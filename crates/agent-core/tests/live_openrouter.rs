@@ -11,6 +11,40 @@ use tokio::sync::mpsc;
 
 #[tokio::test]
 #[ignore]
+async fn live_refresh_lists_models() {
+    let key = std::env::var("OPENROUTER_KEY").expect("OPENROUTER_KEY must be set");
+    let dir = tempfile::tempdir().unwrap();
+    let keys = Arc::new(MemoryKeyStore::new());
+    keys.set("openrouter", key.trim()).unwrap();
+    let rt = AgentRuntime::with_key_store(
+        dir.path().to_path_buf(),
+        Config::new(dir.path().to_path_buf()),
+        keys,
+    );
+    assert!(rt.refresh_providers().await, "refresh should start");
+    // Poll for the background catalog write.
+    let mut models = Vec::new();
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        models = rt
+            .list_providers()
+            .into_iter()
+            .find(|p| p.name == "openrouter")
+            .map(|p| p.models)
+            .unwrap_or_default();
+        if !models.is_empty() {
+            break;
+        }
+    }
+    assert!(
+        models.contains(&"google/gemma-4-31b-it:free".to_string()),
+        "openrouter catalog missing target model ({} models)",
+        models.len()
+    );
+}
+
+#[tokio::test]
+#[ignore]
 async fn live_openrouter_gemma() {
     let key = std::env::var("OPENROUTER_KEY").expect("OPENROUTER_KEY must be set");
     assert!(!key.trim().is_empty(), "OPENROUTER_KEY must not be empty");
