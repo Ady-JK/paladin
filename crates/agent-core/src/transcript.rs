@@ -268,7 +268,7 @@ impl Store {
                 infos.push(info(&session_dir, meta));
             }
         }
-        infos.sort_by(|a, b| b.meta.created_at.cmp(&a.meta.created_at));
+        infos.sort_by_key(|a| std::cmp::Reverse(a.meta.created_at));
         if limit > 0 && infos.len() > limit {
             infos.truncate(limit);
         }

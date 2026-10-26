@@ -30,6 +30,33 @@ pub enum ToolError {
     Args(String),
     #[error("execution failed: {0}")]
     Exec(String),
+    #[error("{msg}")]
+    Failed { content: String, msg: String },
+}
+
+impl ToolError {
+    /// A failure that preserves model-facing output.
+    pub fn with_content(content: impl Into<String>, msg: impl Into<String>) -> Self {
+        Self::Failed {
+            content: content.into(),
+            msg: msg.into(),
+        }
+    }
+
+    pub fn args(msg: impl Into<String>) -> Self {
+        let msg = msg.into();
+        Self::Failed {
+            content: serde_json::json!({"error": msg}).to_string(),
+            msg,
+        }
+    }
+
+    pub fn content(&self) -> String {
+        match self {
+            Self::Failed { content, .. } => content.clone(),
+            e => serde_json::json!({"error": e.to_string()}).to_string(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
