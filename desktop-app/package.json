@@ -7,9 +7,6 @@
   "homepage": "https://github.com/Ady-JK/paladin",
   "type": "module",
   "main": "dist-electron/main.js",
-  "pnpm": {
-    "onlyBuiltDependencies": ["electron", "esbuild"]
-  },
   "scripts": {
     "dev": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:renderer": "vite --port 5173 --strictPort",
