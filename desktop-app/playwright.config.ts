@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: "pnpm preview --port 4173 --strictPort",
+    command: "pnpm preview --port 4173 --strictPort --host 127.0.0.1",
     port: 4173,
     reuseExistingServer: true,
   },
