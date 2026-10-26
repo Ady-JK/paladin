@@ -160,15 +160,6 @@ async function __paladinBaseInvoke(cmd, args) {
       case "set_workspace":
         window.localStorage.setItem("e2e-workspace", args.path);
         return args.path;
-      case "show_external_page":
-      case "navigate_external_page":
-      case "reload_external_page":
-      case "hide_external_page":
-      case "drop_external_page":
-        return null;
-      case "move_external_page":
-        window.__e2eMoves = (window.__e2eMoves || 0) + 1;
-        return null;
       case "fs_home":
         return "/home/tester";
       case "fs_list": {
@@ -196,7 +187,10 @@ window.paladin = {
   views: {
     ensure: async () => true,
     show: async () => true,
-    setBounds: async () => true,
+    setBounds: async () => {
+      window.__e2eMoves = (window.__e2eMoves || 0) + 1;
+      return true;
+    },
     navigate: async () => true,
     reload: async () => true,
     drop: async () => true,

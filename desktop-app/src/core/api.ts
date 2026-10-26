@@ -156,18 +156,28 @@ export function stopChat(
 }
 
 export function showExternalPage(
+  id: string,
   url: string,
   rect: { x: number; y: number; width: number; height: number },
 ): Promise<unknown> {
-  return invoke("show_external_page", { url, ...rect });
+  // Views live in the Electron main process (WebContentsView), not the
+  // sidecar: ensure navigates when the URL changed, then bound and show.
+  const views = bridge().views;
+  return (async () => {
+    await views.ensure(id, url, partitionFor(id));
+    await views.setBounds(rect);
+    await views.show(id);
+  })();
 }
 
-export function navigateExternalPage(url: string): Promise<unknown> {
-  return invoke("navigate_external_page", { url });
+export function navigateExternalPage(id: string, url: string): Promise<unknown> {
+  return bridge().views.navigate(id, url);
 }
 
 export function hideExternalPage(): Promise<unknown> {
-  return invoke("hide_external_page", {});
+  // Main hides every view unless the name is a live page; "agent" is
+  // the sentinel that shows none.
+  return bridge().views.show("agent");
 }
 
 export function moveExternalPage(rect: {
@@ -176,13 +186,21 @@ export function moveExternalPage(rect: {
   width: number;
   height: number;
 }): Promise<unknown> {
-  return invoke("move_external_page", { ...rect });
+  return bridge().views.setBounds(rect);
 }
 
-export function reloadExternalPage(): Promise<unknown> {
-  return invoke("reload_external_page", {});
+export function reloadExternalPage(id: string): Promise<unknown> {
+  return bridge().views.reload(id);
 }
 
-export function dropExternalPage(): Promise<unknown> {
-  return invoke("drop_external_page", {});
+export function dropExternalPage(id: string): Promise<unknown> {
+  return bridge().views.drop(id);
+}
+
+// partitionFor names the persistent session partition for a chat page.
+// Built-ins keep stable names so logins survive restarts; custom sites
+// get a sanitized one.
+function partitionFor(id: string): string {
+  const safe = id.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+  return `persist:paladin-${safe || "page"}`;
 }

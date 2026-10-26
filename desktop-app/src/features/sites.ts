@@ -241,19 +241,15 @@ export async function refreshExternalVisibility(): Promise<void> {
   if (externalWanted() && page) {
     defusePageDrop();
     try {
-      await api.showExternalPage(page.url, externalRect());
+      // ensure() navigates when the URL changed, so no second
+      // navigate call: it would load the page twice.
+      await api.showExternalPage(page.id, page.url, externalRect());
     } catch (error) {
       toast(String(error), "error");
       return;
     }
-    if (state.pageUrlShown && state.pageUrlShown !== page.url) {
-      try {
-        await api.navigateExternalPage(page.url);
-      } catch (error) {
-        toast(String(error), "error");
-      }
-    }
     state.pageUrlShown = page.url;
+    shownView = page.id;
     return;
   }
 
@@ -310,13 +306,21 @@ export function setSideView(view: SideView): void {
 // in the shared data store on disk, so the next show signs straight in.
 let dropTimer = 0;
 
+// shownView is the page id behind the currently embedded view, so the
+// idle drop timer destroys the view that was actually shown.
+let shownView = "";
+
 function armPageDrop(): void {
   window.clearTimeout(dropTimer);
   dropTimer = window.setTimeout(() => {
     if (externalWanted()) {
       return;
     }
-    api.dropExternalPage().catch(() => undefined);
+    if (shownView) {
+      const target = shownView;
+      shownView = "";
+      api.dropExternalPage(target).catch(() => undefined);
+    }
   }, 60_000);
 }
 
@@ -416,6 +420,11 @@ export function deleteSite(id: string): void {
 
   state.customSites = state.customSites.filter((s) => `site:${s.name}` !== id);
   persistSites();
+  // The removed page never comes back: destroy its view outright.
+  api.dropExternalPage(id).catch(() => undefined);
+  if (shownView === id) {
+    shownView = "";
+  }
 
   if (state.chatPage === id) {
     const next = chatEntries()[0];
@@ -458,10 +467,11 @@ export function trackExternalFlight(): void {
 // reloadCurrentPage reloads the embedded chat page.
 // It supports the desktop app frontend.
 export function reloadCurrentPage(): void {
-  if (!currentChatPage()) {
+  const page = currentChatPage();
+  if (!page) {
     return;
   }
-  api.reloadExternalPage().catch((error) =>
+  api.reloadExternalPage(page.id).catch((error) =>
     toast(String(error), "error"),
   );
 }
