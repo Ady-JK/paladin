@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Paladin desktop (Electron + agent-host sidecar)",
+  "author": "paladin",
+  "homepage": "https://github.com/Ady-JK/paladin",
   "pnpm": {
     "onlyBuiltDependencies": ["electron", "esbuild"]
   },
@@ -12,10 +14,10 @@
     "dev": "concurrently -k \"vite --port 5173\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:renderer": "vite --port 5173",
     "dev:electron": "electron .",
-    "build": "vite build && tsc -p tsconfig.electron.json && electron-builder",
+    "build": "vite build && tsc -p tsconfig.electron.json && electron-builder -c electron-builder.json",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
-    "dist": "electron-builder",
+    "dist": "electron-builder -c electron-builder.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e": "playwright test"
   },
