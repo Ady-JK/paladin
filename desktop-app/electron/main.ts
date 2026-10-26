@@ -1,0 +1,282 @@
+// Electron main: window + agent-host sidecar (JSONL stdio) + WebContentsViews.
+// Renderer never touches the sidecar directly; it goes through ipcHandler
+// channels exposed by preload. stdout stays pure JSONL; logs go to stderr.
+
+import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
+import { app, BrowserWindow, ipcMain, WebContentsView } from "electron";
+import readline from "node:readline";
+
+type Json = any;
+
+let win: BrowserWindow | null = null;
+let agent: ChildProcess | null = null;
+let nextId = 1;
+// ESM (NodeNext): no __dirname; import.meta.dirname works on Node 20.11+.
+const HERE = import.meta.dirname;
+const pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+const views = new Map<string, { view: WebContentsView; url: string; partition: string }>();
+let visibleView: string | null = null;
+let lastBounds: { x: number; y: number; width: number; height: number } | null = null;
+
+function agentBin(): string {
+  // Dev: cargo build output next to the repo. Prod: bundled resource.
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "agent-host", "agent-host");
+  }
+  return path.join(HERE, "..", "..", "target", "debug", "agent-host");
+}
+
+function sendLine(obj: Json): void {
+  if (!agent?.stdin) throw new Error("agent-host is not running");
+  agent.stdin.write(JSON.stringify(obj) + "\n");
+}
+
+function invokeAgent(method: string, params: Json = {}): Promise<any> {
+  const id = `m${nextId++}`;
+  return new Promise((resolve, reject) => {
+    pending.set(String(id), { resolve, reject });
+    try {
+      sendLine({ id, method, params });
+    } catch (e) {
+      pending.delete(String(id));
+      reject(e as Error);
+    }
+  });
+}
+
+function startAgent(): void {
+  const bin = agentBin();
+  agent = spawn(bin, [], { stdio: ["pipe", "pipe", "inherit"] });
+  agent.on("error", (e) => {
+    console.error(`[agent-host] spawn failed (${bin}):`, e.message);
+  });
+  agent.on("exit", (code) => {
+    console.error(`[agent-host] exited with code ${code}`);
+    for (const { reject } of pending.values()) reject(new Error("agent-host exited"));
+    pending.clear();
+  });
+  const rl = readline.createInterface({ input: agent.stdout! });
+  rl.on("line", (line) => {
+    if (!line.trim()) return;
+    let msg: Json;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      console.error("[agent-host] non-JSON line:", line.slice(0, 200));
+      return;
+    }
+    if (msg.event === "chat/delta" || msg.event === "chat/tool") {
+      win?.webContents.send("agent:chat-event", msg);
+      return;
+    }
+    if (msg.id !== undefined) {
+      const key = String(msg.id);
+      const p = pending.get(key);
+      if (!p) return;
+      pending.delete(key);
+      if (msg.ok) p.resolve(msg.result);
+      else p.reject(new Error(typeof msg.error === "string" ? msg.error : "agent error"));
+    }
+  });
+}
+
+function ensureView(name: string, url: string, partition: string): WebContentsView {
+  const existing = views.get(name);
+  if (existing) {
+    if (existing.url !== url) {
+      existing.url = url;
+      existing.view.webContents.loadURL(url).catch(() => undefined);
+    }
+    return existing.view;
+  }
+  const view = new WebContentsView({
+    webPreferences: { partition, sandbox: true },
+  });
+  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  views.set(name, { view, url, partition });
+  view.webContents.loadURL(url).catch(() => undefined);
+  return view;
+}
+
+function layoutVisible(): void {
+  if (!win || !visibleView || !lastBounds) return;
+  const entry = views.get(visibleView);
+  if (!entry) return;
+  const b = lastBounds;
+  try {
+    entry.view.setBounds({
+      x: Math.max(0, Math.round(b.x)),
+      y: Math.max(0, Math.round(b.y)),
+      width: Math.max(1, Math.round(b.width)),
+      height: Math.max(1, Math.round(b.height)),
+    });
+  } catch {
+    // Window is closing; ignore.
+  }
+}
+
+function showOnly(name: string | null): void {
+  if (!win) return;
+  for (const [, entry] of views) {
+    try {
+      win.contentView.removeChildView(entry.view);
+    } catch {
+      // Already removed.
+    }
+  }
+  visibleView = null;
+  if (name && name !== "agent") {
+    const entry = views.get(name);
+    if (entry) {
+      win.contentView.addChildView(entry.view);
+      visibleView = name;
+      layoutVisible();
+    }
+  }
+}
+
+function createWindow(): void {
+  win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(HERE, "preload.js"),
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+
+  if (!app.isPackaged && process.env.ELECTRON_START_URL) {
+    win.loadURL(process.env.ELECTRON_START_URL).catch(console.error);
+  } else if (!app.isPackaged) {
+    win.loadURL("http://localhost:5173").catch(console.error);
+  } else {
+    win.loadFile(path.join(HERE, "..", "dist", "index.html"));
+  }
+
+  win.on("resized", layoutVisible);
+  win.on("moved", layoutVisible);
+  win.contentView.on("bounds-changed", layoutVisible);
+}
+
+app.whenReady().then(() => {
+  startAgent();
+
+  ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
+
+  ipcMain.handle("agent:chat", (e, params: Json) => {
+    const streamId = `s${nextId++}`;
+    pending.set(streamId, {
+      resolve: () => undefined,
+      reject: () => undefined,
+    });
+    // Completion arrives as {id: streamId, ok, result|error}; forward it
+    // to this sender only, then forget the stream.
+    const orig = pending.get(streamId)!;
+    pending.set(streamId, {
+      resolve: (result) => {
+        e.sender.send("agent:chat-done", { streamId, ok: true, result });
+        orig.resolve(result);
+      },
+      reject: (err) => {
+        e.sender.send("agent:chat-done", { streamId, ok: false, error: String(err?.message ?? err) });
+        orig.reject(err);
+      },
+    });
+    try {
+      sendLine({ id: streamId, method: "chat", params });
+    } catch (err) {
+      pending.delete(streamId);
+      throw err;
+    }
+    return streamId;
+  });
+
+  ipcMain.handle("views:ensure", (_e, name: string, url: string, partition: string) => {
+    if (!win) return false;
+    ensureView(name, url, partition);
+    return true;
+  });
+  ipcMain.handle("views:show", (_e, name: string) => {
+    showOnly(name);
+    return true;
+  });
+  ipcMain.handle("views:setBounds", (_e, bounds: Json) => {
+    lastBounds = bounds;
+    layoutVisible();
+    return true;
+  });
+  ipcMain.handle("views:navigate", (_e, name: string, url: string) => {
+    const entry = views.get(name);
+    if (!entry) return false;
+    entry.url = url;
+    entry.view.webContents.loadURL(url).catch(() => undefined);
+    return true;
+  });
+  ipcMain.handle("views:reload", (_e, name: string) => {
+    views.get(name)?.view.webContents.reload();
+    return true;
+  });
+  ipcMain.handle("views:drop", (_e, name: string) => {
+    const entry = views.get(name);
+    if (!entry) return true;
+    if (win) {
+      try {
+        win.contentView.removeChildView(entry.view);
+      } catch {
+        // Ignore.
+      }
+    }
+    try {
+      (entry.view.webContents as any).destroy?.();
+    } catch {
+      // Ignore.
+    }
+    views.delete(name);
+    if (visibleView === name) visibleView = null;
+    return true;
+  });
+
+  createWindow();
+  // Headless smoke: --smoke-test loads the window, pings the sidecar
+  // over JSONL, reports, and exits (non-zero on any failure).
+  if (process.argv.includes("--smoke-test")) {
+    const fail = (msg: string): never => {
+      console.error(`[smoke] FAIL: ${msg}`);
+      process.exit(1);
+    };
+    win!.webContents.on("did-fail-load", (_e, code, desc) => fail(`renderer load failed ${code}: ${desc}`));
+    win!.webContents.on("console-message", (_e, _level, message) => {
+      if (/preload bridge missing|Uncaught/.test(message)) fail(`renderer console: ${message}`);
+    });
+    const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
+    win!.webContents.on("did-finish-load", () => {
+      invokeAgent("ping")
+        .then((r) => {
+          clearTimeout(timer);
+          if (r?.ok === true) {
+            console.log("[smoke] PASS: renderer loaded, agent-host ping ok");
+            process.exit(0);
+          } else fail(`unexpected ping result: ${JSON.stringify(r)}`);
+        })
+        .catch((e) => fail(`ping failed: ${e.message}`));
+    });
+  }
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  try {
+    agent?.kill();
+  } catch {
+    // Ignore.
+  }
+});

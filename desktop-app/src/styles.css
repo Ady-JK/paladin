@@ -1,144 +1,89 @@
-/* styles.css is part of the desktop app frontend. */
-/* It supports the UI. */
-@import "tailwindcss";
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/600.css";
-@import "@fontsource/jetbrains-mono/400.css";
-
-/* The palette of the interface. The dark one is the default, the light one
-   is applied with the "light" class on the html element. */
-@custom-variant dark (&:where(.dark, .dark *));
-
-@theme {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
-
-  --color-slate-850: #111827;
-  --color-slate-900: #0b0f17;
-  --color-slate-950: #06090e;
-
-  --color-accent-50: #eff6ff;
-  --color-accent-500: #3b82f6;
-  --color-accent-600: #2563eb;
-  --color-accent-700: #1d4ed8;
-
-  --color-agent-purple: #a855f7;
-  --color-agent-amber: #f59e0b;
-  --color-agent-emerald: #10b981;
-  --color-agent-rose: #f43f5e;
+/* Paladin Electron UI: hand-rolled dark theme, no Tailwind runtime.
+   Layout mirrors the old Tauri app: sidebar + main (header, tabs,
+   agent view / external host, composer). No blur, no transitions,
+   no shadows: cheap paint, smooth scroll. */
+:root {
+  --bg: #0b0f17;
+  --panel: #111827;
+  --line: #1f2937;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #2563eb;
+  --accent-soft: #1d4ed8;
 }
-
-@layer base {
-  html,
-  body {
-    height: 100%;
-    margin: 0;
-  }
-
-  body {
-    @apply bg-slate-50 text-slate-800 font-sans antialiased;
-    @apply dark:bg-slate-950 dark:text-slate-200;
-    overflow: hidden;
-  }
-
-  /* A thin scrollbar that fits the dark theme. */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-slate-300;
-    @apply dark:bg-slate-700/60;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-400;
-    @apply dark:bg-slate-600/70;
-  }
-
-  textarea,
-  input,
-  select,
-  button {
-    font: inherit;
-  }
-
-  /* Cheap virtualization: offscreen rows skip layout/paint entirely.
-     intrinsic-size keeps the scrollbar stable while they are skipped. */
-  .turn-row,
-  .session-row,
-  .pick-row,
-  .tool-card {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 120px;
-  }
-
-  .session-row,
-  .pick-row {
-    contain-intrinsic-size: auto 44px;
-  }
-
-  html {
-    scroll-behavior: auto;
-  }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, "Segoe UI", Inter, sans-serif;
+  overflow: hidden;
 }
-
-@layer components {
-  /* The message bubble of the user. */
-  .bubble-user {
-    @apply max-w-2xl rounded-2xl rounded-tr-xs bg-accent-600 p-3.5 text-white shadow-sm;
-  }
-
-  /* The icon of a message. */
-  .avatar {
-    @apply flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-xs;
-  }
-
-  .avatar-agent {
-    @apply bg-accent-600 text-white shadow-sm;
-  }
-
-  .avatar-user {
-    @apply bg-slate-200 text-slate-700;
-    @apply dark:bg-slate-700 dark:text-slate-200;
-  }
-
-  .avatar-error {
-    @apply bg-agent-rose text-white shadow-sm;
-  }
-
-  /* The panel of the harness view. */
-  .panel {
-    @apply flex flex-col overflow-hidden bg-slate-900;
-  }
-
-  .panel-title {
-    @apply flex items-center justify-between border-b border-slate-800 px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-400;
-  }
-
-  /* The code of the diff view. */
-  .code-added {
-    @apply bg-emerald-500/15 text-emerald-400;
-  }
-
-  .code-removed {
-    @apply bg-rose-500/15 text-rose-400;
-  }
-
-  .code-keyword {
-    @apply text-pink-400;
-  }
-
-  .code-string {
-    @apply text-lime-300;
-  }
-
-  .code-comment {
-    @apply text-slate-500 italic;
-  }
+.ic { width: 14px; height: 14px; flex-shrink: 0; }
+#app { display: flex; height: 100vh; }
+#sidebar {
+  width: 272px; flex-shrink: 0; background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; min-height: 0;
 }
+#sidebar.hidden-bar { display: none; }
+.brand { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid var(--line); }
+.brand h1 { font-size: 15px; margin: 0; }
+.row { display: flex; gap: 8px; align-items: center; }
+.btn {
+  background: #1f2937; color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 13px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { background: #273449; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-soft); }
+.btn.danger { color: #f87171; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+#sessionSearch { width: 100%; margin: 8px 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: #0b0f17; color: var(--text); }
+#sessionList { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+.session-row { border: 1px solid transparent; border-radius: 8px; padding: 6px; margin-bottom: 2px; }
+.session-row.active { border-color: var(--accent); background: #16213a; }
+.session-row .t { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-row .m { font-size: 11px; color: var(--muted); }
+.day { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px 4px 2px; }
+.side-foot { padding: 10px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#topbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+#topbar h2 { font-size: 13px; margin: 0; font-weight: 600; }
+#tabs { display: flex; gap: 6px; margin-left: 12px; }
+.tab { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; }
+.tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#chatView { flex: 1; overflow-y: auto; padding: 16px; }
+#messages { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.turn-row { content-visibility: auto; contain-intrinsic-size: auto 120px; display: flex; gap: 10px; font-size: 13px; }
+.avatar { width: 24px; height: 24px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #1f2937; flex-shrink: 0; }
+.avatar.agent { background: #1e3a8a; color: #fff; }
+.bubble { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-width: 0; flex: 1; }
+.bubble .who { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.ws-pre { white-space: pre-wrap; word-break: break-word; }
+.code { background: #06090e; border: 1px solid var(--line); border-radius: 8px; padding: 8px; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 12px; }
+.tool-card { content-visibility: auto; contain-intrinsic-size: auto 120px; border: 1px solid var(--line); border-radius: 8px; background: #0d1320; font-size: 12px; margin-top: 6px; }
+.tool-head { display: flex; gap: 8px; align-items: center; padding: 6px 8px; width: 100%; background: none; border: 0; color: var(--text); cursor: pointer; text-align: left; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; flex-shrink: 0; }
+.dot.ok { background: #10b981; } .dot.failed { background: #ef4444; } .dot.running { background: #f59e0b; }
+.tool-body { padding: 0 8px 8px; }
+.tool-body pre { max-height: 240px; overflow: auto; background: #06090e; border-radius: 6px; padding: 8px; font-size: 11px; }
+#externalHost { flex: 1; min-height: 0; display: none; background: #fff; }
+#externalHost.on { display: block; }
+#composer { border-top: 1px solid var(--line); padding: 10px 14px; background: var(--panel); }
+#composerBox { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; }
+#promptInput { flex: 1; min-height: 40px; max-height: 160px; resize: vertical; border-radius: 8px; border: 1px solid var(--line); background: #0b0f17; color: var(--text); padding: 8px 10px; font: inherit; }
+#statusLine { max-width: 800px; margin: 6px auto 0; font-size: 11px; color: var(--muted); min-height: 14px; }
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 50; }
+.modal-back.on { display: flex; }
+.modal { width: 560px; max-width: 92vw; max-height: 84vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.modal h3 { margin: 0 0 10px; font-size: 14px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 12px; }
+.field input, .field select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: #0b0f17; color: var(--text); font: inherit; }
+.pick-row { content-visibility: auto; contain-intrinsic-size: auto 44px; }
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 99; }
+.toast { background: #1f2937; border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; }
+.toast.error { border-color: #ef4444; color: #fecaca; }
+.file-row { display: flex; width: 100%; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 8px; border: 0; background: none; color: var(--text); cursor: pointer; font-size: 13px; text-align: left; }
+.file-row:hover { background: #1f2937; }

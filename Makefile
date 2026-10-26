@@ -1,34 +1,29 @@
-# Root Makefile — thin wrappers over cargo/tauri/pnpm.
-.PHONY: help desktop-dev desktop-build fmt clippy test test-e2e clean
+# Root Makefile — thin wrappers over cargo/pnpm.
+.PHONY: help desktop-dev desktop-build fmt clippy test agent-host agent-host-release clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:' Makefile | cut -d: -f1 | sort
 
-# Run the desktop app in dev mode (Tauri dev server + Rust core).
-desktop-dev:
-	cd desktop-app && pnpm tauri dev
+# Build the sidecar first, then run the Electron UI against Vite.
+desktop-dev: agent-host
+	cd desktop-app && pnpm install --prefer-offline && pnpm dev
 
-# Build the desktop app (bundles for the host OS).
-# AppImage needs to download its AppRun runtime from GitHub; when that
-# network fetch fails, build without it via the flag below. For all
-# bundles (including AppImage) run `pnpm tauri build` in desktop-app/.
-desktop-build:
-	cd desktop-app && pnpm tauri build -b deb,rpm
+# Release: sidecar + renderer + electron packaging.
+desktop-build: agent-host-release
+	cd desktop-app && pnpm install --prefer-offline && pnpm build
 
-# Format and lint the whole workspace.
+agent-host-release:
+	cargo build --release -p agent-host
+
 fmt:
 	cargo fmt --all
 
 clippy:
 	cargo clippy --all-targets -- -D warnings
 
-# Unit + integration tests for the core (and everything else in the workspace).
 test:
 	cargo test --workspace
 
-# UI end-to-end tests (Playwright).
-test-e2e:
-	cd desktop-app && pnpm test:e2e
-
 clean:
 	cargo clean
+	rm -rf desktop-app/dist desktop-app/dist-electron desktop-app/release

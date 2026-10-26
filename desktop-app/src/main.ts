@@ -1,119 +1,60 @@
-// main.ts bootstraps the desktop app frontend.
-// In-process only: no daemon connect, no subscribe — direct runtime calls.
+// Bootstrap: wire everything, load workspace + providers + sessions.
+import { api } from "./api";
+import { send, scrollToBottom } from "./chat";
+import { state } from "./state";
+import { icon, paintIcons } from "./icons";
+import { initModels, loadProviders } from "./models";
+import { initSessions, refreshSessions } from "./sessions";
+import { initSettings } from "./settings";
+import { initSites, refreshExternalVisibility, trackBounds } from "./sites";
+import { initWorkspace } from "./workspace";
+import { toast } from "./ui";
 
-import * as api from "./core/api";
-import {
-  $,
-  inputEl,
-  messagesEl,
-  modelAdvancedBtn,
-  modelMenu,
-  paintIcons,
-  sessionLabelEl,
-  statusDetailEl,
-  workspaceInputEl,
-  workspaceLabelEl,
-} from "./core/dom";
-import { shortPath } from "./core/format";
-import { state } from "./core/state";
-import { setStatus } from "./ui/status";
-import { initChat } from "./features/chat";
-import { renderGreeting } from "./features/chatView";
-import { initModelPicker, loadProviders, refreshProviders } from "./features/models";
-import {
-  closeConfirm,
-  initSessions,
-  refreshSessions,
-} from "./features/sessions";
-import {
-  closeNewSession,
-  initSessionDialog,
-  openNewSession,
-} from "./features/sessionDialog";
-import {
-  closeNewSite,
-  initSites,
-  openNewSite,
-  refreshExternalVisibility,
-} from "./features/sites";
-import { closeSettings, initSettings, openSettings } from "./features/settings";
-import { initWindow } from "./features/window";
+async function boot(): Promise<void> {
+  paintIcons();
+  document.querySelector("#headerTitle")!.innerHTML = `${icon("robot", "ic")} paladin`;
+  initSessions();
+  initModels();
+  initSettings();
+  initSites();
+  initWorkspace();
 
-async function connect(): Promise<void> {
-  setStatus("connecting…", "busy");
+  document.querySelector("#sendBtn")!.addEventListener("click", () => void send(false));
+  document.querySelector("#promptInput")!.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter" && !(e as KeyboardEvent).shiftKey) {
+      e.preventDefault();
+      void send(false);
+    }
+  });
+  document.querySelector("#pauseBtn")!.addEventListener("click", () => {
+    void api.stopChat(state.sessionId, state.cwd);
+  });
+  document.querySelector("#sidebarToggle")!.addEventListener("click", () => {
+    document.querySelector("#sidebar")!.classList.add("hidden-bar");
+    (document.querySelector("#sidebarShow") as HTMLElement).style.display = "";
+    trackBounds();
+  });
+  document.querySelector("#sidebarShow")!.addEventListener("click", () => {
+    document.querySelector("#sidebar")!.classList.remove("hidden-bar");
+    (document.querySelector("#sidebarShow") as HTMLElement).style.display = "none";
+    trackBounds();
+  });
 
   try {
-    let daemonWorkspace = "";
-    try {
-      daemonWorkspace = await api.getWorkspace();
-    } catch {
-      daemonWorkspace = "";
-    }
-    workspaceInputEl.value = daemonWorkspace;
-    if (!state.cwd) {
-      state.cwd = daemonWorkspace || (await api.resolveWorkspace(null));
-    } else {
-      state.cwd = await api.resolveWorkspace(state.cwd);
-    }
-    workspaceLabelEl.textContent = shortPath(state.cwd);
-
-    state.sessionId = "";
-    sessionLabelEl.textContent = "—";
-    state.shownMessages = 0;
-
-    messagesEl.innerHTML = "";
-    renderGreeting();
-
-    await refreshSessions();
-
-    setStatus("local", "ok");
-    statusDetailEl.textContent = "in-process";
-
-    await loadProviders();
-    void refreshProviders();
-  } catch (error) {
-    setStatus(String(error), "error");
-    statusDetailEl.textContent = "—";
+    state.cwd = await api.getWorkspace();
+    if (!state.cwd) state.cwd = await api.resolveWorkspace(null);
+    (document.querySelector("#workspaceLabel") as HTMLElement).textContent = state.cwd || "no workspace";
+  } catch (e) {
+    toast(String(e), "error");
   }
+  await loadProviders();
+  await refreshSessions();
+  await refreshExternalVisibility();
+  scrollToBottom();
+  // Keep the overlay aligned after fonts settle.
+  setTimeout(trackBounds, 300);
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  paintIcons();
-
-  initWindow();
-  initChat();
-  initModelPicker();
-  initSites();
-  initSessionDialog();
-  initSettings(connect);
-  initSessions();
-
-  modelAdvancedBtn.addEventListener("click", () => {
-    modelMenu.classList.add("hidden");
-    openSettings();
-  });
-
-  $("#newSessionBtn").addEventListener("click", () => {
-    if (state.sideView === "chat") {
-      openNewSite();
-    } else {
-      void openNewSession();
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") {
-      return;
-    }
-    closeConfirm();
-    closeSettings();
-    closeNewSession();
-    closeNewSite();
-    modelMenu.classList.add("hidden");
-    void refreshExternalVisibility();
-  });
-
-  void connect();
-
-  inputEl.focus();
+document.addEventListener("DOMContentLoaded", () => {
+  void boot();
 });

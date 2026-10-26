@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/agent-core", "desktop-app/src-tauri"]
+members = ["crates/agent-core", "crates/agent-host"]
 resolver = "2"

@@ -1,132 +1,30 @@
-
-// Icon is a type in this module.
-// It supports the desktop app frontend.
-type Icon = {
-  d: string;
-  line?: boolean;
+// Minimal inline SVG icons (no emoji, no deps).
+const paths: Record<string, string> = {
+  robot: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/><path d="M8 15h8"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  send: '<path d="M4 12l16-7-7 16-2-7z"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  trash: '<path d="M4 7h16M9 7V5h6v2m-8 0l1 13h8l1-13"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10l2 2M19 5l-2 2M7 17l-2 2"/>',
+  folder: '<path d="M3 6h6l2 2h10v12H3z"/>',
+  check: '<path d="M4 12l5 5L20 6"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  brain: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2-5.5M20 4v5h-5"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
 };
 
-// ICONS is a const in this module.
-// It supports the desktop app frontend.
-const ICONS: Record<string, Icon> = {
-  bolt: { d: "M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5Z" },
-  comments: { d: "M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z" },
-  code: { d: "m16 18 6-6-6-6M8 6l-6 6 6 6", line: true },
-  folder: { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" },
-  "folder-open": { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H6.5L3 17V7Z" },
-  "folder-tree": {
-    d: "M3 4h5v4H3V4Zm0 12h5v4H3v-4ZM8 6h4m-4 10h4m4-12h5v2h-5V4Zm0 12h5v2h-5v-2Z",
-  },
-  plus: { d: "M12 5v14M5 12h14", line: true },
-  search: { d: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2-4.35-4.35", line: true },
-  gear: {
-    d: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0 10.5 1.6 1.2a1 1 0 0 0 1.5-.3l1-1.7a1 1 0 0 1 1.2-.5l1.9.4a1 1 0 0 0 1.1-.8l.3-2a1 1 0 0 1 .8-1l1.9-.6a1 1 0 0 0 .7-1.3l-.7-1.8a1 1 0 0 1 0-1.2l.7-1.8a1 1 0 0 0-.7-1.3l-1.9-.6a1 1 0 0 1-.8-1l-.3-2a1 1 0 0 0-1.1-.8l-1.9.4a1 1 0 0 1-1.2-.5l-1-1.7a1 1 0 0 0-1.5-.3L12 2.5l-1.6-1.2a1 1 0 0 0-1.5.3l-1 1.7a1 1 0 0 1-1.2.5l-1.9-.4a1 1 0 0 0-1.1.8l-.3 2a1 1 0 0 1-.8 1l-1.9.6a1 1 0 0 0-.7 1.3l.7 1.8a1 1 0 0 1 0 1.2l-.7 1.8a1 1 0 0 0 .7 1.3l1.9.6a1 1 0 0 1 .8 1l.3 2a1 1 0 0 0 1.1.8l1.9-.4a1 1 0 0 1 1.2.5l1 1.7a1 1 0 0 0 1.5.3Z",
-  },
-  download: { d: "M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2", line: true },
-  moon: { d: "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" },
-  sun: {
-    d: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-13v2m0 16v-2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4",
-    line: true,
-  },
-  microchip: {
-    d: "M7 7h10v10H7V7Zm3 3h4v4h-4v-4ZM9 3v4m6-4v4M9 17v4m6-4v4M3 9h4m-4 6h4m12-6h4m-4 6h4",
-    line: true,
-  },
-  "code-branch": {
-    d: "M6 3a3 3 0 0 1 1 5.8V17a2 2 0 1 1-2 0V8.8A3 3 0 0 1 6 3Zm12 0a3 3 0 0 1 1 5.8V11a4 4 0 0 1-4 4h-3a3 3 0 0 0-3 3v1.2a3 3 0 1 1-2 0V18a5 5 0 0 1 5-5h3a2 2 0 0 0 2-2V8.8A3 3 0 0 1 18 3Z",
-  },
-  terminal: { d: "m4 17 6-6-6-6m8 12h8M2 3h20v18H2V3Z", line: true },
-  "file-code": {
-    d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6M10 13l-2 2 2 2m4-4 2 2-2 2",
-    line: true,
-  },
-  paperclip: {
-    d: "M21.4 11.05 12.2 20.2a5.5 5.5 0 0 1-7.8-7.8l9.2-9.1a3.67 3.67 0 0 1 5.2 5.2l-9.2 9.1a1.83 1.83 0 0 1-2.6-2.6l8.5-8.4",
-    line: true,
-  },
-  microphone: {
-    d: "M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm7-3a7 7 0 0 1-14 0m7 7v3",
-    line: true,
-  },
-  paperplane: { d: "M22 2 11 13m11-11L9 22l2-9 9-11Z" },
-  pause: { d: "M8 5v14M16 5v14", line: true },
-  "chevron-down": { d: "m6 9 6 6 6-6", line: true },
-  "chevron-right": { d: "m9 6 6 6-6 6", line: true },
-  "angles-left": { d: "m11 17-5-5 5-5m6 10 5-5-5-5", line: true },
-  brain: {
-    d: "M9.5 3A3.5 3.5 0 0 0 6 6.5v.3A3.5 3.5 0 0 0 5 13a3.5 3.5 0 0 0 4.5 4.3V21a2 2 0 0 0 4 0v-3.7a3.5 3.5 0 0 0 0-6.6V3.2A3.5 3.5 0 0 0 9.5 3Zm5 0A3.5 3.5 0 0 1 18 6.5v.3A3.5 3.5 0 0 1 19 13a3.5 3.5 0 0 1-4.5 4.3",
-    line: true,
-  },
-  flask: {
-    d: "M9 3h6M12 3v5.2L6.7 17.6A2 2 0 0 0 8.5 21h7a2 2 0 0 0 1.8-3.4L12 8.2M7.6 14h8.8",
-    line: true,
-  },
-  globe: {
-    d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-9-9h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18",
-    line: true,
-  },
-  sliders: { d: "M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6M9 8h6m2 8h6", line: true },
-  xmark: { d: "M6 6l12 12M18 6 6 18", line: true },
-  play: { d: "m6 3 14 9-14 9V3Z" },
-  "code-compare": { d: "m16 18 6-6-6-6M8 6 2 12l6 6m8-6H4", line: true },
-  "magnifying-glass-code": {
-    d: "m21 21-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0Zm-8 2 2 2 4-4",
-    line: true,
-  },
-  repeat: { d: "m17 2 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 22l-4-4 4-4m14-3v2a4 4 0 0 1-4 4H3", line: true },
-  robot: {
-    d: "M12 2v3M7 10a5 5 0 0 1 10 0v6a5 5 0 0 1-10 0v-6ZM4 13H2v4h2m16-4h2v4h-2M9 13h.01M15 13h.01",
-    line: true,
-  },
-  bug: {
-    d: "M8 6a4 4 0 0 1 8 0M6 10h12v4a6 6 0 0 1-12 0v-4Zm0 0H3m18 0h-3M4.5 6 7 8m12.5-2L17 8M4 16l3-2m14 2-3-2M6 20l2-3m10 3-2-3",
-    line: true,
-  },
-  check: { d: "m5 13 4 4L19 7", line: true },
-  eye: { d: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", line: true },
-  circle: { d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", line: true },
-  user: {
-    d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m8-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
-    line: true,
-  },
-  "window-minimize": { d: "M5 12h14", line: true },
-  "window-maximize": { d: "M5 5h14v14H5V5Z", line: true },
-  "window-restore": { d: "M8 8h11v11H8V8ZM5 16V5h11", line: true },
-  "window-close": { d: "M6 6l12 12M18 6 6 18", line: true },
-  trash: {
-    d: "M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12M10 11v6M14 11v6",
-    line: true,
-  },
-  external: {
-    d: "M14 4h6v6m0-6L10 14M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3",
-    line: true,
-  },
-};
+export function icon(name: string, cls = "ic"): string {
+  const body = paths[name] ?? paths.robot;
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+}
 
-// IconName is a type in this module.
-// It supports the desktop app frontend.
-export type IconName = keyof typeof ICONS;
-
-// icon is a function in this module.
-// It supports the desktop app frontend.
-export function icon(name: IconName, className = "h-3 w-3"): string {
-// entry is a const in this module.
-// It supports the desktop app frontend.
-  const entry = ICONS[name];
-  if (!entry) {
-    return "";
-  }
-
-  if (entry.line) {
-    return (
-      `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
-      `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-      `<path d="${entry.d}"/></svg>`
-    );
-  }
-
-  return (
-    `<svg class="${className}" viewBox="0 0 24 24" fill="currentColor" ` +
-    `aria-hidden="true"><path d="${entry.d}"/></svg>`
-  );
+export function paintIcons(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>("[data-icon]").forEach((holder) => {
+    if (holder.dataset.painted) return;
+    const name = holder.dataset.icon || "robot";
+    holder.innerHTML = icon(name, "ic");
+    holder.dataset.painted = "1";
+  });
 }

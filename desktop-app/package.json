@@ -1,28 +1,31 @@
 {
-  "name": "desktop-app",
-  "private": true,
+  "name": "paladin-desktop",
   "version": "0.1.0",
+  "private": true,
+  "description": "Paladin desktop (Electron + agent-host sidecar)",
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
+  },
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "e2e": "playwright test",
+    "dev": "concurrently -k \"vite --port 5173\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:renderer": "vite --port 5173",
+    "dev:electron": "electron .",
+    "build": "vite build && tsc -p tsconfig.electron.json && electron-builder",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist": "electron-builder",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e": "playwright test"
   },
-  "dependencies": {
-    "@fontsource/inter": "^5.3.0",
-    "@fontsource/jetbrains-mono": "^5.3.0",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
-  },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
-    "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/cli": "^2",
-    "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "@types/node": "^22.7.0",
+    "concurrently": "^9.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "wait-on": "^7.2.0"
   }
 }
