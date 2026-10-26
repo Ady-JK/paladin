@@ -40,6 +40,7 @@ import {
 } from "../core/format";
 import { collapsedLabs, collapsedProviders, state } from "../core/state";
 import type { GroupedLab, GroupedProvider, ProviderInfo } from "../core/types";
+import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
 import { icon } from "../icons";
 
 // MODEL_KEY is a const in this module.
@@ -629,9 +630,9 @@ export function initModelPicker(): void {
 
   modelSelectBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    modelMenu.classList.toggle("hidden");
+    const opened = toggleMenu(modelMenu);
     syncModelSelects();
-    if (!modelMenu.classList.contains("hidden")) {
+    if (opened) {
       modelSearchEl.focus();
     }
   });
@@ -641,7 +642,7 @@ export function initModelPicker(): void {
       .composedPath()
       .some((node) => node instanceof Element && node.matches("#modelSelectBtn, #modelMenu"));
     if (!inside) {
-      modelMenu.classList.add("hidden");
+      closeMenu(modelMenu);
     }
   });
 
@@ -662,11 +663,11 @@ export function initModelPicker(): void {
     } else if (event.key === "Enter") {
       event.preventDefault();
       if (quickSelect(modelSearchEl.value)) {
-        modelMenu.classList.add("hidden");
+        closeMenu(modelMenu);
         inputEl.focus();
       }
     } else if (event.key === "Escape") {
-      modelMenu.classList.add("hidden");
+      closeMenu(modelMenu);
       inputEl.focus();
     }
   });
@@ -696,7 +697,7 @@ export function initModelPicker(): void {
 
   modelQuickBtn.addEventListener("click", () => {
     if (quickSelect(modelSearchEl.value)) {
-      modelMenu.classList.add("hidden");
+      closeMenu(modelMenu);
       inputEl.focus();
     }
   });
@@ -705,15 +706,15 @@ export function initModelPicker(): void {
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      modelMenu.classList.toggle("hidden");
+      const opened = toggleMenu(modelMenu);
       syncModelSelects();
-      if (!modelMenu.classList.contains("hidden")) {
+      if (opened) {
         modelSearchEl.focus();
       }
-    } else if (event.ctrlKey && event.key === "1" && !modelMenu.classList.contains("hidden")) {
+    } else if (event.ctrlKey && event.key === "1" && isMenuOpen(modelMenu)) {
       event.preventDefault();
       if (quickSelect(modelSearchEl.value)) {
-        modelMenu.classList.add("hidden");
+        closeMenu(modelMenu);
         inputEl.focus();
       }
     }

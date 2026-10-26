@@ -2,6 +2,7 @@
 // It embeds Gemini/ChatGPT-style pages and tracks the embedded view.
 
 import * as api from "../core/api";
+import { closeModal, openModal } from "../ui/anim";
 import {
   agentTabEl,
   agentViewEl,
@@ -345,8 +346,7 @@ export function selectChatEntry(id: string): void {
 export function openNewSite(): void {
   siteNameEl.value = "";
   siteUrlEl.value = "";
-  siteModalEl.classList.remove("hidden");
-  siteModalEl.classList.add("flex");
+  openModal(siteModalEl);
   void refreshExternalVisibility();
   siteNameEl.focus();
 }
@@ -354,8 +354,7 @@ export function openNewSite(): void {
 // closeNewSite is a function in this module.
 // It supports the desktop app frontend.
 export function closeNewSite(): void {
-  siteModalEl.classList.add("hidden");
-  siteModalEl.classList.remove("flex");
+  closeModal(siteModalEl);
   void refreshExternalVisibility();
 }
 

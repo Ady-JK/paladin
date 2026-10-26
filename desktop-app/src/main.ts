@@ -18,6 +18,7 @@ import {
 import { shortPath } from "./core/format";
 import { state } from "./core/state";
 import { setStatus } from "./ui/status";
+import { closeMenu } from "./ui/anim";
 import { initChat } from "./features/chat";
 import { renderGreeting } from "./features/chatView";
 import { initModelPicker, loadProviders, refreshProviders } from "./features/models";
@@ -90,7 +91,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSessions();
 
   modelAdvancedBtn.addEventListener("click", () => {
-    modelMenu.classList.add("hidden");
+    closeMenu(modelMenu);
     openSettings();
   });
 
@@ -110,7 +111,7 @@ window.addEventListener("DOMContentLoaded", () => {
     closeSettings();
     closeNewSession();
     closeNewSite();
-    modelMenu.classList.add("hidden");
+    closeMenu(modelMenu);
     void refreshExternalVisibility();
   });
 

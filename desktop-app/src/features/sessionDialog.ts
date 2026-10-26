@@ -13,6 +13,7 @@ import {
 } from "../core/dom";
 import { shortPath } from "../core/format";
 import { state } from "../core/state";
+import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { pickModel, syncModelSelects } from "./models";
 import { newSession } from "./sessions";
@@ -22,8 +23,7 @@ import { folderRows, wireFolderList } from "./workspace";
 export async function openNewSession(): Promise<void> {
   state.pendingWorkspace = state.cwd;
   newSessionSearchEl.value = "";
-  sessionModalEl.classList.remove("hidden");
-  sessionModalEl.classList.add("flex");
+  openModal(sessionModalEl);
   syncModelSelects();
   void refreshExternalVisibility();
 
@@ -33,8 +33,7 @@ export async function openNewSession(): Promise<void> {
 // closeNewSession is a function in this module.
 // It supports the desktop app frontend.
 export function closeNewSession(): void {
-  sessionModalEl.classList.add("hidden");
-  sessionModalEl.classList.remove("flex");
+  closeModal(sessionModalEl);
   void refreshExternalVisibility();
 }
 

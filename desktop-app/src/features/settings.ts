@@ -37,6 +37,7 @@ import { escapeAttr, escapeHtml, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { ProviderInfo } from "../core/types";
 import { toast } from "../ui/toast";
+import { closeModal, openModal } from "../ui/anim";
 import { icon } from "../icons";
 import { refreshProviders, syncModelSelects } from "./models";
 import { refreshExternalVisibility } from "./sites";
@@ -163,16 +164,14 @@ const openProviderCard = (mode: "add" | "edit", info?: ProviderInfo): void => {
   providerCardTypeEl.value = info?.apiType ?? "openai";
   providerCardErrorEl.classList.add("hidden");
   providerCardErrorEl.textContent = "";
-  providerCardEl.classList.remove("hidden");
-  providerCardEl.classList.add("flex");
+  openModal(providerCardEl);
   (mode === "add" ? providerCardNameEl : providerCardUrlEl).focus();
 };
 
 // closeProviderCard is a const in this module.
 // It supports the desktop app frontend.
 const closeProviderCard = (): void => {
-  providerCardEl.classList.add("hidden");
-  providerCardEl.classList.remove("flex");
+  closeModal(providerCardEl);
   providerCardKeyEl.value = "";
 };
 
@@ -216,8 +215,7 @@ const saveProviderCard = async (): Promise<void> => {
 // openSettings is a const in this module.
 // It supports the desktop app frontend.
 export const openSettings = (): void => {
-  settingsModalEl.classList.remove("hidden");
-  settingsModalEl.classList.add("flex");
+  openModal(settingsModalEl);
   paintSettingsNav("workspace");
   renderProviderList();
   paintSettingsConnection();
@@ -234,8 +232,7 @@ export const openSettings = (): void => {
 // It supports the desktop app frontend.
 export const closeSettings = (): void => {
   closeProviderCard();
-  settingsModalEl.classList.add("hidden");
-  settingsModalEl.classList.remove("flex");
+  closeModal(settingsModalEl);
   void refreshExternalVisibility();
 };
 

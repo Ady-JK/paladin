@@ -16,6 +16,7 @@ import { dayOf, escapeHtml, renderText, splitModel } from "../core/format";
 import { state } from "../core/state";
 import type { SessionEvent, ToolInfo } from "../core/types";
 import { toast } from "../ui/toast";
+import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, renderGreeting, scrollToBottom } from "./chatView";
@@ -139,16 +140,14 @@ function askDelete(id: string): void {
   state.pendingDelete = id;
   confirmTitleEl.textContent = session?.title || "this session";
 
-  confirmModalEl.classList.remove("hidden");
-  confirmModalEl.classList.add("flex");
+  openModal(confirmModalEl);
   void refreshExternalVisibility();
 }
 
 // closeConfirm is a function in this module.
 // It supports the desktop app frontend.
 export function closeConfirm(): void {
-  confirmModalEl.classList.add("hidden");
-  confirmModalEl.classList.remove("flex");
+  closeModal(confirmModalEl);
   state.pendingDelete = "";
   void refreshExternalVisibility();
 }
