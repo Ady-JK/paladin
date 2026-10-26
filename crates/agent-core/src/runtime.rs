@@ -8,9 +8,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, ProviderInfo, ProviderInput};
 use crate::error::ApiError;
-use crate::session::SessionStore;
 use crate::tools::{builtin_registry, ToolRegistry};
 use crate::transcript::Message;
+use crate::transcript::Store as SessionStore;
 use crate::turn::{ChatChunk, ChatOutcome, ChatRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
