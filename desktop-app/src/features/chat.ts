@@ -1,0 +1,192 @@
+// chat.ts sends messages and streams the agent reply.
+// It supports the desktop app frontend.
+
+import { listen } from "@tauri-apps/api/event";
+import * as api from "../core/api";
+import { continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
+import { renderText } from "../core/format";
+import { state } from "../core/state";
+import type { ToolInfo, ToolView } from "../core/types";
+import { toast } from "../ui/toast";
+import { setStatus } from "../ui/status";
+import { icon } from "../icons";
+import { addTurn, scrollToBottom } from "./chatView";
+import { refreshSessions } from "./sessions";
+import { createToolActivity } from "./tools";
+
+export async function send(resume = false): Promise<void> {
+  const message = resume ? "" : inputEl.value.trim();
+  if (!message && !resume) {
+    return;
+  }
+  if (state.busy) {
+    return;
+  }
+
+  if (!resume) {
+    inputEl.value = "";
+    addTurn("user", message);
+    state.shownMessages++;
+  }
+  continueBtn.classList.add("hidden");
+
+  state.busy = true;
+  sendBtn.disabled = true;
+  sendBtn.classList.add("hidden");
+  pauseBtn.classList.remove("hidden");
+  setStatus("thinking…", "busy");
+
+  const { wrapper, textEl: body } = addTurn("agent", "");
+  body.innerHTML = `<span class="text-slate-400">${icon("bolt", "h-3 w-3 inline")} thinking…</span>`;
+
+  let reply = "";
+
+  let segment = "";
+  let segEl = body;
+  const container = body.parentElement!;
+
+  const newSegment = (after: Node): HTMLElement => {
+    const el = document.createElement("div");
+    el.className =
+      "whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+    container.insertBefore(el, after.nextSibling);
+    return el;
+  };
+
+  const unlisten = await listen<string>("chat://delta", (event) => {
+    reply += event.payload;
+    segment += event.payload;
+    segEl.innerHTML = renderText(segment);
+    scrollToBottom();
+  });
+
+  const toolViews = new Map<string, ToolView>();
+
+  const unlistenTool = await listen<ToolInfo>("chat://tool", (event) => {
+    const tool = event.payload;
+    const existing = toolViews.get(tool.id);
+
+    if (existing) {
+      existing.update(tool);
+    } else {
+      const row = document.createElement("div");
+      row.className = "py-0.5";
+
+      const view = createToolActivity(tool);
+      row.append(view.el);
+      container.insertBefore(row, segEl.nextSibling);
+      toolViews.set(tool.id, view);
+
+      segment = "";
+      segEl = newSegment(row);
+    }
+
+    scrollToBottom();
+  });
+
+  try {
+    // The client owns the session: /chat only loads it, so open one
+    // before the first message of a conversation.
+    if (!state.sessionId) {
+      const opened = await api.openSession(null, state.cwd);
+      state.sessionId = opened.sessionId;
+      sessionLabelEl.textContent = state.sessionId.slice(0, 8);
+    }
+
+    const result = await api.chatStream({
+      sessionId: state.sessionId || null,
+      message,
+      resume,
+      cwd: state.cwd,
+      provider: state.selectedProvider || null,
+      model: state.selectedModel || null,
+      systemPrompt: null,
+    });
+
+    if (!state.sessionId && result.sessionId) {
+      state.sessionId = result.sessionId;
+      sessionLabelEl.textContent = state.sessionId.slice(0, 8);
+    }
+
+    if (!reply) {
+      reply = result.reply;
+      segment = result.reply;
+      segEl.innerHTML = renderText(segment);
+    }
+
+    state.shownMessages++;
+
+    if (result.stopped) {
+      setStatus("stopped", "ok");
+      statusDetailEl.textContent = "STOPPED";
+    } else if (result.needsContinue) {
+      continueBtn.classList.remove("hidden");
+      toast("Paused at the round cap — continue?");
+      setStatus("paused", "ok");
+      statusDetailEl.textContent = "PAUSED";
+    } else {
+      setStatus("ready", "ok");
+      statusDetailEl.textContent = "READY";
+    }
+
+    await refreshSessions();
+  } catch (error) {
+    state.shownMessages--;
+
+    if (!reply.trim() && toolViews.size === 0) {
+      wrapper.remove();
+    } else if (!reply.trim()) {
+      segEl.innerHTML = `<span class="text-slate-400">interrupted — the tool calls above already ran</span>`;
+    }
+
+    addTurn("error", String(error));
+    setStatus(String(error), "error");
+  } finally {
+    unlisten();
+    unlistenTool();
+    state.busy = false;
+    sendBtn.disabled = false;
+    sendBtn.classList.remove("hidden");
+    pauseBtn.classList.add("hidden");
+    inputEl.focus();
+  }
+}
+
+// requestStop asks the running turn to stop after what already streamed.
+// It supports the desktop app frontend.
+export function requestStop(): void {
+  toast("Agent Stopped");
+  void api.stopChat(state.sessionId || null, state.cwd || null);
+}
+
+// initChat wires the composer and the stop affordances.
+// It supports the desktop app frontend.
+export function initChat(): void {
+  inputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void send();
+    }
+  });
+
+  sendBtn.addEventListener("click", () => void send());
+  pauseBtn.addEventListener("click", () => {
+    state.escArmedAt = 0;
+    requestStop();
+  });
+  continueBtn.addEventListener("click", () => void send(true));
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !state.busy) {
+      return;
+    }
+    const now = Date.now();
+    if (now - state.escArmedAt < 2500) {
+      state.escArmedAt = 0;
+      requestStop();
+    } else {
+      state.escArmedAt = now;
+      toast("Press ESC again to stop the turn");
+    }
+  });
+}

@@ -1,0 +1,129 @@
+/* styles.css is part of the desktop app frontend. */
+/* It supports the UI. */
+@import "tailwindcss";
+@import "@fontsource/inter/300.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+/* The palette of the interface. The dark one is the default, the light one
+   is applied with the "light" class on the html element. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+  --color-slate-850: #111827;
+  --color-slate-900: #0b0f17;
+  --color-slate-950: #06090e;
+
+  --color-accent-50: #eff6ff;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+  --color-accent-700: #1d4ed8;
+
+  --color-agent-purple: #a855f7;
+  --color-agent-amber: #f59e0b;
+  --color-agent-emerald: #10b981;
+  --color-agent-rose: #f43f5e;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-800 font-sans antialiased;
+    @apply dark:bg-slate-950 dark:text-slate-200;
+    overflow: hidden;
+  }
+
+  /* A thin scrollbar that fits the dark theme. */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+    @apply dark:bg-slate-700/60;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+    @apply dark:bg-slate-600/70;
+  }
+
+  textarea,
+  input,
+  select,
+  button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  /* The message bubble of the user. */
+  .bubble-user {
+    @apply max-w-2xl rounded-2xl rounded-tr-xs bg-accent-600 p-3.5 text-white shadow-sm;
+  }
+
+  /* The icon of a message. */
+  .avatar {
+    @apply flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-xs;
+  }
+
+  .avatar-agent {
+    @apply bg-accent-600 text-white shadow-sm;
+  }
+
+  .avatar-user {
+    @apply bg-slate-200 text-slate-700;
+    @apply dark:bg-slate-700 dark:text-slate-200;
+  }
+
+  .avatar-error {
+    @apply bg-agent-rose text-white shadow-sm;
+  }
+
+  /* The panel of the harness view. */
+  .panel {
+    @apply flex flex-col overflow-hidden bg-slate-900;
+  }
+
+  .panel-title {
+    @apply flex items-center justify-between border-b border-slate-800 px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  /* The code of the diff view. */
+  .code-added {
+    @apply bg-emerald-500/15 text-emerald-400;
+  }
+
+  .code-removed {
+    @apply bg-rose-500/15 text-rose-400;
+  }
+
+  .code-keyword {
+    @apply text-pink-400;
+  }
+
+  .code-string {
+    @apply text-lime-300;
+  }
+
+  .code-comment {
+    @apply text-slate-500 italic;
+  }
+}

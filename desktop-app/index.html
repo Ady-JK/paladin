@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>paladin</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body class="h-screen">
+    <div class="flex h-screen overflow-hidden">
+      <!-- ==================== SIDEBAR ==================== -->
+      <aside
+        id="sidebar"
+        class="flex w-72 flex-shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-300 dark:border-slate-800 dark:bg-slate-900"
+      >
+        <!-- Brand -->
+        <div class="flex items-center justify-between border-b border-slate-200 p-3.5 dark:border-slate-800">
+          <div class="flex min-w-0 items-center gap-3">
+            <div
+              class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-600 font-mono text-xs font-bold text-white shadow-md shadow-indigo-500/20"
+            >
+              CA
+            </div>
+            <div class="sidebar-text min-w-0 overflow-hidden">
+              <h1 class="flex items-center gap-1 text-sm font-semibold leading-none text-slate-900 dark:text-slate-100">
+                core-agent
+                <span
+                  class="rounded border border-indigo-200 bg-indigo-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-indigo-600 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-400"
+                  >v0.1</span
+                >
+              </h1>
+              <span class="text-[11px] text-slate-400">Agent Harness</span>
+            </div>
+          </div>
+          <button
+            id="sidebarToggleBtn"
+            class="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            title="Collapse the sidebar"
+          >
+            <span data-icon="angles-left"></span>
+          </button>
+        </div>
+
+        <!-- Workspace -->
+        <div id="workspaceWrap" class="sidebar-text border-b border-slate-200 p-3 dark:border-slate-800/60">
+          <div
+            class="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-100/80 px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-200/60 dark:border-slate-700/60 dark:bg-slate-800/50 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <div class="flex min-w-0 items-center gap-2">
+              <span data-icon="folder-tree" class="text-agent-amber"></span>
+              <span id="workspaceLabel" class="truncate">workspace</span>
+            </div>
+          </div>
+
+          <button
+            id="newSessionBtn"
+            class="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-accent-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm shadow-accent-600/20 transition hover:bg-accent-700"
+          >
+            <span data-icon="plus"></span>
+            <span id="newSessionBtnLabel">New Session</span>
+          </button>
+        </div>
+
+        <!-- View tabs -->
+        <div id="tabsWrap" class="sidebar-text border-b border-slate-200 px-3 py-2 dark:border-slate-800/60">
+          <div
+            class="grid grid-cols-2 gap-1 rounded-md bg-slate-100 p-1 dark:bg-slate-950"
+            role="tablist"
+          >
+            <button
+              id="agentTab"
+              role="tab"
+              class="flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium transition"
+              title="The coding harness"
+            >
+              <span data-icon="terminal"></span>
+              <span>Agent</span>
+            </button>
+            <button
+              id="chatTab"
+              role="tab"
+              class="flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium transition"
+              title="The external chat pages"
+            >
+              <span data-icon="comments"></span>
+              <span>Chat</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Search -->
+        <div id="searchWrap" class="sidebar-text px-3 pb-1 pt-3">
+          <div class="relative">
+            <span data-icon="search" class="pointer-events-none absolute left-2.5 top-2.5 text-slate-400"></span>
+            <input
+              id="searchInput"
+              type="text"
+              placeholder="Search sessions..."
+              class="w-full rounded-md border border-slate-200 bg-slate-100 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder-slate-400 focus:border-accent-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:placeholder-slate-500"
+            />
+          </div>
+        </div>
+
+        <!-- The sessions -->
+        <div id="sessionList" class="sidebar-text flex-1 space-y-4 overflow-y-auto p-2 text-xs">
+          <p class="px-2 py-1 text-slate-400">no sessions yet</p>
+        </div>
+
+        <!-- The external chat pages -->
+        <div id="chatList" class="sidebar-text hidden flex-1 space-y-1 overflow-y-auto p-2 text-xs">
+          <div id="chatEntries" class="space-y-1"></div>
+        </div>
+
+        <!-- The daemon -->
+        <div id="daemonWrap" class="sidebar-text border-t border-slate-200 p-3 dark:border-slate-800">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex min-w-0 items-center gap-2">
+              <span
+                id="daemonDot"
+                class="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300 dark:bg-slate-700"
+              ></span>
+              <span data-icon="microchip" class="text-accent-500"></span>
+              <div class="min-w-0">
+                <div id="daemonLabel" class="truncate text-xs font-medium text-slate-800 dark:text-slate-200">
+                  connecting…
+                </div>
+                <div id="daemonDetail" class="truncate font-mono text-[10px] text-slate-400">—</div>
+              </div>
+            </div>
+            <button
+              id="settingsBtn"
+              class="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              title="Settings"
+            >
+              <span data-icon="gear"></span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ==================== MAIN ==================== -->
+      <main class="relative flex h-full flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
+        <!-- Header -->
+        <header
+          id="titleBar"
+          class="flex select-none items-center justify-between border-b border-slate-200 bg-white/80 px-4 py-2 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80"
+        >
+          <div class="flex items-center gap-3">
+            <span class="relative flex h-2 w-2">
+              <span
+                id="headerPulse"
+                class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
+              ></span>
+              <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+            </span>
+            <span id="headerTitle" class="text-xs font-semibold text-slate-800 dark:text-slate-200">Agent Chat</span>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <div
+              class="hidden items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300"
+            >
+              <span data-icon="code-branch" class="text-agent-amber"></span>
+              <span id="sessionLabel">—</span>
+            </div>
+            <button
+              id="themeToggleBtn"
+              class="rounded-md p-1.5 text-xs text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+              title="Toggle the theme"
+            >
+              <span data-icon="moon"></span>
+            </button>
+            <button
+              id="pageReloadBtn"
+              class="hidden rounded-md p-1.5 text-xs text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+              title="Reload the chat page"
+            >
+              <span data-icon="repeat"></span>
+            </button>
+
+            <!-- The buttons of the window -->
+            <div class="-mb-2 -mr-4 -mt-2 flex items-stretch self-stretch">
+              <button
+                id="windowMinimizeBtn"
+                class="flex w-11 items-center justify-center text-slate-500 transition hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800"
+                title="Minimize"
+              >
+                <span data-icon="window-minimize"></span>
+              </button>
+              <button
+                id="windowMaximizeBtn"
+                class="flex w-11 items-center justify-center text-slate-500 transition hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800"
+                title="Maximize"
+              >
+                <span data-icon="window-maximize"></span>
+              </button>
+              <button
+                id="windowCloseBtn"
+                class="flex w-11 items-center justify-center text-slate-500 transition hover:bg-agent-rose hover:text-white dark:text-slate-400"
+                title="Close"
+              >
+                <span data-icon="window-close"></span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- The agent -->
+        <div id="agentView" class="flex min-h-0 flex-1 flex-col">
+          <!-- The conversation -->
+          <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
+            <div id="messages" class="mx-auto max-w-4xl space-y-6"></div>
+          </div>
+
+          <!-- The composer -->
+          <footer
+            class="border-t border-slate-200 bg-white/90 p-2 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90"
+          >
+          <div class="w-full">
+            <div
+              class="relative rounded-xl border border-slate-300 bg-slate-50 shadow-sm transition focus-within:border-accent-500 dark:border-slate-800 dark:bg-slate-950"
+            >
+              <textarea
+                id="promptInput"
+                rows="2"
+                placeholder="Ask the agent to code, run commands, refactor files… (enter to send, shift+enter for a new line)"
+                class="w-full resize-none bg-transparent px-2.5 pb-1 pt-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                spellcheck="false"
+              ></textarea>
+
+              <div
+                class="flex flex-nowrap items-center gap-2 border-t border-slate-200/50 px-2 pb-1.5 pt-1.5 dark:border-slate-800/50"
+              >
+                <div class="relative min-w-0 flex-1">
+                  <button
+                    id="modelSelectBtn"
+                    class="flex max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 font-mono text-[11px] text-slate-400 transition hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                    title="Pick the provider and the model"
+                  >
+                    <span data-icon="microchip" class="flex-shrink-0 text-accent-500"></span>
+                    <span id="modelSelectLabel" class="truncate">—</span>
+                    <span data-icon="chevron-down" class="flex-shrink-0"></span>
+                  </button>
+                  <div
+                    id="modelMenu"
+                    class="absolute bottom-full left-0 z-50 mb-2 hidden w-[42rem] max-w-[92vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
+                  >
+                    <div
+                      class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800"
+                    >
+                      <span data-icon="search" class="flex-shrink-0 text-slate-400"></span>
+                      <input
+                        id="modelSearch"
+                        type="text"
+                        placeholder="Search providers, labs, or models... (Cmd+K)"
+                        spellcheck="false"
+                        class="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                      />
+                      <button
+                        id="modelSearchClear"
+                        class="rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                        title="Clear the search"
+                      >
+                        <span data-icon="xmark"></span>
+                      </button>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+                      <div class="min-w-0">
+                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                          Provider
+                        </div>
+                        <select
+                          id="providerPick"
+                          title="Switch the provider"
+                          class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 transition hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                        ></select>
+                      </div>
+                      <div class="min-w-0">
+                        <div class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                          <span data-icon="flask"></span>
+                          <span>Lab</span>
+                        </div>
+                        <select
+                          id="labPick"
+                          title="Switch the lab"
+                          class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 transition hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                        ></select>
+                      </div>
+                      <div class="min-w-0">
+                        <div class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                          <span data-icon="brain"></span>
+                          <span>Model</span>
+                        </div>
+                        <div
+                          id="modelPill"
+                          class="flex min-w-0 items-center gap-1.5 truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        ></div>
+                      </div>
+                    </div>
+                    <div
+                      id="filterBar"
+                      class="hidden items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 dark:border-slate-800"
+                    >
+                      <div
+                        id="filterLabel"
+                        class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
+                      ></div>
+                      <button
+                        id="filterClearBtn"
+                        class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                        title="Show every provider and lab again"
+                      >
+                        Clear filter
+                      </button>
+                    </div>
+                    <div class="grid grid-cols-[1fr_14rem]">
+                      <div id="modelTree" class="max-h-64 min-h-32 overflow-y-auto p-1.5"></div>
+                      <div
+                        id="modelDetail"
+                        class="min-h-32 border-l border-slate-200 p-3 dark:border-slate-800"
+                      ></div>
+                    </div>
+                    <div
+                      class="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-slate-800"
+                    >
+                      <div
+                        id="modelBreadcrumb"
+                        class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
+                      ></div>
+                      <div class="flex flex-shrink-0 gap-2">
+                        <button
+                          id="modelQuickBtn"
+                          class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                          title="Apply the highlighted match"
+                        >
+                          Quick Select (Ctrl+1)
+                        </button>
+                        <button
+                          id="modelAdvancedBtn"
+                          class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                          title="Open the settings"
+                        >
+                          Advanced Config…
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="ml-auto flex flex-shrink-0 items-center gap-2">
+                  <span class="hidden whitespace-nowrap font-mono text-[10px] text-slate-400 sm:inline">enter to send</span>
+                  <button
+                    id="sendBtn"
+                    class="flex items-center justify-center rounded-lg bg-accent-600 p-2 text-xs font-semibold text-white shadow-md shadow-accent-600/20 transition hover:bg-accent-700 disabled:opacity-40"
+                    title="Send"
+                  >
+                    <span data-icon="paperplane"></span>
+                  </button>
+                  <button
+                    id="pauseBtn"
+                    class="hidden flex items-center justify-center rounded-lg bg-amber-500 p-2 text-xs font-semibold text-white shadow-md shadow-amber-500/20 transition hover:bg-amber-600"
+                    title="Pause"
+                  >
+                    <span data-icon="pause"></span>
+                  </button>
+                  <button
+                    id="continueBtn"
+                    class="hidden flex items-center justify-center rounded-lg bg-emerald-600 p-2 text-xs font-semibold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700"
+                    title="Continue the paused turn"
+                  >
+                    <span data-icon="play"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          </footer>
+        </div>
+
+        <!-- The external chat pages (Gemini, ChatGPT) -->
+        <div id="externalView" class="hidden min-h-0 flex-1 flex-col">
+          <div id="externalHost" class="relative min-h-0 flex-1 bg-white dark:bg-slate-950">
+            <div
+              id="externalFallback"
+              class="absolute inset-0 hidden flex-col items-center justify-center gap-3 p-6 text-center"
+            >
+              <p class="max-w-md text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                The embedded page needs the desktop app. The preview runs in a
+                plain browser, so open the page directly instead.
+              </p>
+              <a
+                id="externalFallbackLink"
+                href="https://gemini.google.com"
+                target="_blank"
+                rel="noreferrer"
+                class="rounded-md bg-accent-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent-700"
+                >Open Gemini</a
+              >
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ==================== SETTINGS ==================== -->
+    <div
+      id="settingsModal"
+      class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/60 backdrop-blur-sm"
+    >
+      <div
+        class="flex h-[90vh] w-[90vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+      >
+        <!-- Settings sidebar -->
+        <div class="flex w-48 flex-shrink-0 flex-col gap-1 border-r border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+          <div class="px-2 pb-2 pt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
+          <button
+            id="settingsNavWorkspace"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium transition"
+          >
+            <span data-icon="folder-tree"></span>
+            <span>Workspace</span>
+          </button>
+          <button
+            id="settingsNavProviders"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium transition"
+          >
+            <span data-icon="globe"></span>
+            <span>Providers</span>
+          </button>
+          <button
+            id="settingsNavConnection"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium transition"
+          >
+            <span data-icon="microchip"></span>
+            <span>Connection</span>
+          </button>
+        </div>
+
+        <!-- Settings content -->
+        <div class="flex min-w-0 flex-1 flex-col">
+          <div class="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            <h3 id="settingsPaneTitle" class="text-sm font-semibold text-slate-900 dark:text-slate-100">Workspace</h3>
+            <button
+              id="settingsCloseBtn"
+              class="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
+              <span data-icon="xmark"></span>
+            </button>
+          </div>
+
+          <div class="flex-1 space-y-5 overflow-y-auto p-5 text-xs">
+            <div id="settingsPaneWorkspace" class="space-y-5">
+              <div>
+                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+                  Default workspace
+                </label>
+                <div class="flex gap-2">
+                  <input
+                    id="settingsDefaultWorkspace"
+                    type="text"
+                    placeholder="leave empty to open in the home directory"
+                    spellcheck="false"
+                    class="min-w-0 flex-1 rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    id="settingsWorkspaceBrowseBtn"
+                    class="flex-shrink-0 rounded border border-slate-200 bg-slate-100 px-3 py-2 text-slate-600 transition hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    title="Browse the folders on the machine of the daemon"
+                  >
+                    <span data-icon="folder-tree"></span>
+                  </button>
+                </div>
+                <div
+                  id="settingsWorkspaceBrowser"
+                  class="mt-2 hidden overflow-hidden rounded border border-slate-200 dark:border-slate-700"
+                >
+                  <div
+                    id="settingsWorkspaceBrowserPath"
+                    class="truncate border-b border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                  ></div>
+                  <div id="settingsWorkspaceBrowserList" class="max-h-48 overflow-y-auto p-1"></div>
+                </div>
+                <p class="mt-1 text-[10px] text-slate-400">
+                  New sessions open here. Stored in <code>config.json</code> on the daemon side.
+                </p>
+                <div class="mt-2 flex gap-2">
+                  <button
+                    id="settingsWorkspaceSaveBtn"
+                    class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent-700"
+                  >
+                    Save workspace
+                  </button>
+                  <button
+                    id="settingsWorkspaceUseBtn"
+                    class="rounded border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    title="Switch the current view to the default workspace"
+                  >
+                    Open it now
+                  </button>
+                </div>
+                <p id="settingsWorkspaceError" class="hidden text-[11px] text-agent-rose"></p>
+              </div>
+
+              <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                <div class="mb-1 text-xs font-semibold text-slate-900 dark:text-slate-100">Daemon</div>
+                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+                  Daemon address
+                </label>
+                <input
+                  id="remoteAddr"
+                  type="text"
+                  placeholder="leave empty to use the local daemon"
+                  spellcheck="false"
+                  class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+                <p class="mt-1 text-[10px] text-slate-400">
+                  A remote daemon, for example <code>host:50051</code>. It speaks HTTP/3,
+                  so the port is a UDP port. The local daemon is started by the app when
+                  this is empty.
+                </p>
+                <label class="mb-1 mt-3 block font-medium text-slate-700 dark:text-slate-300">
+                  Token
+                </label>
+                <input
+                  id="remoteToken"
+                  type="password"
+                  placeholder="leave empty for the local daemon"
+                  spellcheck="false"
+                  class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+                <p class="mt-1 text-[10px] text-slate-400">
+                  The token of a remote daemon, from the <code>token</code> file next to
+                  its <code>config.json</code>. The certificate of the daemon is pinned the
+                  first time the app talks to it.
+                </p>
+                <div class="mt-2">
+                  <button
+                    id="settingsSaveBtn"
+                    class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent-700"
+                  >
+                    Apply &amp; reconnect
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            <div id="settingsPaneProviders" class="hidden">
+              <div class="mb-3 flex items-center justify-between gap-2">
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                  Keys stay on the daemon and are never shown back.
+                </div>
+                <button
+                  id="settingsAddProviderBtn"
+                  class="flex items-center gap-1.5 rounded-md bg-accent-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-accent-700"
+                  title="Add a provider"
+                >
+                  <span data-icon="plus"></span>
+                  <span>Add provider</span>
+                </button>
+              </div>
+              <div id="settingsProviderList" class="space-y-2"></div>
+              <p id="settingsProviderHint" class="mt-3 font-mono text-[10px] text-slate-400"></p>
+            </div>
+
+            <div id="settingsPaneConnection" class="hidden space-y-3">
+              <div class="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                <div class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+                  <span id="settingsConnDot" class="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300"></span>
+                  <span id="settingsConnLabel" class="text-xs font-medium text-slate-700 dark:text-slate-200">—</span>
+                </div>
+                <div id="settingsConnDetail" class="space-y-1.5 px-3 py-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400"></div>
+              </div>
+              <button
+                id="settingsRefreshModelsBtn"
+                class="rounded border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Fetch the model list in the background"
+              >
+                Refresh models
+              </button>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-2 border-t border-slate-200 px-5 py-3 dark:border-slate-800">
+            <button
+              id="settingsCancelBtn"
+              class="rounded px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Provider add/connect card -->
+      <div
+        id="providerCard"
+        class="absolute inset-0 z-10 hidden items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      >
+        <div
+          class="w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        >
+          <h4 id="providerCardTitle" class="text-sm font-semibold text-slate-900 dark:text-slate-100">Add provider</h4>
+          <div class="space-y-3 text-xs">
+            <div id="providerCardNameWrap">
+              <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">Name</label>
+              <input
+                id="providerCardName"
+                type="text"
+                placeholder="one word, e.g. together"
+                spellcheck="false"
+                autocomplete="off"
+                class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">API url</label>
+              <input
+                id="providerCardUrl"
+                type="text"
+                placeholder="https://…/v1"
+                spellcheck="false"
+                autocomplete="off"
+                class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">API key</label>
+              <input
+                id="providerCardKey"
+                type="password"
+                placeholder="leave empty to keep the stored key"
+                spellcheck="false"
+                autocomplete="off"
+                class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">API type</label>
+              <select
+                id="providerCardType"
+                class="w-full rounded border border-slate-200 bg-slate-100 p-2 text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <option value="openai">openai</option>
+                <option value="anthropic">anthropic</option>
+                <option value="google">google</option>
+              </select>
+            </div>
+          </div>
+          <p id="providerCardError" class="hidden text-[11px] text-agent-rose"></p>
+          <div class="flex justify-end gap-2 pt-1">
+            <button
+              id="providerCardCancel"
+              class="rounded px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              id="providerCardSave"
+              class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent-700"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== NEW SESSION ==================== -->
+    <div
+      id="sessionModal"
+      class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+    >
+      <div
+        class="max-h-[70vh] min-h-[22rem] w-[70vw] min-w-[36rem] max-w-[calc(100vw-2rem)] space-y-4 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div
+          class="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800"
+        >
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <span data-icon="plus" class="text-accent-500"></span>
+            New Session
+          </h3>
+          <button
+            id="sessionCloseBtn"
+            class="text-slate-400 transition hover:text-slate-200 dark:hover:text-slate-100"
+          >
+            <span data-icon="xmark"></span>
+          </button>
+        </div>
+
+        <div class="grid gap-4 text-xs md:grid-cols-2">
+          <div class="min-w-0">
+            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+              Workspace
+            </label>
+            <div
+              id="newSessionPath"
+              class="truncate rounded border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+            ></div>
+            <div
+              id="newSessionList"
+              class="mt-2 max-h-[44vh] min-h-44 overflow-y-auto rounded border border-slate-200 p-1 dark:border-slate-700"
+            ></div>
+          </div>
+
+          <div class="min-w-0">
+            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+              Model
+            </label>
+            <div class="relative">
+              <span data-icon="search" class="pointer-events-none absolute left-2 top-2 text-slate-400"></span>
+              <input
+                id="newSessionSearch"
+                type="text"
+                placeholder="Search providers, labs, or models..."
+                spellcheck="false"
+                class="w-full rounded border border-slate-200 bg-slate-100 py-1.5 pl-8 pr-3 font-mono text-slate-800 placeholder-slate-400 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:placeholder-slate-500"
+              />
+            </div>
+
+            <div
+              id="newSessionTree"
+              class="mt-2 max-h-[44vh] min-h-44 overflow-y-auto rounded border border-slate-200 p-1 dark:border-slate-700"
+            ></div>
+            <div
+              id="newSessionFilterBar"
+              class="mt-1 hidden items-center justify-between gap-2"
+            >
+              <div
+                id="newSessionFilterLabel"
+                class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
+              ></div>
+              <button
+                id="newSessionFilterClearBtn"
+                class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Show every provider and lab again"
+              >
+                Clear filter
+              </button>
+            </div>
+            <div
+              id="newSessionCrumb"
+              class="mt-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
+            ></div>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            id="sessionCancelBtn"
+            class="rounded px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            id="sessionStartBtn"
+            class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent-700"
+          >
+            Start
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== NEW SITE ==================== -->
+    <div
+      id="siteModal"
+      class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+    >
+      <div
+        class="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div
+          class="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800"
+        >
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <span data-icon="plus" class="text-accent-500"></span>
+            New Site
+          </h3>
+          <button
+            id="siteCloseBtn"
+            class="text-slate-400 transition hover:text-slate-200 dark:hover:text-slate-100"
+          >
+            <span data-icon="xmark"></span>
+          </button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+              Name
+            </label>
+            <input
+              id="siteName"
+              type="text"
+              placeholder="My assistant"
+              spellcheck="false"
+              maxlength="40"
+              class="w-full rounded border border-slate-200 bg-slate-100 p-2 text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            />
+          </div>
+
+          <div>
+            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+              URL
+            </label>
+            <input
+              id="siteUrl"
+              type="text"
+              placeholder="https://example.com"
+              spellcheck="false"
+              inputmode="url"
+              class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            />
+            <p class="mt-1 text-[10px] text-slate-400">
+              Only secure https addresses are accepted. The sign-in stays in
+              the page itself: the app never sees the password.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            id="siteCancelBtn"
+            class="rounded px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            id="siteAddBtn"
+            class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent-700"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== CONFIRM ==================== -->
+    <div
+      id="confirmModal"
+      class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+    >
+      <div
+        class="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div class="flex items-center gap-2">
+          <span data-icon="trash" class="text-agent-rose"></span>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            Delete the session?
+          </h3>
+        </div>
+
+        <p class="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+          The conversation
+          <span id="confirmTitle" class="font-medium text-slate-900 dark:text-slate-100"
+            >this session</span
+          >
+          is removed from the disk. This cannot be undone.
+        </p>
+
+        <div class="flex justify-end gap-2">
+          <button
+            id="confirmCancelBtn"
+            class="rounded px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            id="confirmDeleteBtn"
+            class="rounded bg-agent-rose px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- ==================== THE TOAST ==================== -->
+    <div
+      id="toast"
+      class="pointer-events-none fixed left-1/2 top-20 z-[60] hidden max-w-lg -translate-x-1/2 items-center gap-2 rounded-lg border px-4 py-2.5 text-xs shadow-2xl"
+    >
+      <span id="toastIcon"></span>
+      <span id="toastText" class="min-w-0 break-words"></span>
+    </div>
+  </body>
+</html>
