@@ -5,7 +5,7 @@ package syserr
 
 import (
 	"errors"
-	"os"
+	"io/fs"
 	"syscall"
 )
 
@@ -27,10 +27,11 @@ func Str(err error) string {
 			return "File exists (os error 17)"
 		}
 	}
-	if os.IsNotExist(err) {
+	// errors.Is unwraps generic wrappers that os.IsNotExist misses.
+	if errors.Is(err, fs.ErrNotExist) {
 		return "No such file or directory (os error 2)"
 	}
-	if os.IsPermission(err) {
+	if errors.Is(err, fs.ErrPermission) {
 		return "Permission denied (os error 13)"
 	}
 	return err.Error()

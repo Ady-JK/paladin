@@ -270,16 +270,22 @@ func shellResponseJSON(id, status string, exitCode *int, output *string, truncat
 func (s *ShellTool) status(jobID string) (string, error) {
 	s.inner.mu.Lock()
 	j, ok := s.inner.byID[strings.TrimSpace(jobID)]
+	// Snapshot under the lock: the waiter goroutine mutates the entry
+	// (status/exitCode/logDone) while a status check is in flight.
+	var snap job
+	if ok {
+		snap = *j
+	}
 	s.inner.mu.Unlock()
 	if !ok {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
 	}
-	text, err := shellResponseJSON(j.id, j.status, j.exitCode, nil, nil, j.log)
+	text, err := shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log)
 	if err != nil {
 		return "", err
 	}
-	if j.finished && (j.status == JobFailed || j.status == JobTimeout) {
-		return "", WithContent(text, fmt.Sprintf("shell: job %s %s", j.id, j.status))
+	if snap.finished && (snap.status == JobFailed || snap.status == JobTimeout) {
+		return "", WithContent(text, fmt.Sprintf("shell: job %s %s", snap.id, snap.status))
 	}
 	return text, nil
 }
@@ -304,11 +310,15 @@ func (s *ShellTool) cancel(jobID string) (string, error) {
 	s.inner.changed.notify()
 	s.inner.mu.Lock()
 	jj, ok := s.inner.byID[strings.TrimSpace(jobID)]
+	var snap job
+	if ok {
+		snap = *jj
+	}
 	s.inner.mu.Unlock()
 	if !ok {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
 	}
-	return shellResponseJSON(jj.id, jj.status, jj.exitCode, nil, nil, jj.log)
+	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log)
 }
 
 func (s *ShellTool) ArmNotify(owner, callID, jobID string) {

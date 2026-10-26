@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
@@ -116,6 +117,7 @@ type KeyStore interface {
 
 // MemoryKeyStore is an in-memory key store for tests.
 type MemoryKeyStore struct {
+	mu   sync.Mutex
 	keys map[string]string
 }
 
@@ -124,16 +126,22 @@ func NewMemoryKeyStore() *MemoryKeyStore {
 }
 
 func (m *MemoryKeyStore) Get(provider string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	key, ok := m.keys[provider]
 	return key, ok, nil
 }
 
 func (m *MemoryKeyStore) Set(provider, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.keys[provider] = key
 	return nil
 }
 
 func (m *MemoryKeyStore) Delete(provider string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.keys, provider)
 	return nil
 }
