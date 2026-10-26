@@ -1,6 +1,6 @@
 # Paladin JSONL protocol (Electron main <-> agent-host sidecar)
 
-`agent-host` is a Rust executable built from `crates/agent-host`.
+`agent-host` is a Go executable built from `core/cmd/agent-host`.
 Electron main spawns it with piped stdio:
 
 - stdin: requests, one JSON object per line

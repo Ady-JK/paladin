@@ -1,5 +1,5 @@
-# Root Makefile — thin wrappers over cargo/pnpm.
-.PHONY: help desktop-dev desktop-build fmt clippy test agent-host agent-host-release clean
+# Root Makefile — thin wrappers over go/pnpm.
+.PHONY: help desktop-dev desktop-build fmt vet test agent-host agent-host-release clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:' Makefile | cut -d: -f1 | sort
@@ -12,18 +12,20 @@ desktop-dev: agent-host
 desktop-build: agent-host-release
 	cd desktop-app && pnpm install --prefer-offline && pnpm build
 
+agent-host:
+	cd core && go build -o bin/agent-host ./cmd/agent-host
+
 agent-host-release:
-	cargo build --release -p agent-host
+	cd core && go build -trimpath -ldflags "-s -w" -o bin/agent-host ./cmd/agent-host
 
 fmt:
-	cargo fmt --all
+	cd core && gofmt -l .
 
-clippy:
-	cargo clippy --all-targets -- -D warnings
+vet:
+	cd core && go vet ./...
 
 test:
-	cargo test --workspace
+	cd core && go test ./...
 
 clean:
-	cargo clean
-	rm -rf desktop-app/dist desktop-app/dist-electron desktop-app/release
+	rm -rf core/bin desktop-app/dist desktop-app/dist-electron desktop-app/release

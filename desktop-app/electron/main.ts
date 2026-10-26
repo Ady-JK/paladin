@@ -20,11 +20,11 @@ let visibleView: string | null = null;
 let lastBounds: { x: number; y: number; width: number; height: number } | null = null;
 
 function agentBin(): string {
-  // Dev: cargo build output next to the repo. Prod: bundled resource.
+  // Dev: go build output next to the repo. Prod: bundled resource.
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "agent-host", "agent-host");
   }
-  return path.join(HERE, "..", "..", "target", "debug", "agent-host");
+  return path.join(HERE, "..", "..", "core", "bin", "agent-host");
 }
 
 function sendLine(obj: Json): void {

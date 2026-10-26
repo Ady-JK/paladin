@@ -17,14 +17,14 @@ desktop-app/
 └── PROTOCOL.md      # JSONL wire spec (Electron main <-> agent-host)
 ```
 
-`crates/agent-host` is the stdio sidecar: one JSON object per line on
+`core/cmd/agent-host` is the stdio sidecar (Go): one JSON object per line on
 stdin, responses + `chat/delta` / `chat/tool` events on stdout, logs on
 stderr. See `PROTOCOL.md`.
 
 ## Run
 
 ```sh
-make desktop-dev        # cargo build -p agent-host, pnpm install, vite + electron
+make desktop-dev        # go build ./core, pnpm install, vite + electron
 ```
 
 Headed Electron needs an X server. Headless smoke (CI-friendly):

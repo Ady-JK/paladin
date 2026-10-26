@@ -1,3 +1,0 @@
-[workspace]
-members = ["crates/agent-core", "crates/agent-host"]
-resolver = "2"
