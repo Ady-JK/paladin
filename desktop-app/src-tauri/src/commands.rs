@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use agent_core::turn::ChatRequest;
 use agent_core::{AgentRuntime, ApiType, Config};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tokio::sync::mpsc;
@@ -31,9 +32,10 @@ pub struct ChatArgs {
     pub resume: Option<bool>,
 }
 
-pub fn default_runtime() -> AgentRuntime {
+pub fn default_runtime() -> Arc<AgentRuntime> {
     let data_dir = agent_core::data_dir();
-    AgentRuntime::new(data_dir.clone(), Config::new(data_dir))
+    agent_core::logging::init(&data_dir);
+    Arc::new(AgentRuntime::new(data_dir.clone(), Config::new(data_dir)))
 }
 
 #[tauri::command]
@@ -148,7 +150,7 @@ pub async fn list_sessions(
     runtime: State<'_, Arc<AgentRuntime>>,
     cwd: Option<String>,
     limit: Option<i32>,
-) -> Result<Vec<agent_core::runtime::SessionInfo>, String> {
+) -> Result<Vec<agent_core::session::SessionInfo>, String> {
     runtime
         .list_sessions(cwd.as_deref().unwrap_or_default(), limit.unwrap_or(100))
         .await
@@ -160,7 +162,7 @@ pub async fn session_history(
     runtime: State<'_, Arc<AgentRuntime>>,
     session_id: String,
     cwd: Option<String>,
-) -> Result<Vec<agent_core::transcript::Message>, String> {
+) -> Result<Vec<agent_core::session::HistoryMessage>, String> {
     runtime
         .session_history(&session_id, cwd.as_deref().unwrap_or_default())
         .await
@@ -193,9 +195,8 @@ pub async fn chat_stream<R: Runtime>(
     runtime: State<'_, Arc<AgentRuntime>>,
     args: ChatArgs,
 ) -> Result<ChatResult, String> {
-    let (tx, mut rx) = mpsc::channel(64);
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let req = agent_core::turn::ChatRequest {
+    let (tx, mut rx) = mpsc::channel(128);
+    let req = ChatRequest {
         session_id: args.session_id.clone().unwrap_or_default(),
         message: args.message.clone(),
         cwd: args.cwd.clone(),
@@ -203,25 +204,27 @@ pub async fn chat_stream<R: Runtime>(
         model: args.model.clone(),
         system_prompt: args.system_prompt.clone(),
         resume: args.resume.unwrap_or(false),
-        cancel: Some(cancel),
     };
-    let app_clone = app.clone();
-    let chat = async move { runtime.chat(req, tx).await.map_err(|e| e.to_string()) };
+    let runtime_clone = runtime.inner().clone();
+    let chat = async move { runtime_clone.chat(req, tx).await };
     let pump = async move {
         let mut reply = String::new();
+        let mut session_id = args.session_id.clone().unwrap_or_default();
         let mut stopped = false;
         let mut needs_continue = false;
-        let session_id = args.session_id.clone().unwrap_or_default();
         while let Some(chunk) = rx.recv().await {
             if let Some(error) = chunk.error {
                 return Err(error.message);
             }
+            if session_id.is_empty() {
+                session_id = chunk.session_id.clone();
+            }
             if !chunk.delta.is_empty() {
                 reply.push_str(&chunk.delta);
-                let _ = app_clone.emit(CHAT_EVENT, &chunk.delta);
+                let _ = app.emit(CHAT_EVENT, &chunk.delta);
             }
             if let Some(tool) = chunk.tool {
-                let _ = app_clone.emit(CHAT_TOOL_EVENT, &tool);
+                let _ = app.emit(CHAT_TOOL_EVENT, &tool);
             }
             if chunk.stopped {
                 stopped = true;
@@ -241,7 +244,7 @@ pub async fn chat_stream<R: Runtime>(
         })
     };
     let (outcome, pumped) = tokio::join!(chat, pump);
-    let _ = outcome?;
+    outcome.map_err(|e| e.to_string())?;
     pumped
 }
 
@@ -249,10 +252,13 @@ pub async fn chat_stream<R: Runtime>(
 pub async fn stop_chat(
     runtime: State<'_, Arc<AgentRuntime>>,
     session_id: Option<String>,
-    _cwd: Option<String>,
+    cwd: Option<String>,
 ) -> Result<bool, String> {
     Ok(runtime
-        .stop(session_id.as_deref().unwrap_or_default())
+        .stop_in(
+            session_id.as_deref().unwrap_or_default(),
+            cwd.as_deref().unwrap_or_default(),
+        )
         .await)
 }
 
