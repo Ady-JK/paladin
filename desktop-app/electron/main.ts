@@ -233,6 +233,19 @@ function createWindow(): void {
 
   win.on("resized", layoutVisible);
   win.on("moved", layoutVisible);
+  // GPU status is only meaningful once a window (and thus Viz) exists:
+  // logged a moment after the first load. If this says software, the
+  // guest pages are rasterising on the CPU and will feel sluggish no
+  // matter what the shell does.
+  win.webContents.once("did-finish-load", () => {
+    setTimeout(() => {
+      try {
+        console.error(`[gpu] ${JSON.stringify(app.getGPUFeatureStatus())}`);
+      } catch {
+        // Not available.
+      }
+    }, 2000);
+  });
   const notifyResized = (): void => {
     win?.webContents.send("window:resized");
   };
@@ -243,15 +256,6 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  // One-line diagnostic: if the guest pages fall back to software raster
-  // (blocklisted driver, no DRI node) everything feels sluggish and this
-  // is the first thing to check in the logs.
-  try {
-    console.error(`[gpu] ${JSON.stringify(app.getGPUFeatureStatus())}`);
-  } catch {
-    // Not available.
-  }
-
   startAgent();
 
   ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
