@@ -796,6 +796,7 @@ version = "0.1.0"
 dependencies = [
  "agent-core",
  "anyhow",
+ "gtk",
  "serde",
  "serde_json",
  "tauri",
@@ -805,6 +806,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "webkit2gtk",
 ]
 
 [[package]]
