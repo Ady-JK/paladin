@@ -13,7 +13,7 @@
     "dev:electron": "electron .",
     "build": "vite build && tsc -p tsconfig.electron.json && electron-builder -c electron-builder.json",
     "build:renderer": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "tsc -p tsconfig.electron.json && printf '{\"type\":\"commonjs\"}' > dist-electron/package.json",
     "dist": "electron-builder -c electron-builder.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e": "playwright test"

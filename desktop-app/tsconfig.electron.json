@@ -1,8 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
     "outDir": "dist-electron",
     "rootDir": "electron",
     "types": ["node", "electron"]

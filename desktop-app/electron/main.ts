@@ -12,8 +12,8 @@ type Json = any;
 let win: BrowserWindow | null = null;
 let agent: ChildProcess | null = null;
 let nextId = 1;
-// ESM (NodeNext): no __dirname; import.meta.dirname works on Node 20.11+.
-const HERE = import.meta.dirname;
+// CJS (tsconfig.electron): __dirname is the dist-electron dir.
+const HERE = __dirname;
 const pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 const views = new Map<string, { view: WebContentsView; url: string; partition: string }>();
 let visibleView: string | null = null;
@@ -269,6 +269,12 @@ app.whenReady().then(() => {
     });
     const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
     win!.webContents.on("did-finish-load", () => {
+      win!.webContents
+        .executeJavaScript("typeof window.paladin")
+        .then((t) => {
+          if (t !== "object") fail(`window.paladin is ${String(t)} (preload bridge missing)`);
+        })
+        .catch((e) => fail(`bridge probe failed: ${e.message}`));
       invokeAgent("ping")
         .then((r) => {
           clearTimeout(timer);
