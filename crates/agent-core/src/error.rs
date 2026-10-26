@@ -16,10 +16,12 @@ pub enum ProviderError {
     Unknown(String),
     #[error("provider has placeholder key: {0}")]
     PlaceholderKey(String),
-    #[error("request failed: {0}")]
+    #[error("{0}")]
     Request(String),
     #[error("config: {0}")]
     Config(String),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 #[derive(Debug, thiserror::Error)]

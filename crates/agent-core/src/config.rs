@@ -18,7 +18,7 @@ pub const PLACEHOLDER_KEY: &str = "replace_me";
 pub const KEYRING_SERVICE: &str = "paladin";
 pub const OPENCODE_CATALOG_URL: &str = "https://opencode.ai/inference/go/v1/models";
 pub const OPENCODE_USER_AGENT: &str = "paladin/1.0";
-pub const OPENCODE_SESSION_HEADER: &str = "x-paladin-session";
+pub const OPENCODE_SESSION_HEADER: &str = "x-opencode-session";
 
 /// Resolves the shared data directory:
 /// `$PALADIN_DATA_DIR` override, else OS-specific default.
