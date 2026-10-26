@@ -9,8 +9,11 @@ desktop-dev:
 	cd desktop-app && pnpm tauri dev
 
 # Build the desktop app (bundles for the host OS).
+# AppImage needs to download its AppRun runtime from GitHub; when that
+# network fetch fails, build without it via the flag below. For all
+# bundles (including AppImage) run `pnpm tauri build` in desktop-app/.
 desktop-build:
-	cd desktop-app && pnpm tauri build
+	cd desktop-app && pnpm tauri build -b deb,rpm
 
 # Format and lint the whole workspace.
 fmt:
