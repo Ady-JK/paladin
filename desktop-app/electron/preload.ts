@@ -1,33 +1,56 @@
 // Preload: the only bridge between renderer and Electron main.
 // Renderer gets window.paladin; nothing else leaks (sandbox + isolation on).
+// Chat stream demux lives here: one ipc listener pair, routed by streamId.
 
 import { contextBridge, ipcRenderer } from "electron";
 
 export interface ChatParams {
-  sessionId?: string;
+  sessionId: string | null;
   message: string;
+  resume: boolean;
   cwd: string;
-  provider?: string | null;
-  model?: string | null;
-  systemPrompt?: string | null;
-  resume?: boolean;
+  provider: string | null;
+  model: string | null;
+  systemPrompt: string | null;
+}
+
+export interface ChatHandlers {
+  onDelta: (delta: string) => void;
+  onTool: (tool: unknown) => void;
+}
+
+const pending = new Map<string, { handlers: ChatHandlers; done: (v: unknown) => void; fail: (e: Error) => void }>();
+let armed = false;
+
+function arm(): void {
+  if (armed) return;
+  armed = true;
+  ipcRenderer.on("agent:chat-event", (_e, msg: any) => {
+    const p = pending.get(msg?.streamId);
+    if (!p) return;
+    if (msg.event === "chat/delta" && typeof msg.delta === "string") p.handlers.onDelta(msg.delta);
+    else if (msg.event === "chat/tool") p.handlers.onTool(msg.tool);
+  });
+  ipcRenderer.on("agent:chat-done", (_e, msg: any) => {
+    const p = pending.get(msg?.streamId);
+    if (!p) return;
+    pending.delete(msg.streamId);
+    if (msg.ok) p.done(msg.result);
+    else p.fail(new Error(typeof msg.error === "string" ? msg.error : "chat failed"));
+  });
 }
 
 contextBridge.exposeInMainWorld("paladin", {
   invoke: (method: string, params: unknown = {}) => ipcRenderer.invoke("agent:invoke", method, params),
 
-  chat: (params: ChatParams) => ipcRenderer.invoke("agent:chat", params),
-
-  onChatEvent: (cb: (msg: any) => void) => {
-    const fn = (_e: unknown, msg: any) => cb(msg);
-    ipcRenderer.on("agent:chat-event", fn);
-    return () => ipcRenderer.removeListener("agent:chat-event", fn);
-  },
-
-  onChatDone: (cb: (msg: any) => void) => {
-    const fn = (_e: unknown, msg: any) => cb(msg);
-    ipcRenderer.on("agent:chat-done", fn);
-    return () => ipcRenderer.removeListener("agent:chat-done", fn);
+  chat: (params: ChatParams, handlers: ChatHandlers): Promise<unknown> => {
+    arm();
+    return ipcRenderer.invoke("agent:chat", params).then(
+      (streamId) =>
+        new Promise<unknown>((done, fail) => {
+          pending.set(streamId as string, { handlers, done, fail });
+        }),
+    );
   },
 
   views: {
@@ -39,5 +62,21 @@ contextBridge.exposeInMainWorld("paladin", {
     navigate: (name: string, url: string) => ipcRenderer.invoke("views:navigate", name, url),
     reload: (name: string) => ipcRenderer.invoke("views:reload", name),
     drop: (name: string) => ipcRenderer.invoke("views:drop", name),
+  },
+
+  shell: {
+    openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
+  },
+
+  windows: {
+    minimize: () => ipcRenderer.invoke("window:minimize"),
+    toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
+    close: () => ipcRenderer.invoke("window:close"),
+    isMaximized: () => ipcRenderer.invoke("window:isMaximized"),
+    onResized: (cb: () => void) => {
+      const fn = (): void => cb();
+      ipcRenderer.on("window:resized", fn);
+      return () => ipcRenderer.removeListener("window:resized", fn);
+    },
   },
 });

@@ -6,17 +6,14 @@
 desktop-app/
 ├── electron/
 │   ├── main.ts      # window + sidecar spawn + JSONL bridge + WebContentsViews
-│   └── preload.ts   # window.paladin bridge (context isolation, no node in renderer)
-├── src/             # renderer: vanilla TS UI (no framework, no Tailwind runtime)
-│   ├── main.ts      # bootstrap
-│   ├── api.ts       # typed IPC wrapper (invoke + chat stream demux + views)
-│   ├── state.ts     # single shared state object
-│   ├── chat.ts      # rAF-coalesced streaming, stick-to-bottom scroll
-│   ├── sessions.ts  # delegated clicks, debounced search, single-layout history
-│   ├── models.ts    # debounced picker, visibility-gated trees, 300-row cap
-│   ├── sites.ts     # Agent/Gemini/ChatGPT tabs -> persistent WebContentsViews
-│   ├── settings.ts  # provider CRUD
-│   └── workspace.ts # fs browser
+│   └── preload.ts   # window.paladin bridge (stream demux, views, shell, windows)
+├── src/             # renderer: the classic paladin UI (Tailwind, vanilla TS)
+│   ├── main.ts      # bootstrap (imports styles.css so dev picks up utilities)
+│   ├── core/        # api (bridge invoke), tauri (bridge probe+types), dom/format/state/types
+│   ├── features/    # chat, sessions, models, sites, settings, workspace, window, tools
+│   ├── ui/          # toast, status
+│   └── styles.css   # Tailwind v4 theme + components
+├── e2e/             # Playwright suite (paladin-stub.js fakes window.paladin)
 └── PROTOCOL.md      # JSONL wire spec (Electron main <-> agent-host)
 ```
 

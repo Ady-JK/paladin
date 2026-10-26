@@ -4,7 +4,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, WebContentsView } from "electron";
+import { app, BrowserWindow, ipcMain, shell, WebContentsView } from "electron";
 import readline from "node:readline";
 
 type Json = any;
@@ -158,6 +158,12 @@ function createWindow(): void {
 
   win.on("resized", layoutVisible);
   win.on("moved", layoutVisible);
+  const notifyResized = (): void => {
+    win?.webContents.send("window:resized");
+  };
+  win.on("resize", notifyResized);
+  win.on("maximize", notifyResized);
+  win.on("unmaximize", notifyResized);
   win.contentView.on("bounds-changed", layoutVisible);
 }
 
@@ -219,8 +225,18 @@ app.whenReady().then(() => {
     views.get(name)?.view.webContents.reload();
     return true;
   });
-  ipcMain.handle("views:drop", (_e, name: string) => {
-    const entry = views.get(name);
+  ipcMain.handle("shell:openExternal", (_e, url: string) => shell.openExternal(url));
+
+  ipcMain.handle("window:minimize", () => win?.minimize());
+  ipcMain.handle("window:toggleMaximize", () => {
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  });
+  ipcMain.handle("window:close", () => win?.close());
+  ipcMain.handle("window:isMaximized", () => win?.isMaximized() ?? false);
+
+  ipcMain.handle("views:drop", (_e, name: string) => {    const entry = views.get(name);
     if (!entry) return true;
     if (win) {
       try {
