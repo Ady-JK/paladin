@@ -9,6 +9,10 @@ import readline from "node:readline";
 
 type Json = any;
 
+// Match Chrome's wheel behaviour: interpolate ticks instead of snapping.
+// (Harmless if the platform already defaults to smooth scrolling.)
+app.commandLine.appendSwitch("enable-smooth-scrolling");
+
 let win: BrowserWindow | null = null;
 let agent: ChildProcess | null = null;
 let nextId = 1;
@@ -113,7 +117,17 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
     return existing.view;
   }
   const view = new WebContentsView({
-    webPreferences: { partition, sandbox: true },
+    webPreferences: {
+      partition,
+      sandbox: true,
+      // Guest pages are the content of this app: a visible one must not be
+      // throttled to 1fps when the window loses focus. Hidden guests get
+      // throttling back in showOnly so they stop burning a core.
+      backgroundThrottling: false,
+      // Spelling underlines on every keystroke in a chat composer are pure
+      // overhead; the pages run their own editors anyway.
+      spellcheck: false,
+    },
   });
   const ua = userAgentForView();
   if (ua) {
@@ -169,6 +183,13 @@ function showOnly(name: string | null): void {
     } catch {
       // Already removed.
     }
+    // Hidden pages may throttle: they keep their JS state but stop
+    // compositing/timers at full speed in the background.
+    try {
+      entry.view.webContents.setBackgroundThrottling(true);
+    } catch {
+      // Destroyed.
+    }
   }
   visibleView = null;
   if (name && name !== "agent") {
@@ -176,6 +197,12 @@ function showOnly(name: string | null): void {
     if (entry) {
       win.contentView.addChildView(entry.view);
       visibleView = name;
+      // The page on screen is the app's foreground: never throttle it.
+      try {
+        entry.view.webContents.setBackgroundThrottling(false);
+      } catch {
+        // Destroyed.
+      }
       layoutVisible();
     }
   }
@@ -186,6 +213,9 @@ function createWindow(): void {
     width: 1400,
     height: 900,
     autoHideMenuBar: true,
+    // Painted before the first frame: no white flash between window
+    // creation and the renderer's dark background.
+    backgroundColor: "#06090e",
     webPreferences: {
       preload: path.join(HERE, "preload.js"),
       contextIsolation: true,
@@ -213,6 +243,15 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // One-line diagnostic: if the guest pages fall back to software raster
+  // (blocklisted driver, no DRI node) everything feels sluggish and this
+  // is the first thing to check in the logs.
+  try {
+    console.error(`[gpu] ${JSON.stringify(app.getGPUFeatureStatus())}`);
+  } catch {
+    // Not available.
+  }
+
   startAgent();
 
   ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
@@ -314,12 +353,29 @@ app.whenReady().then(() => {
     });
     const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
     win!.webContents.on("did-finish-load", () => {
-      win!.webContents
-        .executeJavaScript("typeof window.paladin")
-        .then((t) => {
-          if (t !== "object") fail(`window.paladin is ${String(t)} (preload bridge missing)`);
-        })
-        .catch((e) => fail(`bridge probe failed: ${e.message}`));
+      // The frame can be momentarily undisposed-ready right after load
+      // (worse headless); poll briefly instead of failing on one shot.
+      const probeBridge = (tries: number): void => {
+        win!.webContents
+          .executeJavaScript("typeof window.paladin")
+          .then((t) => {
+            if (t !== "object") {
+              if (tries > 0) {
+                setTimeout(() => probeBridge(tries - 1), 250);
+              } else {
+                fail(`window.paladin is ${String(t)} (preload bridge missing)`);
+              }
+            }
+          })
+          .catch((e) => {
+            if (tries > 0) {
+              setTimeout(() => probeBridge(tries - 1), 250);
+            } else {
+              fail(`bridge probe failed: ${e.message}`);
+            }
+          });
+      };
+      probeBridge(12);
       invokeAgent("ping")
         .then((r) => {
           clearTimeout(timer);

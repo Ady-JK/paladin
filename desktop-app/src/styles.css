@@ -378,6 +378,42 @@
   #headerPulse {
     animation: soft-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
+
+  /* ---- Guest page on screen: freeze the app chrome ----
+     An embedded WebContentsView is composited next to this page. A
+     continuously animating layer or a live backdrop-filter keeps the
+     compositor producing frames for the app shell on every vsync,
+     stealing time from the page the user is scrolling. While a guest
+     page is visible the shell is made completely static: the pulse
+     stops and the blur layers (which re-read their backdrop) are
+     replaced with solid fills of the same colour. */
+  body.guest-visible #headerPulse {
+    animation: none;
+    opacity: 0.75;
+  }
+
+  body.guest-visible #sidebar,
+  body.guest-visible #titleBar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  body.guest-visible #sidebar {
+    transition: none;
+  }
+
+  body.guest-visible.dark #sidebar {
+    background: linear-gradient(180deg, #0f172a, #020617);
+  }
+
+  body.guest-visible.dark #titleBar {
+    background: #0f172a;
+  }
+
+  /* No gradient mesh to overdraw behind the (now opaque) chrome. */
+  body.guest-visible::before {
+    display: none;
+  }
 }
 
 @keyframes view-in {

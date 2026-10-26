@@ -229,11 +229,19 @@ function externalRect(): { x: number; y: number; width: number; height: number }
   return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
 }
 
+// setGuestVisible marks the shell as "a native page is on screen". The
+// stylesheet uses it to freeze animations/blur so the guest renderer
+// gets the whole frame budget while scrolling.
+function setGuestVisible(on: boolean): void {
+  document.body.classList.toggle("guest-visible", on);
+}
+
 export async function refreshExternalVisibility(): Promise<void> {
   const page = currentChatPage();
 
   if (!hasTauri()) {
     const on = state.sideView === "chat" && page !== null;
+    setGuestVisible(false);
     externalFallbackEl.classList.toggle("hidden", !on);
     externalFallbackEl.classList.toggle("flex", on);
     return;
@@ -246,14 +254,17 @@ export async function refreshExternalVisibility(): Promise<void> {
       // navigate call: it would load the page twice.
       await api.showExternalPage(page.id, page.url, externalRect());
     } catch (error) {
+      setGuestVisible(false);
       toast(String(error), "error");
       return;
     }
+    setGuestVisible(true);
     state.pageUrlShown = page.url;
     shownView = page.id;
     return;
   }
 
+  setGuestVisible(false);
   armPageDrop();
   try {
     await api.hideExternalPage();

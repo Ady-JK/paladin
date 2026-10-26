@@ -127,6 +127,31 @@ test("rapid tab switching ends in one clean side", async ({ page }) => {  await 
   await expect(page.locator("#headerTitle")).toHaveText("ChatGPT");
 });
 
+test("a visible chat page freezes the shell compositing", async ({ page }) => {
+  await page.click("#chatTab");
+  await page.click('[data-pick="chatgpt"]');
+  await expect(page.locator("#externalView")).toBeVisible();
+
+  await expect
+    .poll(() => page.evaluate(() => document.body.classList.contains("guest-visible")))
+    .toBe(true);
+
+  const styles = await page.evaluate(() => {
+    const pulse = getComputedStyle(document.getElementById("headerPulse")!);
+    const sidebar = getComputedStyle(document.getElementById("sidebar")!);
+    return { animation: pulse.animationName, blur: sidebar.backdropFilter };
+  });
+  // The infinite pulse and the blur layers would force the compositor to
+  // produce frames for the shell while the guest page is scrolling.
+  expect(styles.animation).toBe("none");
+  expect(styles.blur === "none" || styles.blur === "").toBe(true);
+
+  await page.click("#agentTab");
+  await expect
+    .poll(() => page.evaluate(() => document.body.classList.contains("guest-visible")))
+    .toBe(false);
+});
+
 test("chat mode never moves the page", async ({ page }) => {
   await page.click("#chatTab");
   await page.click('[data-pick="gemini"]');
