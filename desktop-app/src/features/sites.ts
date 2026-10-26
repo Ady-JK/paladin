@@ -23,6 +23,7 @@ import {
   sessionModalEl,
   settingsModalEl,
   confirmModalEl,
+  sidebarEl,
   siteModalEl,
   siteNameEl,
   siteUrlEl,
@@ -272,6 +273,34 @@ export function paintSideVisibility(): void {
   daemonWrapEl.classList.toggle("hidden", state.collapsed);
 }
 
+// In chat mode the embedded page is positioned once and never
+// resized afterwards, so the sidebar is forced open and its toggle
+// locked: any width change would move the native view mid-scroll.
+function lockSidebarForChat(): void {
+  if (state.collapsed) {
+    state.collapsed = false;
+    sidebarEl.classList.remove("w-16");
+    sidebarEl.classList.add("w-72");
+  }
+  const btn = $("#sidebarToggleBtn") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("opacity-30");
+    btn.title = "Sidebar is fixed while a chat page is open";
+  }
+  paintSideVisibility();
+}
+
+// unlockSidebarForAgent restores the collapse toggle when leaving chat.
+function unlockSidebarForAgent(): void {
+  const btn = $("#sidebarToggleBtn") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove("opacity-30");
+    btn.title = "Collapse the sidebar";
+  }
+}
+
 // setSideView is a function in this module.
 // It supports the desktop app frontend.
 export function setSideView(view: SideView): void {
@@ -293,8 +322,10 @@ export function setSideView(view: SideView): void {
   newSessionBtnLabelEl.textContent = agent ? "New Session" : "New Site";
   $("#newSessionBtn").title = agent ? "Start a new session" : "Add another chat page";
   if (!agent) {
+    lockSidebarForChat();
     paintChatList();
   } else {
+    unlockSidebarForAgent();
     inputEl.focus();
   }
 
@@ -535,11 +566,9 @@ export function initSites(): void {
   const nudgeExternal = (): void => {
     window.clearTimeout(externalMoveTimer);
     externalMoveTimer = window.setTimeout(() => {
-      if (currentChatPage() && externalWanted()) {
-        api.moveExternalPage({ ...externalRect() }).catch(
-          () => undefined,
-        );
-      }
+      // Deduped by lastSentRect: with the sidebar locked in chat
+      // mode this is a no-op unless the outer window moved.
+      trackExternalFlight();
     }, 120);
   };
   new ResizeObserver(nudgeExternal).observe(externalHostEl);

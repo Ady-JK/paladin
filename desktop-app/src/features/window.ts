@@ -18,6 +18,11 @@ function toggleTheme(): void {
 // toggleSidebar is a function in this module.
 // It supports the desktop app frontend.
 function toggleSidebar(): void {
+  // Locked in chat mode: the embedded page is fixed, so the sidebar
+  // must not move. The button is disabled there as well.
+  if (state.sideView === "chat") {
+    return;
+  }
   state.collapsed = !state.collapsed;
 
   if (state.collapsed) {

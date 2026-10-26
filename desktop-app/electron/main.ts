@@ -15,7 +15,14 @@ let nextId = 1;
 // CJS (tsconfig.electron): __dirname is the dist-electron dir.
 const HERE = __dirname;
 const pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-const views = new Map<string, { view: WebContentsView; url: string; partition: string }>();
+type ViewEntry = {
+  view: WebContentsView;
+  url: string;
+  partition: string;
+  applied?: { x: number; y: number; width: number; height: number };
+};
+
+const views = new Map<string, ViewEntry>();
 let visibleView: string | null = null;
 let lastBounds: { x: number; y: number; width: number; height: number } | null = null;
 
@@ -81,6 +88,21 @@ function startAgent(): void {
   });
 }
 
+// Guest pages get a plain Chrome UA (no Electron token): heavy sites
+// UA-sniff for bundles and bot checks, and the Electron token buys us
+// the degraded path.
+let guestUA = "";
+function userAgentForView(): string {
+  if (!guestUA && win) {
+    try {
+      guestUA = win.webContents.getUserAgent().replace(/ Electron\/\S+/, "");
+    } catch {
+      guestUA = "";
+    }
+  }
+  return guestUA;
+}
+
 function ensureView(name: string, url: string, partition: string): WebContentsView {
   const existing = views.get(name);
   if (existing) {
@@ -93,6 +115,10 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
   const view = new WebContentsView({
     webPreferences: { partition, sandbox: true },
   });
+  const ua = userAgentForView();
+  if (ua) {
+    view.webContents.setUserAgent(ua);
+  }
   view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   views.set(name, { view, url, partition });
   view.webContents.loadURL(url).catch(() => undefined);
@@ -104,13 +130,27 @@ function layoutVisible(): void {
   const entry = views.get(visibleView);
   if (!entry) return;
   const b = lastBounds;
+  const next = {
+    x: Math.max(0, Math.round(b.x)),
+    y: Math.max(0, Math.round(b.y)),
+    width: Math.max(1, Math.round(b.width)),
+    height: Math.max(1, Math.round(b.height)),
+  };
+  const prev = entry.applied;
+  // setBounds recreates the guest surface: skip no-ops so resizes and
+  // repeat shows don't stutter an already-placed page.
+  if (
+    prev &&
+    prev.x === next.x &&
+    prev.y === next.y &&
+    prev.width === next.width &&
+    prev.height === next.height
+  ) {
+    return;
+  }
   try {
-    entry.view.setBounds({
-      x: Math.max(0, Math.round(b.x)),
-      y: Math.max(0, Math.round(b.y)),
-      width: Math.max(1, Math.round(b.width)),
-      height: Math.max(1, Math.round(b.height)),
-    });
+    entry.view.setBounds(next);
+    entry.applied = next;
   } catch {
     // Window is closing; ignore.
   }
@@ -118,6 +158,11 @@ function layoutVisible(): void {
 
 function showOnly(name: string | null): void {
   if (!win) return;
+  // Same page already up: no detach/reattach, just confirm bounds.
+  if (name && name !== "agent" && visibleView === name && views.has(name)) {
+    layoutVisible();
+    return;
+  }
   for (const [, entry] of views) {
     try {
       win.contentView.removeChildView(entry.view);

@@ -67,14 +67,13 @@ test("the picked side survives a reload", async ({ page }) => {
   await expect(page.locator("#headerTitle")).toHaveText("Gemini");
 });
 
-test("collapsing in chat never brings the sessions back", async ({ page }) => {
+test("sidebar stays fixed open in chat mode", async ({ page }) => {
   await page.click("#chatTab");
   await page.click('[data-pick="gemini"]');
 
-  await page.click("#sidebarToggleBtn");
-  await expect(page.locator("#chatList")).toBeHidden();
-  await expect(page.locator("#sessionList")).toBeHidden();
-  await page.click("#sidebarToggleBtn");
+  await expect(page.locator("#sidebarToggleBtn")).toBeDisabled();
+  // Clicking the locked toggle is a no-op: the page list stays put.
+  await page.click("#sidebarToggleBtn", { force: true });
   await expect(page.locator("#chatList")).toBeVisible();
   await expect(page.locator("#sessionList")).toBeHidden();
   await expect(page.locator("#searchWrap")).toBeHidden();
@@ -93,12 +92,14 @@ test("collapsing in agent keeps the sessions and hides the chats", async ({ page
 });
 
 test("collapse, expand, then switch sides stays clean", async ({ page }) => {
-  await page.click("#chatTab");
-  await page.click('[data-pick="chatgpt"]');
   await page.click("#sidebarToggleBtn");
   await expect(page.locator("#sessionList")).toBeHidden();
-  await expect(page.locator("#chatList")).toBeHidden();
   await page.click("#sidebarToggleBtn");
+  await expect(page.locator("#sessionList")).toBeVisible();
+
+  await page.click("#chatTab");
+  await page.click('[data-pick="chatgpt"]');
+  await expect(page.locator("#sidebarToggleBtn")).toBeDisabled();
 
   await page.click("#agentTab");
   await expect(page.locator("#agentView")).toBeVisible();
@@ -126,27 +127,20 @@ test("rapid tab switching ends in one clean side", async ({ page }) => {  await 
   await expect(page.locator("#headerTitle")).toHaveText("ChatGPT");
 });
 
-test("sidebar toggle settles the page with one move", async ({ page }) => {
+test("chat mode never moves the page", async ({ page }) => {
   await page.click("#chatTab");
   await page.click('[data-pick="gemini"]');
+  // Let the initial show settle first: the show itself moves once.
+  await page.waitForTimeout(900);
 
   await page.evaluate(() => {
     window.__e2eMoves = 0;
   });
-  await page.click("#sidebarToggleBtn");
+  // The toggle is locked in chat mode: fixed sidebar, zero moves.
+  await page.click("#sidebarToggleBtn", { force: true });
   await page.waitForTimeout(900);
   const moves = await page.evaluate(() => window.__e2eMoves || 0);
-  // Instant layout: exactly one settle move, never a 60fps storm.
-  expect(moves).toBeGreaterThanOrEqual(1);
-  expect(moves).toBeLessThan(5);
-
-  await page.evaluate(() => {
-    window.__e2eMoves = 0;
-  });
-  await page.waitForTimeout(500);
-  await expect
-    .poll(async () => page.evaluate(() => window.__e2eMoves || 0))
-    .toBe(0);
+  expect(moves).toBe(0);
 });
 
 test("a site can be added, kept, and removed", async ({ page }) => {
