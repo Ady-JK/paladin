@@ -2,6 +2,7 @@
 // In-process only: a single shared AgentRuntime, no daemon.
 
 pub mod commands;
+mod external;
 
 use std::sync::Arc;
 
@@ -12,6 +13,10 @@ use commands::{
     add_provider, chat_stream, delete_session, fs_home, fs_list, get_workspace, list_providers,
     list_sessions, open_session, refresh_providers, resolve_workspace, session_history,
     set_default_provider, set_workspace, stop_chat, update_provider,
+};
+use external::{
+    hide_external_page, move_external_page, navigate_external_page, reload_external_page,
+    show_external_page,
 };
 
 pub fn configure<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
@@ -43,6 +48,11 @@ pub fn configure_with_runtime<R: Runtime>(
             delete_session,
             chat_stream,
             stop_chat,
+            show_external_page,
+            navigate_external_page,
+            move_external_page,
+            reload_external_page,
+            hide_external_page,
         ])
 }
 
