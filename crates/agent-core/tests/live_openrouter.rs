@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use agent_core::config::{Config, MemoryKeyStore};
+use agent_core::config::{Config, KeyStore, MemoryKeyStore};
 use agent_core::runtime::AgentRuntime;
 use agent_core::turn::ChatRequest;
 use tokio::sync::mpsc;
@@ -27,7 +27,7 @@ async fn live_openrouter_gemma() {
     let cwd = ws.display().to_string();
     let sess = rt.open_session("", &cwd).await.expect("open session");
     assert_eq!(sess.provider, "openrouter");
-    let (tx, mut rx) = mpsc::channel(128);
+    let (tx, rx) = mpsc::channel(128);
     let req = ChatRequest {
         session_id: sess.session_id.clone(),
         message: "Reply with exactly: paladin-live-ok".to_string(),

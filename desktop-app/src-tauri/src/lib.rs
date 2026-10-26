@@ -17,6 +17,13 @@ use commands::{
 pub fn configure<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let data_dir = data_dir();
     let runtime = Arc::new(AgentRuntime::new(data_dir.clone(), Config::new(data_dir)));
+    configure_with_runtime(builder, runtime)
+}
+
+pub fn configure_with_runtime<R: Runtime>(
+    builder: tauri::Builder<R>,
+    runtime: Arc<AgentRuntime>,
+) -> tauri::Builder<R> {
     builder
         .manage(runtime)
         .invoke_handler(tauri::generate_handler![
