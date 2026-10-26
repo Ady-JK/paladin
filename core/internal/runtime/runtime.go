@@ -433,10 +433,15 @@ func (r *AgentRuntime) addProviderLocked(name, url, apiType, key string, req con
 	file.Providers = append(file.Providers, config.Provider{
 		Name: name, ApiURL: url, ApiType: at,
 	})
-	if err := r.store.SaveProviders(file); err != nil {
+	// Write the secret first: if the keychain is unavailable the catalog
+	// is left untouched instead of gaining a provider without a key.
+	if err := r.store.Keys.Set(name, key); err != nil {
 		return config.ProviderInfo{}, err
 	}
-	if err := r.store.Keys.Set(name, key); err != nil {
+	if err := r.store.SaveProviders(file); err != nil {
+		// The catalog write failed, so the provider does not exist: drop
+		// the orphan secret rather than leaving it behind.
+		_ = r.store.Keys.Delete(name)
 		return config.ProviderInfo{}, err
 	}
 	r.evictProviderCache()

@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/zalando/go-keyring"
@@ -15,7 +16,7 @@ type OsKeyStore struct{}
 func (OsKeyStore) Get(provider string) (string, bool, error) {
 	key, err := keyring.Get(KeyringService, provider)
 	if err != nil {
-		if err == keyring.ErrNotFound {
+		if errors.Is(err, keyring.ErrNotFound) {
 			return "", false, nil
 		}
 		return "", false, fmt.Errorf("keychain unavailable: %v", err)
@@ -32,7 +33,7 @@ func (OsKeyStore) Set(provider, key string) error {
 
 func (OsKeyStore) Delete(provider string) error {
 	if err := keyring.Delete(KeyringService, provider); err != nil {
-		if err == keyring.ErrNotFound {
+		if errors.Is(err, keyring.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("keychain unavailable: %v", err)

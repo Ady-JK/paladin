@@ -48,6 +48,44 @@ func TestOpenListHistoryDeleteSession(t *testing.T) {
 	}
 }
 
+type failingKeyStore struct{ err error }
+
+func (f failingKeyStore) Get(string) (string, bool, error) { return "", false, f.err }
+func (f failingKeyStore) Set(string, string) error         { return f.err }
+func (f failingKeyStore) Delete(string) error              { return nil }
+
+// A keychain failure while adding a provider must not leave an entry in
+// the catalog that has no secret behind it.
+func TestAddProviderKeychainFailureLeavesCatalogUntouched(t *testing.T) {
+	dir := t.TempDir()
+	rt := WithKeyStore(dir, config.NewConfig(dir), failingKeyStore{err: fmt.Errorf("keychain unavailable: no bus")})
+	before, err := rt.store.LoadProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = rt.AddProvider(config.ProviderInput{
+		Name:    "vault",
+		ApiURL:  "https://example.test/v1",
+		ApiKey:  "sk-never-stored",
+		ApiType: "openai",
+	})
+	if err == nil {
+		t.Fatal("AddProvider succeeded without a keychain")
+	}
+	after, err := rt.store.LoadProviders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Providers) != len(before.Providers) {
+		t.Fatalf("catalog gained providers: %d -> %d", len(before.Providers), len(after.Providers))
+	}
+	for _, p := range after.Providers {
+		if p.Name == "vault" {
+			t.Fatal("provider was written despite the keychain failure")
+		}
+	}
+}
+
 func TestConcurrentTurnRejected(t *testing.T) {
 	rt, _ := testRuntime(t)
 	noop := func() {}
