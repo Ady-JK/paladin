@@ -12,6 +12,6 @@ export function setStatus(text: string, kind: "ok" | "error" | "busy"): void {
     kind === "error"
       ? "h-2 w-2 flex-shrink-0 rounded-full bg-agent-rose"
       : kind === "busy"
-        ? "h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-agent-amber"
+        ? "h-2 w-2 flex-shrink-0 rounded-full bg-agent-amber"
         : "h-2 w-2 flex-shrink-0 rounded-full bg-agent-emerald";
 }

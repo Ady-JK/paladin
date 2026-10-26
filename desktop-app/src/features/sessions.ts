@@ -101,7 +101,7 @@ export function renderSessions(): void {
       const title = session.title || "untitled session";
 
       html += `
-        <div class="group flex items-center gap-1 rounded-md border p-1 transition ${
+        <div class="session-row group flex items-center gap-1 rounded-md border p-1 ${
           active
             ? "border-indigo-200 bg-indigo-50/80 text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200"
             : "border-transparent text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/60"
@@ -117,7 +117,7 @@ export function renderSessions(): void {
           <span class="flex-shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-400 dark:border-slate-700/60 dark:bg-slate-800">${session.messageCount}</span>
           <button
             data-delete="${session.sessionId}"
-            class="flex-shrink-0 rounded p-1 text-slate-400 opacity-40 transition hover:bg-agent-rose/10 hover:text-agent-rose hover:opacity-100 focus:opacity-100"
+            class="flex-shrink-0 rounded p-1 text-slate-400 opacity-40 hover:bg-agent-rose/10 hover:text-agent-rose hover:opacity-100 focus:opacity-100"
             title="Delete the session"
           >
             ${icon("trash", "h-3 w-3")}
@@ -129,19 +129,6 @@ export function renderSessions(): void {
   }
 
   sessionListEl.innerHTML = html;
-
-  sessionListEl.querySelectorAll<HTMLButtonElement>("button[data-session]").forEach((button) => {
-    button.addEventListener("click", () => {
-      void openSession(button.dataset.session!);
-    });
-  });
-
-  sessionListEl.querySelectorAll<HTMLButtonElement>("button[data-delete]").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      askDelete(button.dataset.delete!);
-    });
-  });
 }
 
 // askDelete is a function in this module.
@@ -232,6 +219,9 @@ export async function loadHistory(id: string): Promise<void> {
   const history = await api.sessionHistory(id, state.cwd || null);
 
   messagesEl.innerHTML = "";
+  // One layout for the whole transcript: keep the container display:none
+  // while rows are appended, then paint once.
+  messagesEl.style.display = "none";
 
   let agentBody: HTMLElement | null = null;
 
@@ -256,6 +246,13 @@ export async function loadHistory(id: string): Promise<void> {
     if (!agentBody) {
       openAgent("", undefined);
     }
+    // Cap the live DOM copy: the full result stays in the transcript.
+    if (tool.result && tool.result.length > 8000) {
+      tool = {
+        ...tool,
+        result: `${tool.result.slice(0, 8000)}\n…(truncated, kept in history)`,
+      };
+    }
     const row = document.createElement("div");
     row.className = "py-0.5";
     row.append(createToolActivity(tool).el);
@@ -278,6 +275,8 @@ export async function loadHistory(id: string): Promise<void> {
       });
     }
   }
+
+  messagesEl.style.display = "";
 
   state.shownMessages = history.filter(
     (message) => message.role === "user" || message.role === "assistant",
@@ -307,7 +306,25 @@ export function newSession(): void {
 // initSessions wires the session search and the delete confirm dialog.
 // It supports the desktop app frontend.
 export function initSessions(): void {
-  searchInputEl.addEventListener("input", renderSessions);
+  let searchTimer = 0;
+  searchInputEl.addEventListener("input", () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(renderSessions, 120);
+  });
+
+  sessionListEl.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const del = target.closest<HTMLElement>("[data-delete]");
+    if (del?.dataset.delete) {
+      event.stopPropagation();
+      askDelete(del.dataset.delete);
+      return;
+    }
+    const pick = target.closest<HTMLElement>("[data-session]");
+    if (pick?.dataset.session) {
+      void openSession(pick.dataset.session);
+    }
+  });
 
   const close = (): void => {
     closeConfirm();

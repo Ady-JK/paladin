@@ -86,7 +86,7 @@ const renderProviderList = (): void => {
       const key = p.hasKey ? "key stored" : "no key";
       const badge = p.default
         ? `<span class="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">default</span>`
-        : `<button data-setdefault="${escapeAttr(p.name)}" class="shrink-0 rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800">set default</button>`;
+        : `<button data-setdefault="${escapeAttr(p.name)}" class="shrink-0 rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800">set default</button>`;
       return (
         `<div class="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900">` +
         `<span class="flex-shrink-0 text-accent-500">${icon("globe", "h-4 w-4")}</span>` +
@@ -95,7 +95,7 @@ const renderProviderList = (): void => {
         `<div class="truncate font-mono text-[10px] text-slate-400">${escapeHtml(p.apiType)} · ${escapeHtml(p.apiUrl || "no url")} · ${escapeHtml(key)} · ${escapeHtml(models)}</div>` +
         `</div>` +
         badge +
-        `<button data-connect="${escapeAttr(p.name)}" class="shrink-0 rounded-md bg-accent-600 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-accent-700">connect</button>` +
+        `<button data-connect="${escapeAttr(p.name)}" class="shrink-0 rounded-md bg-accent-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-accent-700">connect</button>` +
         `</div>`
       );
     })

@@ -3,7 +3,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import * as api from "../core/api";
-import { continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
+import { chatViewEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
 import { renderText } from "../core/format";
 import { state } from "../core/state";
 import type { ToolInfo, ToolView } from "../core/types";
@@ -53,11 +53,42 @@ export async function send(resume = false): Promise<void> {
     return el;
   };
 
+  // Deltas arrive in bursts (dozens per frame). Painting full innerHTML
+  // per event is O(n^2) over a reply; coalesce to one paint per frame and
+  // only force-scroll while the user is already pinned to the bottom.
+  let paintQueued = false;
+  let scrollQueued = false;
+  let stickToBottom = true;
+  const onScroll = (): void => {
+    const gap = chatViewEl.scrollHeight - chatViewEl.scrollTop - chatViewEl.clientHeight;
+    stickToBottom = gap < 96;
+  };
+  chatViewEl.addEventListener("scroll", onScroll);
+  const gatedScroll = (): void => {
+    if (!stickToBottom || scrollQueued) {
+      return;
+    }
+    scrollQueued = true;
+    requestAnimationFrame(() => {
+      scrollQueued = false;
+      if (stickToBottom) {
+        scrollToBottom();
+      }
+    });
+  };
+
   const unlisten = await listen<string>("chat://delta", (event) => {
     reply += event.payload;
     segment += event.payload;
-    segEl.innerHTML = renderText(segment);
-    scrollToBottom();
+    if (paintQueued) {
+      return;
+    }
+    paintQueued = true;
+    requestAnimationFrame(() => {
+      paintQueued = false;
+      segEl.innerHTML = renderText(segment);
+      gatedScroll();
+    });
   });
 
   const toolViews = new Map<string, ToolView>();
@@ -81,7 +112,7 @@ export async function send(resume = false): Promise<void> {
       segEl = newSegment(row);
     }
 
-    scrollToBottom();
+    gatedScroll();
   });
 
   try {
@@ -144,6 +175,7 @@ export async function send(resume = false): Promise<void> {
   } finally {
     unlisten();
     unlistenTool();
+    chatViewEl.removeEventListener("scroll", onScroll);
     state.busy = false;
     sendBtn.disabled = false;
     sendBtn.classList.remove("hidden");

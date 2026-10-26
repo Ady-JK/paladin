@@ -130,3 +130,7 @@ export function moveExternalPage(rect: {
 export function reloadExternalPage(): Promise<unknown> {
   return invoke("reload_external_page", {});
 }
+
+export function dropExternalPage(): Promise<unknown> {
+  return invoke("drop_external_page", {});
+}

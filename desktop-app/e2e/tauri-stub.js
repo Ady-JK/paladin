@@ -165,6 +165,7 @@ window.__TAURI_INTERNALS__ = {
       case "navigate_external_page":
       case "reload_external_page":
       case "hide_external_page":
+      case "drop_external_page":
         return null;
       case "move_external_page":
         window.__e2eMoves = (window.__e2eMoves || 0) + 1;

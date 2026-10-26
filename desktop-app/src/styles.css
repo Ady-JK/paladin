@@ -1,13 +1,9 @@
 /* styles.css is part of the desktop app frontend. */
 /* It supports the UI. */
 @import "tailwindcss";
-@import "@fontsource/inter/300.css";
 @import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
 @import "@fontsource/inter/600.css";
-@import "@fontsource/inter/700.css";
 @import "@fontsource/jetbrains-mono/400.css";
-@import "@fontsource/jetbrains-mono/500.css";
 
 /* The palette of the interface. The dark one is the default, the light one
    is applied with the "light" class on the html element. */
@@ -70,6 +66,25 @@
   select,
   button {
     font: inherit;
+  }
+
+  /* Cheap virtualization: offscreen rows skip layout/paint entirely.
+     intrinsic-size keeps the scrollbar stable while they are skipped. */
+  .turn-row,
+  .session-row,
+  .pick-row,
+  .tool-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
+  }
+
+  .session-row,
+  .pick-row {
+    contain-intrinsic-size: auto 44px;
+  }
+
+  html {
+    scroll-behavior: auto;
   }
 }
 

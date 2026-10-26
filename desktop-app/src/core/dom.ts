@@ -283,10 +283,11 @@ export const toastTextEl = $("#toastText");
 // It supports the desktop app frontend.
 export const toastIconEl = $("#toastIcon");
 
-// paintIcons is a function in this module.
-// It supports the desktop app frontend.
-export function paintIcons(): void {
-  document.querySelectorAll<HTMLElement>("[data-icon]").forEach((holder) => {
+// paintIcons replaces [data-icon] placeholders with inline SVG.
+// Pass the subtree that changed: a full-document sweep is O(n) and must
+// only run once at startup. Hot paths pass their own container.
+export function paintIcons(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>("[data-icon]").forEach((holder) => {
     const name = holder.dataset.icon as IconName | undefined;
     if (!name) {
       return;

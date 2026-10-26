@@ -98,9 +98,9 @@ function persistSites(): void {
 // It supports the desktop app frontend.
 function paintSideTabs(): void {
   const active =
-    "flex items-center justify-center gap-1.5 rounded bg-white px-2 py-1.5 text-xs font-medium text-slate-900 shadow-sm transition dark:bg-slate-800 dark:text-slate-100";
+    "flex items-center justify-center gap-1.5 rounded bg-white px-2 py-1.5 text-xs font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100";
   const idle =
-    "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200";
+    "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200";
   agentTabEl.className = state.sideView === "agent" ? active : idle;
   chatTabEl.className = state.sideView === "chat" ? active : idle;
   agentTabEl.setAttribute("aria-selected", String(state.sideView === "agent"));
@@ -114,10 +114,10 @@ export function paintChatList(): void {
   for (const entry of chatEntries()) {
     const picked = entry.id === state.chatPage;
     html += `
-      <div class="flex items-center gap-1">
+      <div class="pick-row flex items-center gap-1">
         <button
           data-pick="${escapeAttr(entry.id)}"
-          class="min-w-0 flex-1 rounded-md border p-1.5 text-left transition ${
+          class="min-w-0 flex-1 rounded-md border p-1.5 text-left ${
             picked
               ? "border-indigo-200 bg-indigo-50/80 dark:border-indigo-800 dark:bg-indigo-950/40"
               : "border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60"
@@ -134,7 +134,7 @@ export function paintChatList(): void {
         </button>
         <button
           data-open="${escapeAttr(entry.id)}"
-          class="flex-shrink-0 rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          class="flex-shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
           title="Open ${escapeAttr(entry.title)} in the system browser"
         >
           ${icon("external")}
@@ -144,7 +144,7 @@ export function paintChatList(): void {
             ? ""
             : `<button
           data-del="${escapeAttr(entry.id)}"
-          class="flex-shrink-0 rounded-md p-1.5 text-slate-400 transition hover:bg-agent-rose/10 hover:text-agent-rose"
+          class="flex-shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-agent-rose/10 hover:text-agent-rose"
           title="Remove ${escapeAttr(entry.title)}"
         >
           ${icon("trash")}
@@ -158,7 +158,7 @@ export function paintChatList(): void {
   }
 
   chatEntriesEl.innerHTML = html;
-  paintIcons();
+  paintIcons(chatEntriesEl);
 }
 
 // hostOf is a function in this module.
@@ -239,6 +239,7 @@ export async function refreshExternalVisibility(): Promise<void> {
   }
 
   if (externalWanted() && page) {
+    defusePageDrop();
     try {
       await api.showExternalPage(page.url, externalRect());
     } catch (error) {
@@ -256,6 +257,7 @@ export async function refreshExternalVisibility(): Promise<void> {
     return;
   }
 
+  armPageDrop();
   try {
     await api.hideExternalPage();
   } catch {
@@ -301,6 +303,25 @@ export function setSideView(view: SideView): void {
   }
 
   void refreshExternalVisibility();
+}
+
+// dropTimer destroys the hidden page after a minute idle so its RAM
+// (JS heap, decoded images, GPU buffers) goes back to zero. Logins live
+// in the shared data store on disk, so the next show signs straight in.
+let dropTimer = 0;
+
+function armPageDrop(): void {
+  window.clearTimeout(dropTimer);
+  dropTimer = window.setTimeout(() => {
+    if (externalWanted()) {
+      return;
+    }
+    api.dropExternalPage().catch(() => undefined);
+  }, 60_000);
+}
+
+function defusePageDrop(): void {
+  window.clearTimeout(dropTimer);
 }
 
 // selectChatEntry is a function in this module.
@@ -416,30 +437,24 @@ export function deleteSite(id: string): void {
   toast(`Removed ${entry.title}`);
 }
 
-// trackExternalFlight is a function in this module.
-// It supports the desktop app frontend.
-export function trackExternalFlight(forMs = 600): void {
+// trackExternalFlight re-syncs the native page rect once, on the next
+// frame. Layout changes are instant now (no sidebar animation), so a
+// 600ms/60fps IPC storm is pure waste: one move per settle is enough.
+export function trackExternalFlight(): void {
   if (!hasTauri()) {
     return;
   }
-  const end = performance.now() + forMs;
-  const step = (): void => {
+  requestAnimationFrame(() => {
     const page = currentChatPage();
     if (page && externalWanted()) {
       const rect = externalRect();
       const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
       if (key !== state.lastSentRect) {
         state.lastSentRect = key;
-        api.moveExternalPage({ ...rect }).catch(
-          () => undefined,
-        );
+        api.moveExternalPage({ ...rect }).catch(() => undefined);
       }
     }
-    if (performance.now() < end) {
-      requestAnimationFrame(step);
-    }
-  };
-  requestAnimationFrame(step);
+  });
 }
 
 // reloadCurrentPage reloads the embedded chat page.

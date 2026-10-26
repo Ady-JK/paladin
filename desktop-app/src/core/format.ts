@@ -59,9 +59,20 @@ export function tryParseJson(raw: string): Record<string, unknown> | null {
   return null;
 }
 
+// dayCache avoids rebuilding "Today"/date strings per row per render.
+const dayCache = new Map<number, string>();
+
 // dayOf is a function in this module.
 // It supports the desktop app frontend.
 export function dayOf(timestamp: number): string {
+  const key = Math.floor(timestamp / 86400);
+  const cached = dayCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  if (dayCache.size > 400) {
+    dayCache.clear();
+  }
   const date = new Date(timestamp * 1000);
   const today = new Date();
   const yesterday = new Date(today);
@@ -72,13 +83,16 @@ export function dayOf(timestamp: number): string {
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
 
+  let out: string;
   if (sameDay(date, today)) {
-    return "Today";
+    out = "Today";
+  } else if (sameDay(date, yesterday)) {
+    out = "Yesterday";
+  } else {
+    out = date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
-  if (sameDay(date, yesterday)) {
-    return "Yesterday";
-  }
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  dayCache.set(key, out);
+  return out;
 }
 
 // shortPath is a function in this module.

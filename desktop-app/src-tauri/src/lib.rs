@@ -15,8 +15,8 @@ use commands::{
     set_default_provider, set_workspace, stop_chat, update_provider,
 };
 use external::{
-    hide_external_page, move_external_page, navigate_external_page, reload_external_page,
-    show_external_page,
+    drop_external_page, hide_external_page, move_external_page, navigate_external_page,
+    reload_external_page, show_external_page,
 };
 
 pub fn configure<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
@@ -53,6 +53,7 @@ pub fn configure_with_runtime<R: Runtime>(
             move_external_page,
             reload_external_page,
             hide_external_page,
+            drop_external_page,
         ])
 }
 

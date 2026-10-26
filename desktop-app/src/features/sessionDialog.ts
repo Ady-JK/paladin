@@ -22,9 +22,9 @@ import { folderRows, wireFolderList } from "./workspace";
 export async function openNewSession(): Promise<void> {
   state.pendingWorkspace = state.cwd;
   newSessionSearchEl.value = "";
-  syncModelSelects();
   sessionModalEl.classList.remove("hidden");
   sessionModalEl.classList.add("flex");
+  syncModelSelects();
   void refreshExternalVisibility();
 
   await browseNewSession();

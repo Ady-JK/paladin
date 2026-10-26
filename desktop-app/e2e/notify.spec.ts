@@ -26,7 +26,7 @@ test("a notify reminder renders in turn order", async ({ page }) => {
   }
 
   await expect(
-    page.locator("#messages").getByText("core-agent", { exact: true }),
+    page.locator("#messages").getByText("paladin", { exact: true }),
   ).toHaveCount(1);
 });
 

@@ -21,7 +21,7 @@ export function renderGreeting(): void {
   }
 
   const wrapper = document.createElement("div");
-  wrapper.className = "mx-auto flex max-w-4xl gap-3 text-xs";
+  wrapper.className = "turn-row mx-auto flex max-w-4xl gap-3 text-xs";
 
   wrapper.innerHTML = `
     <div class="avatar avatar-agent">${icon("robot", "h-3 w-3")}</div>
@@ -50,7 +50,7 @@ export function addTurn(
   timestamp?: number,
 ): { wrapper: HTMLElement; textEl: HTMLElement } {
   const wrapper = document.createElement("div");
-  wrapper.className = "mx-auto flex max-w-4xl gap-3 text-xs";
+  wrapper.className = "turn-row mx-auto flex max-w-4xl gap-3 text-xs";
 
   const isUser = role === "user";
   const isError = role === "error";

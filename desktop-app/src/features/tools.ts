@@ -37,11 +37,12 @@ export function toolSummary(name: string, raw: string): string {
 }
 
 // lineDiff diffs old lines against new lines with longest-common-subsequence.
-// It returns context/del/add rows; huge inputs fall back to whole-block replace.
+// Big inputs skip the O(n*m) table and fall back to whole-block replace:
+// a collapsed-by-default card never needs a perfect diff at 60Hz.
 export function lineDiff(oldLines: string[], newLines: string[]): DiffRow[] {
   const n = oldLines.length;
   const m = newLines.length;
-  if (n * m > 250000) {
+  if (n > 400 || m > 400 || n * m > 250000) {
     const rows: DiffRow[] = oldLines.map((text, i) => ({ kind: "del", oldNo: i + 1, newNo: null, text }));
     for (let j = 0; j < m; j++) {
       rows.push({ kind: "add", oldNo: null, newNo: j + 1, text: newLines[j] ?? "" });
@@ -215,7 +216,7 @@ function richWriteHtml(tool: ToolInfo): string | null {
     : '<div class="px-2 py-1 text-slate-400">(empty file)</div>';
   return (
     `<div data-fileview="write" class="overflow-hidden rounded-md border border-slate-200/70 dark:border-slate-700/70">` +
-    `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white/80 px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +
+    `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +
     `<span class="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(args.path as string)}</span>` +
     chips
       .map(
@@ -223,7 +224,7 @@ function richWriteHtml(tool: ToolInfo): string | null {
           `<span class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">${escapeHtml(chip)}</span>`,
       )
       .join("") +
-    `</div><div class="max-h-96 overflow-auto bg-white/80 p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">${body}</div></div>`
+    `</div><div class="max-h-96 overflow-auto bg-white p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">${body}</div></div>`
   );
 }
 
@@ -348,7 +349,7 @@ function richEditHtml(tool: ToolInfo): string | null {
     .join("");
   return (
     `<div data-filediff="edit" class="overflow-hidden rounded-md border border-slate-200/70 dark:border-slate-700/70">` +
-    `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white/80 px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +
+    `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +
     `<span class="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(args.path as string)}</span>` +
     chips
       .map(
@@ -356,7 +357,7 @@ function richEditHtml(tool: ToolInfo): string | null {
           `<span class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">${escapeHtml(chip)}</span>`,
       )
       .join("") +
-    `</div><div class="max-h-96 overflow-auto bg-white/80 p-1 font-mono text-[10px] leading-relaxed dark:bg-slate-900/60">${sections}</div>${extra}</div>`
+    `</div><div class="max-h-96 overflow-auto bg-white p-1 font-mono text-[10px] leading-relaxed dark:bg-slate-900/60">${sections}</div>${extra}</div>`
   );
 }
 
@@ -367,7 +368,7 @@ export function paintToolStatus(statusEl: HTMLElement, status: string): void {
     statusEl.className =
       "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400";
     statusEl.innerHTML =
-      '<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 shadow-[0_0_6px_2px_rgba(251,191,36,0.6)]"></span>running';
+      '<span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>running';
     return;
   }
 
@@ -375,14 +376,14 @@ export function paintToolStatus(statusEl: HTMLElement, status: string): void {
     statusEl.className =
       "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-red-600 dark:text-red-400";
     statusEl.innerHTML =
-      '<span class="h-1.5 w-1.5 rounded-full bg-red-500 shadow-[0_0_5px_1px_rgba(239,68,68,0.5)]"></span>failed';
+      '<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span>failed';
     return;
   }
 
   statusEl.className =
     "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400";
   statusEl.innerHTML =
-    '<span class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_1px_rgba(16,185,129,0.45)]"></span>done';
+    '<span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>done';
 }
 
 // createToolActivity is a function in this module.
@@ -392,17 +393,17 @@ export function createToolActivity(tool: ToolInfo): ToolView {
 
   const box = document.createElement("div");
   box.className =
-    "overflow-hidden rounded-lg border border-slate-200/70 bg-slate-50/70 text-[11px] dark:border-slate-700/70 dark:bg-slate-800/40";
+    "tool-card overflow-hidden rounded-lg border border-slate-200/70 bg-slate-50/70 text-[11px] dark:border-slate-700/70 dark:bg-slate-800/40";
   box.setAttribute("data-tool", current.name);
 
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className =
-    "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50";
+    "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50";
   toggle.setAttribute("aria-expanded", "false");
 
   const chevron = document.createElement("span");
-  chevron.className = "shrink-0 transition-transform duration-150";
+  chevron.className = "shrink-0";
   chevron.innerHTML = icon("chevron-right", "h-3 w-3");
 
   const name = document.createElement("span");
@@ -428,9 +429,11 @@ export function createToolActivity(tool: ToolInfo): ToolView {
   let filled = false;
   let richWrap: HTMLElement | null = null;
   // renderRich rebuilds the file view or diff from the latest tool state.
-  // It runs on first expand and on every update while expanded.
+  // It runs on first expand and on settled updates only: while the card is
+  // collapsed there is nothing to paint, and while running only the status
+  // line moves (recomputing a diff per tick is pure waste).
   const renderRich = () => {
-    if (!richWrap) {
+    if (!richWrap || details.classList.contains("hidden")) {
       return;
     }
     const html =
@@ -448,6 +451,13 @@ export function createToolActivity(tool: ToolInfo): ToolView {
   const outputText = () =>
     current.status === "running" ? "running…" : prettyJson(current.result) || "(empty)";
 
+  // capText keeps multi-KB tool dumps out of the live DOM; the full text
+  // stays in the session transcript on disk.
+  const capText = (text: string): string =>
+    text.length > 8000
+      ? `${text.slice(0, 8000)}\n…(truncated, ${text.length - 8000} chars kept in history)`
+      : text;
+
   const fill = () => {
     if (filled) {
       return;
@@ -464,7 +474,7 @@ export function createToolActivity(tool: ToolInfo): ToolView {
 
       const pre = document.createElement("pre");
       pre.className =
-        "overflow-auto rounded bg-white/80 p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300";
+        "overflow-auto rounded bg-white p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300";
 
       wrapper.append(heading, pre);
       return { wrapper, pre };
@@ -473,12 +483,12 @@ export function createToolActivity(tool: ToolInfo): ToolView {
     const input = section("Input");
     input.wrapper.classList.add("mb-2");
     input.pre.classList.add("max-h-56");
-    input.pre.textContent = prettyJson(current.arguments) || "(none)";
+    input.pre.textContent = capText(prettyJson(current.arguments) || "(none)");
     inputPre = input.pre;
 
     const output = section("Output");
     output.pre.classList.add("max-h-72");
-    output.pre.textContent = outputText();
+    output.pre.textContent = capText(outputText());
     outputPre = output.pre;
 
     details.append(input.wrapper, output.wrapper);
@@ -497,10 +507,14 @@ export function createToolActivity(tool: ToolInfo): ToolView {
     const open = !details.classList.toggle("hidden");
     toggle.setAttribute("aria-expanded", String(open));
     chevron.classList.toggle("rotate-90", open);
+    if (open) {
+      renderRich();
+    }
   });
 
   box.append(toggle, details);
 
+  // update refreshes the card in place. Heavy text is capped (see capText).
   const update = (next: ToolInfo) => {
     current = next;
 
@@ -512,10 +526,10 @@ export function createToolActivity(tool: ToolInfo): ToolView {
     paintToolStatus(statusEl, current.status);
 
     if (inputPre) {
-      inputPre.textContent = prettyJson(current.arguments) || "(none)";
+      inputPre.textContent = capText(prettyJson(current.arguments) || "(none)");
     }
     if (outputPre) {
-      outputPre.textContent = outputText();
+      outputPre.textContent = capText(outputText());
     }
     renderRich();
   };

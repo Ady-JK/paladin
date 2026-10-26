@@ -26,6 +26,7 @@ import {
   newSessionSearchEl,
   newSessionTreeEl,
   providerPickEl,
+  sessionModalEl,
 } from "../core/dom";
 import {
   bare,
@@ -147,11 +148,16 @@ export function syncModelSelects(): void {
   paintModel();
 }
 
-// renderTrees is a function in this module.
-// It supports the desktop app frontend.
+// renderTrees repaints the picker trees, but only the visible ones: the
+// new-session tree is pointless work while its modal is closed (and vice
+// versa). The detail pane is cheap and always fresh.
 export function renderTrees(): void {
-  modelTreeEl.innerHTML = treeHTML(groupedTree(modelSearchEl.value));
-  newSessionTreeEl.innerHTML = treeHTML(groupedTree(newSessionSearchEl.value));
+  if (!modelMenu.classList.contains("hidden")) {
+    modelTreeEl.innerHTML = treeHTML(groupedTree(modelSearchEl.value));
+  }
+  if (!sessionModalEl.classList.contains("hidden")) {
+    newSessionTreeEl.innerHTML = treeHTML(groupedTree(newSessionSearchEl.value));
+  }
   modelDetailEl.innerHTML = detailHTML();
 }
 
@@ -244,22 +250,29 @@ function flatModels(tree: GroupedProvider[]): { provider: string; model: string 
   return out;
 }
 
-// treeHTML is a function in this module.
-// It supports the desktop app frontend.
+// treeHTML renders the provider/lab/model tree. Output is capped: a 467+
+// row tree rebuilt per keystroke is the picker jank. Past the cap the UI
+// says so instead of silently dropping rows.
 function treeHTML(tree: GroupedProvider[]): string {
   if (tree.length === 0) {
     return `<p class="px-2 py-3 text-center font-mono text-[11px] text-slate-400">no match</p>`;
   }
 
   const picked = state.highlightedModel || state.selectedModel;
+  const CAP = 300;
+  const total = tree.reduce(
+    (n, p) => n + p.labs.reduce((m, l) => m + l.models.length, 0),
+    0,
+  );
+  let shown = 0;
 
   let out = "";
-  for (const p of tree) {
+  outer: for (const p of tree) {
     const open = !collapsedProviders.has(p.display);
     out += `
       <button
         data-ptoggle="${escapeAttr(p.display)}"
-        class="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-slate-800 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
+        class="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
       >
         <span class="flex-shrink-0 text-slate-400">${icon(open ? "chevron-down" : "chevron-right", "h-3 w-3")}</span>
         <span class="flex-shrink-0 text-accent-500">${icon("globe", "h-3.5 w-3.5")}</span>
@@ -277,7 +290,7 @@ function treeHTML(tree: GroupedProvider[]): string {
       out += `
         <button
           data-ltoggle="${escapeAttr(p.display)}	${escapeAttr(lab.display)}"
-          class="flex w-full items-center gap-1.5 rounded-md py-1 pl-6 pr-1.5 text-left text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          class="flex w-full items-center gap-1.5 rounded-md py-1 pl-6 pr-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           <span class="flex-shrink-0 text-slate-400">${icon(labOpen ? "chevron-down" : "chevron-right", "h-3 w-3")}</span>
           <span class="flex-shrink-0 text-agent-amber">${icon("flask", "h-3.5 w-3.5")}</span>
@@ -289,13 +302,17 @@ function treeHTML(tree: GroupedProvider[]): string {
       }
 
       for (const entry of lab.models) {
+        if (shown >= CAP) {
+          break outer;
+        }
+        shown++;
         const isPicked = entry.id === state.selectedModel && entry.provider === state.selectedProvider;
         const hot = entry.id === picked;
         out += `
           <button
             data-mpick="${escapeAttr(entry.provider)}	${escapeAttr(entry.id)}"
             title="${escapeAttr(entry.id)}"
-            class="flex w-full items-center gap-1.5 rounded-md py-1 pl-11 pr-1.5 text-left font-mono text-[11px] transition ${
+            class="pick-row flex w-full items-center gap-1.5 rounded-md py-1 pl-11 pr-1.5 text-left font-mono text-[11px] ${
               isPicked
                 ? "bg-accent-600/10 font-semibold text-slate-900 ring-1 ring-inset ring-accent-500/60 dark:text-slate-50"
                 : hot
@@ -308,6 +325,10 @@ function treeHTML(tree: GroupedProvider[]): string {
           </button>`;
       }
     }
+  }
+
+  if (shown < total) {
+    out += `<p class="px-2 py-2 text-center font-mono text-[10px] text-slate-400">…and ${total - shown} more — refine the search</p>`;
   }
 
   return out;
@@ -578,6 +599,7 @@ export function handleTreeClick(event: Event): void {
 // initModelPicker wires the model menu, dropdowns, and search fields.
 // It supports the desktop app frontend.
 export function initModelPicker(): void {
+  let searchTimer = 0;
   providerPickEl.addEventListener("change", () => {
     const value = providerPickEl.value;
     if (!groupedTree("", null).some((g) => g.display === value)) {
@@ -607,8 +629,8 @@ export function initModelPicker(): void {
 
   modelSelectBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    syncModelSelects();
     modelMenu.classList.toggle("hidden");
+    syncModelSelects();
     if (!modelMenu.classList.contains("hidden")) {
       modelSearchEl.focus();
     }
@@ -627,8 +649,11 @@ export function initModelPicker(): void {
   newSessionTreeEl.addEventListener("click", handleTreeClick);
 
   modelSearchEl.addEventListener("input", () => {
-    state.highlightedModel = "";
-    syncModelSelects();
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+      state.highlightedModel = "";
+      syncModelSelects();
+    }, 150);
   });
   modelSearchEl.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -653,8 +678,11 @@ export function initModelPicker(): void {
   });
 
   newSessionSearchEl.addEventListener("input", () => {
-    state.highlightedModel = "";
-    syncModelSelects();
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+      state.highlightedModel = "";
+      syncModelSelects();
+    }, 150);
   });
   newSessionSearchEl.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -677,8 +705,8 @@ export function initModelPicker(): void {
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      syncModelSelects();
       modelMenu.classList.toggle("hidden");
+      syncModelSelects();
       if (!modelMenu.classList.contains("hidden")) {
         modelSearchEl.focus();
       }

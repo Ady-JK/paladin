@@ -126,7 +126,7 @@ test("rapid tab switching ends in one clean side", async ({ page }) => {  await 
   await expect(page.locator("#headerTitle")).toHaveText("ChatGPT");
 });
 
-test("sidebar animation streams moves to the page", async ({ page }) => {
+test("sidebar toggle settles the page with one move", async ({ page }) => {
   await page.click("#chatTab");
   await page.click('[data-pick="gemini"]');
 
@@ -136,7 +136,9 @@ test("sidebar animation streams moves to the page", async ({ page }) => {
   await page.click("#sidebarToggleBtn");
   await page.waitForTimeout(900);
   const moves = await page.evaluate(() => window.__e2eMoves || 0);
-  expect(moves).toBeGreaterThan(5);
+  // Instant layout: exactly one settle move, never a 60fps storm.
+  expect(moves).toBeGreaterThanOrEqual(1);
+  expect(moves).toBeLessThan(5);
 
   await page.evaluate(() => {
     window.__e2eMoves = 0;
