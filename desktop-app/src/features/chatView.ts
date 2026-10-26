@@ -27,7 +27,7 @@ export function renderGreeting(): void {
     <div class="avatar avatar-agent">${icon("robot", "h-3 w-3")}</div>
     <div class="min-w-0 flex-1 space-y-1">
       <div class="flex items-center gap-2">
-        <span class="font-semibold text-slate-900 dark:text-slate-100">core-agent</span>
+        <span class="font-semibold text-slate-900 dark:text-slate-100">paladin</span>
         <span class="text-[10px] text-slate-400">now</span>
       </div>
       <p class="leading-relaxed text-slate-600 dark:text-slate-300">
@@ -70,7 +70,7 @@ export function addTurn(
   const head = document.createElement("div");
   head.className = "flex items-center gap-2";
   head.innerHTML = `
-    <span class="font-semibold ${isError ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}">${isUser ? "You" : isError ? "error" : "core-agent"}</span>
+    <span class="font-semibold ${isError ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}">${isUser ? "You" : isError ? "error" : "paladin"}</span>
     <span class="text-[10px] text-slate-400">${when}</span>
   `;
 

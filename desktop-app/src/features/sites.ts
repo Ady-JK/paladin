@@ -40,7 +40,7 @@ import { icon } from "../icons";
 
 // VIEW_KEY is a const in this module.
 // It supports the desktop app frontend.
-const VIEW_KEY = "core-agent.view";
+const VIEW_KEY = "paladin.view";
 
 // BUILT_IN_PAGES is a const in this module.
 // It supports the desktop app frontend.
@@ -51,7 +51,7 @@ const BUILT_IN_PAGES: ChatEntry[] = [
 
 // SITES_KEY is a const in this module.
 // It supports the desktop app frontend.
-const SITES_KEY = "core-agent.sites";
+const SITES_KEY = "paladin.sites";
 
 // chatEntries is a function in this module.
 // It supports the desktop app frontend.

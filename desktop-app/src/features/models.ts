@@ -43,7 +43,7 @@ import { icon } from "../icons";
 
 // MODEL_KEY is a const in this module.
 // It supports the desktop app frontend.
-const MODEL_KEY = "core-agent.model";
+const MODEL_KEY = "paladin.model";
 
 export async function loadProviders(): Promise<void> {
   try {
