@@ -268,3 +268,51 @@ func TestWildcardMatch(t *testing.T) {
 		t.Fatal("ignored/ should ignore its subtree")
 	}
 }
+
+func TestFuzzyScore(t *testing.T) {
+	// Empty query matches everything.
+	if _, ok := fuzzyScore("", "anything"); !ok {
+		t.Fatal("empty query should match")
+	}
+	// Non-subsequences never match.
+	for _, q := range []string{"zzz", "mnqx", "main.gox"} {
+		if _, ok := fuzzyScore(q, "src/main.go"); ok {
+			t.Fatalf("%q should not match", q)
+		}
+	}
+	// Contiguous and separator-anchored matches beat scattered ones.
+	mn, _ := fuzzyScore("main", "src/main.go")
+	scattered, ok := fuzzyScore("main", "my_awesome_notes_on_integration.md")
+	if !ok {
+		t.Fatal("scattered should still match")
+	}
+	if mn >= scattered {
+		t.Fatalf("contiguous %d should beat scattered %d", mn, scattered)
+	}
+	// Basename start beats deep-path scatter.
+	if a, _ := fuzzyScore("app", "app.go"); true {
+		if b, _ := fuzzyScore("app", "x/maps/and/plans.md"); a >= b {
+			t.Fatalf("basename %d should beat scatter %d", a, b)
+		}
+	}
+}
+
+func TestCompleteFuzzyMatching(t *testing.T) {
+	ws := writeCompleteFixture(t)
+	// Non-contiguous query still finds the file.
+	got, err := CompleteFiles(ws, "sma", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPath(got, "src/main.go") {
+		t.Fatalf("fuzzy sma missed main.go in %v", completePaths(got))
+	}
+	// Basename hits rank first through the caller boost.
+	got, err = CompleteFiles(ws, "app", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].Path != "src/server/app.go" {
+		t.Fatalf("basename should lead, got %v", completePaths(got))
+	}
+}

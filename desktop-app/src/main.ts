@@ -2,6 +2,7 @@
 // In-process only: no daemon connect, no subscribe — direct runtime calls.
 
 import "./styles.css";
+import { version as appVersion } from "../package.json";
 import * as api from "./core/api";
 import {
   $,
@@ -85,6 +86,7 @@ async function connect(): Promise<void> {
 
 window.addEventListener("DOMContentLoaded", () => {
   paintIcons();
+  $("#brandVersion").textContent = `v${appVersion}`;
 
   initWindow();
   initChat();

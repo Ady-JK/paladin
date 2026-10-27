@@ -43,7 +43,7 @@ function ensurePopup(): HTMLElement {
   const el = document.createElement("div");
   el.id = "slashPopup";
   el.className =
-    "absolute bottom-full left-0 z-50 mb-1 hidden max-h-56 w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/50";
+    "absolute bottom-full left-0 right-0 z-50 mb-1.5 hidden max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/60";
   inputEl.parentElement?.appendChild(el);
   el.addEventListener("mousedown", (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>("[data-idx]");
@@ -88,7 +88,7 @@ function paintSlash(): void {
         i === activeIdx
           ? "bg-accent-600/10 text-slate-900 dark:text-slate-100"
           : "text-slate-600 dark:text-slate-300"
-      }"><span class="flex-shrink-0 font-mono text-[11px] font-semibold text-accent-500">/${escapeHtml(cmd.name)}</span><span class="min-w-0 flex-1 truncate text-[11px]">${escapeHtml(cmd.desc)}</span></button>`,
+      }"><span class="flex-shrink-0 font-mono text-xs font-semibold text-accent-500">/${escapeHtml(cmd.name)}</span><span class="min-w-0 flex-1 truncate text-[11px]">${escapeHtml(cmd.desc)}</span></button>`,
     )
     .join("");
 }

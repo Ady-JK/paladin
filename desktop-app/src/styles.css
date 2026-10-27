@@ -1,8 +1,9 @@
 /* styles.css is part of the desktop app frontend. */
 /* It supports the UI. */
 @import "tailwindcss";
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/600.css";
+@import "@fontsource/geist/400.css";
+@import "@fontsource/geist/500.css";
+@import "@fontsource/geist/600.css";
 @import "@fontsource/jetbrains-mono/400.css";
 
 /* The palette of the interface. The dark one is the default, the light one
@@ -10,12 +11,18 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
 
-  --color-slate-850: #111827;
-  --color-slate-900: #0b0f17;
-  --color-slate-950: #06090e;
+  /* Readability: one step up from stock (xs 12->13, sm 14->15). */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.5rem;
+
+  --color-slate-850: #131a26;
+  --color-slate-900: #0d1320;
+  --color-slate-950: #090e18;
 
   --color-accent-50: #eff6ff;
   --color-accent-500: #3b82f6;
@@ -365,16 +372,46 @@
   }
 
   /* ---- Composer glow ---- */
-  #agentView footer .relative.rounded-xl {
+  #agentView footer .composer-float {
     transition:
       border-color 180ms ease,
       box-shadow 220ms ease;
   }
 
-  #agentView footer .relative.rounded-xl:focus-within {
+  #agentView footer .composer-float:focus-within {
     box-shadow:
       0 0 0 1px rgb(99 102 241 / 0.55),
       0 8px 32px -12px rgb(99 102 241 / 0.5);
+  }
+
+  /* ---- Floating composer card: detached, soft, elevated ---- */
+  .composer-float {
+    box-shadow:
+      0 20px 50px -16px rgb(2 6 23 / 0.45),
+      0 4px 14px -6px rgb(2 6 23 / 0.25),
+      0 0 0 1px rgb(148 163 184 / 0.1);
+  }
+
+  .dark .composer-float {
+    background: rgb(19 26 38 / 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  /* ---- Mention / slash popups: full-width floating sheets ---- */
+  #mentionPopup,
+  #slashPopup {
+    box-shadow:
+      0 18px 45px -12px rgb(2 6 23 / 0.5),
+      0 0 0 1px rgb(148 163 184 / 0.14),
+      0 0 32px -12px rgb(99 102 241 / 0.3);
+  }
+
+  .dark #mentionPopup,
+  .dark #slashPopup {
+    background: rgb(19 26 38 / 0.96);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
 
   /* ---- Analytics glass ---- */
@@ -534,4 +571,16 @@
   body::before {
     display: none;
   }
+}
+
+/* ============ Composer prominence ============
+   Unlayered on purpose: the composer input wins over text-xs. */
+#promptInput {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+}
+
+#messages .turn-row {
+  letter-spacing: -0.006em;
 }

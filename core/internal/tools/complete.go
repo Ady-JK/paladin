@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -65,7 +66,7 @@ func CompleteFiles(workspace, query string, limit int) ([]FileEntry, error) {
 	if slash == ".." || strings.HasPrefix(slash, "../") {
 		anchor = filepath.Dir(workspace)
 	}
-	files, err := listCandidateFiles(anchor)
+	files, err := cachedCandidateFiles(anchor)
 	if err != nil {
 		return nil, err
 	}
@@ -103,28 +104,20 @@ func CompleteFiles(workspace, query string, limit int) ([]FileEntry, error) {
 		if abs, _, err := ResolveChatPath(slash, workspace); err == nil {
 			if info, err := os.Stat(abs); err == nil {
 				chat := ToChatPath(abs, workspace)
-				push(abs, chat, info.IsDir(), -1)
+				push(abs, chat, info.IsDir(), minFuzzyScore)
 			}
 		}
 	}
 	for _, abs := range files {
 		chat := ToChatPath(abs, workspace)
 		lower := strings.ToLower(chat)
-		score := -1
-		switch {
-		case q == "" || lower == q:
-			score = 0
-		case strings.HasPrefix(lower, q):
-			score = 1
-		case frag != "" && strings.HasPrefix(baseName(lower), frag):
-			score = 2
-		case frag != "" && strings.Contains(lower, frag):
-			score = 3
-		case q != "" && strings.Contains(lower, q):
-			score = 4
-		}
-		if score < 0 {
+		score, ok := fuzzyScore(q, lower)
+		if !ok {
 			continue
+		}
+		// Basename matches rank better than deep-path ones.
+		if bs, ok := fuzzyScore(q, baseName(lower)); ok && bs < score {
+			score = bs - 2
 		}
 		push(abs, chat, false, score)
 	}
@@ -150,22 +143,17 @@ func CompleteFiles(workspace, query string, limit int) ([]FileEntry, error) {
 					if !e.IsDir() || added >= completeDirCap {
 						continue
 					}
-					name := strings.ToLower(e.Name())
-					score := -1
-					switch {
-					case frag == "":
-						score = 1
-					case strings.HasPrefix(name, frag):
-						score = 1
-					case strings.Contains(name, frag):
-						score = 3
-					}
-					if score < 0 {
-						continue
-					}
 					sub := filepath.Join(baseAbs, e.Name())
 					if ign.ignored(cleanPath(sub), true) {
 						continue
+					}
+					lower := strings.ToLower(ToChatPath(sub, workspace))
+					score, ok := fuzzyScore(q, lower)
+					if !ok {
+						continue
+					}
+					if bs, ok := fuzzyScore(q, strings.ToLower(e.Name())); ok && bs < score {
+						score = bs - 2
 					}
 					push(sub, ToChatPath(sub, workspace), true, score)
 					added++
@@ -197,6 +185,63 @@ func CompleteFiles(workspace, query string, limit int) ([]FileEntry, error) {
 	return entries, nil
 }
 
+// minFuzzyScore pins the exact-path hit ahead of every fuzzy row.
+const minFuzzyScore = -1 << 30
+
+// fuzzyScore matches query as a case-folded subsequence of target
+// and returns a cost (lower ranks first) plus whether it matched at
+// all. Pricing rewards what a user most likely meant: matches at the
+// start of the string or right after a separator (`/` `_` `-` `.`,
+// also camel humps), long consecutive runs, and short targets. Empty
+// queries match everything at zero cost.
+func fuzzyScore(query, target string) (int, bool) {
+	if query == "" {
+		return 0, true
+	}
+	qr, tr := []rune(query), []rune(target)
+	ti := 0
+	cost := 0
+	run := 0
+	first := -1
+	for _, qc := range qr {
+		found := -1
+		for i := ti; i < len(tr); i++ {
+			if tr[i] == qc {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			return 0, false
+		}
+		if first < 0 {
+			first = found
+		}
+		if found == ti {
+			run++
+		} else {
+			run = 0
+		}
+		gap := found - ti
+		bonus := run * 2
+		if found == 0 || isFuzzySep(tr[found-1]) {
+			bonus += 4
+		}
+		cost += gap*3 - bonus
+		ti = found + 1
+	}
+	cost += first + len(tr)/16
+	return cost, true
+}
+
+func isFuzzySep(r rune) bool {
+	switch r {
+	case '/', '\\', '_', '-', '.', ' ', ':':
+		return true
+	}
+	return false
+}
+
 // markScopeOutside reports whether abs escaped the workspace.
 func markScopeOutside(abs, workspace string) bool {
 	_, scope := markScope(abs, workspace)
@@ -220,6 +265,41 @@ func cachedIgnoreMatcher(anchor string) *ignoreMatcher {
 	m := newIgnoreMatcher(anchor)
 	ignoreCache[key] = m
 	return m
+}
+
+// listCache memoizes candidate file lists per anchor so holding a
+// key in the composer does not re-run ripgrep per keystroke. Entries
+// live fileListCacheTTL; a newly created file shows up on the next
+// refresh window at the latest.
+var (
+	listCacheMu sync.Mutex
+	listCache   = map[string]fileListCacheEntry{}
+)
+
+type fileListCacheEntry struct {
+	at    time.Time
+	files []string
+}
+
+const fileListCacheTTL = 10 * time.Second
+
+func cachedCandidateFiles(root string) ([]string, error) {
+	key := cleanPath(root)
+	listCacheMu.Lock()
+	if e, ok := listCache[key]; ok && time.Since(e.at) < fileListCacheTTL {
+		out := append([]string(nil), e.files...)
+		listCacheMu.Unlock()
+		return out, nil
+	}
+	listCacheMu.Unlock()
+	files, err := listCandidateFiles(key)
+	if err != nil {
+		return nil, err
+	}
+	listCacheMu.Lock()
+	listCache[key] = fileListCacheEntry{at: time.Now(), files: append([]string(nil), files...)}
+	listCacheMu.Unlock()
+	return files, nil
 }
 
 func baseName(slash string) string {

@@ -28,7 +28,7 @@ function ensurePopup(): HTMLElement {
   const el = document.createElement("div");
   el.id = "mentionPopup";
   el.className =
-    "absolute bottom-full left-0 z-50 mb-1 hidden max-h-56 w-80 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/50";
+    "absolute bottom-full left-0 right-0 z-50 mb-1.5 hidden max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/60";
   inputEl.parentElement?.appendChild(el);
   el.addEventListener("mousedown", (event) => {
     // Accept on mousedown: the textarea blurs before click fires.
@@ -77,7 +77,7 @@ function paintMention(): void {
         : entry.outside
           ? `<span class="flex-shrink-0 font-mono text-[10px] text-slate-400">out</span>`
           : "";
-      return `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px] ${
+      return `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-xs ${
         i === activeIdx
           ? "bg-accent-600/10 text-slate-900 dark:text-slate-100"
           : "text-slate-600 dark:text-slate-300"
