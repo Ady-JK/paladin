@@ -24,7 +24,8 @@ stderr. See `PROTOCOL.md`.
 ## Run
 
 ```sh
-make desktop-dev        # go build ./core, pnpm install, vite + electron
+make dev                # fast loop: sidecar + Electron main/preload, Vite + Electron
+make desktop-dev        # same thing (kept as an alias)
 ```
 
 Headed Electron needs an X server. Headless smoke (CI-friendly):
