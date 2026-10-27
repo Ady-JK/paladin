@@ -244,6 +244,40 @@ test("a site can be added, kept, and removed", async ({ page }) => {
   await expect(page.locator("#headerTitle")).toHaveText("Gemini");
 });
 
+test("a deleted default can be added back by hand", async ({ page }) => {
+  await page.click("#chatTab");
+  await page.locator('[data-del="site:Claude"]').click();
+  await expect(page.locator('[data-pick="site:Claude"]')).toBeHidden();
+
+  await page.click("#newSessionBtn");
+  await page.fill("#siteName", "Claude");
+  await page.fill("#siteUrl", "https://claude.ai");
+  await page.click("#siteAddBtn");
+
+  await expect(page.locator('[data-pick="site:Claude"]')).toBeVisible();
+  await expect(page.locator("#headerTitle")).toHaveText("Claude");
+  await page.reload();
+  await expect(page.locator('[data-pick="site:Claude"]')).toBeVisible();
+});
+
+test("a site can be added after deleting every default", async ({ page }) => {
+  await page.click("#chatTab");
+  for (const id of ["site:Gemini", "site:ChatGPT", "site:Claude", "site:DeepSeek"]) {
+    await page.locator(`[data-del="${id}"]`).click();
+  }
+  await expect(page.locator("#chatEntries")).toContainText("no pages yet");
+
+  await page.click("#newSessionBtn");
+  await page.fill("#siteName", "Docs");
+  await page.fill("#siteUrl", "https://example.com");
+  await page.click("#siteAddBtn");
+
+  await expect(page.locator('[data-pick="site:Docs"]')).toBeVisible();
+  await expect(page.locator("#headerTitle")).toHaveText("Docs");
+  await page.reload();
+  await expect(page.locator('[data-pick="site:Docs"]')).toBeVisible();
+});
+
 test("bad site URLs are rejected", async ({ page }) => {
   await page.click("#chatTab");
   await page.click("#newSessionBtn");
