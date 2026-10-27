@@ -1,0 +1,476 @@
+/* styles.css is part of the desktop app frontend. */
+/* It supports the UI. */
+@import "tailwindcss";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+
+/* The palette of the interface. The dark one is the default, the light one
+   is applied with the "light" class on the html element. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+  --color-slate-850: #111827;
+  --color-slate-900: #0b0f17;
+  --color-slate-950: #06090e;
+
+  --color-accent-50: #eff6ff;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+  --color-accent-700: #1d4ed8;
+
+  --color-agent-purple: #a855f7;
+  --color-agent-amber: #f59e0b;
+  --color-agent-emerald: #10b981;
+  --color-agent-rose: #f43f5e;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-800 font-sans antialiased;
+    @apply dark:bg-slate-950 dark:text-slate-200;
+    overflow: hidden;
+  }
+
+  /* A thin scrollbar that fits the dark theme. */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+    @apply dark:bg-slate-700/60;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+    @apply dark:bg-slate-600/70;
+  }
+
+  textarea,
+  input,
+  select,
+  button {
+    font: inherit;
+  }
+
+  /* Cheap virtualization: offscreen rows skip layout/paint entirely.
+     intrinsic-size keeps the scrollbar stable while they are skipped. */
+  .turn-row,
+  .session-row,
+  .pick-row,
+  .tool-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
+  }
+
+  .session-row,
+  .pick-row {
+    contain-intrinsic-size: auto 44px;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@layer components {
+  /* The message bubble of the user. */
+  .bubble-user {
+    @apply max-w-2xl rounded-2xl rounded-tr-xs bg-accent-600 p-3.5 text-white shadow-sm;
+  }
+
+  /* The icon of a message. */
+  .avatar {
+    @apply flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-xs;
+  }
+
+  .avatar-agent {
+    @apply bg-accent-600 text-white shadow-sm;
+  }
+
+  .avatar-user {
+    @apply bg-slate-200 text-slate-700;
+    @apply dark:bg-slate-700 dark:text-slate-200;
+  }
+
+  .avatar-error {
+    @apply bg-agent-rose text-white shadow-sm;
+  }
+
+  /* The panel of the harness view. */
+  .panel {
+    @apply flex flex-col overflow-hidden bg-slate-900;
+  }
+
+  .panel-title {
+    @apply flex items-center justify-between border-b border-slate-800 px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  /* The code of the diff view. */
+  .code-added {
+    @apply bg-emerald-500/15 text-emerald-400;
+  }
+
+  .code-removed {
+    @apply bg-rose-500/15 text-rose-400;
+  }
+
+  .code-keyword {
+    @apply text-pink-400;
+  }
+
+  .code-string {
+    @apply text-lime-300;
+  }
+
+  .code-comment {
+    @apply text-slate-500 italic;
+  }
+}
+
+/* ============ Motion, blur, gradients ============
+   GPU-only animation (opacity + transform). Anything that animates
+   layout (width/height/top/left) is excluded so streaming stays at 60fps.
+   Every animation below collapses under prefers-reduced-motion. */
+
+@layer base {
+  /* Ambient gradient mesh behind the whole app. Fixed, pointer-free,
+     one paint at startup; views sit above it with translucent fills. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(42rem 26rem at 12% -8%, rgb(59 130 246 / 0.14), transparent 60%),
+      radial-gradient(38rem 24rem at 88% -6%, rgb(168 85 247 / 0.13), transparent 60%),
+      radial-gradient(46rem 30rem at 50% 115%, rgb(16 185 129 / 0.09), transparent 62%);
+  }
+
+  .dark body::before,
+  html.dark body::before {
+    background:
+      radial-gradient(42rem 26rem at 12% -8%, rgb(59 130 246 / 0.2), transparent 60%),
+      radial-gradient(38rem 24rem at 88% -6%, rgb(168 85 247 / 0.18), transparent 60%),
+      radial-gradient(46rem 30rem at 50% 115%, rgb(16 185 129 / 0.12), transparent 62%);
+  }
+
+  /* Keep app chrome above the mesh. */
+  body > div {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@layer components {
+  /* ---- Sidebar + header glass ---- */
+  #sidebar {
+    transition: width 240ms cubic-bezier(0.32, 0.72, 0.28, 1), background-color 200ms ease;
+  }
+
+  .dark #sidebar {
+    background: linear-gradient(180deg, rgb(15 23 42 / 0.92), rgb(2 6 23 / 0.94));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .dark #titleBar {
+    background: rgb(15 23 42 / 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  /* Sidebar text cross-fades instead of snapping when collapsing. */
+  #sidebar .sidebar-text {
+    transition: opacity 180ms ease;
+  }
+
+  #sidebar.w-16 .sidebar-text {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* ---- Modal overlays: blurred dim + spring card ---- */
+  .modal-overlay {
+    opacity: 0;
+    transition: opacity 180ms ease;
+    background: rgb(2 6 23 / 0.55);
+    backdrop-filter: blur(10px) saturate(1.2);
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  }
+
+  .modal-overlay.is-open {
+    opacity: 1;
+  }
+
+  .modal-overlay.is-closing {
+    opacity: 0;
+  }
+
+  .modal-overlay .modal-card {
+    opacity: 0;
+    transform: translateY(14px) scale(0.965);
+    transform-origin: center;
+    transition:
+      opacity 220ms ease,
+      transform 260ms cubic-bezier(0.22, 1.1, 0.36, 1);
+    box-shadow:
+      0 24px 70px -12px rgb(0 0 0 / 0.45),
+      0 0 0 1px rgb(148 163 184 / 0.12),
+      0 0 44px -12px rgb(99 102 241 / 0.35);
+  }
+
+  .modal-overlay.is-open .modal-card {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .modal-overlay.is-closing .modal-card {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+    transition:
+      opacity 150ms ease,
+      transform 160ms ease-in;
+  }
+
+  .dark .modal-overlay .modal-card {
+    background:
+      linear-gradient(180deg, rgb(30 41 59 / 0.5), transparent 32%),
+      var(--color-slate-900);
+  }
+
+  /* Nested provider card shares the spring. */
+  #providerCard .modal-card {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+    transition:
+      opacity 200ms ease,
+      transform 240ms cubic-bezier(0.22, 1.1, 0.36, 1);
+  }
+
+  #providerCard.is-open .modal-card {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ---- Dropdown / picker pop ---- */
+  #modelMenu {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    transform-origin: bottom left;
+    transition:
+      opacity 150ms ease,
+      transform 190ms cubic-bezier(0.22, 1.1, 0.36, 1);
+  }
+
+  #modelMenu.is-open {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ---- Views cross-fade ---- */
+  #agentView,
+  #externalView {
+    animation: view-in 220ms ease both;
+  }
+
+  /* ---- Rows drift in ---- */
+  .turn-row {
+    animation: turn-in 260ms cubic-bezier(0.22, 0.9, 0.36, 1) both;
+  }
+
+  .session-row,
+  .pick-row,
+  .tool-card {
+    transition:
+      transform 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .session-row:hover,
+  .pick-row:hover {
+    transform: translateX(2px);
+  }
+
+  /* ---- Buttons: lift + press ---- */
+  button {
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease,
+      transform 120ms ease,
+      box-shadow 180ms ease,
+      opacity 150ms ease;
+  }
+
+  button:active {
+    transform: scale(0.97);
+  }
+
+  #sendBtn,
+  #newSessionBtn,
+  #sessionStartBtn,
+  #siteAddBtn,
+  #settingsSaveBtn,
+  #settingsWorkspaceSaveBtn {
+    background-image: linear-gradient(135deg, var(--color-accent-500), #6366f1 60%, var(--color-agent-purple));
+    box-shadow:
+      0 8px 20px -8px rgb(99 102 241 / 0.7),
+      inset 0 1px 0 rgb(255 255 255 / 0.22);
+  }
+
+  #sendBtn:hover,
+  #newSessionBtn:hover,
+  #sessionStartBtn:hover,
+  #siteAddBtn:hover,
+  #settingsSaveBtn:hover,
+  #settingsWorkspaceSaveBtn:hover {
+    box-shadow:
+      0 10px 26px -8px rgb(99 102 241 / 0.85),
+      inset 0 1px 0 rgb(255 255 255 / 0.25);
+    filter: brightness(1.07);
+  }
+
+  /* ---- Composer glow ---- */
+  #agentView footer .relative.rounded-xl {
+    transition:
+      border-color 180ms ease,
+      box-shadow 220ms ease;
+  }
+
+  #agentView footer .relative.rounded-xl:focus-within {
+    box-shadow:
+      0 0 0 1px rgb(99 102 241 / 0.55),
+      0 8px 32px -12px rgb(99 102 241 / 0.5);
+  }
+
+  /* ---- Toast spring + glass ---- */
+  #toast {
+    backdrop-filter: blur(12px) saturate(1.3);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    box-shadow:
+      0 16px 40px -12px rgb(0 0 0 / 0.35),
+      0 0 0 1px rgb(148 163 184 / 0.15);
+  }
+
+  #toast.toast-in {
+    animation: toast-in 260ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+  }
+
+  /* ---- Header pulse, softened ---- */
+  #headerPulse {
+    animation: soft-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  /* ---- Guest page on screen: freeze the app chrome ----
+     An embedded WebContentsView is composited next to this page. A
+     continuously animating layer or a live backdrop-filter keeps the
+     compositor producing frames for the app shell on every vsync,
+     stealing time from the page the user is scrolling. While a guest
+     page is visible the shell is made completely static: the pulse
+     stops and the blur layers (which re-read their backdrop) are
+     replaced with solid fills of the same colour. */
+  body.guest-visible #headerPulse {
+    animation: none;
+    opacity: 0.75;
+  }
+
+  body.guest-visible #sidebar,
+  body.guest-visible #titleBar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  body.guest-visible #sidebar {
+    transition: none;
+  }
+
+  body.guest-visible.dark #sidebar {
+    background: linear-gradient(180deg, #0f172a, #020617);
+  }
+
+  body.guest-visible.dark #titleBar {
+    background: #0f172a;
+  }
+
+  /* No gradient mesh to overdraw behind the (now opaque) chrome. */
+  body.guest-visible::before {
+    display: none;
+  }
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes turn-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes soft-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  70%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  body::before {
+    display: none;
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "appId": "com.paladin.app",
+  "productName": "paladin",
+  "directories": { "output": "release" },
+  "files": ["dist/**", "dist-electron/**", "package.json"],
+  "extraResources": [{ "from": "../core/bin/agent-host", "to": "agent-host/agent-host" }],
+  "linux": {
+    "target": ["deb"],
+    "category": "Utility",
+    "executableName": "paladin",
+    "maintainer": "paladin"
+  }
+}
