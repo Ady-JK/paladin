@@ -34,14 +34,15 @@ func IsNotifyMessage(msg transcript.Message) bool {
 	return msg.ToolCallID != nil && strings.HasSuffix(*msg.ToolCallID, NotifySuffix)
 }
 
-// SessionInfo mirrors the Rust wire shape (snake_case).
+// SessionInfo is the client-facing session row (camelCase, matches the
+// desktop frontend and PROTOCOL.md).
 type SessionInfo struct {
-	CreatedAt    int64  `json:"created_at"`
+	CreatedAt    int64  `json:"createdAt"`
 	Cwd          string `json:"cwd"`
-	MessageCount int    `json:"message_count"`
+	MessageCount int    `json:"messageCount"`
 	Model        string `json:"model"`
 	Provider     string `json:"provider"`
-	SessionID    string `json:"session_id"`
+	SessionID    string `json:"sessionId"`
 	Title        string `json:"title"`
 }
 

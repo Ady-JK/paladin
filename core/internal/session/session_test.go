@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -62,6 +63,29 @@ func TestInfoFromShapes(t *testing.T) {
 	bare := InfoFrom(transcript.Meta{SessionID: "s"}, 0, "")
 	if bare.Provider != "" || bare.Model != "" {
 		t.Fatalf("got %+v", bare)
+	}
+}
+
+// The desktop frontend reads camelCase (sessionId/createdAt/messageCount);
+// snake_case leaves every id undefined, so the delete buttons send
+// "undefined" and the core rejects the id. Lock the wire shape.
+func TestSessionInfoWireIsCamelCase(t *testing.T) {
+	prov, model := "p", "m"
+	info := InfoFrom(transcript.Meta{SessionID: "s", Cwd: "/w", CreatedAt: time.Unix(10, 0).UTC(), Provider: &prov, Model: &model}, 3, "title")
+	raw, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	for _, want := range []string{`"sessionId":"s"`, `"createdAt":10`, `"messageCount":3`} {
+		if !contains(got, want) {
+			t.Fatalf("missing %s in %s", want, got)
+		}
+	}
+	for _, bad := range []string{`session_id`, `created_at`, `message_count`} {
+		if contains(got, bad) {
+			t.Fatalf("snake_case leak %s in %s", bad, got)
+		}
 	}
 }
 
