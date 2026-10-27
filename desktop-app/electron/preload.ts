@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld("paladin", {
     navigate: (name: string, url: string) => ipcRenderer.invoke("views:navigate", name, url),
     reload: (name: string) => ipcRenderer.invoke("views:reload", name),
     drop: (name: string) => ipcRenderer.invoke("views:drop", name),
+    setTheme: (theme: "dark" | "light") => ipcRenderer.invoke("views:setTheme", theme),
   },
 
   shell: {

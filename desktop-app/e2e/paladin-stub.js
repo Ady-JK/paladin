@@ -194,6 +194,7 @@ window.paladin = {
     navigate: async () => true,
     reload: async () => true,
     drop: async () => true,
+    setTheme: async () => true,
   },
   shell: {
     openExternal: async () => {},

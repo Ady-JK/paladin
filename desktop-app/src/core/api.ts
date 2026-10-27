@@ -197,6 +197,12 @@ export function dropExternalPage(id: string): Promise<unknown> {
   return bridge().views.drop(id);
 }
 
+// setExternalTheme keeps the native guest surfaces in step with the shell
+// theme. Their default paint is white, which flashes hard in dark mode.
+export function setExternalTheme(dark: boolean): Promise<unknown> {
+  return bridge().views.setTheme(dark ? "dark" : "light");
+}
+
 // partitionFor names the persistent session partition for a chat page.
 // The two original defaults keep their old partition names so existing
 // logins survive; everything else gets a sanitized one from its id.

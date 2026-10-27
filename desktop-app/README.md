@@ -48,8 +48,12 @@ uncaught exceptions, pings the sidecar over JSONL, and exits 0/1.
 - Views stay alive when switching to Agent (hidden, never destroyed);
   only the selected view gets bounds. Bounds come from the renderer's
   `#externalHost` rect, one settle move per layout change.
-- Built-in views drop after 60s idle on the Agent tab to reclaim RAM;
-  logins persist in the partition.
+- Views drop after 60s idle on the Agent tab to reclaim RAM; logins
+  persist in the partition.
+- The window is frameless: the renderer draws the header and the
+  minimize/maximize/close buttons, and `views:setTheme` keeps every guest
+  view's pre-paint background in the shell colour so opening a page never
+  flashes white in dark mode.
 
 ## Release
 
