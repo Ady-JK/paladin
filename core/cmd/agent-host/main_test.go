@@ -507,8 +507,8 @@ func TestEndToEndChatOverStdio(t *testing.T) {
 	}
 	sessID := open["result"].(map[string]any)["sessionId"].(string)
 	// Chat streams delta events then a final unary response with the id.
-	if _, err := h.stdin.Write([]byte(fmt.Sprintf(
-		`{"id":"2","method":"chat","params":{"sessionId":%q,"message":"hi","cwd":%q}}`+"\n", sessID, dir))); err != nil {
+	if _, err := h.stdin.Write(fmt.Appendf(nil,
+		`{"id":"2","method":"chat","params":{"sessionId":%q,"message":"hi","cwd":%q}}`+"\n", sessID, dir)); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(30 * time.Second)

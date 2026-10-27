@@ -175,7 +175,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	}
 	a.finalize(stopped)
 	if perr := a.persist(a.currentMessage, a.currentResume); perr != nil {
-		return ChatOutcome{}, &turnFailed{perr.Error()}
+		return ChatOutcome{}, perr
 	}
 	needsContinue := a.phase == phaseNeedsContinue
 	return ChatOutcome{
@@ -213,25 +213,21 @@ func (a *Agent) finalize(stopped bool) {
 func (a *Agent) persist(message string, resume bool) error {
 	if !resume {
 		if err := a.session.Append(transcript.RoleUser, message); err != nil {
-			return &persistError{"persist user message: " + err.Error()}
+			return turnFailed{"persist user message: " + err.Error()}
 		}
 	}
 	for _, record := range a.records {
 		if err := a.session.AppendMessage(record); err != nil {
-			return &persistError{"persist turn: " + err.Error()}
+			return turnFailed{"persist turn: " + err.Error()}
 		}
 	}
 	if len(a.toolDefs) == 0 && (a.reply.Len() > 0 || resume) {
 		if err := a.session.Append(transcript.RoleAssistant, a.reply.String()); err != nil {
-			return &persistError{"persist reply: " + err.Error()}
+			return turnFailed{"persist reply: " + err.Error()}
 		}
 	}
 	return nil
 }
-
-type persistError struct{ msg string }
-
-func (e *persistError) Error() string { return e.msg }
 
 func (a *Agent) emit(chunk ChatChunk) error {
 	chunk.SessionID = a.session.Meta.SessionID

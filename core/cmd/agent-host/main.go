@@ -143,6 +143,9 @@ func main() {
 			emit(runUnary(rt, &req))
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		logf("WARN read stdin: %v", err)
+	}
 	// Reap chat tasks so their final response lines always flush.
 	wg.Wait()
 }

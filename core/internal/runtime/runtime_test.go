@@ -367,7 +367,10 @@ func TestStopAndStopIn(t *testing.T) {
 	rt.tracker.track("s1", "/tmp/a", noop)
 	rt.tracker.track("s2", "/tmp/b", noop)
 	// Stop cancels but keeps the entry (idempotent, like the Rust core).
-	if !rt.Stop("s1") || !rt.Stop("s1") {
+	if !rt.Stop("s1") {
+		t.Fatal("first stop failed")
+	}
+	if !rt.Stop("s1") {
 		t.Fatal("stop should be idempotent")
 	}
 	if !rt.StopIn("", "/tmp/b") {
