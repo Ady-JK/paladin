@@ -10,7 +10,9 @@ import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, scrollToBottom } from "./chatView";
+import { handleMentionKey, expandMentions } from "./mentions";
 import { refreshSessions } from "./sessions";
+import { handleSlashKey, tryHandleSlash } from "./slash";
 import { refreshUsage } from "./usage";
 import { createToolActivity } from "./tools";
 
@@ -23,10 +25,31 @@ export async function send(resume = false): Promise<void> {
     return;
   }
 
+  // Slash commands never reach the agent: they run locally.
+  if (!resume && tryHandleSlash(message)) {
+    return;
+  }
+
   if (!resume) {
+    // Hand-typed @paths resolve to OS-specific absolute paths here;
+    // popup-accepted rows are already absolute. The user turn keeps
+    // the original text so the chat shows what was typed.
+    state.busy = true;
+    sendBtn.disabled = true;
+    sendBtn.classList.add("hidden");
+    pauseBtn.classList.remove("hidden");
+    setStatus("thinking…", "busy");
+    let outgoing: string;
+    try {
+      outgoing = await expandMentions(message);
+    } catch (error) {
+      console.warn(`expandMentions failed: ${String(error)}`);
+      outgoing = message;
+    }
     inputEl.value = "";
     addTurn("user", message);
     state.shownMessages++;
+    return sendExpanded(outgoing, false);
   }
   continueBtn.classList.add("hidden");
 
@@ -35,6 +58,11 @@ export async function send(resume = false): Promise<void> {
   sendBtn.classList.add("hidden");
   pauseBtn.classList.remove("hidden");
   setStatus("thinking…", "busy");
+  return sendExpanded("", true);
+}
+
+// sendExpanded runs the streaming turn for already-prepared text.
+async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
 
   const { wrapper, textEl: body } = addTurn("agent", "");
   body.innerHTML = `<span class="text-slate-400">${icon("bolt", "h-3 w-3 inline")} thinking…</span>`;
@@ -125,7 +153,7 @@ export async function send(resume = false): Promise<void> {
 
     const result = await api.chatStream({
       sessionId: state.sessionId || null,
-      message,
+      message: outgoing,
       resume,
       cwd: state.cwd,
       provider: state.selectedProvider || null,
@@ -198,6 +226,13 @@ export function requestStop(): void {
 // It supports the desktop app frontend.
 export function initChat(): void {
   inputEl.addEventListener("keydown", (event) => {
+    // Popups first: Enter/Tab/Esc/Arrows belong to them while open.
+    if (handleSlashKey(event)) {
+      return;
+    }
+    if (handleMentionKey(event)) {
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void send();

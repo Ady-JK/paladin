@@ -270,6 +270,12 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(list)
+	case "file_complete":
+		entries, err := rt.FileComplete(stringParam(req.Params, "query"), stringParam(req.Params, "cwd"), int(intParam(req.Params, "limit", 20)))
+		if err != nil {
+			return failed(err)
+		}
+		return ok(entries)
 	case "open_session":
 		sess, err := rt.OpenSession(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd"))
 		if err != nil {

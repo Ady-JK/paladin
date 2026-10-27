@@ -29,6 +29,7 @@ Electron main spawns it with piped stdio:
 | `resolve_workspace` | `{cwd}` | `string` |
 | `fs_home` | `{}` | `string` |
 | `fs_list` | `{path?}` | `FsList` |
+| `file_complete` | `{query,cwd?,limit?}` | `FileEntry[]` (`path` chat path, `resolvedPath` OS-absolute path to insert, `outside`, `isDir`; gitignored paths never suggested; `../` completes from the workspace parent) |
 | `open_session` | `{sessionId?,cwd?}` | `Session` |
 | `list_sessions` | `{cwd?,limit?}` | `SessionInfo[]` |
 | `session_history` | `{sessionId,cwd?}` | `HistoryMessage[]` |

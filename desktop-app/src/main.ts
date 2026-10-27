@@ -40,6 +40,8 @@ import {
 } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
+import { initMentions } from "./features/mentions";
+import { initSlash } from "./features/slash";
 import { initWindow } from "./features/window";
 
 async function connect(): Promise<void> {
@@ -86,6 +88,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
   initWindow();
   initChat();
+  initMentions();
+  initSlash();
   initModelPicker();
   initSites();
   initSessionDialog();

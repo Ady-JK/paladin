@@ -49,7 +49,7 @@ import { load as loadAnalytics } from "./analytics";
 
 // SettingsNav is a type in this module.
 // It supports the desktop app frontend.
-type SettingsNav = "workspace" | "providers" | "connection" | "analytics";
+export type SettingsNav = "workspace" | "providers" | "connection" | "analytics";
 
 // paintSettingsNav is a const in this module.
 // It supports the desktop app frontend.
@@ -218,9 +218,9 @@ const saveProviderCard = async (): Promise<void> => {
 
 // openSettings is a const in this module.
 // It supports the desktop app frontend.
-export const openSettings = (): void => {
+export const openSettings = (tab: SettingsNav = "workspace"): void => {
   openModal(settingsModalEl);
-  paintSettingsNav("workspace");
+  paintSettingsNav(tab);
   renderProviderList();
   paintSettingsConnection();
   void (async () => {
@@ -350,7 +350,7 @@ export function initSettings(reconnect: () => Promise<void>): void {
 
   paintSettingsNav("workspace");
 
-  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#settingsBtn").addEventListener("click", () => openSettings());
   $("#settingsCloseBtn").addEventListener("click", closeSettings);
   $("#settingsCancelBtn").addEventListener("click", closeSettings);
 

@@ -4,7 +4,7 @@
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 // No daemon, no addr, no subscribe.
 
-import type { FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, ToolInfo } from "./types";
+import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, ToolInfo } from "./types";
 import { bridge } from "./tauri";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -29,6 +29,17 @@ export function fsList(path: string | null): Promise<FsList> {
 
 export function fsHome(): Promise<string> {
   return invoke<string>("fs_home");
+}
+
+// fileComplete suggests workspace files and folders for a partial
+// chat path (`@` mentions). Gitignored paths are never suggested;
+// `../` queries complete from the workspace parent.
+export function fileComplete(
+  query: string,
+  cwd: string | null,
+  limit = 20,
+): Promise<FileEntry[]> {
+  return invoke<FileEntry[]>("file_complete", { query, cwd, limit });
 }
 
 export function listProviders(): Promise<ProviderInfo[]> {

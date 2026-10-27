@@ -359,6 +359,19 @@ async function __paladinBaseInvoke(cmd, args) {
         return args.path;
       case "fs_home":
         return "/home/tester";
+      case "file_complete": {
+        const q = (args && args.query) || "";
+        const all = [
+          { path: "src/main.go", display: "main.go", resolvedPath: "/home/tester/project/src/main.go", outside: false, isDir: false },
+          { path: "src/server/", display: "server/", resolvedPath: "/home/tester/project/src/server", outside: false, isDir: true },
+          { path: "src/server/app.go", display: "app.go", resolvedPath: "/home/tester/project/src/server/app.go", outside: false, isDir: false },
+          { path: "README.md", display: "README.md", resolvedPath: "/home/tester/project/README.md", outside: false, isDir: false },
+          { path: "../sibling/outside.txt", display: "outside.txt", resolvedPath: "/home/tester/sibling/outside.txt", outside: true, isDir: false },
+        ];
+        const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+        const want = norm(q).toLowerCase();
+        return all.filter((e) => norm(e.path).toLowerCase().includes(want));
+      }
       case "fs_list": {
         const at = (args && args.path) || "/home/tester";
         return {

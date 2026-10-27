@@ -854,6 +854,43 @@ func (r *AgentRuntime) FsList(path string) (FsList, error) {
 	return FsList{CurrentPath: abs, ParentPath: parent, Directories: directories}, nil
 }
 
+// FileEntry is one `@` completion row: Path is the Linux-style chat
+// path (`src/foo.ts`, `../sib/file`, `src/sub/` for folders),
+// ResolvedPath is the OS-specific absolute path the composer inserts
+// into the message, Outside flags workspace escapes.
+type FileEntry struct {
+	Path         string `json:"path"`
+	Display      string `json:"display"`
+	ResolvedPath string `json:"resolvedPath"`
+	Outside      bool   `json:"outside"`
+	IsDir        bool   `json:"isDir"`
+}
+
+// FileComplete suggests workspace files and folders for a partial
+// chat path. Gitignored paths are never suggested. Queries starting
+// with `..` complete from the workspace parent so outside files and
+// folders tag correctly.
+func (r *AgentRuntime) FileComplete(query, cwd string, limit int) ([]FileEntry, error) {
+	entries, err := tools.CompleteFiles(resolveCwd(r, cwd), query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FileEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, FileEntry{Path: e.Path, Display: e.Display, ResolvedPath: e.ResolvedPath, Outside: e.Outside, IsDir: e.IsDir})
+	}
+	return out, nil
+}
+
+// resolveCwd falls back to the runtime workspace when the caller
+// passes no cwd.
+func resolveCwd(r *AgentRuntime, cwd string) string {
+	if strings.TrimSpace(cwd) != "" {
+		return cwd
+	}
+	return r.GetWorkspace()
+}
+
 func refreshCatalog(store *config.Store) error {
 	file, err := store.LoadProviders()
 	if err != nil {
