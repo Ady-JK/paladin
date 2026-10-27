@@ -264,11 +264,19 @@ function createWindow(): void {
     // Painted before the first frame: no white flash between window
     // creation and the renderer's dark background.
     backgroundColor: chromeColor(),
+    // Start on the whole screen, not a small floating rectangle. Wait
+    // for the first frame before showing so the maximize is not a jump.
+    show: false,
     webPreferences: {
       preload: path.join(HERE, "preload.js"),
       contextIsolation: true,
       sandbox: true,
     },
+  });
+
+  win.once("ready-to-show", () => {
+    win?.maximize();
+    win?.show();
   });
 
   if (!app.isPackaged && process.env.ELECTRON_START_URL) {
