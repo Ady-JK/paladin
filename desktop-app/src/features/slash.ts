@@ -84,11 +84,11 @@ function paintSlash(): void {
   el.classList.remove("hidden");
   el.innerHTML = filtered
     .map(
-      (cmd, i) => `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left ${
+      (cmd, i) => `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-xs ${
         i === activeIdx
           ? "bg-accent-600/10 text-slate-900 dark:text-slate-100"
           : "text-slate-600 dark:text-slate-300"
-      }"><span class="flex-shrink-0 font-mono text-xs font-semibold text-accent-500">/${escapeHtml(cmd.name)}</span><span class="min-w-0 flex-1 truncate text-[11px]">${escapeHtml(cmd.desc)}</span></button>`,
+      }"><span class="min-w-0 flex-1 truncate">/${escapeHtml(cmd.name)}<span class="ml-1.5 text-slate-400">${escapeHtml(cmd.desc)}</span></span></button>`,
     )
     .join("");
 }

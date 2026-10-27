@@ -378,6 +378,7 @@ async function __paladinBaseInvoke(cmd, args) {
           currentPath: at,
           parentPath: "/home",
           directories: [{ name: "project", path: `${at}/project` }],
+          files: [{ name: "README.md", path: `${at}/README.md` }],
         };
       }
       default:

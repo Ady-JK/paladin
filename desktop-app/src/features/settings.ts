@@ -309,11 +309,25 @@ export function initSettings(reconnect: () => Promise<void>): void {
   });
 
   settingsWorkspaceBrowseBtn.addEventListener("click", () => {
-    if (workspaceBrowser.classList.contains("hidden")) {
-      void browseWorkspace();
-    } else {
-      workspaceBrowser.classList.add("hidden");
-    }
+    void (async () => {
+      if (api.canPickNative()) {
+        try {
+          const picked = await api.pickDirectory(workspaceInputEl.value.trim() || null);
+          if (picked) {
+            workspaceInputEl.value = picked;
+            clearWorkspaceError();
+          }
+        } catch (error) {
+          toast(String(error), "error");
+        }
+        return;
+      }
+      if (workspaceBrowser.classList.contains("hidden")) {
+        void browseWorkspace();
+      } else {
+        workspaceBrowser.classList.add("hidden");
+      }
+    })();
   });
 
   workspaceInputEl.addEventListener("input", clearWorkspaceError);

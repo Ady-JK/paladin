@@ -34,9 +34,15 @@ type FsList struct {
 	CurrentPath string        `json:"currentPath"`
 	Directories []FsDirectory `json:"directories"`
 	ParentPath  string        `json:"parentPath"`
+	Files       []FsFile      `json:"files"`
 }
 
 type FsDirectory struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+type FsFile struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
@@ -834,24 +840,27 @@ func (r *AgentRuntime) FsList(path string) (FsList, error) {
 		return FsList{}, fmt.Errorf("path %q cannot be listed: %s", abs, syserr.Str(err))
 	}
 	directories := []FsDirectory{}
+	files := []FsFile{}
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		switch strings.ToLower(name) {
-		case "system volume information", "$recycle.bin", "recovery":
+		if e.IsDir() {
+			switch strings.ToLower(name) {
+			case "system volume information", "$recycle.bin", "recovery":
+				continue
+			}
+			directories = append(directories, FsDirectory{Name: name, Path: filepath.Join(abs, name)})
 			continue
 		}
-		directories = append(directories, FsDirectory{Name: name, Path: filepath.Join(abs, name)})
+		files = append(files, FsFile{Name: name, Path: filepath.Join(abs, name)})
 	}
 	sort.Slice(directories, func(i, j int) bool { return directories[i].Name < directories[j].Name })
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	parent := filepath.Dir(abs)
 	if parent == abs {
 		// Rust parent() of "/" is None -> "". filepath.Dir("/") = "/".
 		parent = ""
 	}
-	return FsList{CurrentPath: abs, ParentPath: parent, Directories: directories}, nil
+	return FsList{CurrentPath: abs, ParentPath: parent, Directories: directories, Files: files}, nil
 }
 
 // FileEntry is one `@` completion row: Path is the Linux-style chat

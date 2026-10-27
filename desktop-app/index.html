@@ -237,7 +237,7 @@
                 id="promptInput"
                 rows="3"
                 placeholder="Ask the agent to code, run commands, refactor files… (enter to send, shift+enter for a new line)"
-                class="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
                 spellcheck="false"
               ></textarea>
 
@@ -246,10 +246,10 @@
               >
                 <button
                   id="attachBtn"
-                  class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent px-2 py-1 font-mono text-[13px] font-semibold text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                  title="Tag a file or folder (@)"
+                  class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                  title="Attach a file or folder"
                 >
-                  <span data-icon="paperclip" class="flex-shrink-0"></span>
+                  <span data-icon="paperclip" class="flex-shrink-0 [&>svg]:h-5 [&>svg]:w-5"></span>
                 </button>
                 <div class="relative min-w-0 flex-1">
                   <button
@@ -725,9 +725,18 @@
 
         <div class="grid gap-4 text-xs md:grid-cols-2">
           <div class="min-w-0">
-            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
-              Workspace
-            </label>
+            <div class="mb-1 flex items-center justify-between">
+              <label class="block font-medium text-slate-700 dark:text-slate-300">
+                Workspace
+              </label>
+              <button
+                id="newSessionBrowseBtn"
+                class="rounded border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                title="Pick a folder with the OS picker"
+              >
+                OS picker
+              </button>
+            </div>
             <div
               id="newSessionPath"
               class="truncate rounded border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
@@ -792,6 +801,51 @@
             class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white hover:bg-accent-700"
           >
             Start
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== FILE PICKER ==================== -->
+    <div
+      id="fileModal"
+      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4"
+    >
+      <div
+        class="modal-card max-h-[70vh] min-h-[22rem] w-[42rem] max-w-[calc(100vw-2rem)] space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div
+          class="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800"
+        >
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <span data-icon="paperclip" class="text-accent-500 [&>svg]:h-5 [&>svg]:w-5"></span>
+            Attach a file
+          </h3>
+          <button
+            id="fileCloseBtn"
+            class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100"
+          >
+            <span data-icon="xmark" class="[&>svg]:h-4 [&>svg]:w-4"></span>
+          </button>
+        </div>
+
+        <div class="min-w-0">
+          <div
+            id="filePath"
+            class="truncate rounded border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+          ></div>
+          <div
+            id="fileList"
+            class="mt-2 max-h-[50vh] min-h-44 overflow-y-auto rounded border border-slate-200 p-1 dark:border-slate-700"
+          ></div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            id="fileCancelBtn"
+            class="rounded px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Cancel
           </button>
         </div>
       </div>

@@ -41,6 +41,7 @@ import {
 } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
+import { initFilePicker } from "./features/filePicker";
 import { initMentions } from "./features/mentions";
 import { initSlash } from "./features/slash";
 import { initWindow } from "./features/window";
@@ -90,6 +91,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   initWindow();
   initChat();
+  initFilePicker();
   initMentions();
   initSlash();
   initModelPicker();

@@ -2,7 +2,7 @@
 // It supports the desktop app frontend.
 
 import { chatViewEl, inputEl, messagesEl } from "../core/dom";
-import { escapeHtml, renderText } from "../core/format";
+import { escapeHtml, renderText, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { Turn } from "../core/types";
 import { icon } from "../icons";
@@ -43,11 +43,7 @@ export function renderGreeting(): void {
   wrapper.innerHTML = `
     <div class="greet-orb"></div>
     <h1 class="greet-title">Ready when you are.</h1>
-    <p class="greet-sub">Connected to
-      <code class="rounded bg-slate-200 px-1 py-0.5 font-mono dark:bg-slate-800">${escapeHtml(
-        state.cwd || "workspace",
-      )}</code>
-      · tag files with <code class="rounded bg-slate-200 px-1 py-0.5 font-mono dark:bg-slate-800">@</code> · <code class="rounded bg-slate-200 px-1 py-0.5 font-mono dark:bg-slate-800">/help</code> for commands
+    <p class="greet-sub">Workspace '${escapeHtml(shortPath(state.cwd || "workspace"))}'
     </p>
     <div class="greet-chips">${STARTERS.map((s, i) => `<button class="greet-chip" data-chip="${i}">${escapeHtml(s.label)}</button>`).join("")}</div>`;
 

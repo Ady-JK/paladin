@@ -179,12 +179,20 @@ export type FsDirectory = {
   path: string;
 };
 
+// FsFile is a type in this module.
+// It supports the desktop app frontend.
+export type FsFile = {
+  name: string;
+  path: string;
+};
+
 // FsList is a type in this module.
 // It supports the desktop app frontend.
 export type FsList = {
   currentPath: string;
   parentPath: string;
   directories: FsDirectory[];
+  files: FsFile[];
 };
 
 // GroupedLab is a type in this module.

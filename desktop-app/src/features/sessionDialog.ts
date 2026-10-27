@@ -79,6 +79,23 @@ export function initSessionDialog(): void {
   $("#sessionCloseBtn").addEventListener("click", closeNewSession);
   $("#sessionCancelBtn").addEventListener("click", closeNewSession);
   $("#sessionStartBtn").addEventListener("click", startNewSession);
+  $("#newSessionBrowseBtn")?.addEventListener("click", () => {
+    void (async () => {
+      if (!api.canPickNative()) {
+        toast("OS picker unavailable here — browse the list below");
+        return;
+      }
+      try {
+        const picked = await api.pickDirectory(state.pendingWorkspace || state.cwd || null);
+        if (picked) {
+          state.pendingWorkspace = picked;
+          newSessionPathEl.textContent = picked;
+        }
+      } catch (error) {
+        toast(String(error), "error");
+      }
+    })();
+  });
 
   sessionModalEl.addEventListener("click", (event) => {
     if (event.target === sessionModalEl) {

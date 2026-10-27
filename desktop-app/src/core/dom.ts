@@ -110,6 +110,15 @@ export const newSessionFilterClearBtn = $<HTMLButtonElement>("#newSessionFilterC
 // sessionModalEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionModalEl = $("#sessionModal");
+// fileModalEl is a const in this module.
+// It hosts the attach-a-file picker.
+export const fileModalEl = $("#fileModal");
+// filePathEl is a const in this module.
+// It shows the picker directory.
+export const filePathEl = $("#filePath");
+// fileListEl is a const in this module.
+// It lists the picker folders and files.
+export const fileListEl = $("#fileList");
 // headerTitleEl is a const in this module.
 // It supports the desktop app frontend.
 export const headerTitleEl = $("#headerTitle");

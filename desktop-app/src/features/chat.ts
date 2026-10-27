@@ -11,6 +11,7 @@ import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, scrollToBottom } from "./chatView";
 import { handleMentionKey, expandMentions } from "./mentions";
+import { openFilePicker } from "./filePicker";
 import { refreshSessions } from "./sessions";
 import { handleSlashKey, tryHandleSlash } from "./slash";
 import { refreshUsage } from "./usage";
@@ -47,6 +48,7 @@ export async function send(resume = false): Promise<void> {
       outgoing = message;
     }
     inputEl.value = "";
+    autosizeComposer();
     addTurn("user", message);
     state.shownMessages++;
     return sendExpanded(outgoing, false);
@@ -226,13 +228,9 @@ export function requestStop(): void {
 // It supports the desktop app frontend.
 export function initChat(): void {
   attachBtnEl.addEventListener("click", () => {
-    const caret = inputEl.selectionStart ?? inputEl.value.length;
-    inputEl.value = `${inputEl.value.slice(0, caret)}@${inputEl.value.slice(caret)}`;
-    inputEl.selectionStart = caret + 1;
-    inputEl.selectionEnd = caret + 1;
-    inputEl.dispatchEvent(new Event("input", { bubbles: true }));
-    inputEl.focus();
+    openFilePicker();
   });
+  inputEl.addEventListener("input", autosizeComposer);
 
   inputEl.addEventListener("keydown", (event) => {
     // Popups first: Enter/Tab/Esc/Arrows belong to them while open.
@@ -268,4 +266,14 @@ export function initChat(): void {
       toast("Press ESC again to stop the turn");
     }
   });
+}
+
+// autosizeComposer grows the composer with its content, capped at
+// ~35% of the viewport so long pastes stay usable and the chat above
+// keeps its space. Reset by clearing the value then calling again.
+export function autosizeComposer(): void {
+  inputEl.style.height = "auto";
+  const cap = Math.round(window.innerHeight * 0.35);
+  inputEl.style.height = `${Math.min(inputEl.scrollHeight, cap)}px`;
+  inputEl.style.overflowY = inputEl.scrollHeight > cap ? "auto" : "hidden";
 }
