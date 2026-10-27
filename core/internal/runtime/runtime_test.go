@@ -537,6 +537,70 @@ func TestResolveProviderModelOverrideAndCache(t *testing.T) {
 	}
 }
 
+func TestResolveProviderDefaultModel(t *testing.T) {
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("Opencode Go", "sk-live"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.store.SaveModels(config.ModelsFile{Providers: map[string]config.ProviderModels{
+		"Opencode Go": {
+			AllModels:     []string{"glm-5.3-flash", "deepseek-v4.1-flash"},
+			EnabledModels: []string{"glm-5.3-flash", "deepseek-v4.1-flash"},
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, p, err := rt.resolveProvider("Opencode Go", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Prefer the known chat model over alphabetical/catalog order so a
+	// new session always has a model the OpenAI dialect can serve.
+	if p.Model() != config.OpencodeDefaultModel {
+		t.Fatalf("got %q", p.Model())
+	}
+	_, _, override, err := rt.resolveProvider("Opencode Go", "glm-5.3-flash")
+	if err != nil || override.Model() != "glm-5.3-flash" {
+		t.Fatalf("override lost: %q %v", override.Model(), err)
+	}
+}
+
+func TestResolveProviderDefaultModelWithoutCatalog(t *testing.T) {
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("Opencode Go", "sk-live"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, p, err := rt.resolveProvider("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Model() != config.OpencodeDefaultModel {
+		t.Fatalf("got %q", p.Model())
+	}
+}
+
+func TestResolveProviderCatalogDefaultForPlainProvider(t *testing.T) {
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-or"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.store.Keys.Delete("Opencode Go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.store.SaveModels(config.ModelsFile{Providers: map[string]config.ProviderModels{
+		"openrouter": {EnabledModels: []string{"vendor/model-a", "vendor/model-b"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, p, err := rt.resolveProvider("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Model() != "vendor/model-a" {
+		t.Fatalf("got %q", p.Model())
+	}
+}
+
 func TestSystemPromptToolGuidanceMaxRounds(t *testing.T) {
 	rt, _ := testRuntime(t)
 	if got := rt.systemPrompt("override"); got != "override" {
