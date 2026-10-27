@@ -43,29 +43,40 @@ import { icon } from "../icons";
 // It supports the desktop app frontend.
 const VIEW_KEY = "paladin.view";
 
-// BUILT_IN_PAGES is a const in this module.
-// It supports the desktop app frontend.
-const BUILT_IN_PAGES: ChatEntry[] = [
-  { id: "gemini", title: "Gemini", url: "https://gemini.google.com", builtin: true },
-  { id: "chatgpt", title: "ChatGPT", url: "https://chatgpt.com", builtin: true },
+// DEFAULT_SITES seeds a fresh profile and an existing profile that has
+// never been seeded. They are ordinary entries: once written they live in
+// the same list as user-added pages, so every one of them can be removed.
+const DEFAULT_SITES: { name: string; url: string }[] = [
+  { name: "Gemini", url: "https://gemini.google.com" },
+  { name: "ChatGPT", url: "https://chatgpt.com" },
+  { name: "Claude", url: "https://claude.ai" },
+  { name: "DeepSeek", url: "https://chat.deepseek.com" },
 ];
 
 // SITES_KEY is a const in this module.
 // It supports the desktop app frontend.
 const SITES_KEY = "paladin.sites";
 
+// SEEDED_KEY records that the defaults were offered once. Without it,
+// deleting a default would bring it back on the next launch.
+const SEEDED_KEY = "paladin.sites.seeded";
+
+function normalizeSiteUrl(raw: string): string {
+  try {
+    return new URL(raw).toString();
+  } catch {
+    return raw;
+  }
+}
+
 // chatEntries is a function in this module.
 // It supports the desktop app frontend.
 function chatEntries(): ChatEntry[] {
-  return [
-    ...BUILT_IN_PAGES,
-    ...state.customSites.map((s) => ({
-      id: `site:${s.name}`,
-      title: s.name,
-      url: s.url,
-      builtin: false,
-    })),
-  ];
+  return state.customSites.map((s) => ({
+    id: `site:${s.name}`,
+    title: s.name,
+    url: s.url,
+  }));
 }
 
 // restoreSites is a function in this module.
@@ -82,6 +93,39 @@ function restoreSites(): void {
         .map((s) => ({ name: s.name!.trim(), url: s.url!.trim() }))
         .filter((s) => s.name && s.url.toLowerCase().startsWith("https://"));
     }
+  } catch {
+  }
+
+  // Seed once. An existing profile keeps its own pages and gains any
+  // default it is missing; a profile where the user deleted defaults keeps
+  // them deleted because the flag is already set.
+  let seeded = false;
+  try {
+    seeded = localStorage.getItem(SEEDED_KEY) === "1";
+  } catch {
+  }
+  if (seeded) {
+    return;
+  }
+
+  const urls = new Set(state.customSites.map((s) => normalizeSiteUrl(s.url)));
+  const names = new Set(state.customSites.map((s) => s.name.toLowerCase()));
+  let added = false;
+  for (const site of DEFAULT_SITES) {
+    const url = normalizeSiteUrl(site.url);
+    if (names.has(site.name.toLowerCase()) || urls.has(url)) {
+      continue;
+    }
+    state.customSites.push({ name: site.name, url });
+    names.add(site.name.toLowerCase());
+    urls.add(url);
+    added = true;
+  }
+  if (added) {
+    persistSites();
+  }
+  try {
+    localStorage.setItem(SEEDED_KEY, "1");
   } catch {
   }
 }
@@ -140,17 +184,13 @@ export function paintChatList(): void {
         >
           ${icon("external")}
         </button>
-        ${
-          entry.builtin
-            ? ""
-            : `<button
+        <button
           data-del="${escapeAttr(entry.id)}"
           class="flex-shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-agent-rose/10 hover:text-agent-rose"
           title="Remove ${escapeAttr(entry.title)}"
         >
           ${icon("trash")}
-        </button>`
-        }
+        </button>
       </div>`;
   }
 
@@ -187,6 +227,13 @@ function persistView(): void {
   }
 }
 
+// LEGACY_PAGE_IDS maps the old hard-coded page ids to the seeded site
+// ids, so an existing session keeps the chat page it had selected.
+const LEGACY_PAGE_IDS: Record<string, string> = {
+  gemini: "site:Gemini",
+  chatgpt: "site:ChatGPT",
+};
+
 // restoreView is a function in this module.
 // It supports the desktop app frontend.
 function restoreView(): void {
@@ -199,7 +246,10 @@ function restoreView(): void {
       state.sideView = "chat";
     }
     if (typeof saved?.page === "string") {
-      state.chatPage = saved.page;
+      const page = LEGACY_PAGE_IDS[saved.page] ?? saved.page;
+      if (chatEntries().some((e) => e.id === page)) {
+        state.chatPage = page;
+      }
     }
   } catch {
   }
@@ -456,7 +506,7 @@ export function addSite(): void {
 // It supports the desktop app frontend.
 export function deleteSite(id: string): void {
   const entry = chatEntries().find((e) => e.id === id);
-  if (!entry || entry.builtin) {
+  if (!entry) {
     return;
   }
 

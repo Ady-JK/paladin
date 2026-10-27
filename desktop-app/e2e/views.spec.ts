@@ -15,20 +15,23 @@ test("chat tab swaps the sidebar and the main view", async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeHidden();
   await expect(page.locator("#searchWrap")).toBeHidden();
   await expect(page.locator("#chatList")).toBeVisible();
-  await expect(page.locator('[data-pick="gemini"]')).toBeVisible();
+  await expect(page.locator('[data-pick="site:Gemini"]')).toBeVisible();
+  await expect(page.locator('[data-pick="site:ChatGPT"]')).toBeVisible();
+  await expect(page.locator('[data-pick="site:Claude"]')).toBeVisible();
+  await expect(page.locator('[data-pick="site:DeepSeek"]')).toBeVisible();
 
   await expect(page.locator("#agentView")).toBeHidden();
   await expect(page.locator("#externalView")).toBeVisible();
 
-  await page.click('[data-pick="gemini"]');
+  await page.click('[data-pick="site:Gemini"]');
   await expect(page.locator("#headerTitle")).toHaveText("Gemini");
 
-  await page.click('[data-pick="chatgpt"]');
+  await page.click('[data-pick="site:ChatGPT"]');
   await expect(page.locator("#headerTitle")).toHaveText("ChatGPT");
 
   await expect(page.locator("#pageReloadBtn")).toBeVisible();
-  await expect(page.locator('[data-open="gemini"]')).toBeVisible();
-  await expect(page.locator('[data-open="chatgpt"]')).toBeVisible();
+  await expect(page.locator('[data-open="site:Gemini"]')).toBeVisible();
+  await expect(page.locator('[data-open="site:ChatGPT"]')).toBeVisible();
 
   await page.click("#agentTab");
   await expect(page.locator("#agentView")).toBeVisible();
@@ -36,6 +39,56 @@ test("chat tab swaps the sidebar and the main view", async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
   await expect(page.locator("#pageReloadBtn")).toBeHidden();
   await expect(page.locator("#headerTitle")).toHaveText("Agent Chat");
+});
+
+test("every default page can be removed and stays removed", async ({ page }) => {
+  await page.click("#chatTab");
+  for (const id of ["site:Gemini", "site:ChatGPT", "site:Claude", "site:DeepSeek"]) {
+    await expect(page.locator(`[data-pick="${id}"]`)).toBeVisible();
+    await expect(page.locator(`[data-del="${id}"]`)).toBeVisible();
+  }
+
+  await page.locator('[data-del="site:Claude"]').click();
+  await expect(page.locator('[data-pick="site:Claude"]')).toBeHidden();
+  await page.reload();
+  await page.click("#chatTab");
+  await expect(page.locator('[data-pick="site:Claude"]')).toBeHidden();
+  await expect(page.locator('[data-pick="site:DeepSeek"]')).toBeVisible();
+});
+
+test("an existing profile gains the defaults without losing its pages", async ({ page }) => {
+  // Simulate a profile from before the defaults were seeded: one custom
+  // page, no seeded flag, and an old built-in page id selected.
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "paladin.sites",
+      JSON.stringify([{ name: "Mine", url: "https://example.com/" }]),
+    );
+    localStorage.removeItem("paladin.sites.seeded");
+    localStorage.setItem("paladin.view", JSON.stringify({ view: "chat", page: "gemini" }));
+  });
+  await page.reload();
+
+  await expect(page.locator('[data-pick="site:Mine"]')).toBeVisible();
+  for (const id of ["site:Gemini", "site:ChatGPT", "site:Claude", "site:DeepSeek"]) {
+    await expect(page.locator(`[data-pick="${id}"]`)).toBeVisible();
+  }
+  // The legacy "gemini" selection maps to the seeded entry instead of
+  // leaving the chat side with no page.
+  await expect(page.locator("#headerTitle")).toHaveText("Gemini");
+});
+
+test("deleting every page leaves an empty chat list", async ({ page }) => {
+  await page.click("#chatTab");
+  for (const id of ["site:Gemini", "site:ChatGPT", "site:Claude", "site:DeepSeek"]) {
+    await page.locator(`[data-del="${id}"]`).click();
+  }
+  await expect(page.locator("#chatEntries")).toContainText("no pages yet");
+  await expect(page.locator("#headerTitle")).toHaveText("Chat");
+
+  await page.reload();
+  await page.click("#chatTab");
+  await expect(page.locator("#chatEntries")).toContainText("no pages yet");
 });
 
 test("window buttons fill the top-right corner", async ({ page }) => {
@@ -61,7 +114,7 @@ test("window buttons fill the top-right corner", async ({ page }) => {
 // It checks the external view and title persist.
 test("the picked side survives a reload", async ({ page }) => {
   await page.click("#chatTab");
-  await page.click('[data-pick="gemini"]');
+  await page.click('[data-pick="site:Gemini"]');
   await page.reload();
   await expect(page.locator("#externalView")).toBeVisible();
   await expect(page.locator("#headerTitle")).toHaveText("Gemini");
@@ -69,7 +122,7 @@ test("the picked side survives a reload", async ({ page }) => {
 
 test("sidebar stays fixed open in chat mode", async ({ page }) => {
   await page.click("#chatTab");
-  await page.click('[data-pick="gemini"]');
+  await page.click('[data-pick="site:Gemini"]');
 
   await expect(page.locator("#sidebarToggleBtn")).toBeDisabled();
   // Clicking the locked toggle is a no-op: the page list stays put.
@@ -98,7 +151,7 @@ test("collapse, expand, then switch sides stays clean", async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
 
   await page.click("#chatTab");
-  await page.click('[data-pick="chatgpt"]');
+  await page.click('[data-pick="site:ChatGPT"]');
   await expect(page.locator("#sidebarToggleBtn")).toBeDisabled();
 
   await page.click("#agentTab");
@@ -115,7 +168,7 @@ test("collapse, expand, then switch sides stays clean", async ({ page }) => {
 test("rapid tab switching ends in one clean side", async ({ page }) => {  await page.click("#chatTab");
   await page.click("#agentTab");
   await page.click("#chatTab");
-  await page.click('[data-pick="chatgpt"]');
+  await page.click('[data-pick="site:ChatGPT"]');
   await page.click("#agentTab");
   await page.click("#chatTab");
 
@@ -129,7 +182,7 @@ test("rapid tab switching ends in one clean side", async ({ page }) => {  await 
 
 test("a visible chat page freezes the shell compositing", async ({ page }) => {
   await page.click("#chatTab");
-  await page.click('[data-pick="chatgpt"]');
+  await page.click('[data-pick="site:ChatGPT"]');
   await expect(page.locator("#externalView")).toBeVisible();
 
   await expect
@@ -154,7 +207,7 @@ test("a visible chat page freezes the shell compositing", async ({ page }) => {
 
 test("chat mode never moves the page", async ({ page }) => {
   await page.click("#chatTab");
-  await page.click('[data-pick="gemini"]');
+  await page.click('[data-pick="site:Gemini"]');
   // Let the initial show settle first: the show itself moves once.
   await page.waitForTimeout(900);
 
@@ -206,7 +259,7 @@ test("bad site URLs are rejected", async ({ page }) => {
   await page.fill("#siteUrl", "https://gemini.google.com");
   await page.click("#siteAddBtn");
   await expect(page.locator("#siteModal")).toBeVisible();
-  await expect(page.locator("#chatEntries")).not.toContainText("site:");
+  await expect(page.locator("#chatEntries [data-pick]")).toHaveCount(4);
 
   await page.fill("#siteName", "Insecure");
   await page.fill("#siteUrl", "http://example.com");

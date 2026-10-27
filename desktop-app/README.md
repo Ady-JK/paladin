@@ -40,8 +40,11 @@ uncaught exceptions, pings the sidecar over JSONL, and exits 0/1.
 
 ## Web embeds
 
-- ChatGPT: `WebContentsView`, `persist:paladin-chatgpt`
-- Gemini: `WebContentsView`, `persist:paladin-gemini`
+- Chat pages: `WebContentsView` with a persistent partition per page;
+  Gemini and ChatGPT keep their original `persist:paladin-gemini` /
+  `persist:paladin-chatgpt` partitions so existing logins survive.
+- Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
+  ordinary entries and any of them can be removed like a custom page.
 - Views stay alive when switching to Agent (hidden, never destroyed);
   only the selected view gets bounds. Bounds come from the renderer's
   `#externalHost` rect, one settle move per layout change.
