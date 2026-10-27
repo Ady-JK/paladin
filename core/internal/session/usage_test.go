@@ -23,7 +23,7 @@ func TestUsageTotalsAdd(t *testing.T) {
 func TestUsageViewFillPercent(t *testing.T) {
 	var totals UsageTotals
 	totals.AddCall("m", 100, 100, 0, 0, 0, 200, 0.05, 0.1, true, 1)
-	view := totals.View("s", 1000, true)
+	view := totals.View("s", 1000, true, func(string) (int64, bool) { return 1000, true })
 	if view.SessionID != "s" || !view.ContextKnown || view.ContextWindow != 1000 {
 		t.Fatalf("got %+v", view)
 	}
@@ -34,11 +34,89 @@ func TestUsageViewFillPercent(t *testing.T) {
 		t.Fatalf("got %+v", view)
 	}
 	// Unknown window: no percentage, tokens still visible.
-	unknown := totals.View("s", 200000, false)
+	unknown := totals.View("s", 200000, false, nil)
 	if unknown.FillPercent != nil || unknown.ContextKnown {
 		t.Fatalf("got %+v", unknown)
 	}
 	if unknown.TotalTokens != 200 {
 		t.Fatalf("got %+v", unknown)
 	}
+}
+
+func TestUsageTotalsPerModel(t *testing.T) {
+	var totals UsageTotals
+	totals.AddCall("b", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1)
+	totals.AddCall("a", 100, 100, 4, 1, 2, 200, 0.05, 0.1, true, 2)
+	totals.AddCall("a", 50, 50, 0, 0, 0, 100, 0, 0, false, 3)
+	if totals.Calls != 3 || totals.TotalTokens != 315 || totals.PromptTokens != 160 {
+		t.Fatalf("totals %+v", totals)
+	}
+	if !totals.HasCost || !closeTo(totals.Cost, 0.06) {
+		t.Fatalf("cost %+v", totals)
+	}
+	a := totals.Models["a"]
+	if a == nil || a.Calls != 2 || a.TotalTokens != 300 || a.ReasoningTokens != 4 {
+		t.Fatalf("model a %+v", totals.Models)
+	}
+	if !a.HasCost || !closeTo(a.Cost, 0.05) {
+		t.Fatalf("model a cost %+v", a)
+	}
+	b := totals.Models["b"]
+	if b == nil || b.Calls != 1 || b.TotalTokens != 15 {
+		t.Fatalf("model b %+v", totals.Models)
+	}
+	// Empty model still bills the session but keeps no per-model book.
+	totals.AddCall("", 1, 0, 0, 0, 0, 1, 0, 0, false, 4)
+	if totals.TotalTokens != 316 || len(totals.Models) != 2 {
+		t.Fatalf("got %+v", totals)
+	}
+}
+
+func TestUsageViewModelsSortedWithWindows(t *testing.T) {
+	var totals UsageTotals
+	totals.AddCall("b", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1)
+	totals.AddCall("a", 100, 100, 0, 0, 0, 200, 0, 0, false, 2)
+	windows := map[string]int64{"a": 1000, "b": 100}
+	view := totals.View("s", 1000, true, func(m string) (int64, bool) {
+		w, ok := windows[m]
+		return w, ok
+	})
+	if len(view.Models) != 2 {
+		t.Fatalf("got %+v", view.Models)
+	}
+	// Heaviest first: a (200) before b (15).
+	if view.Models[0].Model != "a" || view.Models[1].Model != "b" {
+		t.Fatalf("order %+v", view.Models)
+	}
+	am, bm := view.Models[0], view.Models[1]
+	if !am.ContextKnown || am.ContextWindow != 1000 || am.FillPercent == nil || *am.FillPercent != 20 {
+		t.Fatalf("model a %+v", am)
+	}
+	if am.HasCost {
+		t.Fatalf("model a should not report cost: %+v", am)
+	}
+	if !bm.ContextKnown || bm.FillPercent == nil || *bm.FillPercent != 15 {
+		t.Fatalf("model b %+v", bm)
+	}
+	// Unknown model in the breakdown: no window, no fill.
+	totals.AddCall("zzz", 7, 0, 0, 0, 0, 7, 0, 0, false, 3)
+	view = totals.View("s", 1000, true, func(m string) (int64, bool) {
+		w, ok := windows[m]
+		return w, ok
+	})
+	if len(view.Models) != 3 {
+		t.Fatalf("got %+v", view.Models)
+	}
+	zz := view.Models[2]
+	if zz.Model != "zzz" || zz.ContextKnown || zz.FillPercent != nil {
+		t.Fatalf("zzz %+v", zz)
+	}
+}
+
+func closeTo(got, want float64) bool {
+	d := got - want
+	if d < 0 {
+		d = -d
+	}
+	return d < 1e-9
 }

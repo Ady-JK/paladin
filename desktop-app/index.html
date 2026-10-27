@@ -167,14 +167,14 @@
               <span data-icon="code-branch" class="text-agent-amber"></span>
               <span id="sessionLabel">—</span>
             </div>
-            <div
+            <button
               id="usagePill"
-              class="hidden items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300"
+              class="hidden cursor-pointer items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 hover:bg-slate-200 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700/60"
               title="No usage yet"
             >
               <span data-icon="microchip" class="text-accent-500"></span>
               <span id="usageLabel">—</span>
-            </div>
+            </button>
             <button
               id="themeToggleBtn"
               class="rounded-md p-1.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
@@ -888,6 +888,39 @@
             Delete
           </button>
         </div>
+      </div>
+    </div>
+    <!-- ==================== USAGE DASHBOARD ==================== -->
+    <div
+      id="usageModal"
+      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4 sm:p-8"
+    >
+      <div
+        class="modal-card flex h-[90%] w-[90%] max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div class="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div class="flex min-w-0 items-center gap-2">
+            <span data-icon="microchip" class="flex-shrink-0 text-accent-500"></span>
+            <h3 class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Session analytics
+            </h3>
+            <span id="usageModalSession" class="truncate font-mono text-[11px] text-slate-400"></span>
+          </div>
+          <div class="flex flex-shrink-0 items-center gap-2">
+            <div class="flex rounded-lg border border-slate-200 p-0.5 text-[11px] font-medium dark:border-slate-700">
+              <button id="usageTabOverview" class="rounded-md px-3 py-1">Overview</button>
+              <button id="usageTabModels" class="rounded-md px-3 py-1">By model</button>
+            </div>
+            <button
+              id="usageCloseBtn"
+              class="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              title="Close"
+            >
+              <span data-icon="window-close"></span>
+            </button>
+          </div>
+        </div>
+        <div id="usageBody" class="min-h-0 flex-1 overflow-y-auto p-5"></div>
       </div>
     </div>
     <!-- ==================== THE TOAST ==================== -->

@@ -419,7 +419,7 @@ func (r *AgentRuntime) SessionUsage(sessionID, cwd string) (session.SessionUsage
 		model = *sess.Meta.Model
 	}
 	window, known := inference.ContextWindow(model)
-	return totals.View(sess.Meta.SessionID, window, known), nil
+	return totals.View(sess.Meta.SessionID, window, known, inference.ContextWindow), nil
 }
 
 func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {

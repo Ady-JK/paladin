@@ -180,6 +180,24 @@ export const usagePillEl = $("#usagePill");
 // usageLabelEl is a const in this module.
 // It supports the desktop app frontend.
 export const usageLabelEl = $("#usageLabel");
+// usageModalEl is a const in this module.
+// It hosts the session analytics dashboard.
+export const usageModalEl = $("#usageModal");
+// usageBodyEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageBodyEl = $("#usageBody");
+// usageModalSessionEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageModalSessionEl = $("#usageModalSession");
+// usageTabOverviewEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageTabOverviewEl = $<HTMLButtonElement>("#usageTabOverview");
+// usageTabModelsEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageTabModelsEl = $<HTMLButtonElement>("#usageTabModels");
+// usageCloseBtnEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageCloseBtnEl = $<HTMLButtonElement>("#usageCloseBtn");
 // sessionListEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionListEl = $("#sessionList");

@@ -38,7 +38,7 @@ import {
   openNewSite,
   refreshExternalVisibility,
 } from "./features/sites";
-import { clearUsage } from "./features/usage";
+import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initWindow } from "./features/window";
 
@@ -91,6 +91,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSessionDialog();
   initSettings(connect);
   initSessions();
+  initUsage();
 
   modelAdvancedBtn.addEventListener("click", () => {
     closeMenu(modelMenu);
@@ -114,6 +115,7 @@ window.addEventListener("DOMContentLoaded", () => {
     closeNewSession();
     closeNewSite();
     closeMenu(modelMenu);
+    closeUsageDashboard();
     void refreshExternalVisibility();
   });
 

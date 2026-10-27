@@ -21,6 +21,24 @@ export type SessionInfo = {
   title: string;
 };
 
+// UsageModel is one model's slice of a session's usage.
+export type UsageModel = {
+  model: string;
+  contextWindow: number;
+  contextKnown: boolean;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+  listCost: number;
+  hasCost: boolean;
+  fillPercent?: number;
+};
+
 // SessionUsage is the client-facing usage view from `session_usage`.
 // FillPercent is absent when the model's window is unknown.
 export type SessionUsage = {
@@ -39,6 +57,7 @@ export type SessionUsage = {
   listCost: number;
   hasCost: boolean;
   fillPercent?: number;
+  models?: UsageModel[];
 };
 
 // MessageInfo is a type in this module.

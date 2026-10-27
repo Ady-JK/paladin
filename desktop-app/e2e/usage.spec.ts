@@ -42,6 +42,7 @@ test("the usage pill falls back to tokens when the window is unknown", async ({ 
       cost: 0,
       listCost: 0,
       hasCost: true,
+      models: [],
       // fillPercent absent: unknown window.
     };
   });
@@ -53,4 +54,35 @@ test("the usage pill falls back to tokens when the window is unknown", async ({ 
 
   const title = await page.locator("#usagePill").getAttribute("title");
   expect(title).toContain("window unknown");
+});
+
+test("clicking the pill opens the analytics dashboard", async ({ page }) => {
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+  await expect(page.locator("#usagePill")).toBeVisible();
+
+  await page.click("#usagePill");
+  const modal = page.locator("#usageModal");
+  await expect(modal).toBeVisible();
+  await expect(page.locator("#usageBody")).toContainText("Total tokens");
+  await expect(page.locator("#usageBody")).toContainText("25,000");
+  await expect(page.locator("#usageBody")).toContainText("Context fill");
+
+  await page.click("#usageTabModels");
+  await expect(page.locator("#usageBody")).toContainText("beam-free");
+  await expect(page.locator("#usageBody")).toContainText("kimi-k2.6");
+  await expect(page.locator("#usageBody")).toContainText("19,000");
+
+  await page.click("#usageCloseBtn");
+  await expect(modal).toBeHidden();
+});
+
+test("escape closes the analytics dashboard", async ({ page }) => {
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+  await page.click("#usagePill");
+  await expect(page.locator("#usageModal")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#usageModal")).toBeHidden();
 });
