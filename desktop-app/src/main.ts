@@ -38,6 +38,7 @@ import {
   openNewSite,
   refreshExternalVisibility,
 } from "./features/sites";
+import { clearUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initWindow } from "./features/window";
 
@@ -62,6 +63,7 @@ async function connect(): Promise<void> {
     state.sessionId = "";
     sessionLabelEl.textContent = "—";
     state.shownMessages = 0;
+    clearUsage();
 
     messagesEl.innerHTML = "";
     renderGreeting();

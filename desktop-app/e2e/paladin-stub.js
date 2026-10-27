@@ -52,6 +52,27 @@ async function __paladinBaseInvoke(cmd, args) {
           { role: "assistant", content: "It printed hi.", createdAt: at },
         ];
       }
+      case "session_usage":
+        return (
+          window.__e2eUsage || {
+            sessionId: "sess-notify-1",
+            cwd: "/home/tester/project",
+            model: "beam-free",
+            contextWindow: 200000,
+            contextKnown: true,
+            calls: 3,
+            promptTokens: 20000,
+            completionTokens: 5000,
+            reasoningTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: 25000,
+            cost: 0.0042,
+            listCost: 0.008,
+            hasCost: true,
+            fillPercent: 12.5,
+          }
+        );
       case "list_providers":
         window.__e2eLists = (window.__e2eLists || 0) + 1;
         if (!window.__e2eProviders) {

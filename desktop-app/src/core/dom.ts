@@ -173,6 +173,13 @@ export const newSessionListEl = $("#newSessionList");
 // sessionLabelEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionLabelEl = $("#sessionLabel");
+// usagePillEl is a const in this module.
+// It shows the active session's context fill and spend; hidden when
+// there is no session or no billed usage yet.
+export const usagePillEl = $("#usagePill");
+// usageLabelEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageLabelEl = $("#usageLabel");
 // sessionListEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionListEl = $("#sessionList");
