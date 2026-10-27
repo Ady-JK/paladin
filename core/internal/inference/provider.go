@@ -24,6 +24,10 @@ type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments string
+	// Signature carries provider-specific round-trip data. Gemini puts a
+	// thoughtSignature on a function-call part and rejects the next
+	// request without it; other dialects leave it empty.
+	Signature string
 }
 
 type ToolDefinition struct {

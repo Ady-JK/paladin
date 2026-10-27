@@ -52,7 +52,7 @@ func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMe
 					if call.ID == "" {
 						continue
 					}
-					calls = append(calls, inference.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
+					calls = append(calls, inference.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments, Signature: call.Signature})
 				}
 			}
 			if strings.TrimSpace(msg.Content) == "" && len(calls) == 0 {

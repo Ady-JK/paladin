@@ -75,12 +75,15 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 		t.Fatalf("got %+v", msgs)
 	}
 	// Assistant blank WITH calls survives (tool path).
-	stored := []transcript.ToolCall{{ID: "c1", Name: "read", Arguments: "{}"}}
+	stored := []transcript.ToolCall{{ID: "c1", Name: "read", Arguments: "{}", Signature: "sig-1"}}
 	msgs = LlmMessages([]transcript.Message{
 		{Role: transcript.RoleAssistant, Content: "", CreatedAt: now, ToolCalls: &stored},
 	}, true)
 	if len(msgs) != 1 || len(msgs[0].ToolCalls) != 1 {
 		t.Fatalf("got %+v", msgs)
+	}
+	if msgs[0].ToolCalls[0].Signature != "sig-1" {
+		t.Fatalf("signature lost: %+v", msgs[0].ToolCalls[0])
 	}
 	// Empty tool-call IDs are skipped.
 	stored2 := []transcript.ToolCall{{ID: "", Name: "read", Arguments: "{}"}}

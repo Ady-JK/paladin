@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -206,6 +207,15 @@ func TestOpencodeHeadersOnlyForOpencode(t *testing.T) {
 	if len(oc.headers("s")) != 2 {
 		t.Fatalf("got %d headers", len(oc.headers("s")))
 	}
+	// An empty id must not become an empty header: gateways treat that as
+	// a missing session.
+	if len(oc.headers("  ")) != 1 {
+		t.Fatalf("empty session still sent: %d", len(oc.headers("  ")))
+	}
+	zen := NewOpenAIProvider("n", "m", "https://opencode.ai/zen/go/v1", "k")
+	if !zen.isOpencode || len(zen.headers("s")) != 2 {
+		t.Fatal("zen alias not detected")
+	}
 }
 
 func TestToSDKMessagesShapes(t *testing.T) {
@@ -235,17 +245,56 @@ func TestToSDKToolsShapes(t *testing.T) {
 
 func TestNewParamsPrependsSystem(t *testing.T) {
 	p := providerFor("http://x")
-	params := p.newParams("sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil)
+	params := p.newParams("sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "")
 	if len(params.Messages) != 2 {
 		t.Fatalf("got %d", len(params.Messages))
 	}
-	bare := p.newParams("", []LlmMessage{{Role: "user", Content: "hi"}}, nil)
+	bare := p.newParams("", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "")
 	if len(bare.Messages) != 1 {
 		t.Fatalf("got %d", len(bare.Messages))
 	}
-	withTools := p.newParams("", nil, []ToolDefinition{{Name: "read"}})
+	withTools := p.newParams("", nil, []ToolDefinition{{Name: "read"}}, "")
 	if len(withTools.Tools) != 1 {
 		t.Fatal("tools missing")
+	}
+}
+
+func TestOpencodePromptCacheKey(t *testing.T) {
+	oc := NewOpenAIProvider("n", "m", "https://opencode.ai/inference/go/openai/v1", "k")
+	raw, err := json.Marshal(oc.newParams("", nil, nil, " session-1 "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"prompt_cache_key":"session-1"`) {
+		t.Fatalf("missing cache key: %s", raw)
+	}
+	// A blank conversation id is not a cache bucket.
+	raw, _ = json.Marshal(oc.newParams("", nil, nil, " "))
+	if strings.Contains(string(raw), "prompt_cache_key") {
+		t.Fatalf("blank cache key sent: %s", raw)
+	}
+	// Plain OpenAI-compatible endpoints must not receive OpenCode's
+	// extension fields.
+	plain := providerFor("https://api.openai.com/v1")
+	raw, _ = json.Marshal(plain.newParams("", nil, nil, "session-1"))
+	if strings.Contains(string(raw), "prompt_cache_key") {
+		t.Fatalf("cache key leaked to plain openai: %s", raw)
+	}
+}
+
+func TestOpencodeCatalogURL(t *testing.T) {
+	cases := map[string]string{
+		"https://opencode.ai/inference/go/openai/v1":  "https://opencode.ai/inference/go/v1/models",
+		"https://opencode.ai/inference/go/openai/v1/": "https://opencode.ai/inference/go/v1/models",
+		"https://opencode.ai/zen/go/v1":               "https://opencode.ai/zen/go/v1/models",
+		"https://opencode.ai/zen/go/v1?x=1":           "https://opencode.ai/zen/go/v1/models",
+		"https://opencode.ai":                         "https://opencode.ai/v1/models",
+	}
+	for base, want := range cases {
+		p := NewOpenAIProvider("n", "m", base, "k")
+		if got := p.catalogURL(); got != want {
+			t.Fatalf("%s: got %s want %s", base, got, want)
+		}
 	}
 }
 
@@ -357,25 +406,80 @@ func TestListModelsErrorPaths(t *testing.T) {
 }
 
 func TestListOpencodeCatalog(t *testing.T) {
-	var gotUA, gotSess string
+	var gotPath, gotUA, gotSess, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUA, gotSess = r.Header.Get("User-Agent"), r.Header.Get(config.OpencodeSessionHeader)
+		gotPath = r.URL.Path
+		gotUA = r.Header.Get("User-Agent")
+		gotSess = r.Header.Get(config.OpencodeSessionHeader)
+		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data": [{"id": "m1"}, {"id": ""}, {"id": "m2"}]}`)
 	}))
 	defer srv.Close()
-	p := NewOpenAIProvider("oc", "m", "https://opencode.ai/inference/go/openai/v1", "k")
-	_ = p
-	// Swap the catalog URL? The provider hardcodes the prod URL, so test
-	// the wire decoder via a direct call shape instead: use a plain
-	// provider against a /models endpoint for the generic path.
-	plain := providerFor(srv.URL)
-	models, err := plain.ListModels(context.Background())
+	p := NewOpenAIProvider("oc", "m", srv.URL, "sk-live")
+	p.isOpencode = true
+	models, err := p.ListModels(context.Background())
 	if err != nil || len(models) != 2 || models[0] != "m1" || models[1] != "m2" {
 		t.Fatalf("got %v %v", models, err)
 	}
-	_ = gotUA
-	_ = gotSess
+	if gotPath != "/v1/models" {
+		t.Fatalf("path %q", gotPath)
+	}
+	if gotUA != config.OpencodeUserAgent || gotSess != "catalog" {
+		t.Fatalf("headers ua=%q session=%q", gotUA, gotSess)
+	}
+	if gotAuth != "Bearer sk-live" {
+		t.Fatalf("auth %q", gotAuth)
+	}
+}
+
+func TestOpencodeWireHeaders(t *testing.T) {
+	var gotUA string
+	var gotSess []string
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		gotSess = append(gotSess, r.Header.Get(config.OpencodeSessionHeader))
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		bodies = append(bodies, body)
+		if stream, _ := body["stream"].(bool); stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer srv.Close()
+	p := NewOpenAIProvider("oc", "m", srv.URL, "k")
+	p.isOpencode = true
+	if _, err := p.CompleteTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess-42"); err != nil {
+		t.Fatal(err)
+	}
+	tx := make(chan Chunk, 4)
+	done := make(chan struct{})
+	if err := p.StreamTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess-42", tx, done); err != nil {
+		t.Fatal(err)
+	}
+	close(done)
+	close(tx)
+	if gotUA != config.OpencodeUserAgent {
+		t.Fatalf("ua %q", gotUA)
+	}
+	if len(gotSess) != 2 {
+		t.Fatalf("requests %d", len(gotSess))
+	}
+	for i, got := range gotSess {
+		if got != "sess-42" {
+			t.Fatalf("request %d session %q", i, got)
+		}
+		if bodies[i]["prompt_cache_key"] != "sess-42" {
+			t.Fatalf("request %d cache key missing: %#v", i, bodies[i])
+		}
+	}
 }
 
 func TestMapErrorShapes(t *testing.T) {

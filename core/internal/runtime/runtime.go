@@ -199,6 +199,9 @@ func (r *AgentRuntime) resolveProvider(nameOverride, modelOverride string) (conf
 	if strings.TrimSpace(modelOverride) != "" {
 		entry.Model = strings.TrimSpace(modelOverride)
 	}
+	if strings.TrimSpace(entry.Model) == "" {
+		entry.Model = r.defaultModel(entry)
+	}
 	cacheKey := entry.Name + "\x00" + entry.Model
 	r.cacheMu.Lock()
 	if cached, ok := r.providerCache[cacheKey]; ok {
@@ -214,6 +217,32 @@ func (r *AgentRuntime) resolveProvider(nameOverride, modelOverride string) (conf
 	r.providerCache[cacheKey] = provider
 	r.cacheMu.Unlock()
 	return entry, key, provider, nil
+}
+
+// defaultModel picks the model a session should use when the caller did
+// not choose one. Prefer the provider's fetched catalog so a new session
+// never falls back to the generic gpt-4o-mini default on a provider that
+// does not serve it. OpenCode additionally prefers a known chat model
+// when the catalog is empty, because an invalid model name is rejected
+// before the request reaches the subscription.
+func (r *AgentRuntime) defaultModel(entry config.Provider) string {
+	models := r.store.ModelsFor(entry.Name)
+	if config.IsOpencodeEndpoint(entry.ApiURL) {
+		for _, m := range models {
+			if m == config.OpencodeDefaultModel {
+				return m
+			}
+		}
+	}
+	for _, m := range models {
+		if strings.TrimSpace(m) != "" {
+			return m
+		}
+	}
+	if config.IsOpencodeEndpoint(entry.ApiURL) {
+		return config.OpencodeDefaultModel
+	}
+	return ""
 }
 
 func (r *AgentRuntime) systemPrompt(override string) string {

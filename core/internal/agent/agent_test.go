@@ -20,6 +20,7 @@ type mockProvider struct {
 	completeErr error
 	streamsErr  error
 	calls       int
+	sessionIDs  []string
 }
 
 type streamScript struct {
@@ -33,10 +34,12 @@ func (m *mockProvider) Model() string                                { return "m
 func (m *mockProvider) ListModels(context.Context) ([]string, error) { return nil, nil }
 
 func (m *mockProvider) CompleteTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string) (inference.ToolResponse, error) {
+	m.sessionIDs = append(m.sessionIDs, sessionID)
 	return m.complete, m.completeErr
 }
 
 func (m *mockProvider) StreamTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string, tx chan<- inference.Chunk, done <-chan struct{}) error {
+	m.sessionIDs = append(m.sessionIDs, sessionID)
 	idx := m.calls
 	m.calls++
 	if m.streamsErr != nil {
@@ -248,12 +251,18 @@ func TestAppendNotifyShape(t *testing.T) {
 func TestAppendAssistantAndToolResult(t *testing.T) {
 	a, _, _, done := testAgent(t, &mockProvider{}, 5)
 	defer close(done)
-	calls := []inference.ToolCall{{ID: "c1", Name: "read", Arguments: "{}"}}
+	calls := []inference.ToolCall{{ID: "c1", Name: "read", Arguments: "{}", Signature: "sig-1"}}
 	a.appendAssistant("text", calls)
 	call := &inference.ToolCall{ID: "c1", Name: "read", Arguments: "{}"}
 	a.appendToolResult(call, &tools.ToolResult{CallID: "c1", Name: "read", Content: "out"})
 	if len(a.messages) != 2 || len(a.messages[0].ToolCalls) != 1 {
 		t.Fatalf("got %+v", a.messages)
+	}
+	if a.messages[0].ToolCalls[0].Signature != "sig-1" {
+		t.Fatalf("signature not kept in memory: %+v", a.messages[0].ToolCalls[0])
+	}
+	if a.records[0].ToolCalls == nil || (*a.records[0].ToolCalls)[0].Signature != "sig-1" {
+		t.Fatalf("signature not persisted: %+v", a.records[0].ToolCalls)
 	}
 	if a.messages[1].Role != "tool" || a.messages[1].Content != "out" {
 		t.Fatalf("got %+v", a.messages[1])

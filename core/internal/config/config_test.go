@@ -226,14 +226,26 @@ func TestIsPlaceholderKeyMatrix(t *testing.T) {
 }
 
 func TestIsOpencodeEndpoint(t *testing.T) {
-	if !IsOpencodeEndpoint("https://opencode.ai/inference/go/openai/v1") {
-		t.Fatal("seed URL not recognised")
+	for _, url := range []string{
+		"https://opencode.ai/inference/go/openai/v1",
+		"HTTPS://OPencode.AI/INFERENCE/x",
+		"https://opencode.ai/zen/go/v1",
+		"https://go.opencode.ai/openai/v1",
+		" https://opencode.ai ",
+	} {
+		if !IsOpencodeEndpoint(url) {
+			t.Fatalf("%q not recognised", url)
+		}
 	}
-	if !IsOpencodeEndpoint("HTTPS://OPencode.AI/INFERENCE/x") {
-		t.Fatal("case-insensitive match failed")
-	}
-	if IsOpencodeEndpoint("https://api.openai.com/v1") {
-		t.Fatal("openai wrongly matched")
+	for _, url := range []string{
+		"https://api.openai.com/v1",
+		"https://opencode.ai.example.com/v1",
+		"https://evilopencode.ai/v1",
+		"",
+	} {
+		if IsOpencodeEndpoint(url) {
+			t.Fatalf("%q wrongly matched", url)
+		}
 	}
 }
 
