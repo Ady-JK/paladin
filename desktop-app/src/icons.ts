@@ -65,6 +65,19 @@ const ICONS: Record<string, Icon> = {
     d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-9-9h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18",
     line: true,
   },
+  chart: {
+    d: "M4 20V10m6 10V4m6 16v-7m4 7H2",
+    line: true,
+  },
+  "dollar-sign": {
+    d: "M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6",
+    line: true,
+  },
+  zap: { d: "M13 2 3 14h9l-1 8 10-12h-9l1-8Z" },
+  layers: {
+    d: "m12 2 10 5-10 5L2 7l10-5ZM2 12l10 5 10-5M2 17l10 5 10-5",
+    line: true,
+  },
   sliders: { d: "M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6M9 8h6m2 8h6", line: true },
   xmark: { d: "M6 6l12 12M18 6 6 18", line: true },
   play: { d: "m6 3 14 9-14 9V3Z" },

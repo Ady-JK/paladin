@@ -1,5 +1,5 @@
-// settings.ts owns the settings modal: workspace, providers, connection.
-// It supports the desktop app frontend.
+// settings.ts owns the settings modal: workspace, providers, connection,
+// analytics. It supports the desktop app frontend.
 
 import * as api from "../core/api";
 import {
@@ -15,9 +15,11 @@ import {
   settingsConnDotEl,
   settingsConnLabelEl,
   settingsModalEl,
+  settingsNavAnalyticsEl,
   settingsNavConnectionEl,
   settingsNavProvidersEl,
   settingsNavWorkspaceEl,
+  settingsPaneAnalyticsEl,
   settingsPaneConnectionEl,
   settingsPaneProvidersEl,
   settingsPaneTitleEl,
@@ -43,10 +45,11 @@ import { refreshProviders, syncModelSelects } from "./models";
 import { refreshExternalVisibility } from "./sites";
 import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
+import { load as loadAnalytics } from "./analytics";
 
 // SettingsNav is a type in this module.
 // It supports the desktop app frontend.
-type SettingsNav = "workspace" | "providers" | "connection";
+type SettingsNav = "workspace" | "providers" | "connection" | "analytics";
 
 // paintSettingsNav is a const in this module.
 // It supports the desktop app frontend.
@@ -55,6 +58,7 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     ["workspace", settingsNavWorkspaceEl, settingsPaneWorkspaceEl, "Workspace"],
     ["providers", settingsNavProvidersEl, settingsPaneProvidersEl, "Providers"],
     ["connection", settingsNavConnectionEl, settingsPaneConnectionEl, "Connection"],
+    ["analytics", settingsNavAnalyticsEl, settingsPaneAnalyticsEl, "Analytics"],
   ];
   for (const [name, btn, pane, title] of tabs) {
     const active = name === tab;
@@ -256,6 +260,10 @@ export function initSettings(reconnect: () => Promise<void>): void {
   settingsNavConnectionEl.addEventListener("click", () => {
     paintSettingsConnection();
     paintSettingsNav("connection");
+  });
+  settingsNavAnalyticsEl.addEventListener("click", () => {
+    paintSettingsNav("analytics");
+    void loadAnalytics(true);
   });
 
   settingsProviderListEl.addEventListener("click", (event) => {

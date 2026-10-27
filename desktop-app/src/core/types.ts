@@ -58,6 +58,61 @@ export type SessionUsage = {
   hasCost: boolean;
   fillPercent?: number;
   models?: UsageModel[];
+  daily?: DailyPoint[];
+};
+
+// DailyPoint is one UTC calendar day's billed activity.
+export type DailyPoint = {
+  date: string;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+  listCost: number;
+  hasCost: boolean;
+};
+
+// OverallSessionEntry is one session's slice of the fleet-wide rollup.
+export type OverallSessionEntry = {
+  sessionId: string;
+  title?: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+  listCost: number;
+  hasCost: boolean;
+};
+
+// OverallUsage is the fleet-wide rollup from `overall_usage`.
+export type OverallUsage = {
+  sessionCount: number;
+  sessionsWithUsage: number;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+  listCost: number;
+  hasCost: boolean;
+  updatedAt: number;
+  models?: UsageModel[];
+  sessions?: OverallSessionEntry[];
+  daily?: DailyPoint[];
 };
 
 // MessageInfo is a type in this module.

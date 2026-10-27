@@ -32,7 +32,8 @@ Electron main spawns it with piped stdio:
 | `open_session` | `{sessionId?,cwd?}` | `Session` |
 | `list_sessions` | `{cwd?,limit?}` | `SessionInfo[]` |
 | `session_history` | `{sessionId,cwd?}` | `HistoryMessage[]` |
-| `session_usage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]`; `fillPercent` omitted when the model's window is unknown) |
+| `session_usage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` omitted when the model's window is unknown) |
+| `overall_usage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
 | `delete_session` | `{sessionId,cwd?}` | `bool` |
 | `stop_chat` | `{sessionId?,cwd?}` | `bool` |
 | `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?}` | streaming (below) |

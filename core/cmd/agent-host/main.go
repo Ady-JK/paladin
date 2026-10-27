@@ -294,6 +294,15 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(usage)
+	case "overall_usage":
+		{
+			limit := int(intParam(req.Params, "limit", 50))
+			usage, err := rt.OverallUsage(stringParam(req.Params, "cwd"), limit)
+			if err != nil {
+				return failed(err)
+			}
+			return ok(usage)
+		}
 	case "delete_session":
 		v, err := rt.DeleteSession(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd"))
 		if err != nil {

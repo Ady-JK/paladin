@@ -120,3 +120,20 @@ func closeTo(got, want float64) bool {
 	}
 	return d < 1e-9
 }
+
+func TestUsageTotalsDaily(t *testing.T) {
+	var totals UsageTotals
+	// 2026-10-26 and 2026-10-27 UTC.
+	totals.AddCall("m", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1790880000)
+	totals.AddCall("m", 20, 10, 0, 0, 0, 30, 0.02, 0.04, true, 1790966400)
+	if len(totals.Daily) != 2 {
+		t.Fatalf("daily %+v", totals.Daily)
+	}
+	view := totals.View("s", 1000, true, nil)
+	if len(view.Daily) != 2 || view.Daily[0].Date > view.Daily[1].Date {
+		t.Fatalf("daily view %+v", view.Daily)
+	}
+	if view.Daily[0].TotalTokens+view.Daily[1].TotalTokens != 45 {
+		t.Fatalf("daily view %+v", view.Daily)
+	}
+}

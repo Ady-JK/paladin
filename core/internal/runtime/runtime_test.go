@@ -1050,3 +1050,55 @@ func TestSessionUsageKnownWindow(t *testing.T) {
 		t.Fatalf("got %+v", bareInfo)
 	}
 }
+
+func TestOverallUsageAggregates(t *testing.T) {
+	rt, _ := testRuntime(t)
+	a, err := rt.transcripts.Create("/tmp/p", "opencode-go", "beam-free")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := rt.transcripts.Create("/tmp/p", "opencode-go", "kimi-k2.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ta session.UsageTotals
+	ta.AddCall("beam-free", 100, 50, 0, 10, 0, 150, 0.01, 0.02, true, 1790966400)
+	var tb session.UsageTotals
+	tb.AddCall("kimi-k2.6", 200, 100, 5, 0, 5, 300, 0.02, 0.04, true, 1790966400)
+	for _, tc := range []struct {
+		sess   string
+		totals session.UsageTotals
+	}{
+		{a.Dir, ta},
+		{b.Dir, tb},
+	} {
+		data, _ := json.Marshal(tc.totals)
+		if err := os.WriteFile(tc.sess+"/usage.json", data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	overall, err := rt.OverallUsage("/tmp/p", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overall.SessionCount != 2 || overall.SessionsWithUsage != 2 {
+		t.Fatalf("got %+v", overall)
+	}
+	if overall.TotalTokens != 450 || overall.Calls != 2 {
+		t.Fatalf("got %+v", overall)
+	}
+	if len(overall.Models) != 2 || overall.Models[0].Model != "kimi-k2.6" {
+		t.Fatalf("models %+v", overall.Models)
+	}
+	if len(overall.Sessions) != 2 || len(overall.Daily) != 1 {
+		t.Fatalf("sessions/daily %+v %+v", overall.Sessions, overall.Daily)
+	}
+	// Limit caps the session table but not the totals.
+	limited, err := rt.OverallUsage("/tmp/p", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited.Sessions) != 1 || limited.TotalTokens != 450 {
+		t.Fatalf("got %+v", limited)
+	}
+}

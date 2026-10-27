@@ -216,6 +216,9 @@ export const settingsNavProvidersEl = $<HTMLButtonElement>("#settingsNavProvider
 // settingsNavConnectionEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsNavConnectionEl = $<HTMLButtonElement>("#settingsNavConnection");
+// settingsNavAnalyticsEl is a const in this module.
+// It opens the fleet-wide analytics pane inside settings.
+export const settingsNavAnalyticsEl = $<HTMLButtonElement>("#settingsNavAnalytics");
 // settingsPaneTitleEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneTitleEl = $("#settingsPaneTitle");
@@ -228,6 +231,12 @@ export const settingsPaneProvidersEl = $("#settingsPaneProviders");
 // settingsPaneConnectionEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneConnectionEl = $("#settingsPaneConnection");
+// settingsPaneAnalyticsEl is a const in this module.
+// It hosts the fleet-wide analytics dashboard.
+export const settingsPaneAnalyticsEl = $("#settingsPaneAnalytics");
+// analyticsBodyEl is a const in this module.
+// It hosts the rendered fleet-wide dashboard.
+export const analyticsBodyEl = $("#analyticsBody");
 // settingsProviderListEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsProviderListEl = $("#settingsProviderList");
