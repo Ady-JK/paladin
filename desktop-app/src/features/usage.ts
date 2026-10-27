@@ -220,29 +220,115 @@ function statCell(label: string, value: string, title?: string): string {
   </div>`;
 }
 
+function donut(
+  segments: Array<{ label: string; value: number; color: string }>,
+  centerTop: string,
+  centerSub: string,
+  size = 132,
+): string {
+  const thickness = 20;
+  const r = (size - thickness) / 2;
+  const c = size / 2;
+  const circ = 2 * Math.PI * r;
+  const total = segments.reduce((n, s) => n + s.value, 0);
+  let offset = 0;
+  const rings = segments
+    .filter((s) => s.value > 0)
+    .map((s) => {
+      const len = total > 0 ? (s.value / total) * circ : 0;
+      const el = `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${thickness}" stroke-dasharray="${len.toFixed(2)} ${circ.toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"/>`;
+      offset += len;
+      return el;
+    })
+    .join("");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img">
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="${thickness}"/>
+    <g transform="rotate(-90 ${c} ${c})">${rings}</g>
+    <text x="${c}" y="${c - 2}" text-anchor="middle" class="fill-slate-900 dark:fill-slate-100" font-size="18" font-weight="700">${escapeHtml(centerTop)}</text>
+    <text x="${c}" y="${c + 16}" text-anchor="middle" class="fill-slate-400" font-size="10">${escapeHtml(centerSub)}</text>
+  </svg>`;
+}
+
+function donutCard(
+  title: string,
+  segments: Array<{ label: string; value: number; color: string }>,
+  centerTop: string,
+  centerSub: string,
+  formatValue: (n: number) => string,
+): string {
+  const legend = segments
+    .map(
+      (s) =>
+        `<span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" style="background:${s.color}"></span>${escapeHtml(s.label)} · ${formatValue(s.value)}</span>`,
+    )
+    .join("");
+  return `<div class="flex flex-1 items-center gap-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+    <div class="flex-shrink-0">${donut(segments, centerTop, centerSub)}</div>
+    <div class="min-w-0">
+      <div class="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-400">${title}</div>
+      <div class="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">${legend}</div>
+    </div>
+  </div>`;
+}
+
+function tokenMixCard(usage: SessionUsage): string {
+  return donutCard(
+    "Token mix",
+    [
+      { label: "Read", value: usage.promptTokens, color: "#0ea5e9" },
+      { label: "Written", value: usage.completionTokens, color: "#10b981" },
+      { label: "Reasoning", value: usage.reasoningTokens, color: "#8b5cf6" },
+    ],
+    compactTokens(usage.totalTokens),
+    "tokens",
+    (n) => n.toLocaleString(),
+  );
+}
+
+function spendMixCard(usage: SessionUsage): string | null {
+  const models = (usage.models ?? []).filter((m) => m.hasCost && m.cost > 0);
+  if (!usage.hasCost || models.length === 0) {
+    return null;
+  }
+  const palette = ["#f59e0b", "#f43f5e", "#0ea5e9", "#10b981", "#8b5cf6"];
+  const top = models.slice(0, 4);
+  const restCost = models.slice(4).reduce((n, m) => n + m.cost, 0);
+  const segments = top.map((m, i) => ({ label: m.model, value: m.cost, color: palette[i % palette.length] }));
+  if (restCost > 0) {
+    segments.push({ label: `${models.length - 4} more`, value: restCost, color: "#64748b" });
+  }
+  return donutCard("Spend by model", segments, formatCost(usage.cost), "spent", formatCost);
+}
+
 function distributionBar(usage: SessionUsage): string {
+  const spend = spendMixCard(usage);
+  const charts = spend ? `${tokenMixCard(usage)}${spend}` : tokenMixCard(usage);
+  return `<div class="flex flex-col gap-3 sm:flex-row">${charts}</div>`;
+}
+
+function modelShareBars(usage: SessionUsage): string {
+  const models = usage.models ?? [];
+  if (models.length < 2) {
+    return "";
+  }
   const total = usage.totalTokens || 1;
-  const segs: Array<[string, number, string]> = [
-    ["Read", usage.promptTokens, "bg-sky-500"],
-    ["Written", usage.completionTokens, "bg-emerald-500"],
-    ["Reasoning", usage.reasoningTokens, "bg-violet-500"],
-  ];
-  const bars = segs
-    .filter(([, n]) => n > 0)
-    .map(([label, n, color]) => {
-      const pct = (n / total) * 100;
-      return `<div class="${color} h-full" style="width:${pct.toFixed(2)}%" title="${label}: ${n.toLocaleString()}"></div>`;
-    })
-    .join("");
-  const legend = segs
-    .map(([label, n, color]) => {
-      const dot = color.replace("bg-", "bg-");
-      return `<span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full ${dot}"></span>${label} · ${compactTokens(n)}</span>`;
-    })
-    .join("");
-  return `<div>
-    <div class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">${bars}</div>
-    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">${legend}</div>
+  const palette = ["#0ea5e9", "#10b981", "#f59e0b", "#8b5cf6", "#f43f5e"];
+  const rows = models.slice(0, 5).map((m, i) => {
+    const pct = (m.totalTokens / total) * 100;
+    const color = palette[i % palette.length];
+    return `<div>
+      <div class="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
+        <span class="truncate font-medium text-slate-700 dark:text-slate-300">${escapeHtml(m.model)}</span>
+        <span class="flex-shrink-0 font-mono text-slate-400">${compactTokens(m.totalTokens)} · ${pct.toFixed(1)}%</span>
+      </div>
+      <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+        <div class="h-full rounded-full" style="width:${pct.toFixed(2)}%;background:${color}"></div>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+    <div class="mb-3 text-[11px] font-medium uppercase tracking-wider text-slate-400">Share by model</div>
+    <div class="space-y-2.5">${rows}</div>
   </div>`;
 }
 
@@ -270,6 +356,7 @@ function overviewHtml(usage: SessionUsage): string {
   return `<div class="space-y-5">
     <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">${heroes}</div>
     ${distributionBar(usage)}
+    ${modelShareBars(usage)}
     <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">${cells}</div>
   </div>`;
 }
@@ -283,15 +370,15 @@ function modelsHtml(usage: SessionUsage): string {
     .map((m) => {
       const bar = m.contextKnown && m.fillPercent !== undefined
         ? `<div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"><div class="h-full rounded-full bg-accent-500" style="width:${Math.min(100, m.fillPercent).toFixed(2)}%"></div></div>`
-        : `<div class="text-[10px] text-slate-400">window unknown</div>`;
+        : "";
       const spend = m.hasCost ? formatCost(m.cost) : "—";
       return `<div class="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
         <div class="flex items-baseline justify-between gap-3">
           <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">${escapeHtml(m.model)}</div>
           <div class="flex-shrink-0 font-mono text-[11px] text-slate-400">${m.calls} call${m.calls === 1 ? "" : "s"} · ${spend}</div>
         </div>
-        <div class="mt-1 font-mono text-[11px] text-slate-400">${m.contextKnown ? `window ${m.contextWindow.toLocaleString()} · fill ${formatPct(m.fillPercent)}` : "window unknown"}</div>
-        <div class="mt-2">${bar}</div>
+        <div class="mt-1 font-mono text-[11px] text-slate-400">${m.contextKnown ? `window ${m.contextWindow.toLocaleString()} · fill ${formatPct(m.fillPercent)}` : "window size not listed for this model"}</div>
+        ${bar ? `<div class="mt-2">${bar}</div>` : ""}
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
           ${statCell("Total", m.totalTokens.toLocaleString())}
           ${statCell("Read", m.promptTokens.toLocaleString())}

@@ -29,7 +29,7 @@ test("the usage pill falls back to tokens when the window is unknown", async ({ 
   await page.evaluate(() => {
     (window as any).__e2eUsage = {
       sessionId: "sess-notify-1",
-      model: "beam-free",
+      model: "omen-alpha",
       contextWindow: 200000,
       contextKnown: false,
       calls: 1,
@@ -67,6 +67,8 @@ test("clicking the pill opens the analytics dashboard", async ({ page }) => {
   await expect(page.locator("#usageBody")).toContainText("Total tokens");
   await expect(page.locator("#usageBody")).toContainText("25,000");
   await expect(page.locator("#usageBody")).toContainText("Context fill");
+  await expect(page.locator("#usageBody svg").first()).toBeVisible();
+  await expect(page.locator("#usageBody")).toContainText("Share by model");
 
   await page.click("#usageTabModels");
   await expect(page.locator("#usageBody")).toContainText("beam-free");
