@@ -5,10 +5,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -62,6 +65,9 @@ type ChatOutcome struct {
 	Reply         string `json:"reply"`
 	Stopped       bool   `json:"stopped"`
 	NeedsContinue bool   `json:"needsContinue"`
+	// Usage is the turn's billed footprint: every LLM call's tokens
+	// and gateway-reported spend folded together.
+	Usage inference.Usage `json:"-"`
 }
 
 type phase int
@@ -119,6 +125,9 @@ type Agent struct {
 	messages  []inference.LlmMessage
 	records   []transcript.Message
 	reply     strings.Builder
+	// turnUsage accumulates every LLM call's Usage for the turn, across
+	// all rounds and both streaming and fallback paths.
+	turnUsage inference.Usage
 	tx        chan<- ChatChunk
 	done      <-chan struct{}
 
@@ -183,6 +192,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		Reply:         a.reply.String(),
 		Stopped:       stopped,
 		NeedsContinue: needsContinue,
+		Usage:         a.turnUsage,
 	}, nil
 }
 
@@ -226,7 +236,32 @@ func (a *Agent) persist(message string, resume bool) error {
 			return turnFailed{"persist reply: " + err.Error()}
 		}
 	}
+	a.recordUsage()
 	return nil
+}
+
+// recordUsage folds the turn's billed footprint into the session's
+// usage.json ledger. It runs on every persist path (done, stopped and
+// failed turns all spent tokens) and is best-effort: billing must never
+// fail a turn, so errors are swallowed and a corrupt ledger restarts
+// fresh rather than blocking.
+func (a *Agent) recordUsage() {
+	if a.turnUsage.Empty() {
+		return
+	}
+	u := a.turnUsage
+	var totals session.UsageTotals
+	if data, err := os.ReadFile(a.session.UsagePath()); err == nil {
+		_ = json.Unmarshal(data, &totals)
+	}
+	totals.SessionID = a.session.Meta.SessionID
+	totals.AddCall(a.provider.Model(),
+		u.PromptTokens, u.CompletionTokens, u.ReasoningTokens,
+		u.CacheReadTokens, u.CacheWriteTokens, u.TotalTokens,
+		u.Cost, u.ListCost, u.HasCost, time.Now().UTC().Unix())
+	if data, err := json.MarshalIndent(totals, "", "  "); err == nil {
+		_ = os.WriteFile(a.session.UsagePath(), data, 0o644)
+	}
 }
 
 func (a *Agent) emit(chunk ChatChunk) error {

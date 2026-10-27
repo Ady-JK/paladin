@@ -46,6 +46,9 @@ func (a *Agent) runLoop() error {
 					streamErr = &chunk.Err
 					break loop
 				}
+				if chunk.Usage != nil {
+					a.turnUsage.Add(*chunk.Usage)
+				}
 				if chunk.ToolNotice != nil {
 					notice := chunk.ToolNotice
 					name := notice.Name
@@ -115,6 +118,9 @@ func (a *Agent) runLoop() error {
 			roundText.WriteString(resp.Content)
 			a.appendDelta(resp.Content)
 			calls = resp.ToolCalls
+			if resp.Usage != nil {
+				a.turnUsage.Add(*resp.Usage)
+			}
 			if resp.Content != "" {
 				if err := a.emit(ChatChunk{Delta: resp.Content}); err != nil {
 					return a.stopWithPartial(roundText.String())
@@ -282,6 +288,9 @@ loop:
 					return turnStop{}
 				}
 			}
+			if chunk.Usage != nil {
+				a.turnUsage.Add(*chunk.Usage)
+			}
 			if a.stopRequested() {
 				return turnStop{}
 			}
@@ -313,6 +322,9 @@ loop:
 			return turnFailed{"provider unavailable: " + err.Error()}
 		}
 		a.appendDelta(resp.Content)
+		if resp.Usage != nil {
+			a.turnUsage.Add(*resp.Usage)
+		}
 		content := a.reply.String()
 		if err := a.emit(ChatChunk{Delta: content}); err != nil {
 			return turnStop{}

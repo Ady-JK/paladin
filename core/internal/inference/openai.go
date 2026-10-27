@@ -199,6 +199,11 @@ func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools [
 	params := openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(p.model),
 		Messages: toSDKMessages(messages),
+		// The usage-bearing final chunk only arrives when asked for; it is
+		// a standard field, harmless on plain OpenAI endpoints too.
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: openai.Bool(true),
+		},
 	}
 	if system != "" {
 		sys := openai.SystemMessage(system)
@@ -237,7 +242,38 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 			Arguments: call.Function.Arguments,
 		})
 	}
+	out.Usage = chatUsage(res.Usage, res.RawJSON())
 	return out, nil
+}
+
+// chatUsage maps a chat-completions usage block onto Usage. Token counts
+// come from the typed SDK fields; dollar costs and the cache breakdown
+// come from the OpenCode gateway extras in the raw body (absent on plain
+// providers, where costs stay unreported).
+func chatUsage(u openai.CompletionUsage, raw string) *Usage {
+	out := &Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		ReasoningTokens:  u.CompletionTokensDetails.ReasoningTokens,
+		CacheReadTokens:  u.PromptTokensDetails.CachedTokens,
+		TotalTokens:      u.TotalTokens,
+	}
+	if out.TotalTokens == 0 {
+		out.TotalTokens = out.PromptTokens + out.CompletionTokens
+	}
+	if cost, list, cr, cw, ok := gatewayCost(raw); ok {
+		out.Cost, out.ListCost, out.HasCost = cost, list, true
+		if out.CacheReadTokens == 0 {
+			out.CacheReadTokens = cr
+		}
+		if out.CacheWriteTokens == 0 {
+			out.CacheWriteTokens = cw
+		}
+	}
+	if *out == (Usage{}) {
+		return nil
+	}
+	return out
 }
 
 type callAcc struct {
@@ -252,6 +288,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	defer cancel()
 	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID), p.headers(sessionID)...)
 	defer stream.Close()
+	var usage Usage
 	accs := map[int64]*callAcc{}
 	signaled := map[int64]bool{}
 	send := func(c Chunk) error {
@@ -266,6 +303,9 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	}
 	for stream.Next() {
 		chunk := stream.Current()
+		if u := chatUsage(chunk.Usage, chunk.RawJSON()); u != nil {
+			usage.Add(*u)
+		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {
 				if err := send(TextChunk(choice.Delta.Content)); err != nil {
@@ -339,6 +379,18 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 		}
 		select {
 		case tx <- Chunk{ToolCalls: calls}:
+		case <-done:
+			return CancelledError()
+		case <-parent.Done():
+			return CancelledError()
+		}
+	}
+	// Usage travels as its own trailing chunk so the loop can bill the
+	// turn even when the model made no tool calls.
+	if !usage.Empty() {
+		u := usage
+		select {
+		case tx <- Chunk{Usage: &u}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():

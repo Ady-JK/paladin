@@ -169,7 +169,9 @@ func (p *OpenAIProvider) completeGoogle(ctx context.Context, system string, mess
 	if wire.Error != nil && wire.Error.Message != "" {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: google: %s", p.name, wire.Error.Message))
 	}
-	return wire.toolResponse(), nil
+	out := wire.toolResponse()
+	out.Usage = googleUsageOf(wire.UsageMetadata)
+	return out, nil
 }
 
 func (p *OpenAIProvider) googleHeaders(req *http.Request, sessionID string, stream bool) {
@@ -197,9 +199,61 @@ type googleResponse struct {
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
-	Error *struct {
+	UsageMetadata *googleUsage `json:"usageMetadata"`
+	Error         *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// googleUsage is the Generative Language usage envelope. Field names
+// follow the API; the OpenCode gateway additionally nests its cost
+// envelope here (cost/opencode), captured the same way as chat usage.
+type googleUsage struct {
+	PromptTokens        int64    `json:"promptTokenCount"`
+	CandidatesTokens    int64    `json:"candidatesTokenCount"`
+	ThoughtsTokens      int64    `json:"thoughtsTokenCount"`
+	CachedContentTokens int64    `json:"cachedContentTokenCount"`
+	TotalTokens         int64    `json:"totalTokenCount"`
+	Cost                *float64 `json:"cost"`
+	Opencode            *struct {
+		ListCost *float64 `json:"list_cost"`
+		Tokens   *struct {
+			CacheWrite5m int64 `json:"cache_write_5m"`
+			CacheWrite1h int64 `json:"cache_write_1h"`
+		} `json:"tokens"`
+	} `json:"opencode"`
+}
+
+func googleUsageOf(m *googleUsage) *Usage {
+	if m == nil {
+		return nil
+	}
+	out := &Usage{
+		PromptTokens:     m.PromptTokens,
+		CompletionTokens: m.CandidatesTokens,
+		ReasoningTokens:  m.ThoughtsTokens,
+		CacheReadTokens:  m.CachedContentTokens,
+		TotalTokens:      m.TotalTokens,
+	}
+	if out.TotalTokens == 0 {
+		out.TotalTokens = out.PromptTokens + out.CompletionTokens
+	}
+	if m.Cost != nil {
+		out.Cost, out.HasCost = *m.Cost, true
+	}
+	if m.Opencode != nil {
+		if m.Opencode.ListCost != nil {
+			out.ListCost = *m.Opencode.ListCost
+			out.HasCost = true
+		}
+		if m.Opencode.Tokens != nil {
+			out.CacheWriteTokens = m.Opencode.Tokens.CacheWrite5m + m.Opencode.Tokens.CacheWrite1h
+		}
+	}
+	if *out == (Usage{}) {
+		return nil
+	}
+	return out
 }
 
 func (r googleResponse) toolResponse() ToolResponse {
@@ -272,6 +326,7 @@ func (p *OpenAIProvider) streamGoogle(ctx context.Context, system string, messag
 		}
 	}
 	var calls []ToolCall
+	var streamUsage Usage
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -289,6 +344,11 @@ func (p *OpenAIProvider) streamGoogle(ctx context.Context, system string, messag
 		}
 		if ev.Error != nil && ev.Error.Message != "" {
 			return RequestError(fmt.Sprintf("%s: google: %s", p.name, ev.Error.Message))
+		}
+		// usageMetadata repeats on chunks with running totals; the last
+		// one is authoritative, so it overwrites rather than adds.
+		if u := googleUsageOf(ev.UsageMetadata); u != nil {
+			streamUsage = *u
 		}
 		for _, cand := range ev.Candidates {
 			for _, part := range cand.Content.Parts {
@@ -336,6 +396,16 @@ func (p *OpenAIProvider) streamGoogle(ctx context.Context, system string, messag
 	if len(calls) > 0 {
 		select {
 		case tx <- Chunk{ToolCalls: calls}:
+		case <-done:
+			return CancelledError()
+		case <-parent.Done():
+			return CancelledError()
+		}
+	}
+	if !streamUsage.Empty() {
+		u := streamUsage
+		select {
+		case tx <- Chunk{Usage: &u}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():

@@ -397,6 +397,31 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	return session.HistoryView(msgs), nil
 }
 
+// SessionUsage returns the session's billed footprint: accumulated
+// tokens, gateway-reported spend, the model's context window and the
+// fill percentage. Sessions that predate usage tracking (or whose
+// provider never reported usage) come back with zero totals; the window
+// is still resolved so the UI can show the budget.
+func (r *AgentRuntime) SessionUsage(sessionID, cwd string) (session.SessionUsage, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return session.SessionUsage{}, fmt.Errorf("session id is required")
+	}
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return session.SessionUsage{}, err
+	}
+	var totals session.UsageTotals
+	if data, err := os.ReadFile(sess.UsagePath()); err == nil {
+		_ = json.Unmarshal(data, &totals)
+	}
+	model := totals.Model
+	if model == "" && sess.Meta.Model != nil {
+		model = *sess.Meta.Model
+	}
+	window, known := inference.ContextWindow(model)
+	return totals.View(sess.Meta.SessionID, window, known), nil
+}
+
 func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("session id is required")

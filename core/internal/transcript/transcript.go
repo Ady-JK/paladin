@@ -144,6 +144,13 @@ func (s *Session) History() ([]Message, error) {
 	return LoadTranscript(s.Dir)
 }
 
+// UsagePath is the per-session token/spend ledger. It lives next to
+// meta.json so per-session accounting survives restarts and needs no
+// migration of the transcript itself.
+func (s *Session) UsagePath() string {
+	return filepath.Join(s.Dir, "usage.json")
+}
+
 type Info struct {
 	Meta         Meta
 	MessageCount int
