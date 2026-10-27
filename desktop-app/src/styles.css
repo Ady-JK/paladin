@@ -620,35 +620,7 @@
   mask-image: radial-gradient(ellipse 90% 75% at 50% 28%, black 25%, transparent 78%);
 }
 
-/* ---- Thread light: one purple blob that travels down the
-   thread. Avatars glow like graph nodes as it passes. ---- */
-#messages {
-  position: relative;
-}
-
-.dark #messages::before {
-  content: "";
-  position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 13px;
-  width: 2px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, transparent, rgb(168 85 247 / 0.6), transparent);
-  background-size: 100% 32%;
-  background-repeat: no-repeat;
-  animation: spine-flow 6s linear infinite;
-}
-
-@keyframes spine-flow {
-  from {
-    background-position: 0 135%, 0 0;
-  }
-  to {
-    background-position: 0 -135%, 0 0;
-  }
-}
-
+/* ---- Thread: avatars glow like graph nodes. ---- */
 .dark .turn-row .avatar {
   box-shadow:
     0 0 0 3px #090e18,
@@ -843,7 +815,6 @@
 }
 
 /* ---- Frozen shell: no travelling lights behind a guest page. ---- */
-body.guest-visible #messages::before,
 body.guest-visible .greet-orb,
 body.guest-visible .greet-title {
   animation: none;

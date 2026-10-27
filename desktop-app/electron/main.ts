@@ -322,7 +322,7 @@ app.whenReady().then(() => {
   ipcMain.handle("dialog:pickFiles", async (_e, defaultPath: string | null) => {
     if (!win) return null;
     const res = await dialog.showOpenDialog(win, {
-      properties: ["openFile", "multiSelections"],
+      properties: ["openFile", "openDirectory", "multiSelections"],
       ...(defaultPath ? { defaultPath } : {}),
     });
     return res.canceled ? null : res.filePaths;
