@@ -2,16 +2,27 @@
 // It supports the desktop app frontend.
 
 import { $, paintIcons, sidebarEl } from "../core/dom";
+import * as api from "../core/api";
 import { state } from "../core/state";
 import { bridge, hasTauri } from "../core/tauri";
 import { icon } from "../icons";
 import { paintSideVisibility, trackExternalFlight } from "./sites";
 
+// applyShellTheme updates the renderer and the native guest surfaces. The
+// guest pages paint their own content, but until they commit the view
+// background is what the user sees, so it must follow the shell.
+function applyShellTheme(): void {
+  document.documentElement.classList.toggle("dark", state.dark);
+  if (hasTauri()) {
+    api.setExternalTheme(state.dark).catch(() => undefined);
+  }
+}
+
 // toggleTheme is a function in this module.
 // It supports the desktop app frontend.
 function toggleTheme(): void {
   state.dark = !state.dark;
-  document.documentElement.classList.toggle("dark", state.dark);
+  applyShellTheme();
   paintIcons();
 }
 
@@ -83,7 +94,9 @@ async function setupWindow(): Promise<void> {
 
   const titleBar = $("#titleBar");
 
-  // Native frame handles dragging; double-click still toggles maximize.
+  // The header is a drag region now (frameless window). Double-clicking
+  // any non-button part still toggles maximize where the compositor
+  // forwards the event; the maximize button covers the rest.
   titleBar.addEventListener("dblclick", (event) => {
     if ((event.target as HTMLElement).closest("button")) {
       return;
@@ -95,6 +108,7 @@ async function setupWindow(): Promise<void> {
 // initWindow wires the shell controls and sets up the native window.
 // It supports the desktop app frontend.
 export function initWindow(): void {
+  applyShellTheme();
   $("#themeToggleBtn").addEventListener("click", toggleTheme);
   $("#sidebarToggleBtn").addEventListener("click", toggleSidebar);
 

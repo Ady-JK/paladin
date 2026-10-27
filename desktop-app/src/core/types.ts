@@ -130,5 +130,4 @@ export type ChatEntry = {
   id: string;
   title: string;
   url: string;
-  builtin: boolean;
 };

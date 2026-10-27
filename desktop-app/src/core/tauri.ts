@@ -20,6 +20,7 @@ export interface PaladinBridge {
     navigate: (name: string, url: string) => Promise<boolean>;
     reload: (name: string) => Promise<boolean>;
     drop: (name: string) => Promise<boolean>;
+    setTheme: (theme: "dark" | "light") => Promise<boolean>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

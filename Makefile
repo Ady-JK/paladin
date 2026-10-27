@@ -1,12 +1,16 @@
 # Root Makefile — thin wrappers over go/pnpm.
-.PHONY: help desktop-dev desktop-build fmt vet test agent-host agent-host-release clean
+.PHONY: help dev desktop-dev desktop-build fmt vet test agent-host agent-host-release clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:' Makefile | cut -d: -f1 | sort
 
+# Fast loop: compile the sidecar + the Electron main/preload only, then
+# run Vite and Electron. No renderer bundle, no packaging.
+dev: agent-host
+	cd desktop-app && pnpm install --prefer-offline && pnpm build:electron && pnpm dev
+
 # Build the sidecar first, then run the Electron UI against Vite.
-desktop-dev: agent-host
-	cd desktop-app && pnpm install --prefer-offline && pnpm dev
+desktop-dev: dev
 
 # Release: sidecar + renderer + electron packaging.
 desktop-build: agent-host-release

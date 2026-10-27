@@ -24,7 +24,8 @@ stderr. See `PROTOCOL.md`.
 ## Run
 
 ```sh
-make desktop-dev        # go build ./core, pnpm install, vite + electron
+make dev                # fast loop: sidecar + Electron main/preload, Vite + Electron
+make desktop-dev        # same thing (kept as an alias)
 ```
 
 Headed Electron needs an X server. Headless smoke (CI-friendly):
@@ -40,13 +41,20 @@ uncaught exceptions, pings the sidecar over JSONL, and exits 0/1.
 
 ## Web embeds
 
-- ChatGPT: `WebContentsView`, `persist:paladin-chatgpt`
-- Gemini: `WebContentsView`, `persist:paladin-gemini`
+- Chat pages: `WebContentsView` with a persistent partition per page;
+  Gemini and ChatGPT keep their original `persist:paladin-gemini` /
+  `persist:paladin-chatgpt` partitions so existing logins survive.
+- Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
+  ordinary entries and any of them can be removed like a custom page.
 - Views stay alive when switching to Agent (hidden, never destroyed);
   only the selected view gets bounds. Bounds come from the renderer's
   `#externalHost` rect, one settle move per layout change.
-- Built-in views drop after 60s idle on the Agent tab to reclaim RAM;
-  logins persist in the partition.
+- Views drop after 60s idle on the Agent tab to reclaim RAM; logins
+  persist in the partition.
+- The window is frameless: the renderer draws the header and the
+  minimize/maximize/close buttons, and `views:setTheme` keeps every guest
+  view's pre-paint background in the shell colour so opening a page never
+  flashes white in dark mode.
 
 ## Release
 

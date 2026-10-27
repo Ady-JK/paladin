@@ -179,6 +179,22 @@
 }
 
 @layer components {
+  /* ---- Frameless window drag regions ----
+     The OS frame is off, so the top strips are the title bar. Controls
+     inside them opt back out, otherwise clicks would start a drag. */
+  #brandBar,
+  #titleBar {
+    -webkit-app-region: drag;
+  }
+
+  #brandBar button,
+  #brandBar input,
+  #titleBar button,
+  #titleBar input,
+  #titleBar a {
+    -webkit-app-region: no-drag;
+  }
+
   /* ---- Sidebar + header glass ---- */
   #sidebar {
     transition: width 240ms cubic-bezier(0.32, 0.72, 0.28, 1), background-color 200ms ease;

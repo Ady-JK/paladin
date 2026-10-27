@@ -4,7 +4,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
 import readline from "node:readline";
 
 type Json = any;
@@ -29,6 +29,43 @@ type ViewEntry = {
 const views = new Map<string, ViewEntry>();
 let visibleView: string | null = null;
 let lastBounds: { x: number; y: number; width: number; height: number } | null = null;
+
+// The shell is frameless, so the renderer owns the title bar and the
+// window buttons. Renderer dark/light is mirrored here because guest
+// pages are native views: their background must match the shell before
+// the first paint, or a dark shell flashes white on every open.
+type AppTheme = "dark" | "light";
+let appTheme: AppTheme = "dark";
+
+function chromeColor(): string {
+  // Matches the palette in styles.css: slate-950 is #06090e.
+  return appTheme === "dark" ? "#06090e" : "#ffffff";
+}
+
+function paintViewBackground(entry: ViewEntry): void {
+  try {
+    entry.view.setBackgroundColor(chromeColor());
+  } catch {
+    // Window is closing; ignore.
+  }
+}
+
+function applyTheme(theme: AppTheme): void {
+  appTheme = theme;
+  const color = chromeColor();
+  // Guest pages read prefers-color-scheme, not the shell's CSS class. Tell
+  // them the same theme so a site with a system theme loads dark instead
+  // of flashing its white default in a dark window.
+  nativeTheme.themeSource = theme;
+  try {
+    win?.setBackgroundColor(color);
+  } catch {
+    // Window is closing; ignore.
+  }
+  for (const entry of views.values()) {
+    paintViewBackground(entry);
+  }
+}
 
 function agentBin(): string {
   // Dev: go build output next to the repo. Prod: bundled resource.
@@ -129,6 +166,14 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
       spellcheck: false,
     },
   });
+  // Paint the view's surface in the shell colour from the first frame.
+  // Without this the compositor shows its default white until the page
+  // commits, which is jarring (and blinding) on a dark theme.
+  try {
+    view.setBackgroundColor(chromeColor());
+  } catch {
+    // Older Electron; the window background still covers the gap.
+  }
   const ua = userAgentForView();
   if (ua) {
     view.webContents.setUserAgent(ua);
@@ -140,7 +185,7 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
 }
 
 function layoutVisible(): void {
-  if (!win || !visibleView || !lastBounds) return;
+  if (!win || win.isDestroyed() || !visibleView || !lastBounds) return;
   const entry = views.get(visibleView);
   if (!entry) return;
   const b = lastBounds;
@@ -171,7 +216,7 @@ function layoutVisible(): void {
 }
 
 function showOnly(name: string | null): void {
-  if (!win) return;
+  if (!win || win.isDestroyed()) return;
   // Same page already up: no detach/reattach, just confirm bounds.
   if (name && name !== "agent" && visibleView === name && views.has(name)) {
     layoutVisible();
@@ -213,14 +258,25 @@ function createWindow(): void {
     width: 1400,
     height: 900,
     autoHideMenuBar: true,
+    // No OS title bar: the renderer draws the header and the window
+    // buttons, so there is exactly one set of controls.
+    frame: false,
     // Painted before the first frame: no white flash between window
     // creation and the renderer's dark background.
-    backgroundColor: "#06090e",
+    backgroundColor: chromeColor(),
+    // Start on the whole screen, not a small floating rectangle. Wait
+    // for the first frame before showing so the maximize is not a jump.
+    show: false,
     webPreferences: {
       preload: path.join(HERE, "preload.js"),
       contextIsolation: true,
       sandbox: true,
     },
+  });
+
+  win.once("ready-to-show", () => {
+    win?.maximize();
+    win?.show();
   });
 
   if (!app.isPackaged && process.env.ELECTRON_START_URL) {
@@ -256,6 +312,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  nativeTheme.themeSource = appTheme;
   startAgent();
 
   ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
@@ -324,7 +381,12 @@ app.whenReady().then(() => {
   ipcMain.handle("window:close", () => win?.close());
   ipcMain.handle("window:isMaximized", () => win?.isMaximized() ?? false);
 
-  ipcMain.handle("views:drop", (_e, name: string) => {    const entry = views.get(name);
+  ipcMain.handle("views:setTheme", (_e, theme: string) => {
+    applyTheme(theme === "light" ? "light" : "dark");
+    return true;
+  });
+  ipcMain.handle("views:drop", (_e, name: string) => {
+    const entry = views.get(name);
     if (!entry) return true;
     if (win) {
       try {
