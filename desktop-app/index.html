@@ -231,19 +231,26 @@
           >
           <div class="w-full">
             <div
-              class="composer-float relative rounded-2xl border border-slate-300/80 bg-white/95 focus-within:border-accent-500 dark:border-slate-700/70 dark:bg-slate-900/90"
+              class="composer-float relative rounded-3xl border border-slate-300/80 bg-white/95 focus-within:border-accent-500 dark:border-slate-700/70 dark:bg-slate-900/90"
             >
               <textarea
                 id="promptInput"
-                rows="2"
+                rows="3"
                 placeholder="Ask the agent to code, run commands, refactor files… (enter to send, shift+enter for a new line)"
-                class="w-full resize-none bg-transparent px-2.5 pb-1 pt-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                class="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
                 spellcheck="false"
               ></textarea>
 
               <div
                 class="flex flex-nowrap items-center gap-2 border-t border-slate-200/50 px-2 pb-1.5 pt-1.5 dark:border-slate-800/50"
               >
+                <button
+                  id="attachBtn"
+                  class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent px-2 py-1 font-mono text-[13px] font-semibold text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                  title="Tag a file or folder (@)"
+                >
+                  <span data-icon="paperclip" class="flex-shrink-0"></span>
+                </button>
                 <div class="relative min-w-0 flex-1">
                   <button
                     id="modelSelectBtn"

@@ -20,6 +20,9 @@ export const chatViewEl = $("#chatView");
 // inputEl is a const in this module.
 // It supports the desktop app frontend.
 export const inputEl = $<HTMLTextAreaElement>("#promptInput");
+// attachBtnEl is a const in this module.
+// It tags a file or folder from the composer.
+export const attachBtnEl = $<HTMLButtonElement>("#attachBtn");
 // sendBtn is a const in this module.
 // It supports the desktop app frontend.
 export const sendBtn = $<HTMLButtonElement>("#sendBtn");

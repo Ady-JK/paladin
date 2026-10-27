@@ -35,9 +35,14 @@ test("expanding a tool row keeps the reading position", async ({ page }) => {
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("notify job-1-1");
 
-  await page.locator("#chatView").evaluate((el) => el.scrollTo(0, 0));
-  await page.locator("#messages button").first().click();
+  // Seat the row in view first: the assertion below measures the
+  // expand itself, not the click's scroll-into-view.
+  const btn = page.locator("#messages button").first();
+  await btn.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(100);
+  const before = await page.locator("#chatView").evaluate((el) => el.scrollTop);
+  await btn.click();
   await page.waitForTimeout(200);
-  const top = await page.locator("#chatView").evaluate((el) => el.scrollTop);
-  expect(top).toBeLessThan(50);
+  const after = await page.locator("#chatView").evaluate((el) => el.scrollTop);
+  expect(Math.abs(after - before)).toBeLessThan(50);
 });

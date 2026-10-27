@@ -2,7 +2,7 @@
 // It supports the desktop app frontend.
 
 import * as api from "../core/api";
-import { chatViewEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
+import { attachBtnEl, chatViewEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
 import { renderText } from "../core/format";
 import { state } from "../core/state";
 import type { ToolView } from "../core/types";
@@ -225,6 +225,15 @@ export function requestStop(): void {
 // initChat wires the composer and the stop affordances.
 // It supports the desktop app frontend.
 export function initChat(): void {
+  attachBtnEl.addEventListener("click", () => {
+    const caret = inputEl.selectionStart ?? inputEl.value.length;
+    inputEl.value = `${inputEl.value.slice(0, caret)}@${inputEl.value.slice(caret)}`;
+    inputEl.selectionStart = caret + 1;
+    inputEl.selectionEnd = caret + 1;
+    inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+    inputEl.focus();
+  });
+
   inputEl.addEventListener("keydown", (event) => {
     // Popups first: Enter/Tab/Esc/Arrows belong to them while open.
     if (handleSlashKey(event)) {

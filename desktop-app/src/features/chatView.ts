@@ -1,7 +1,7 @@
 // chatView.ts renders the conversation turns.
 // It supports the desktop app frontend.
 
-import { chatViewEl, messagesEl } from "../core/dom";
+import { chatViewEl, inputEl, messagesEl } from "../core/dom";
 import { escapeHtml, renderText } from "../core/format";
 import { state } from "../core/state";
 import type { Turn } from "../core/types";
@@ -13,31 +13,54 @@ export function scrollToBottom(): void {
   chatViewEl.scrollTop = chatViewEl.scrollHeight;
 }
 
-// renderGreeting is a function in this module.
-// It supports the desktop app frontend.
+// STARTERS are the hero suggestion chips on an empty conversation.
+// Picking one drafts the prompt in the composer without sending.
+const STARTERS: Array<{ label: string; prompt: string }> = [
+  {
+    label: "Map the codebase",
+    prompt: "Explore the workspace and give me a guided tour of the codebase layout.",
+  },
+  {
+    label: "Run the test suite",
+    prompt: "Run the test suite and report what fails.",
+  },
+  {
+    label: "Review my changes",
+    prompt: "Review the latest changes and point out risks.",
+  },
+];
+
+// renderGreeting paints the empty-state hero: drifting orb, panning
+// gradient title, and starter chips that draft prompts.
 export function renderGreeting(): void {
   if (messagesEl.childElementCount > 0) {
     return;
   }
 
   const wrapper = document.createElement("div");
-  wrapper.className = "turn-row mx-auto flex max-w-4xl gap-3 text-xs";
+  wrapper.className = "greet-hero mx-auto w-full max-w-4xl text-xs";
 
   wrapper.innerHTML = `
-    <div class="avatar avatar-agent">${icon("robot", "h-3 w-3")}</div>
-    <div class="min-w-0 flex-1 space-y-1">
-      <div class="flex items-center gap-2">
-        <span class="font-semibold text-slate-900 dark:text-slate-100">paladin</span>
-        <span class="text-[10px] text-slate-400">now</span>
-      </div>
-      <p class="leading-relaxed text-slate-600 dark:text-slate-300">
-        The harness is connected to the workspace
-        <code class="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px] dark:bg-slate-800">${escapeHtml(
-          state.cwd || "workspace",
-        )}</code>.
-        I am ready to read the code, answer questions and write code. What are we building today?
-      </p>
-    </div>`;
+    <div class="greet-orb"></div>
+    <h1 class="greet-title">Ready when you are.</h1>
+    <p class="greet-sub">Connected to
+      <code class="rounded bg-slate-200 px-1 py-0.5 font-mono dark:bg-slate-800">${escapeHtml(
+        state.cwd || "workspace",
+      )}</code>
+      · tag files with <code class="rounded bg-slate-200 px-1 py-0.5 font-mono dark:bg-slate-800">@</code> · <code class="rounded bg-slate-200 px-1 py-0.5 font-mono dark:bg-slate-800">/help</code> for commands
+    </p>
+    <div class="greet-chips">${STARTERS.map((s, i) => `<button class="greet-chip" data-chip="${i}">${escapeHtml(s.label)}</button>`).join("")}</div>`;
+
+  wrapper.querySelectorAll<HTMLButtonElement>("[data-chip]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const starter = STARTERS[Number(chip.dataset.chip)];
+      if (!starter) {
+        return;
+      }
+      inputEl.value = starter.prompt;
+      inputEl.focus();
+    });
+  });
 
   messagesEl.append(wrapper);
 }
