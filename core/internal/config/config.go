@@ -6,6 +6,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -457,8 +458,19 @@ func IsPlaceholderKey(key string) bool {
 		strings.Contains(lower, "xxx")
 }
 
+// IsOpencodeEndpoint reports whether apiURL points at OpenCode Go. The
+// documented hosts are opencode.ai/inference/... and opencode.ai/zen/...;
+// matching the host (not a path prefix) keeps both working, including any
+// future gateway path. A lookalike host such as opencode.ai.example.com
+// must not opt into OpenCode's session headers.
 func IsOpencodeEndpoint(apiURL string) bool {
-	return strings.Contains(strings.ToLower(apiURL), "opencode.ai/inference")
+	trimmed := strings.TrimSpace(apiURL)
+	u, err := url.Parse(trimmed)
+	if err == nil && u.Hostname() != "" {
+		host := strings.ToLower(u.Hostname())
+		return host == "opencode.ai" || strings.HasSuffix(host, ".opencode.ai")
+	}
+	return strings.Contains(strings.ToLower(trimmed), "opencode.ai")
 }
 
 // AtomicWrite writes data to path via a temp file + rename, with

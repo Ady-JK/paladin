@@ -20,6 +20,7 @@ type mockProvider struct {
 	completeErr error
 	streamsErr  error
 	calls       int
+	sessionIDs  []string
 }
 
 type streamScript struct {
@@ -33,10 +34,12 @@ func (m *mockProvider) Model() string                                { return "m
 func (m *mockProvider) ListModels(context.Context) ([]string, error) { return nil, nil }
 
 func (m *mockProvider) CompleteTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string) (inference.ToolResponse, error) {
+	m.sessionIDs = append(m.sessionIDs, sessionID)
 	return m.complete, m.completeErr
 }
 
 func (m *mockProvider) StreamTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string, tx chan<- inference.Chunk, done <-chan struct{}) error {
+	m.sessionIDs = append(m.sessionIDs, sessionID)
 	idx := m.calls
 	m.calls++
 	if m.streamsErr != nil {

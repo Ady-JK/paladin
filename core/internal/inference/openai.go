@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -80,13 +81,44 @@ func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
 	if !p.isOpencode {
 		return nil
 	}
-	return []option.RequestOption{
+	out := []option.RequestOption{
 		option.WithHeader("User-Agent", config.OpencodeUserAgent),
-		option.WithHeader(config.OpencodeSessionHeader, sessionID),
 	}
+	// OpenCode asks every client for a stable per-conversation id; it also
+	// routes and caches by it. Never send an empty value, which some
+	// gateways reject as a missing header.
+	if id := strings.TrimSpace(sessionID); id != "" {
+		out = append(out, option.WithHeader(config.OpencodeSessionHeader, id))
+	}
+	return out
 }
 
 func (p *OpenAIProvider) chatURL() string { return p.baseURL + "/chat/completions" }
+
+// catalogURL derives the model list endpoint from the configured base.
+// OpenCode's documented base is .../go/openai/v1 while its model list is
+// .../go/v1/models, so strip the protocol segment. The zen alias
+// (.../zen/go/v1) uses .../zen/go/v1/models directly. Deriving keeps a
+// custom or future OpenCode host from being pinned to the prod URL.
+func (p *OpenAIProvider) catalogURL() string {
+	u, err := url.Parse(p.baseURL)
+	if err != nil {
+		return config.OpencodeCatalogURL
+	}
+	path := strings.TrimRight(u.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/openai/v1"):
+		path = strings.TrimSuffix(path, "/openai/v1") + "/v1/models"
+	case strings.HasSuffix(path, "/v1"):
+		path += "/models"
+	default:
+		path += "/v1/models"
+	}
+	u.Path = path
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
 
 // requestError never logs or returns the key: errors carry status + body.
 func (p *OpenAIProvider) requestError(status int, body string) *ProviderError {
@@ -156,7 +188,7 @@ func toSDKTools(tools []ToolDefinition) []openai.ChatCompletionToolParam {
 	return out
 }
 
-func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools []ToolDefinition) openai.ChatCompletionNewParams {
+func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(p.model),
 		Messages: toSDKMessages(messages),
@@ -168,13 +200,21 @@ func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools [
 	if len(tools) > 0 {
 		params.Tools = toSDKTools(tools)
 	}
+	// OpenCode forwards this to the upstream provider. Pairing the stable
+	// conversation id with the x-opencode-session header keeps the
+	// prompt-cache bucket identical across every round of a turn.
+	if p.isOpencode {
+		if id := strings.TrimSpace(sessionID); id != "" {
+			params.PromptCacheKey = openai.String(id)
+		}
+	}
 	return params
 }
 
 func (p *OpenAIProvider) CompleteTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools), p.headers(sessionID)...)
+	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID), p.headers(sessionID)...)
 	if err != nil {
 		return ToolResponse{}, p.mapError("chat completion", err)
 	}
@@ -203,7 +243,7 @@ func (p *OpenAIProvider) StreamTools(ctx context.Context, system string, message
 	parent := ctx
 	tctx, cancel := context.WithTimeout(ctx, streamTimeout)
 	defer cancel()
-	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools), p.headers(sessionID)...)
+	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID), p.headers(sessionID)...)
 	defer stream.Close()
 	accs := map[int64]*callAcc{}
 	signaled := map[int64]bool{}
@@ -348,12 +388,19 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
 func (p *OpenAIProvider) listOpencodeCatalog(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", config.OpencodeCatalogURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", p.catalogURL(), nil)
 	if err != nil {
 		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", config.OpencodeUserAgent)
 	req.Header.Set(config.OpencodeSessionHeader, "catalog")
+	// The catalog is public today, but sending the key when one is
+	// configured keeps private/regional listings working without a
+	// separate code path. A placeholder key must never be sent.
+	if key := strings.TrimSpace(p.apiKey); key != "" && !config.IsPlaceholderKey(key) {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))

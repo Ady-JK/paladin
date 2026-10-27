@@ -39,6 +39,16 @@ cd desktop-app
 `--smoke-test` loads the window, fails on renderer load errors /
 uncaught exceptions, pings the sidecar over JSONL, and exits 0/1.
 
+## OpenCode Go
+
+The seeded `Opencode Go` provider targets OpenCode's OpenAI-compatible endpoint
+(`https://opencode.ai/inference/go/openai/v1`; the `/zen/go/v1` alias also works).
+Every request sends `User-Agent: paladin/1.0` and `x-opencode-session` set to the
+transcript session id. Chat requests also send that id as `prompt_cache_key`, so
+all rounds of one conversation share OpenCode's routing and prompt-cache bucket.
+The model catalog is derived from the configured base URL rather than a hardcoded
+gateway URL.
+
 ## Web embeds
 
 - Chat pages: `WebContentsView` with a persistent partition per page;

@@ -71,6 +71,33 @@ func TestRunToolRound(t *testing.T) {
 	}
 }
 
+func TestRunUsesStableSessionIDAcrossRounds(t *testing.T) {
+	dir := t.TempDir()
+	wsFile := dir + "/note.txt"
+	if err := writeTestFile(wsFile, "cached prefix\n"); err != nil {
+		t.Fatal(err)
+	}
+	prov := &mockProvider{streams: []streamScript{
+		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path": "` + wsFile + `"}`}}}}},
+		{chunks: []inference.Chunk{inference.TextChunk("done")}},
+	}}
+	const sid = "00000000-0000-4000-8000-0000000000aa"
+	sess := testSession(t, sid)
+	a, _, done := newAgentForTest(t, prov, sess, 5, "read it", false, true)
+	defer close(done)
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if len(prov.sessionIDs) < 2 {
+		t.Fatalf("expected multiple rounds, got %d", len(prov.sessionIDs))
+	}
+	for i, got := range prov.sessionIDs {
+		if got != sid {
+			t.Fatalf("round %d session %q, want %q", i, got, sid)
+		}
+	}
+}
+
 func TestRunProviderError(t *testing.T) {
 	prov := &mockProvider{streamsErr: inference.RequestError("down")}
 	a, _, _, done := testAgent(t, prov, 5)
