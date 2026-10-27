@@ -47,7 +47,10 @@ Every request sends `User-Agent: paladin/1.0` and `x-opencode-session` set to th
 transcript session id. Chat requests also send that id as `prompt_cache_key`, so
 all rounds of one conversation share OpenCode's routing and prompt-cache bucket.
 The model catalog is derived from the configured base URL rather than a hardcoded
-gateway URL.
+gateway URL. Models that OpenCode only exposes over the Responses, Anthropic
+Messages, or Google Generative Language APIs are routed to those dialects
+automatically; Gemini thought signatures are round-tripped through the
+transcript so tool follow-up rounds stay valid.
 
 ## Web embeds
 

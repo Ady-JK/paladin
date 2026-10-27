@@ -32,6 +32,7 @@ type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type Message struct {

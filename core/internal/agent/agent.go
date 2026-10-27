@@ -249,7 +249,7 @@ func (a *Agent) appendAssistant(content string, calls []inference.ToolCall) {
 	})
 	stored := make([]transcript.ToolCall, 0, len(calls))
 	for _, c := range calls {
-		stored = append(stored, transcript.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments})
+		stored = append(stored, transcript.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments, Signature: c.Signature})
 	}
 	a.records = append(a.records, transcript.Message{
 		Role:      transcript.RoleAssistant,

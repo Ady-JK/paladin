@@ -47,6 +47,7 @@ type OpenAIProvider struct {
 	baseURL    string
 	apiKey     string
 	isOpencode bool
+	protocol   string
 	client     *openai.Client
 }
 
@@ -63,12 +64,18 @@ func NewOpenAIProvider(name, model, baseURL, apiKey string) *OpenAIProvider {
 		option.WithAPIKey(apiKey),
 		option.WithMaxRetries(0),
 	)
+	isOpencode := config.IsOpencodeEndpoint(baseURL)
+	protocol := protocolChat
+	if isOpencode {
+		protocol = opencodeProtocol(model)
+	}
 	return &OpenAIProvider{
 		name:       name,
 		model:      model,
 		baseURL:    baseURL,
 		apiKey:     apiKey,
-		isOpencode: config.IsOpencodeEndpoint(baseURL),
+		isOpencode: isOpencode,
+		protocol:   protocol,
 		client:     &client,
 	}
 }
@@ -211,7 +218,7 @@ func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools [
 	return params
 }
 
-func (p *OpenAIProvider) CompleteTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
+func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID), p.headers(sessionID)...)
@@ -239,7 +246,7 @@ type callAcc struct {
 	arguments strings.Builder
 }
 
-func (p *OpenAIProvider) StreamTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
+func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
 	parent := ctx
 	tctx, cancel := context.WithTimeout(ctx, streamTimeout)
 	defer cancel()

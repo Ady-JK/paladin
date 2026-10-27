@@ -251,12 +251,18 @@ func TestAppendNotifyShape(t *testing.T) {
 func TestAppendAssistantAndToolResult(t *testing.T) {
 	a, _, _, done := testAgent(t, &mockProvider{}, 5)
 	defer close(done)
-	calls := []inference.ToolCall{{ID: "c1", Name: "read", Arguments: "{}"}}
+	calls := []inference.ToolCall{{ID: "c1", Name: "read", Arguments: "{}", Signature: "sig-1"}}
 	a.appendAssistant("text", calls)
 	call := &inference.ToolCall{ID: "c1", Name: "read", Arguments: "{}"}
 	a.appendToolResult(call, &tools.ToolResult{CallID: "c1", Name: "read", Content: "out"})
 	if len(a.messages) != 2 || len(a.messages[0].ToolCalls) != 1 {
 		t.Fatalf("got %+v", a.messages)
+	}
+	if a.messages[0].ToolCalls[0].Signature != "sig-1" {
+		t.Fatalf("signature not kept in memory: %+v", a.messages[0].ToolCalls[0])
+	}
+	if a.records[0].ToolCalls == nil || (*a.records[0].ToolCalls)[0].Signature != "sig-1" {
+		t.Fatalf("signature not persisted: %+v", a.records[0].ToolCalls)
 	}
 	if a.messages[1].Role != "tool" || a.messages[1].Content != "out" {
 		t.Fatalf("got %+v", a.messages[1])
