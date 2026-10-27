@@ -121,6 +121,16 @@ func toAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefini
 	return req
 }
 
+// anthropicUsageBlock is the usage envelope the Messages API sends in
+// message_start (input side, on .message.usage) and message_delta
+// (output side, on .usage). Field names follow the Anthropic API.
+type anthropicUsageBlock struct {
+	InputTokens              int64 `json:"input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+}
+
 func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	body := toAnthropicRequest(system, messages, tools)
 	body.Model = p.model
@@ -158,6 +168,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 			Name  string          `json:"name"`
 			Input json.RawMessage `json:"input"`
 		} `json:"content"`
+		Usage anthropicUsageBlock `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
@@ -183,7 +194,27 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 		}
 	}
 	out.Content = text.String()
+	if u := anthropicUsage(wire.Usage); u != nil {
+		out.Usage = u
+	}
 	return out, nil
+}
+
+// anthropicUsage folds one usage block into Usage. Input-side fields
+// arrive in message_start, output tokens in message_delta; both map
+// onto the same accumulator.
+func anthropicUsage(b anthropicUsageBlock) *Usage {
+	out := &Usage{
+		PromptTokens:     b.InputTokens,
+		CompletionTokens: b.OutputTokens,
+		CacheReadTokens:  b.CacheReadInputTokens,
+		CacheWriteTokens: b.CacheCreationInputTokens,
+	}
+	out.TotalTokens = out.PromptTokens + out.CompletionTokens
+	if *out == (Usage{}) {
+		return nil
+	}
+	return out
 }
 
 func (p *OpenAIProvider) anthropicHeaders(req *http.Request, sessionID string, stream bool) {
@@ -245,6 +276,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 		}
 	}
 	accs := map[int]*anthropicCallAcc{}
+	var streamUsage Usage
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -257,8 +289,12 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 			continue
 		}
 		var ev struct {
-			Type         string `json:"type"`
-			Index        int    `json:"index"`
+			Type    string `json:"type"`
+			Index   int    `json:"index"`
+			Message *struct {
+				Usage anthropicUsageBlock `json:"usage"`
+			} `json:"message"`
+			Usage        *anthropicUsageBlock `json:"usage"`
 			ContentBlock *struct {
 				Type string `json:"type"`
 				ID   string `json:"id"`
@@ -278,6 +314,16 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 			continue
 		}
 		switch ev.Type {
+		case "message_start":
+			// Input-side usage rides on message_start.message.usage.
+			if ev.Message != nil {
+				addUsage(&streamUsage, anthropicUsage(ev.Message.Usage))
+			}
+		case "message_delta":
+			// Output tokens arrive here.
+			if ev.Usage != nil {
+				addUsage(&streamUsage, anthropicUsage(*ev.Usage))
+			}
 		case "content_block_start":
 			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
 				acc := &anthropicCallAcc{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name, index: ev.Index}
@@ -305,6 +351,12 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 		case "message_stop":
 			if calls := anthropicCalls(accs); len(calls) > 0 {
 				if err := send(Chunk{ToolCalls: calls}); err != nil {
+					return CancelledError()
+				}
+			}
+			if !streamUsage.Empty() {
+				u := streamUsage
+				if err := send(Chunk{Usage: &u}); err != nil {
 					return CancelledError()
 				}
 			}
@@ -337,6 +389,16 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 	if calls := anthropicCalls(accs); len(calls) > 0 {
 		select {
 		case tx <- Chunk{ToolCalls: calls}:
+		case <-done:
+			return CancelledError()
+		case <-parent.Done():
+			return CancelledError()
+		}
+	}
+	if !streamUsage.Empty() {
+		u := streamUsage
+		select {
+		case tx <- Chunk{Usage: &u}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():

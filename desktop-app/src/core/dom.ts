@@ -173,6 +173,31 @@ export const newSessionListEl = $("#newSessionList");
 // sessionLabelEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionLabelEl = $("#sessionLabel");
+// usagePillEl is a const in this module.
+// It shows the active session's context fill and spend; hidden when
+// there is no session or no billed usage yet.
+export const usagePillEl = $("#usagePill");
+// usageLabelEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageLabelEl = $("#usageLabel");
+// usageModalEl is a const in this module.
+// It hosts the session analytics dashboard.
+export const usageModalEl = $("#usageModal");
+// usageBodyEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageBodyEl = $("#usageBody");
+// usageModalSessionEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageModalSessionEl = $("#usageModalSession");
+// usageTabOverviewEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageTabOverviewEl = $<HTMLButtonElement>("#usageTabOverview");
+// usageTabModelsEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageTabModelsEl = $<HTMLButtonElement>("#usageTabModels");
+// usageCloseBtnEl is a const in this module.
+// It supports the desktop app frontend.
+export const usageCloseBtnEl = $<HTMLButtonElement>("#usageCloseBtn");
 // sessionListEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionListEl = $("#sessionList");
@@ -191,6 +216,9 @@ export const settingsNavProvidersEl = $<HTMLButtonElement>("#settingsNavProvider
 // settingsNavConnectionEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsNavConnectionEl = $<HTMLButtonElement>("#settingsNavConnection");
+// settingsNavAnalyticsEl is a const in this module.
+// It opens the fleet-wide analytics pane inside settings.
+export const settingsNavAnalyticsEl = $<HTMLButtonElement>("#settingsNavAnalytics");
 // settingsPaneTitleEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneTitleEl = $("#settingsPaneTitle");
@@ -203,6 +231,12 @@ export const settingsPaneProvidersEl = $("#settingsPaneProviders");
 // settingsPaneConnectionEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneConnectionEl = $("#settingsPaneConnection");
+// settingsPaneAnalyticsEl is a const in this module.
+// It hosts the fleet-wide analytics dashboard.
+export const settingsPaneAnalyticsEl = $("#settingsPaneAnalytics");
+// analyticsBodyEl is a const in this module.
+// It hosts the rendered fleet-wide dashboard.
+export const analyticsBodyEl = $("#analyticsBody");
 // settingsProviderListEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsProviderListEl = $("#settingsProviderList");

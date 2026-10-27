@@ -39,15 +39,21 @@ type ToolDefinition struct {
 type ToolResponse struct {
 	Content   string
 	ToolCalls []ToolCall
+	// Usage is the call's token/spend footprint; nil when the provider
+	// did not report one.
+	Usage *Usage
 }
 
 // Chunk is one streamed piece: text, a tool-call notice (name arrived,
-// args still streaming), final tool calls, or an error.
+// args still streaming), final tool calls, usage, or an error.
 type Chunk struct {
 	Text       string
 	ToolCalls  []ToolCall
 	ToolNotice *ToolCall
-	Err        string
+	// Usage arrives once per stream (the final usage chunk); the loop
+	// accumulates it and never surfaces it as a delta.
+	Usage *Usage
+	Err   string
 }
 
 func TextChunk(text string) Chunk { return Chunk{Text: text} }

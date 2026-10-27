@@ -397,6 +397,189 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	return session.HistoryView(msgs), nil
 }
 
+// SessionUsage returns the session's billed footprint: accumulated
+// tokens, gateway-reported spend, the model's context window and the
+// fill percentage. Sessions that predate usage tracking (or whose
+// provider never reported usage) come back with zero totals; the window
+// is still resolved so the UI can show the budget.
+func (r *AgentRuntime) SessionUsage(sessionID, cwd string) (session.SessionUsage, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return session.SessionUsage{}, fmt.Errorf("session id is required")
+	}
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return session.SessionUsage{}, err
+	}
+	var totals session.UsageTotals
+	if data, err := os.ReadFile(sess.UsagePath()); err == nil {
+		_ = json.Unmarshal(data, &totals)
+	}
+	model := totals.Model
+	if model == "" && sess.Meta.Model != nil {
+		model = *sess.Meta.Model
+	}
+	window, known := inference.ContextWindow(model)
+	return totals.View(sess.Meta.SessionID, window, known, inference.ContextWindow), nil
+}
+
+// OverallUsage rolls every session's usage.json into one fleet-wide
+// view: totals plus per-model, per-session and per-day breakdowns.
+// cwd scopes like ListSessions (empty means every workspace).
+// limit caps the per-session table (0 means all); totals always cover
+// every session found.
+func (r *AgentRuntime) OverallUsage(cwd string, limit int) (session.OverallUsage, error) {
+	infos, err := r.transcripts.List(cwd, 0)
+	if err != nil {
+		return session.OverallUsage{}, err
+	}
+	out := session.OverallUsage{SessionCount: int64(len(infos))}
+	byModel := map[string]*session.ModelUsageView{}
+	byDay := map[string]*session.DailyPoint{}
+	for _, info := range infos {
+		sess, err := r.transcripts.Load(info.Meta.Cwd, info.Meta.SessionID)
+		if err != nil {
+			continue
+		}
+		var totals session.UsageTotals
+		if data, err := os.ReadFile(sess.UsagePath()); err == nil {
+			_ = json.Unmarshal(data, &totals)
+		}
+		if totals.Calls == 0 && totals.TotalTokens == 0 {
+			continue
+		}
+		out.SessionsWithUsage++
+		out.Calls += totals.Calls
+		out.PromptTokens += totals.PromptTokens
+		out.CompletionTokens += totals.CompletionTokens
+		out.ReasoningTokens += totals.ReasoningTokens
+		out.CacheReadTokens += totals.CacheReadTokens
+		out.CacheWriteTokens += totals.CacheWriteTokens
+		out.TotalTokens += totals.TotalTokens
+		if totals.HasCost {
+			out.Cost += totals.Cost
+			out.ListCost += totals.ListCost
+			out.HasCost = true
+		}
+		if totals.UpdatedAt > out.UpdatedAt {
+			out.UpdatedAt = totals.UpdatedAt
+		}
+		model := totals.Model
+		if model == "" && sess.Meta.Model != nil {
+			model = *sess.Meta.Model
+		}
+		entry := session.OverallSessionEntry{
+			SessionID:        sess.Meta.SessionID,
+			Title:            info.Title,
+			Model:            model,
+			CreatedAt:        sess.Meta.CreatedAt.Unix(),
+			UpdatedAt:        totals.UpdatedAt,
+			Calls:            totals.Calls,
+			PromptTokens:     totals.PromptTokens,
+			CompletionTokens: totals.CompletionTokens,
+			ReasoningTokens:  totals.ReasoningTokens,
+			CacheReadTokens:  totals.CacheReadTokens,
+			CacheWriteTokens: totals.CacheWriteTokens,
+			TotalTokens:      totals.TotalTokens,
+			Cost:             totals.Cost,
+			ListCost:         totals.ListCost,
+			HasCost:          totals.HasCost,
+		}
+		out.Sessions = append(out.Sessions, entry)
+		for name, m := range totals.Models {
+			if m == nil {
+				continue
+			}
+			agg := byModel[name]
+			if agg == nil {
+				agg = &session.ModelUsageView{Model: name}
+				byModel[name] = agg
+			}
+			agg.Calls += m.Calls
+			agg.PromptTokens += m.PromptTokens
+			agg.CompletionTokens += m.CompletionTokens
+			agg.ReasoningTokens += m.ReasoningTokens
+			agg.CacheReadTokens += m.CacheReadTokens
+			agg.CacheWriteTokens += m.CacheWriteTokens
+			agg.TotalTokens += m.TotalTokens
+			if m.HasCost {
+				agg.Cost += m.Cost
+				agg.ListCost += m.ListCost
+				agg.HasCost = true
+			}
+		}
+		// Sessions that predate per-model books still contribute to
+		// the model share under their session model.
+		if len(totals.Models) == 0 && model != "" {
+			agg := byModel[model]
+			if agg == nil {
+				agg = &session.ModelUsageView{Model: model}
+				byModel[model] = agg
+			}
+			agg.Calls += totals.Calls
+			agg.PromptTokens += totals.PromptTokens
+			agg.CompletionTokens += totals.CompletionTokens
+			agg.ReasoningTokens += totals.ReasoningTokens
+			agg.CacheReadTokens += totals.CacheReadTokens
+			agg.CacheWriteTokens += totals.CacheWriteTokens
+			agg.TotalTokens += totals.TotalTokens
+			if totals.HasCost {
+				agg.Cost += totals.Cost
+				agg.ListCost += totals.ListCost
+				agg.HasCost = true
+			}
+		}
+		for date, d := range totals.Daily {
+			if d == nil {
+				continue
+			}
+			agg := byDay[date]
+			if agg == nil {
+				agg = &session.DailyPoint{Date: date}
+				byDay[date] = agg
+			}
+			agg.Calls += d.Calls
+			agg.PromptTokens += d.PromptTokens
+			agg.CompletionTokens += d.CompletionTokens
+			agg.ReasoningTokens += d.ReasoningTokens
+			agg.CacheReadTokens += d.CacheReadTokens
+			agg.CacheWriteTokens += d.CacheWriteTokens
+			agg.TotalTokens += d.TotalTokens
+			if d.HasCost {
+				agg.Cost += d.Cost
+				agg.ListCost += d.ListCost
+				agg.HasCost = true
+			}
+		}
+	}
+	for _, m := range byModel {
+		out.Models = append(out.Models, *m)
+	}
+	sort.Slice(out.Models, func(i, j int) bool {
+		if out.Models[i].TotalTokens != out.Models[j].TotalTokens {
+			return out.Models[i].TotalTokens > out.Models[j].TotalTokens
+		}
+		return out.Models[i].Model < out.Models[j].Model
+	})
+	sort.Slice(out.Sessions, func(i, j int) bool {
+		if out.Sessions[i].TotalTokens != out.Sessions[j].TotalTokens {
+			return out.Sessions[i].TotalTokens > out.Sessions[j].TotalTokens
+		}
+		return out.Sessions[i].SessionID < out.Sessions[j].SessionID
+	})
+	if limit > 0 && len(out.Sessions) > limit {
+		out.Sessions = out.Sessions[:limit]
+	}
+	dates := make([]string, 0, len(byDay))
+	for date := range byDay {
+		dates = append(dates, date)
+	}
+	sort.Strings(dates)
+	for _, date := range dates {
+		out.Daily = append(out.Daily, *byDay[date])
+	}
+	return out, nil
+}
+
 func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("session id is required")

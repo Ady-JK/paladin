@@ -11,6 +11,7 @@ import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, scrollToBottom } from "./chatView";
 import { refreshSessions } from "./sessions";
+import { refreshUsage } from "./usage";
 import { createToolActivity } from "./tools";
 
 export async function send(resume = false): Promise<void> {
@@ -159,6 +160,9 @@ export async function send(resume = false): Promise<void> {
     }
 
     await refreshSessions();
+    // Tokens bill even on failed turns, so the pill refreshes on both
+    // paths; refreshUsage keeps the last reading on fetch errors.
+    void refreshUsage();
   } catch (error) {
     state.shownMessages--;
 
@@ -170,6 +174,7 @@ export async function send(resume = false): Promise<void> {
 
     addTurn("error", String(error));
     setStatus(String(error), "error");
+    void refreshUsage();
   } finally {
     unlisten();
     unlistenTool();

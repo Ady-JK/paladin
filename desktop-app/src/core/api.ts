@@ -4,7 +4,7 @@
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 // No daemon, no addr, no subscribe.
 
-import type { FsList, MessageInfo, ProviderInfo, SessionInfo, ToolInfo } from "./types";
+import type { FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, ToolInfo } from "./types";
 import { bridge } from "./tauri";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -76,6 +76,20 @@ export function sessionHistory(
   cwd: string | null,
 ): Promise<MessageInfo[]> {
   return invoke<MessageInfo[]>("session_history", { sessionId, cwd });
+}
+
+export function sessionUsage(
+  sessionId: string,
+  cwd: string | null,
+): Promise<SessionUsage> {
+  return invoke<SessionUsage>("session_usage", { sessionId, cwd });
+}
+
+export function overallUsage(
+  cwd: string | null,
+  limit = 50,
+): Promise<OverallUsage> {
+  return invoke<OverallUsage>("overall_usage", { cwd, limit });
 }
 
 export function deleteSession(

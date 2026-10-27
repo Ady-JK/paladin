@@ -21,6 +21,7 @@ import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, renderGreeting, scrollToBottom } from "./chatView";
 import { createToolActivity } from "./tools";
+import { clearUsage, refreshUsage } from "./usage";
 import { syncModelSelects } from "./models";
 import { refreshExternalVisibility } from "./sites";
 
@@ -208,6 +209,9 @@ export async function openSession(id: string): Promise<void> {
     await loadHistory(session.sessionId);
 
     renderSessions();
+    // The ledger persists across restarts, so opening a session shows
+    // its last-known totals immediately.
+    void refreshUsage();
     setStatus("ready", "ok");
   } catch (error) {
     setStatus(String(error), "error");
@@ -292,6 +296,7 @@ export async function loadHistory(id: string): Promise<void> {
 // It supports the desktop app frontend.
 export function newSession(): void {
   state.sessionId = "";
+  clearUsage();
   sessionLabelEl.textContent = "—";
   state.shownMessages = 0;
 

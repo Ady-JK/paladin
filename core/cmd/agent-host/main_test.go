@@ -552,3 +552,9 @@ func TestEndToEndChatOverStdio(t *testing.T) {
 		t.Fatalf("history rows: %v", hist)
 	}
 }
+
+func TestSessionUsageMethod(t *testing.T) {
+	rt := testRuntime(t)
+	mustFail(t, callUnary(rt, "1", "session_usage", map[string]string{"sessionId": "", "cwd": "/tmp/p"}), "required")
+	mustFail(t, callUnary(rt, "2", "session_usage", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
+}

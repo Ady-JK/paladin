@@ -38,6 +38,7 @@ import {
   openNewSite,
   refreshExternalVisibility,
 } from "./features/sites";
+import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initWindow } from "./features/window";
 
@@ -62,6 +63,7 @@ async function connect(): Promise<void> {
     state.sessionId = "";
     sessionLabelEl.textContent = "—";
     state.shownMessages = 0;
+    clearUsage();
 
     messagesEl.innerHTML = "";
     renderGreeting();
@@ -89,6 +91,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSessionDialog();
   initSettings(connect);
   initSessions();
+  initUsage();
 
   modelAdvancedBtn.addEventListener("click", () => {
     closeMenu(modelMenu);
@@ -112,6 +115,7 @@ window.addEventListener("DOMContentLoaded", () => {
     closeNewSession();
     closeNewSite();
     closeMenu(modelMenu);
+    closeUsageDashboard();
     void refreshExternalVisibility();
   });
 

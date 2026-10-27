@@ -118,6 +118,34 @@ func parseResponsesOutput(res *responses.Response) ToolResponse {
 	return out
 }
 
+// responsesUsage maps a Responses usage block onto Usage. Reasoning
+// comes from the typed output details; costs and cache flow from the
+// gateway extras in the raw body when present.
+func responsesUsage(u responses.ResponseUsage, raw string) *Usage {
+	out := &Usage{
+		PromptTokens:     u.InputTokens,
+		CompletionTokens: u.OutputTokens,
+		ReasoningTokens:  u.OutputTokensDetails.ReasoningTokens,
+		TotalTokens:      u.TotalTokens,
+	}
+	if out.TotalTokens == 0 {
+		out.TotalTokens = out.PromptTokens + out.CompletionTokens
+	}
+	if cost, list, cr, cw, ok := gatewayCost(raw); ok {
+		out.Cost, out.ListCost, out.HasCost = cost, list, true
+		if out.CacheReadTokens == 0 {
+			out.CacheReadTokens = cr
+		}
+		if out.CacheWriteTokens == 0 {
+			out.CacheWriteTokens = cw
+		}
+	}
+	if *out == (Usage{}) {
+		return nil
+	}
+	return out
+}
+
 func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
@@ -128,7 +156,9 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 	if res.Error.Message != "" {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: responses: %s", p.name, res.Error.Message))
 	}
-	return parseResponsesOutput(res), nil
+	out := parseResponsesOutput(res)
+	out.Usage = responsesUsage(res.Usage, res.RawJSON())
+	return out, nil
 }
 
 type respCallAcc struct {
@@ -224,6 +254,13 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, mes
 				case <-done:
 					return CancelledError()
 				case <-parent.Done():
+					return CancelledError()
+				}
+			}
+			// The completed envelope carries the turn's usage; bill it
+			// even when the model made no tool calls.
+			if u := responsesUsage(ev.Response.Usage, ev.Response.RawJSON()); u != nil {
+				if err := send(Chunk{Usage: u}); err != nil {
 					return CancelledError()
 				}
 			}

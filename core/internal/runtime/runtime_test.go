@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/session"
 )
 
 func testRuntime(t *testing.T) (*AgentRuntime, string) {
@@ -956,5 +958,147 @@ func TestNewHonoursMemoryKeyStoreOverride(t *testing.T) {
 	key, ok, err := rt.store.Keys.Get("provider-x")
 	if err != nil || !ok || key != "sk-test" {
 		t.Fatalf("got %q %v %v", key, ok, err)
+	}
+}
+
+func TestSessionUsageAfterBilledTurn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":3,\"total_tokens\":14,\"cost\":0.001,\"opencode\":{\"list_cost\":0.002}}}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	pointMockAt(rt, server.URL)
+	sess, err := rt.OpenSession("", "/tmp/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, _ := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "hi", Cwd: "/tmp/proj"})
+	if outcome.Usage.TotalTokens != 14 {
+		t.Fatalf("turn usage %+v", outcome.Usage)
+	}
+	info, err := rt.SessionUsage(sess.SessionID, "/tmp/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Calls != 1 || info.TotalTokens != 14 || info.PromptTokens != 11 || info.CompletionTokens != 3 {
+		t.Fatalf("got %+v", info)
+	}
+	if !info.HasCost || info.Cost != 0.001 || info.ListCost != 0.002 {
+		t.Fatalf("cost %+v", info)
+	}
+	// The default mock provider has no model name, so the window is
+	// unknown and no fill percentage is reported.
+	if info.ContextKnown || info.FillPercent != nil {
+		t.Fatalf("got %+v", info)
+	}
+	if _, err := rt.SessionUsage("", "/tmp/proj"); err == nil {
+		t.Fatal("empty id accepted")
+	}
+	if _, err := rt.SessionUsage("00000000-0000-4000-8000-000000000099", "/tmp/proj"); err == nil {
+		t.Fatal("unknown session accepted")
+	}
+}
+
+func TestSessionUsageKnownWindow(t *testing.T) {
+	rt, _ := testRuntime(t)
+	sess, err := rt.transcripts.Create("/tmp/p", "openrouter", "kimi-k2.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var totals session.UsageTotals
+	totals.AddCall("kimi-k2.6", 1000, 1000, 0, 0, 0, 2000, 0.05, 0.1, true, 1)
+	data, err := json.Marshal(totals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usagePath := sess.Dir + "/usage.json"
+	if err := os.WriteFile(usagePath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := rt.SessionUsage(sess.Meta.SessionID, "/tmp/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ContextKnown || info.ContextWindow != 262144 || info.Model != "kimi-k2.6" {
+		t.Fatalf("got %+v", info)
+	}
+	if info.FillPercent == nil {
+		t.Fatal("no fill percent")
+	}
+	want := float64(2000) / float64(262144) * 100
+	if *info.FillPercent != want {
+		t.Fatalf("got %v want %v", *info.FillPercent, want)
+	}
+	// A session with no ledger reports zeros but still resolves the
+	// window from the transcript model.
+	bare, err := rt.transcripts.Create("/tmp/p", "openrouter", "kimi-k2.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bareInfo, err := rt.SessionUsage(bare.Meta.SessionID, "/tmp/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bareInfo.Calls != 0 || bareInfo.TotalTokens != 0 || bareInfo.HasCost {
+		t.Fatalf("got %+v", bareInfo)
+	}
+	if !bareInfo.ContextKnown || bareInfo.FillPercent == nil || *bareInfo.FillPercent != 0 {
+		t.Fatalf("got %+v", bareInfo)
+	}
+}
+
+func TestOverallUsageAggregates(t *testing.T) {
+	rt, _ := testRuntime(t)
+	a, err := rt.transcripts.Create("/tmp/p", "opencode-go", "beam-free")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := rt.transcripts.Create("/tmp/p", "opencode-go", "kimi-k2.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ta session.UsageTotals
+	ta.AddCall("beam-free", 100, 50, 0, 10, 0, 150, 0.01, 0.02, true, 1790966400)
+	var tb session.UsageTotals
+	tb.AddCall("kimi-k2.6", 200, 100, 5, 0, 5, 300, 0.02, 0.04, true, 1790966400)
+	for _, tc := range []struct {
+		sess   string
+		totals session.UsageTotals
+	}{
+		{a.Dir, ta},
+		{b.Dir, tb},
+	} {
+		data, _ := json.Marshal(tc.totals)
+		if err := os.WriteFile(tc.sess+"/usage.json", data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	overall, err := rt.OverallUsage("/tmp/p", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overall.SessionCount != 2 || overall.SessionsWithUsage != 2 {
+		t.Fatalf("got %+v", overall)
+	}
+	if overall.TotalTokens != 450 || overall.Calls != 2 {
+		t.Fatalf("got %+v", overall)
+	}
+	if len(overall.Models) != 2 || overall.Models[0].Model != "kimi-k2.6" {
+		t.Fatalf("models %+v", overall.Models)
+	}
+	if len(overall.Sessions) != 2 || len(overall.Daily) != 1 {
+		t.Fatalf("sessions/daily %+v %+v", overall.Sessions, overall.Daily)
+	}
+	// Limit caps the session table but not the totals.
+	limited, err := rt.OverallUsage("/tmp/p", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited.Sessions) != 1 || limited.TotalTokens != 450 {
+		t.Fatalf("got %+v", limited)
 	}
 }
