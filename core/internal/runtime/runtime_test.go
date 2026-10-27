@@ -793,3 +793,104 @@ func TestEmitDoneNonBlocking(t *testing.T) {
 	defer cancel()
 	_ = ctx
 }
+
+// TestChatRunsEveryBuiltinTool drives write, read, edit and shell through
+// the real runtime.Chat -> agent template -> model stream -> tools path,
+// then checks both the streamed tool results and the file on disk.
+func TestChatRunsEveryBuiltinTool(t *testing.T) {
+	wsDir := t.TempDir()
+	toolRound := func(id, name, args string) string {
+		return fmt.Sprintf(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":%q,"function":{"name":%q,"arguments":%q}}]}}]}`,
+			id, name, args)
+	}
+	rounds := []string{
+		toolRound("c1", "write", `{"path":"workspace/notes.txt","content":"alpha\n"}`),
+		toolRound("c2", "read", `{"path":"workspace/notes.txt"}`),
+		toolRound("c3", "edit", `{"path":"workspace/notes.txt","old_string":"alpha","new_string":"beta"}`),
+		toolRound("c4", "shell", `{"cmd":"cat notes.txt"}`),
+	}
+	var calls int64
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		mu.Lock()
+		n := calls
+		calls++
+		mu.Unlock()
+		if n < int64(len(rounds)) {
+			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", rounds[n])
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"all done\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	pointMockAt(rt, server.URL)
+	sess, err := rt.OpenSession("", wsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "do it", Cwd: wsDir})
+	if outcome.Reply != "all done" {
+		t.Fatalf("got %+v", outcome)
+	}
+
+	results := map[string]string{}
+	for _, c := range chunks {
+		if c.Tool != nil && c.Tool.Status == "ok" {
+			results[c.Tool.Name] = c.Tool.Result
+		}
+	}
+	for _, name := range []string{"write", "read", "edit", "shell"} {
+		if _, ok := results[name]; !ok {
+			t.Fatalf("no successful %s result in %+v", name, chunks)
+		}
+	}
+	if !strings.Contains(results["write"], `"created":true`) {
+		t.Fatalf("write result: %s", results["write"])
+	}
+	if !strings.Contains(results["read"], "alpha") {
+		t.Fatalf("read result: %s", results["read"])
+	}
+	if !strings.Contains(results["edit"], `"replacements":1`) {
+		t.Fatalf("edit result: %s", results["edit"])
+	}
+	if !strings.Contains(results["shell"], "beta") {
+		t.Fatalf("shell result: %s", results["shell"])
+	}
+
+	data, err := os.ReadFile(filepath.Join(wsDir, "notes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "beta\n" {
+		t.Fatalf("file = %q", data)
+	}
+
+	// user, 4 x (assistant call + tool result), final assistant text.
+	history, err := rt.SessionHistory(sess.SessionID, wsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 10 {
+		t.Fatalf("got %d rows: %+v", len(history), history)
+	}
+}
+
+func TestNewHonoursMemoryKeyStoreOverride(t *testing.T) {
+	t.Setenv("PALADIN_KEYSTORE", "  MEMORY  ")
+	dir := t.TempDir()
+	rt := New(dir, config.NewConfig(dir))
+	if err := rt.store.Keys.Set("provider-x", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	key, ok, err := rt.store.Keys.Get("provider-x")
+	if err != nil || !ok || key != "sk-test" {
+		t.Fatalf("got %q %v %v", key, ok, err)
+	}
+}

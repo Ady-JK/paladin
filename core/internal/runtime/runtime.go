@@ -116,7 +116,13 @@ type AgentRuntime struct {
 	cacheMu       sync.Mutex
 }
 
+// New builds the production runtime, backed by the OS keychain. The
+// PALADIN_KEYSTORE=memory override keeps sidecar tests hermetic on
+// machines that have real provider keys in their desktop keyring.
 func New(dataDir string, cfg config.Config) *AgentRuntime {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("PALADIN_KEYSTORE")), "memory") {
+		return WithKeyStore(dataDir, cfg, config.NewMemoryKeyStore())
+	}
 	return WithKeyStore(dataDir, cfg, config.OsKeyStore{})
 }
 

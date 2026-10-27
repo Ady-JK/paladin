@@ -358,6 +358,12 @@ func startHost(t *testing.T, bin, dataDir string) *hostClient {
 	t.Helper()
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(), "PALADIN_DATA_DIR="+dataDir)
+	// Keep the protocol tests hermetic: the host normally reads the real
+	// OS keychain, where a developer machine can have live provider keys.
+	// The opt-in live keychain test needs the OS store instead.
+	if os.Getenv("PALADIN_KEYRING_LIVE") != "1" {
+		cmd.Env = append(cmd.Env, "PALADIN_KEYSTORE=memory")
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
