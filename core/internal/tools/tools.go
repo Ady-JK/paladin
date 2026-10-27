@@ -109,12 +109,38 @@ func (r *Registry) Len() int {
 	return len(r.tools)
 }
 
-func (r *Registry) Definitions() []ToolDefinition {
+func (r *Registry) Names() []string {
 	names := make([]string, 0, len(r.tools))
 	for n := range r.tools {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	return names
+}
+
+// Subset returns a registry over the named tools, sharing the same
+// instances (important for the stateful shell tool). Empty names clones
+// every tool. Unknown names are an error so template typos fail loudly.
+func (r *Registry) Subset(names []string) (*Registry, error) {
+	out := NewRegistry()
+	if len(names) == 0 {
+		for n, t := range r.tools {
+			out.tools[n] = t
+		}
+		return out, nil
+	}
+	for _, name := range names {
+		t, ok := r.tools[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown tool %q", name)
+		}
+		out.tools[name] = t
+	}
+	return out, nil
+}
+
+func (r *Registry) Definitions() []ToolDefinition {
+	names := r.Names()
 	var out []ToolDefinition
 	for _, n := range names {
 		out = append(out, r.tools[n].Definition())
@@ -168,12 +194,60 @@ func isBlank(s string) bool {
 	return true
 }
 
+// Template is the blueprint for one tool: identity plus a constructor.
+// A Catalog turns templates into live tool instances.
+type Template struct {
+	Name string
+	New  func() Tool
+}
+
+// Catalog is the template registry for tools. New tool kinds are added
+// by registering a template instead of editing a switch.
+type Catalog struct {
+	templates map[string]Template
+}
+
+func NewCatalog() *Catalog {
+	return &Catalog{templates: map[string]Template{}}
+}
+
+func (c *Catalog) Register(t Template) {
+	if t.Name == "" || t.New == nil {
+		return
+	}
+	c.templates[t.Name] = t
+}
+
+func (c *Catalog) Names() []string {
+	names := make([]string, 0, len(c.templates))
+	for n := range c.templates {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Instantiate creates one live instance per registered template.
+func (c *Catalog) Instantiate() *Registry {
+	r := NewRegistry()
+	for _, name := range c.Names() {
+		r.Register(c.templates[name].New())
+	}
+	return r
+}
+
+// BuiltinCatalog is the shipped tool template set: read, write, edit,
+// shell. fileengine and scope stay shared modules behind write/edit.
+func BuiltinCatalog() *Catalog {
+	c := NewCatalog()
+	c.Register(Template{Name: "read", New: func() Tool { return ReadTool{} }})
+	c.Register(Template{Name: "write", New: func() Tool { return NewWriteTool(NewEngine()) }})
+	c.Register(Template{Name: "edit", New: func() Tool { return NewEditTool(NewEngine()) }})
+	c.Register(Template{Name: "shell", New: func() Tool { return NewShellTool() }})
+	return c
+}
+
 // BuiltinRegistry is the model-facing tool registry.
 func BuiltinRegistry() *Registry {
-	r := NewRegistry()
-	r.Register(ReadTool{})
-	r.Register(NewWriteTool(NewEngine()))
-	r.Register(NewEditTool(NewEngine()))
-	r.Register(NewShellTool())
-	return r
+	return BuiltinCatalog().Instantiate()
 }

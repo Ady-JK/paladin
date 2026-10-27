@@ -30,6 +30,16 @@ const (
 	listTimeout    = 30 * time.Second
 )
 
+func init() {
+	// The OpenAI-compatible dialect is this package's own template.
+	RegisterProviderTemplate(ProviderTemplate{
+		ApiType: config.ApiTypeOpenai,
+		New: func(spec ProviderSpec) (Provider, error) {
+			return NewOpenAIProvider(spec.Name, spec.Model, spec.BaseURL, spec.ApiKey), nil
+		},
+	})
+}
+
 type OpenAIProvider struct {
 	name       string
 	model      string

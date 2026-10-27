@@ -29,10 +29,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
-	"github.com/Ady-JK/paladin/core/internal/turn"
 )
 
 type Request struct {
@@ -304,18 +304,18 @@ func runChat(rt *runtime.AgentRuntime, req Request) {
 	if len(req.Params) > 0 {
 		_ = json.Unmarshal(req.Params, &p)
 	}
-	chatReq := turn.ChatRequest{
+	chatReq := agent.Request{
 		SessionID: p.SessionID, Message: p.Message, Cwd: p.Cwd,
 		Provider: p.Provider, Model: p.Model,
 		SystemPrompt: p.SystemPrompt, Resume: p.Resume,
 	}
-	tx := make(chan turn.ChatChunk, 128)
+	tx := make(chan agent.ChatChunk, 128)
 	done := make(chan struct{})
 	var doneOnce sync.Once
 	closeDone := func() { doneOnce.Do(func() { close(done) }) }
 	defer closeDone()
 	type outcome struct {
-		out turn.ChatOutcome
+		out agent.ChatOutcome
 		err error
 	}
 	resultCh := make(chan outcome, 1)

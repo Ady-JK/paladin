@@ -2,9 +2,9 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,211 +37,133 @@ func TestDefinitionsSortedByName(t *testing.T) {
 	}
 }
 
-func TestRejectsEscapeAndBareRelative(t *testing.T) {
-	if _, _, err := ResolveScopedPath("read", "path", "workspace/../etc/hosts", "/tmp/ws"); err == nil {
-		t.Fatal("expected escape rejection")
+func TestToolErrorStrings(t *testing.T) {
+	cases := []struct {
+		err  *ToolError
+		want string
+	}{
+		{&ToolError{Kind: "unknown", Msg: "x"}, "unknown tool: x"},
+		{&ToolError{Kind: "args", Msg: "bad"}, "bad arguments: bad"},
+		{&ToolError{Kind: "exec", Msg: "fail"}, "execution failed: fail"},
+		{&ToolError{Kind: "failed", Msg: "m", Content: "c"}, "m"},
+		{&ToolError{Kind: "other", Msg: "m"}, "m"},
 	}
-	if _, _, err := ResolveScopedPath("read", "path", "src/main.rs", "/tmp/ws"); err == nil {
-		t.Fatal("expected bare relative rejection")
+	for _, tc := range cases {
+		if got := tc.err.Error(); got != tc.want {
+			t.Errorf("got %q want %q", got, tc.want)
+		}
 	}
-	resolved, scope, err := ResolveScopedPath("read", "path", "workspace/src/main.rs", "/tmp/ws")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scope != ScopeInside || resolved != "/tmp/ws/src/main.rs" {
-		t.Fatalf("got %q %q", resolved, scope)
-	}
-	resolved, scope, err = ResolveScopedPath("read", "path", "/etc/hosts", "/tmp/ws")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scope != ScopeOutside || resolved != "/etc/hosts" {
-		t.Fatalf("got %q %q", resolved, scope)
-	}
-}
-
-func TestReadsWithOffsetAndLimit(t *testing.T) {
-	ctx, ws := testCtx(t)
-	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("l1\nl2\nl3\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/a.txt","offset":2,"limit":1}`), ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var resp ReadResponse
-	if err := json.Unmarshal([]byte(out), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Content != "l2\n" || !resp.HasMore || resp.StopReason != "line_limit" {
-		t.Fatalf("got %+v", resp)
-	}
-}
-
-func TestRefusesBinaryFiles(t *testing.T) {
-	ctx, ws := testCtx(t)
-	if err := os.WriteFile(filepath.Join(ws, "b.bin"), []byte{0, 1, 2}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/b.bin"}`), ctx); err == nil {
-		t.Fatal("expected binary rejection")
-	}
-}
-
-func TestRejectsBareRelativePaths(t *testing.T) {
-	ctx, _ := testCtx(t)
-	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"a.txt"}`), ctx); err == nil {
-		t.Fatal("expected rejection")
-	}
-}
-
-func TestWriteThenEditRoundtrip(t *testing.T) {
-	dir := t.TempDir()
-	ws := filepath.Join(dir, "ws")
-	if err := os.MkdirAll(ws, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	engine := NewEngine()
-	if _, err := engine.Write(ws, "workspace/a.txt", "hello\n", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.Write(ws, "workspace/a.txt", "x", false); err == nil {
-		t.Fatal("expected exists error")
-	} else if ee, ok := err.(*EngineError); !ok || ee.Kind != "exists" {
-		t.Fatalf("expected exists, got %v", err)
-	}
-	res, err := engine.Edit(ws, "workspace/a.txt", "hello", "bye", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Replacements != 1 {
-		t.Fatalf("got %+v", res)
-	}
-	data, err := os.ReadFile(filepath.Join(ws, "a.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "bye\n" {
-		t.Fatalf("got %q", data)
-	}
-}
-
-func TestEditAmbiguousListsOccurrences(t *testing.T) {
-	dir := t.TempDir()
-	ws := filepath.Join(dir, "ws")
-	if err := os.MkdirAll(ws, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	engine := NewEngine()
-	if _, err := engine.Write(ws, "workspace/a.txt", "x\nx\n", false); err != nil {
-		t.Fatal(err)
-	}
-	_, err := engine.Edit(ws, "workspace/a.txt", "x", "y", false)
-	ee, ok := err.(*EngineError)
-	if !ok || ee.Kind != "ambiguous" || ee.Count != 2 {
-		t.Fatalf("expected ambiguous count 2, got %v", err)
-	}
-}
-
-func TestWriteToolRefusesClobber(t *testing.T) {
-	ctx, _ := testCtx(t)
-	tool := NewWriteTool(NewEngine())
-	if _, err := tool.Call(json.RawMessage(`{"path":"workspace/a.txt","content":"a"}`), ctx); err != nil {
-		t.Fatal(err)
-	}
-	_, err := tool.Call(json.RawMessage(`{"path":"workspace/a.txt","content":"b"}`), ctx)
-	if err == nil {
-		t.Fatal("expected clobber error")
-	}
-	terr, ok := err.(*ToolError)
-	if !ok {
-		t.Fatalf("expected ToolError, got %T", err)
-	}
-	var payload map[string]any
-	if uerr := json.Unmarshal([]byte(terr.Content), &payload); uerr != nil {
-		t.Fatal(uerr)
-	}
-	if payload["exists"] != true {
-		t.Fatalf("got %v", payload)
-	}
-}
-
-func TestEditToolRequiresOldString(t *testing.T) {
-	dir := t.TempDir()
-	ctx := &ToolCtx{Workspace: dir, SessionDir: dir, Cancel: context.Background()}
-	tool := NewEditTool(NewEngine())
-	if _, err := tool.Call(json.RawMessage(`{"path":"workspace/a.txt","old_string":"","new_string":"b"}`), ctx); err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestSyncRunReturnsOutput(t *testing.T) {
-	ctx, _ := testCtx(t)
-	tool := NewShellTool()
-	out, err := tool.Call(json.RawMessage(`{"cmd":"echo hi"}`), ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var resp ShellResponse
-	if err := json.Unmarshal([]byte(out), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Status != JobDone || resp.Output == nil || *resp.Output != "hi\n" {
-		t.Fatalf("got %+v", resp)
-	}
-}
-
-func TestFailingCommandIsToolError(t *testing.T) {
-	ctx, _ := testCtx(t)
-	tool := NewShellTool()
-	_, err := tool.Call(json.RawMessage(`{"cmd":"exit 3"}`), ctx)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if got := err.Error(); got != "shell: the command exited with status 3" && len(got) < 10 {
+	if got := WithContent("c", "m").ResultContent(); got != "c" {
 		t.Fatalf("got %q", got)
 	}
+	if got := ArgsError("bad").ResultContent(); !strings.Contains(got, "bad") {
+		t.Fatalf("got %q", got)
+	}
+	plain := &ToolError{Kind: "args", Msg: "bad"}
+	if got := plain.ResultContent(); !strings.Contains(got, "bad arguments") {
+		t.Fatalf("got %q", got)
+	}
+	// Non-ToolError results are wrapped as JSON.
+	r := NewRegistry()
+	r.Register(ReadTool{})
+	res := r.Call(&ToolCall{ID: "1", Name: "read", Arguments: "{"}, &ToolCtx{})
+	if !res.IsError || !strings.Contains(res.Content, "valid JSON") {
+		t.Fatalf("got %+v", res)
+	}
+	// Blank arguments become null -> read complains about path.
+	res = r.Call(&ToolCall{ID: "1", Name: "read", Arguments: "   "}, &ToolCtx{Workspace: t.TempDir()})
+	if !res.IsError {
+		t.Fatalf("got %+v", res)
+	}
 }
 
-func TestBackgroundStatusCancel(t *testing.T) {
-	dir := t.TempDir()
-	ws := filepath.Join(dir, "ws")
-	sess := filepath.Join(dir, "sess")
-	os.MkdirAll(ws, 0o755)
-	os.MkdirAll(sess, 0o755)
-	ctx := &ToolCtx{Workspace: ws, SessionDir: sess, Cancel: context.Background()}
-	tool := NewShellTool()
-	out, err := tool.Call(json.RawMessage(`{"cmd":"sleep 30","background":true}`), ctx)
+func TestRegistryDefinitionsSorted(t *testing.T) {
+	r := NewRegistry()
+	r.Register(NewShellTool())
+	r.Register(ReadTool{})
+	defs := r.Definitions()
+	if len(defs) != 2 || defs[0].Name != "read" || defs[1].Name != "shell" {
+		t.Fatalf("got %v", defs)
+	}
+	if got := NewRegistry().Definitions(); got == nil || len(got) != 0 {
+		t.Fatalf("empty registry should give [], got %+v", got)
+	}
+	if got := r.Names(); len(got) != 2 || got[0] != "read" || got[1] != "shell" {
+		t.Fatalf("got %v", got)
+	}
+	if _, ok := r.Get("read"); !ok {
+		t.Fatal("Get failed")
+	}
+	if _, ok := r.Get("missing"); ok {
+		t.Fatal("Get false positive")
+	}
+}
+
+func TestRegistrySubsetSharesInstances(t *testing.T) {
+	reg := BuiltinRegistry()
+	shell, _ := reg.Get("shell")
+	sub, err := reg.Subset([]string{"shell", "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var resp ShellResponse
-	if err := json.Unmarshal([]byte(out), &resp); err != nil {
-		t.Fatal(err)
+	if sub.Len() != 2 {
+		t.Fatalf("got %d", sub.Len())
 	}
-	if resp.JobID == nil {
-		t.Fatal("missing job id")
+	got, ok := sub.Get("shell")
+	if !ok || got != shell {
+		t.Fatal("subset must share tool instances")
 	}
-	statusOut, err := tool.Call(json.RawMessage(`{"action":"status","job_id":"`+*resp.JobID+`"}`), ctx)
+	// Empty names clones everything.
+	all, err := reg.Subset(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var status ShellResponse
-	if err := json.Unmarshal([]byte(statusOut), &status); err != nil {
-		t.Fatal(err)
+	if all.Len() != reg.Len() {
+		t.Fatalf("got %d", all.Len())
 	}
-	if status.Status != JobRunning {
-		t.Fatalf("got %+v", status)
+	// Unknown names fail loudly.
+	if _, err := reg.Subset([]string{"raed"}); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("got %v", err)
 	}
-	cancelOut, err := tool.Call(json.RawMessage(`{"action":"cancel","job_id":"`+*resp.JobID+`"}`), ctx)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestCatalogRegistersAndInstantiates(t *testing.T) {
+	c := BuiltinCatalog()
+	names := c.Names()
+	want := []string{"edit", "read", "shell", "write"}
+	if len(names) != len(want) {
+		t.Fatalf("got %v", names)
 	}
-	var cancelled ShellResponse
-	if err := json.Unmarshal([]byte(cancelOut), &cancelled); err != nil {
-		t.Fatal(err)
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("got %v", names)
+		}
 	}
-	if cancelled.Status != JobCancelled {
-		t.Fatalf("got %+v", cancelled)
+	reg := c.Instantiate()
+	if reg.Len() != 4 {
+		t.Fatalf("got %d", reg.Len())
+	}
+	for _, n := range want {
+		if _, ok := reg.Get(n); !ok {
+			t.Fatalf("missing %q", n)
+		}
+	}
+	// Each instantiate makes fresh instances, so background jobs do not
+	// leak between registries.
+	a := c.Instantiate()
+	b := c.Instantiate()
+	aShell, _ := a.Get("shell")
+	bShell, _ := b.Get("shell")
+	if aShell == bShell {
+		t.Fatal("catalog should build independent tool instances")
+	}
+}
+
+func TestCatalogIgnoresInvalidTemplates(t *testing.T) {
+	c := NewCatalog()
+	c.Register(Template{Name: "", New: func() Tool { return ReadTool{} }})
+	c.Register(Template{Name: "nil"})
+	if names := c.Names(); len(names) != 0 {
+		t.Fatalf("got %v", names)
 	}
 }

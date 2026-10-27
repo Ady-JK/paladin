@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/prompt"
@@ -20,7 +21,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
-	"github.com/Ady-JK/paladin/core/internal/turn"
 )
 
 type Session struct {
@@ -105,8 +105,10 @@ type AgentRuntime struct {
 	configMu      sync.RWMutex
 	store         *config.Store
 	transcripts   *transcript.Store
+	catalog       *tools.Catalog
 	tools         *tools.Registry
 	shell         *tools.ShellTool
+	agents        *agent.Registry
 	tracker       *tracker
 	providersMu   sync.Mutex
 	refreshing    atomic.Bool
@@ -120,24 +122,46 @@ func New(dataDir string, cfg config.Config) *AgentRuntime {
 
 func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *AgentRuntime {
 	store := config.NewStore(dataDir, keys)
-	shell := tools.NewShellTool()
-	registry := tools.NewRegistry()
-	registry.Register(tools.ReadTool{})
-	engine := tools.NewEngine()
-	registry.Register(tools.NewWriteTool(engine))
-	registry.Register(tools.NewEditTool(engine))
-	registry.Register(shell)
+	catalog := tools.BuiltinCatalog()
+	registry := catalog.Instantiate()
+	shell, _ := registry.Get("shell")
+	shellTool, _ := shell.(*tools.ShellTool)
+	agents := agent.NewRegistry()
+	_ = agents.Register(agent.DefaultTemplate())
 	return &AgentRuntime{
 		dataDir:       dataDir,
 		config:        cfg,
 		store:         store,
 		transcripts:   transcript.NewStore(filepath.Join(dataDir, "sessions")),
+		catalog:       catalog,
 		tools:         registry,
-		shell:         shell,
+		shell:         shellTool,
+		agents:        agents,
 		tracker:       newTracker(),
 		providerCache: map[string]inference.Provider{},
 	}
 }
+
+// runtimeSessions adapts the transcript store to agent.SessionSource.
+type runtimeSessions struct{ r *AgentRuntime }
+
+func (s runtimeSessions) LoadSession(cwd, sessionID string) (transcript.Session, error) {
+	return s.r.transcripts.Load(cwd, sessionID)
+}
+
+// runtimeProviders adapts provider resolution to agent.ProviderSource.
+type runtimeProviders struct{ r *AgentRuntime }
+
+func (p runtimeProviders) ResolveProvider(name, model string) (inference.Provider, error) {
+	_, _, provider, err := p.r.resolveProvider(name, model)
+	return provider, err
+}
+
+// runtimePrompts adapts settings/config prompts to agent.PromptSource.
+type runtimePrompts struct{ r *AgentRuntime }
+
+func (p runtimePrompts) SystemPrompt(override string) string { return p.r.systemPrompt(override) }
+func (p runtimePrompts) ToolGuidance() string                { return p.r.toolGuidance() }
 
 func (r *AgentRuntime) settingsPath() string {
 	return filepath.Join(r.dataDir, "config", "settings.json")
@@ -217,70 +241,57 @@ func (r *AgentRuntime) maxRounds() uint32 {
 	return config.ClampMaxToolRounds(r.config.MaxToolRounds)
 }
 
-func strVal(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-// Chat runs one turn, forwarding chunks on tx (closed with a done chunk
-// by the caller protocol) until done is closed.
-func (r *AgentRuntime) Chat(req turn.ChatRequest, tx chan<- turn.ChatChunk, done <-chan struct{}) (turn.ChatOutcome, error) {
+// Chat runs one turn by resolving the default agent template. The
+// template fixes the provider, session, history, tool subset and prompt
+// before the loop starts; Chat only owns lifecycle and tracking.
+func (r *AgentRuntime) Chat(req agent.Request, tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
 	defer close(tx)
 	if strings.TrimSpace(req.SessionID) == "" {
-		return turn.ChatOutcome{}, fmt.Errorf("sessionId is required: create one with open_session first")
+		return agent.ChatOutcome{}, fmt.Errorf("sessionId is required: create one with open_session first")
 	}
 	if strings.TrimSpace(req.Message) == "" && !req.Resume {
-		return turn.ChatOutcome{}, fmt.Errorf("message is required")
+		return agent.ChatOutcome{}, fmt.Errorf("message is required")
 	}
-	sess, err := r.transcripts.Load(req.Cwd, req.SessionID)
-	if err != nil {
-		return turn.ChatOutcome{}, err
-	}
-	entry, _, provider, err := r.resolveProvider(strVal(req.Provider), strVal(req.Model))
-	if err != nil {
-		return turn.ChatOutcome{}, err
-	}
-	_ = entry
-	history, err := sess.History()
-	if err != nil {
-		return turn.ChatOutcome{}, err
-	}
-	base := r.systemPrompt(strVal(req.SystemPrompt))
-	system := prompt.ToolSystem(base, r.toolGuidance(), sess.Meta.Cwd)
-	toolDefs := r.toolDefinitions()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if !r.tracker.track(req.SessionID, req.Cwd, cancel) {
-		return turn.ChatOutcome{}, fmt.Errorf("a turn is already running for session %q", req.SessionID)
+		return agent.ChatOutcome{}, fmt.Errorf("a turn is already running for session %q", req.SessionID)
 	}
 	defer r.tracker.untrack(req.SessionID)
-	agent := turn.NewAgent(sess, provider, r.tools, r.shell, ctx, cancel, system, r.maxRounds(), history, toolDefs, tx, done)
-	outcome, err := agent.RunTurn(req.Message, req.Resume)
+
+	template, ok := r.agents.Default()
+	if !ok {
+		return agent.ChatOutcome{}, fmt.Errorf("no agent template registered")
+	}
+	built, err := template.Build(agent.Deps{
+		Sessions:  runtimeSessions{r},
+		Providers: runtimeProviders{r},
+		Prompts:   runtimePrompts{r},
+		Tools:     r.tools,
+		Shell:     r.shell,
+		MaxRounds: r.maxRounds(),
+		Context:   ctx,
+		Cancel:    cancel,
+		Tx:        tx,
+		Done:      done,
+	}, req)
 	if err != nil {
-		r.emitDone(tx, req.SessionID, false, false, turn.NewApiError("internal", err.Error()))
-		return turn.ChatOutcome{}, err
+		return agent.ChatOutcome{}, err
+	}
+	outcome, err := built.Run()
+	if err != nil {
+		r.emitDone(tx, req.SessionID, false, false, agent.NewApiError("internal", err.Error()))
+		return agent.ChatOutcome{}, err
 	}
 	r.emitDone(tx, outcome.SessionID, outcome.Stopped, outcome.NeedsContinue, nil)
 	return outcome, nil
 }
 
-func (r *AgentRuntime) emitDone(tx chan<- turn.ChatChunk, sessionID string, stopped, needsContinue bool, apiErr *turn.ApiError) {
+func (r *AgentRuntime) emitDone(tx chan<- agent.ChatChunk, sessionID string, stopped, needsContinue bool, apiErr *agent.ApiError) {
 	select {
-	case tx <- turn.ChatChunk{SessionID: sessionID, Done: true, Stopped: stopped, NeedsContinue: needsContinue, Error: apiErr}:
+	case tx <- agent.ChatChunk{SessionID: sessionID, Done: true, Stopped: stopped, NeedsContinue: needsContinue, Error: apiErr}:
 	default:
 	}
-}
-
-func (r *AgentRuntime) toolDefinitions() []inference.ToolDefinition {
-	var out []inference.ToolDefinition
-	for _, d := range r.tools.Definitions() {
-		out = append(out, inference.ToolDefinition{
-			Name: d.Name, Description: d.Description, Parameters: d.Parameters,
-		})
-	}
-	return out
 }
 
 func (r *AgentRuntime) Stop(sessionID string) bool {
