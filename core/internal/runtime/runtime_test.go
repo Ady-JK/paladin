@@ -877,14 +877,14 @@ func TestTrackerStopSemantics(t *testing.T) {
 func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 	rt, _ := testRuntime(t)
 	defs := rt.tools.Definitions()
-	if len(defs) != 5 {
+	if len(defs) != 6 {
 		t.Fatalf("got %d", len(defs))
 	}
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"read", "write", "edit", "shell", "ask"} {
+	for _, want := range []string{"read", "write", "edit", "shell", "ask", "todo"} {
 		if !names[want] {
 			t.Fatalf("missing %q", want)
 		}

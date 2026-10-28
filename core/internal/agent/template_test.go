@@ -182,7 +182,7 @@ func TestBuildResolvesEverything(t *testing.T) {
 	if a.currentMessage != "hi" || a.currentResume {
 		t.Fatalf("input %q %v", a.currentMessage, a.currentResume)
 	}
-	if len(a.toolDefs) != 5 {
+	if len(a.toolDefs) != 6 {
 		t.Fatalf("default template should use every tool: %+v", a.toolDefs)
 	}
 	if a.shell == nil {

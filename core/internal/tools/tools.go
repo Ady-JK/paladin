@@ -254,7 +254,8 @@ func (c *Catalog) Instantiate() *Registry {
 }
 
 // BuiltinCatalog is the shipped tool template set: read, write, edit,
-// shell, ask. fileengine and scope stay shared modules behind write/edit.
+// shell, ask, todo. fileengine and scope stay shared modules behind
+// write/edit. todo persists per-session, needing no shared instance.
 func BuiltinCatalog() *Catalog {
 	c := NewCatalog()
 	c.Register(Template{Name: "read", New: func() Tool { return ReadTool{} }})
@@ -262,6 +263,7 @@ func BuiltinCatalog() *Catalog {
 	c.Register(Template{Name: "edit", New: func() Tool { return NewEditTool(NewEngine()) }})
 	c.Register(Template{Name: "shell", New: func() Tool { return NewShellTool() }})
 	c.Register(Template{Name: "ask", New: func() Tool { return NewAskTool() }})
+	c.Register(Template{Name: "todo", New: func() Tool { return TodoTool{} }})
 	return c
 }
 
