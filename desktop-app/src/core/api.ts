@@ -258,17 +258,17 @@ export function setExternalTheme(dark: boolean): Promise<unknown> {
 }
 
 // partitionFor names the persistent session partition for a chat page.
-// The two original defaults keep their old partition names so existing
-// logins survive; everything else gets a sanitized one from its id.
-const LEGACY_PARTITIONS: Record<string, string> = {
-  "site:gemini": "persist:paladin-gemini",
-  "site:chatgpt": "persist:paladin-chatgpt",
-};
+// Every site page shares one partition so a Google login done in one
+// page (Gemini) carries over to "Sign in with Google" in another
+// (ChatGPT): Electron partitions are separate cookie jars, so per-page
+// partitions isolated accounts.google.com cookies from each other.
+// The old per-page names (persist:paladin-gemini / -chatgpt) are
+// abandoned, which costs one re-login and buys cross-page SSO.
+const SHARED_SITE_PARTITION = "persist:paladin-sites";
 
 function partitionFor(id: string): string {
-  const legacy = LEGACY_PARTITIONS[id.toLowerCase()];
-  if (legacy) {
-    return legacy;
+  if (id.toLowerCase().startsWith("site:")) {
+    return SHARED_SITE_PARTITION;
   }
   const safe = id.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
   return `persist:paladin-${safe || "page"}`;

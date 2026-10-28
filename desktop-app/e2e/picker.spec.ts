@@ -86,18 +86,93 @@ test("dropdowns filter the tree and clear shows everything", async ({ page }) =>
   await expect(menu).toBeVisible();
 });
 
-test("dialog picker toggles and picks without closing", async ({ page }) => {  await page.click("#newSessionBtn");
+test("new session is a single folder step that starts with the current model", async ({ page }) => {
+  await page.click("#newSessionBtn");
   const dialog = page.locator("#sessionModal");
   await expect(dialog).toBeVisible();
 
-  const tree = page.locator("#newSessionTree");
-  await expect(tree.locator("[data-ltoggle]")).toHaveCount(4);
-  await tree.locator('[data-ptoggle="Opencode Go"]').click();
-  await expect(dialog).toBeVisible();
-  await expect(tree.locator("[data-ltoggle]")).toHaveCount(2);
+  // No model step: the dialog states which model Start will use.
+  await expect(page.locator("#newSessionModelStep")).toHaveCount(0);
+  await expect(page.locator("#newSessionModelHint")).toContainText("model:");
 
-  await tree.locator('[data-ptoggle="Opencode Go"]').click();
-  await tree.locator("[data-mpick]").first().click();
+  // Breadcrumbs show the current path with a clickable root.
+  await expect(page.locator("#newSessionCrumbs")).toContainText("home");
+  await expect(page.locator("#newSessionCrumbs [data-fb-crumb]")).toHaveCount(3);
+
+  // Dotfiles stay hidden by default.
+  await expect(page.locator("#newSessionList")).not.toContainText(".hidden-dir");
+
+  // The Hidden checkbox reveals them and remembers the choice.
+  await page.locator("#newSessionShowHidden").check();
+  await expect(page.locator("#newSessionList")).toContainText(".hidden-dir");
+  await expect(await page.evaluate(() => window.localStorage.getItem("paladin.showHidden"))).toBe("1");
+
+  // Search filters the current folder.
+  await page.fill("#newSessionFolderSearch", "hidden");
+  await expect(page.locator("#newSessionList")).toContainText(".hidden-dir");
+  await expect(page.locator("#newSessionList")).not.toContainText("project");
+  await page.fill("#newSessionFolderSearch", "");
+  await page.locator("#newSessionShowHidden").uncheck();
+  await expect(page.locator("#newSessionList")).not.toContainText(".hidden-dir");
+
+  // The card itself never scrolls; only the list inside does.
+  const cardScroll = await page.locator("#sessionModal .modal-card").evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  expect(cardScroll.scroll).toBeLessThanOrEqual(cardScroll.client + 1);
+
+  // Selecting a folder arms the path line; Start uses it and closes.
+  await page.locator('#newSessionList button[data-fb-select$="/project"]').first().click();
+  await expect(page.locator("#newSessionPath")).toContainText("project");
+  await page.click("#sessionStartBtn");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("#workspaceLabel")).toHaveText("project");
+});
+
+test("attach picker selects files and folders with crumbs and hidden toggle", async ({ page }) => {
+  await page.click("#attachBtn");
+  const dialog = page.locator("#fileModal");
   await expect(dialog).toBeVisible();
-  await expect(page.locator("#newSessionCrumb")).toHaveText("local / other / llama3.2");
+
+  // Breadcrumbs plus both confirm buttons are present.
+  await expect(page.locator("#fileCrumbs")).toContainText("home");
+  await expect(page.locator("#fileSelectFileBtn")).toBeVisible();
+  await expect(page.locator("#fileSelectFolderBtn")).toBeVisible();
+
+  // Hidden entries stay out until opted in.
+  await expect(page.locator("#fileList")).not.toContainText(".env");
+  await page.locator("#fileShowHidden").check();
+  await expect(page.locator("#fileList")).toContainText(".env");
+  await page.locator("#fileShowHidden").uncheck();
+
+  // Search narrows to matching names.
+  await page.fill("#fileSearch", "readme");
+  await expect(page.locator("#fileList")).toContainText("README.md");
+  await page.fill("#fileSearch", "");
+  await expect(page.locator("#fileList")).toContainText("project");
+
+  // Select file inserts the highlighted file and closes.
+  await page.locator('#fileList [data-fb-select][data-fb-kind="file"]').first().click();
+  await expect(page.locator('#fileList [data-fb-select][aria-selected="true"]')).toHaveCount(1);
+
+  // The card itself never scrolls; only the list inside does.
+  const cardScroll = await page.locator("#fileModal .modal-card").evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  expect(cardScroll.scroll).toBeLessThanOrEqual(cardScroll.client + 1);
+
+  await page.click("#fileSelectFileBtn");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("#promptInput")).not.toBeEmpty();
+
+  // Select folder with nothing highlighted inserts the current folder.
+  await page.fill("#promptInput", "");
+  await page.click("#attachBtn");
+  await expect(page.locator("#fileModal")).toBeVisible();
+  await page.click("#fileSelectFolderBtn");
+  await expect(page.locator("#fileModal")).toBeHidden();
+  await expect(page.locator("#promptInput")).not.toBeEmpty();
+  await page.keyboard.press("Escape");
 });

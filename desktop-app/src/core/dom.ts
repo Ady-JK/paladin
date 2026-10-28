@@ -80,15 +80,6 @@ export const modelQuickBtn = $<HTMLButtonElement>("#modelQuickBtn");
 // modelAdvancedBtn is a const in this module.
 // It supports the desktop app frontend.
 export const modelAdvancedBtn = $<HTMLButtonElement>("#modelAdvancedBtn");
-// newSessionSearchEl is a const in this module.
-// It supports the desktop app frontend.
-export const newSessionSearchEl = $<HTMLInputElement>("#newSessionSearch");
-// newSessionTreeEl is a const in this module.
-// It supports the desktop app frontend.
-export const newSessionTreeEl = $("#newSessionTree");
-// newSessionCrumbEl is a const in this module.
-// It supports the desktop app frontend.
-export const newSessionCrumbEl = $("#newSessionCrumb");
 // filterBarEl is a const in this module.
 // It supports the desktop app frontend.
 export const filterBarEl = $("#filterBar");
@@ -98,15 +89,6 @@ export const filterLabelEl = $("#filterLabel");
 // filterClearBtn is a const in this module.
 // It supports the desktop app frontend.
 export const filterClearBtn = $<HTMLButtonElement>("#filterClearBtn");
-// newSessionFilterBarEl is a const in this module.
-// It supports the desktop app frontend.
-export const newSessionFilterBarEl = $("#newSessionFilterBar");
-// newSessionFilterLabelEl is a const in this module.
-// It supports the desktop app frontend.
-export const newSessionFilterLabelEl = $("#newSessionFilterLabel");
-// newSessionFilterClearBtn is a const in this module.
-// It supports the desktop app frontend.
-export const newSessionFilterClearBtn = $<HTMLButtonElement>("#newSessionFilterClearBtn");
 // sessionModalEl is a const in this module.
 // It supports the desktop app frontend.
 export const sessionModalEl = $("#sessionModal");
@@ -328,6 +310,36 @@ export const toastTextEl = $("#toastText");
 // toastIconEl is a const in this module.
 // It supports the desktop app frontend.
 export const toastIconEl = $("#toastIcon");
+// fileCrumbsEl is a const in this module.
+// It hosts the attach picker breadcrumb trail.
+export const fileCrumbsEl = $("#fileCrumbs");
+// fileSearchEl is a const in this module.
+// It filters the attach picker to matching names.
+export const fileSearchEl = $<HTMLInputElement>("#fileSearch");
+// fileShowHiddenEl is a const in this module.
+// It toggles dotfiles and dotfolders in the attach picker.
+export const fileShowHiddenEl = $<HTMLInputElement>("#fileShowHidden");
+// fileSelectFileBtn is a const in this module.
+// It confirms the highlighted file in the attach picker.
+export const fileSelectFileBtn = $<HTMLButtonElement>("#fileSelectFileBtn");
+// fileSelectFolderBtn is a const in this module.
+// It confirms a folder from the attach picker.
+export const fileSelectFolderBtn = $<HTMLButtonElement>("#fileSelectFolderBtn");
+// newSessionFolderStepEl is a const in this module.
+// It hosts the new-session folder browser pane.
+export const newSessionFolderStepEl = $("#newSessionFolderStep");
+// newSessionCrumbsEl is a const in this module.
+// It hosts the new-session breadcrumb trail.
+export const newSessionCrumbsEl = $("#newSessionCrumbs");
+// newSessionModelHintEl is a const in this module.
+// It states which model the new session will use.
+export const newSessionModelHintEl = $("#newSessionModelHint");
+// newSessionFolderSearchEl is a const in this module.
+// It filters the new-session folder list.
+export const newSessionFolderSearchEl = $<HTMLInputElement>("#newSessionFolderSearch");
+// newSessionShowHiddenEl is a const in this module.
+// It toggles dotfolders in the new-session picker.
+export const newSessionShowHiddenEl = $<HTMLInputElement>("#newSessionShowHidden");
 
 // paintIcons replaces [data-icon] placeholders with inline SVG.
 // Pass the subtree that changed: a full-document sweep is O(n) and must

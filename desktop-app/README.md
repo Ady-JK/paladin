@@ -54,9 +54,23 @@ transcript so tool follow-up rounds stay valid.
 
 ## Web embeds
 
-- Chat pages: `WebContentsView` with a persistent partition per page;
-  Gemini and ChatGPT keep their original `persist:paladin-gemini` /
-  `persist:paladin-chatgpt` partitions so existing logins survive.
+- Chat pages: `WebContentsView` sharing one persistent partition
+  (`persist:paladin-sites`), so a Google login in one page carries over
+  to "Sign in with Google" in any other. (Per-page partitions isolated
+  `accounts.google.com` cookies, forcing a second login; the old
+  `persist:paladin-gemini` / `persist:paladin-chatgpt` jars are
+  abandoned, which costs one re-login.)
+- Single live guest: showing a chat page destroys the previous page's
+  view outright — each hidden SPA pins a full renderer, and keeping
+  visited pages alive ballooned past 2GB. Reloads stay logged in
+  (partitions persist on disk).
+- Guest pages cannot hijack the mouse: a `dom-ready` stylesheet forces
+  `-webkit-app-region: no-drag` on every guest, so a page-declared drag
+  region (ChatGPT's logged-in header) can never swallow real clicks
+  browser-side; our own title bar stays the drag handle.
+- Views stay alive when switching to Agent (hidden, never destroyed);
+  only the selected view gets bounds. Bounds come from the renderer's
+  `#externalHost` rect, one settle move per layout change.
 - Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
   ordinary entries and any of them can be removed like a custom page.
 - Views stay alive when switching to Agent (hidden, never destroyed);

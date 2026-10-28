@@ -144,14 +144,72 @@ function userAgentForView(): string {
   return guestUA;
 }
 
+// dropView destroys a guest view outright and forgets it. The session
+// partition lives on disk, so a re-shown page reloads still logged in —
+// this is what keeps N visited chat pages from pinning N heavy renderers
+// (~300MB each) in RAM at once.
+function dropView(name: string): void {
+  const entry = views.get(name);
+  if (!entry) {
+    return;
+  }
+  if (win) {
+    try {
+      win.contentView.removeChildView(entry.view);
+    } catch {
+      // Already removed.
+    }
+  }
+  try {
+    (entry.view.webContents as any).destroy?.();
+  } catch {
+    // Ignore.
+  }
+  views.delete(name);
+  if (visibleView === name) {
+    visibleView = null;
+  }
+}
+
+// NO_GUEST_DRAG_CSS neutralizes page-declared `-webkit-app-region: drag`
+// regions inside guest views. ChatGPT's logged-in shell marks its 52px
+// fixed header draggable (PWA window-controls-overlay), and Chromium
+// honors that browser-side: real mouse events in the strip are consumed
+// for window dragging and never reach the page, so the sidebar toggle and
+// search buttons go dead (CDP-injected input still works, which is why it
+// looks like the buttons themselves are broken). Our own titleBar stays
+// the drag handle, so guests lose nothing.
+const NO_GUEST_DRAG_CSS = "html * { -webkit-app-region: no-drag !important; }";
+
+// defuseGuestDrag injects the no-drag override into a guest view. dom-ready
+// fires per navigation, so SPA route changes keep working and full loads
+// re-arm automatically. Failures (view destroyed mid-load) are ignored.
+function defuseGuestDrag(view: WebContentsView): void {
+  view.webContents.on("dom-ready", () => {
+    try {
+      view.webContents.insertCSS(NO_GUEST_DRAG_CSS).catch(() => undefined);
+    } catch {
+      // Destroyed.
+    }
+  });
+}
+
 function ensureView(name: string, url: string, partition: string): WebContentsView {
   const existing = views.get(name);
   if (existing) {
-    if (existing.url !== url) {
-      existing.url = url;
-      existing.view.webContents.loadURL(url).catch(() => undefined);
+    // The renderer moved every site page to one shared partition so
+    // Google SSO cookies carry across pages. A view created under an
+    // old per-page partition keeps its old session (the partition is
+    // fixed at creation), so rebuild it once on the shared jar.
+    if (existing.partition !== partition) {
+      dropView(name);
+    } else {
+      if (existing.url !== url) {
+        existing.url = url;
+        existing.view.webContents.loadURL(url).catch(() => undefined);
+      }
+      return existing.view;
     }
-    return existing.view;
   }
   const view = new WebContentsView({
     webPreferences: {
@@ -179,6 +237,7 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
     view.webContents.setUserAgent(ua);
   }
   view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  defuseGuestDrag(view);
   views.set(name, { view, url, partition });
   view.webContents.loadURL(url).catch(() => undefined);
   return view;
@@ -221,6 +280,19 @@ function showOnly(name: string | null): void {
   if (name && name !== "agent" && visibleView === name && views.has(name)) {
     layoutVisible();
     return;
+  }
+  // Single live guest: showing a chat page destroys every other guest
+  // outright. Each hidden SPA pins a full renderer (~hundreds of MB), so
+  // keeping visited pages alive is what ballooned the app past 2GB.
+  // Reloads stay logged in (partitions persist on disk); the Agent tab
+  // keeps its 60s idle drop instead, so flipping to the agent and back
+  // does not nuke the reference page immediately.
+  if (name && name !== "agent") {
+    for (const other of [...views.keys()]) {
+      if (other !== name) {
+        dropView(other);
+      }
+    }
   }
   for (const [, entry] of views) {
     try {
@@ -406,22 +478,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle("views:drop", (_e, name: string) => {
-    const entry = views.get(name);
-    if (!entry) return true;
-    if (win) {
-      try {
-        win.contentView.removeChildView(entry.view);
-      } catch {
-        // Ignore.
-      }
-    }
-    try {
-      (entry.view.webContents as any).destroy?.();
-    } catch {
-      // Ignore.
-    }
-    views.delete(name);
-    if (visibleView === name) visibleView = null;
+    dropView(name);
     return true;
   });
 
