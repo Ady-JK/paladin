@@ -1,8 +1,9 @@
 /* styles.css is part of the desktop app frontend. */
 /* It supports the UI. */
 @import "tailwindcss";
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/600.css";
+@import "@fontsource/geist/400.css";
+@import "@fontsource/geist/500.css";
+@import "@fontsource/geist/600.css";
 @import "@fontsource/jetbrains-mono/400.css";
 
 /* The palette of the interface. The dark one is the default, the light one
@@ -10,12 +11,18 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
 
-  --color-slate-850: #111827;
-  --color-slate-900: #0b0f17;
-  --color-slate-950: #06090e;
+  /* Readability: one step up from stock (xs 12->13, sm 14->15). */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.5rem;
+
+  --color-slate-850: #131a26;
+  --color-slate-900: #0d1320;
+  --color-slate-950: #090e18;
 
   --color-accent-50: #eff6ff;
   --color-accent-500: #3b82f6;
@@ -365,16 +372,46 @@
   }
 
   /* ---- Composer glow ---- */
-  #agentView footer .relative.rounded-xl {
+  #agentView footer .composer-float {
     transition:
       border-color 180ms ease,
       box-shadow 220ms ease;
   }
 
-  #agentView footer .relative.rounded-xl:focus-within {
+  #agentView footer .composer-float:focus-within {
     box-shadow:
       0 0 0 1px rgb(99 102 241 / 0.55),
       0 8px 32px -12px rgb(99 102 241 / 0.5);
+  }
+
+  /* ---- Floating composer card: detached, soft, elevated ---- */
+  .composer-float {
+    box-shadow:
+      0 20px 50px -16px rgb(2 6 23 / 0.45),
+      0 4px 14px -6px rgb(2 6 23 / 0.25),
+      0 0 0 1px rgb(148 163 184 / 0.1);
+  }
+
+  .dark .composer-float {
+    background: rgb(19 26 38 / 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  /* ---- Mention / slash popups: full-width floating sheets ---- */
+  #mentionPopup,
+  #slashPopup {
+    box-shadow:
+      0 18px 45px -12px rgb(2 6 23 / 0.5),
+      0 0 0 1px rgb(148 163 184 / 0.14),
+      0 0 32px -12px rgb(99 102 241 / 0.3);
+  }
+
+  .dark #mentionPopup,
+  .dark #slashPopup {
+    background: rgb(19 26 38 / 0.96);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
 
   /* ---- Analytics glass ---- */
@@ -534,4 +571,251 @@
   body::before {
     display: none;
   }
+}
+
+/* ============ Composer prominence ============
+   Unlayered on purpose: the composer input wins over text-xs. */
+#promptInput {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+}
+
+#messages .turn-row {
+  letter-spacing: -0.006em;
+}
+
+/* ============ Chat skin: purple thread ============
+   Purple corner glow, a thread spine with a
+   light that travels down it, branch elbows on tool cards, a glowing
+   hero with drifting orb and panning gradient title, and a purple send.
+   Unlayered on purpose: the skin wins over utilities. Dark-only; the
+   light theme keeps the default skin. */
+
+.dark #agentView {
+  background:
+    radial-gradient(55rem 28rem at 88% -12%, rgb(168 85 247 / 0.1), transparent 62%),
+    radial-gradient(48rem 26rem at -12% 112%, rgb(168 85 247 / 0.08), transparent 60%),
+    #090e18;
+}
+
+.dark #chatView {
+  background: transparent;
+}
+
+#chatView {
+  position: relative;
+}
+
+.dark #chatView::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.033) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.033) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 75% at 50% 28%, black 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 90% 75% at 50% 28%, black 25%, transparent 78%);
+}
+
+/* ---- Thread: avatars glow like graph nodes. ---- */
+.dark .turn-row .avatar {
+  box-shadow:
+    0 0 0 3px #090e18,
+    0 0 16px -2px rgb(168 85 247 / 0.45);
+}
+
+/* ---- Tool cards branch off the spine with an elbow. ---- */
+.dark #messages .tool-card {
+  margin-left: 40px;
+  position: relative;
+  border-color: rgb(168 85 247 / 0.16);
+}
+
+.dark #messages .tool-card::before {
+  content: "";
+  position: absolute;
+  left: -27px;
+  top: -3px;
+  width: 22px;
+  height: 24px;
+  border-left: 2px solid rgb(148 163 184 / 0.28);
+  border-bottom: 2px solid rgb(148 163 184 / 0.28);
+  border-bottom-left-radius: 8px;
+}
+
+/* ---- Greeting hero: orb, panning gradient title, chips. ---- */
+.greet-hero {
+  position: relative;
+  text-align: center;
+  padding: 6vh 1rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.greet-orb {
+  width: 108px;
+  height: 108px;
+  margin: 0 auto 22px;
+  border-radius: 9999px;
+  position: relative;
+  background:
+    radial-gradient(circle at 32% 28%, rgb(233 213 255 / 0.9), transparent 42%),
+    radial-gradient(circle at 68% 72%, rgb(168 85 247 / 0.55), transparent 55%),
+    radial-gradient(circle at 50% 50%, rgb(124 58 237 / 0.35), rgb(12 8 24 / 0.9) 72%);
+  box-shadow:
+    0 0 60px -8px rgb(168 85 247 / 0.45),
+    inset 0 0 24px rgb(0 0 0 / 0.6);
+  animation: orb-drift 9s ease-in-out infinite;
+}
+
+.greet-orb::after {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  border-radius: inherit;
+  border: 1px solid rgb(168 85 247 / 0.25);
+}
+
+@keyframes orb-drift {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.03);
+  }
+}
+
+.greet-title {
+  font-size: clamp(1.9rem, 4vw, 2.9rem);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  padding: 0.05em 0 0.15em;
+  margin: 0;
+  overflow: visible;
+  background: linear-gradient(100deg, #f5f3ff, #a855f7 35%, #f5f3ff 60%, #7c3aed 85%, #f5f3ff);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: title-pan 8s linear infinite;
+}
+
+@keyframes title-pan {
+  to {
+    background-position: 220% center;
+  }
+}
+
+.greet-sub {
+  margin-top: 10px;
+  font-size: 0.9375rem;
+  color: rgb(148 163 184 / 0.9);
+  text-align: center;
+}
+
+.greet-chips {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.greet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9999px;
+  border: 1px solid rgb(15 23 42 / 0.12);
+  background: rgb(15 23 42 / 0.04);
+  padding: 8px 16px;
+  font-size: 0.8125rem;
+  color: #1e293b;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 200ms ease, transform 120ms ease;
+}
+
+.dark .greet-chip {
+  border-color: rgb(255 255 255 / 0.09);
+  background: rgb(255 255 255 / 0.04);
+  color: #e2e8f0;
+}
+
+.greet-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #c084fc, #7c3aed);
+  box-shadow: 0 0 10px rgb(168 85 247 / 0.8);
+}
+
+.greet-chip:hover {
+  border-color: rgb(124 58 237 / 0.55);
+  box-shadow: 0 0 22px -6px rgb(124 58 237 / 0.35);
+}
+
+.dark .greet-chip:hover {
+  border-color: rgb(168 85 247 / 0.4);
+  box-shadow: 0 0 22px -6px rgb(168 85 247 / 0.5);
+}
+
+.greet-chip:active {
+  transform: scale(0.97);
+}
+
+/* ---- Purple send: round, glowing. ---- */
+#agentView #sendBtn {
+  border-radius: 9999px;
+  width: 2.5rem;
+  height: 2.5rem;
+  background-image: linear-gradient(135deg, #c084fc, #7c3aed);
+  color: #1c1e02;
+  box-shadow:
+    0 10px 26px -8px rgb(168 85 247 / 0.8),
+    inset 0 1px 0 rgb(255 255 255 / 0.5);
+}
+
+#agentView #sendBtn:hover {
+  filter: brightness(1.06);
+}
+
+/* ---- User bubble: purple glass on the thread skin. ---- */
+.dark .bubble-user {
+  background: linear-gradient(180deg, rgb(168 85 247 / 0.14), rgb(168 85 247 / 0.07));
+  border: 1px solid rgb(168 85 247 / 0.28);
+  color: #f5f3ff;
+  box-shadow:
+    0 10px 28px -12px rgb(0 0 0 / 0.7),
+    0 0 24px -10px rgb(168 85 247 / 0.4);
+}
+
+/* ---- Sidebar purple accents. ---- */
+#brandBar .bg-gradient-to-tr {
+  background-image: linear-gradient(135deg, #c084fc, #7c3aed);
+  color: #1c1e02;
+}
+
+#newSessionBtn {
+  background-image: linear-gradient(135deg, #c084fc, #7c3aed);
+  color: #1c1e02;
+}
+
+.dark #sessionList .session-row:hover {
+  box-shadow: 0 0 18px -6px rgb(168 85 247 / 0.35);
+  border-color: rgb(168 85 247 / 0.22);
+}
+
+/* ---- Frozen shell: no travelling lights behind a guest page. ---- */
+body.guest-visible .greet-orb,
+body.guest-visible .greet-title {
+  animation: none;
 }

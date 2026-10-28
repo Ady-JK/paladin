@@ -49,7 +49,7 @@ import { load as loadAnalytics } from "./analytics";
 
 // SettingsNav is a type in this module.
 // It supports the desktop app frontend.
-type SettingsNav = "workspace" | "providers" | "connection" | "analytics";
+export type SettingsNav = "workspace" | "providers" | "connection" | "analytics";
 
 // paintSettingsNav is a const in this module.
 // It supports the desktop app frontend.
@@ -218,9 +218,9 @@ const saveProviderCard = async (): Promise<void> => {
 
 // openSettings is a const in this module.
 // It supports the desktop app frontend.
-export const openSettings = (): void => {
+export const openSettings = (tab: SettingsNav = "workspace"): void => {
   openModal(settingsModalEl);
-  paintSettingsNav("workspace");
+  paintSettingsNav(tab);
   renderProviderList();
   paintSettingsConnection();
   void (async () => {
@@ -309,11 +309,25 @@ export function initSettings(reconnect: () => Promise<void>): void {
   });
 
   settingsWorkspaceBrowseBtn.addEventListener("click", () => {
-    if (workspaceBrowser.classList.contains("hidden")) {
-      void browseWorkspace();
-    } else {
-      workspaceBrowser.classList.add("hidden");
-    }
+    void (async () => {
+      if (api.canPickNative()) {
+        try {
+          const picked = await api.pickDirectory(workspaceInputEl.value.trim() || null);
+          if (picked) {
+            workspaceInputEl.value = picked;
+            clearWorkspaceError();
+          }
+        } catch (error) {
+          toast(String(error), "error");
+        }
+        return;
+      }
+      if (workspaceBrowser.classList.contains("hidden")) {
+        void browseWorkspace();
+      } else {
+        workspaceBrowser.classList.add("hidden");
+      }
+    })();
   });
 
   workspaceInputEl.addEventListener("input", clearWorkspaceError);
@@ -350,7 +364,7 @@ export function initSettings(reconnect: () => Promise<void>): void {
 
   paintSettingsNav("workspace");
 
-  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#settingsBtn").addEventListener("click", () => openSettings());
   $("#settingsCloseBtn").addEventListener("click", closeSettings);
   $("#settingsCancelBtn").addEventListener("click", closeSettings);
 

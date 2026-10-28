@@ -2,6 +2,7 @@
 // In-process only: no daemon connect, no subscribe — direct runtime calls.
 
 import "./styles.css";
+import { version as appVersion } from "../package.json";
 import * as api from "./core/api";
 import {
   $,
@@ -40,6 +41,9 @@ import {
 } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
+import { initFilePicker } from "./features/filePicker";
+import { initMentions } from "./features/mentions";
+import { initSlash } from "./features/slash";
 import { initWindow } from "./features/window";
 
 async function connect(): Promise<void> {
@@ -83,9 +87,13 @@ async function connect(): Promise<void> {
 
 window.addEventListener("DOMContentLoaded", () => {
   paintIcons();
+  $("#brandVersion").textContent = `v${appVersion}`;
 
   initWindow();
   initChat();
+  initFilePicker();
+  initMentions();
+  initSlash();
   initModelPicker();
   initSites();
   initSessionDialog();

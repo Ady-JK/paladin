@@ -4,7 +4,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
 import readline from "node:readline";
 
 type Json = any;
@@ -316,6 +316,26 @@ app.whenReady().then(() => {
   startAgent();
 
   ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
+
+  // Native OS pickers: files for attach, a directory for workspace
+  // selection. Null means the user cancelled (or no window yet).
+  ipcMain.handle("dialog:pickFiles", async (_e, defaultPath: string | null) => {
+    if (!win) return null;
+    const res = await dialog.showOpenDialog(win, {
+      properties: ["openFile", "openDirectory", "multiSelections"],
+      ...(defaultPath ? { defaultPath } : {}),
+    });
+    return res.canceled ? null : res.filePaths;
+  });
+
+  ipcMain.handle("dialog:pickDirectory", async (_e, defaultPath: string | null) => {
+    if (!win) return null;
+    const res = await dialog.showOpenDialog(win, {
+      properties: ["openDirectory"],
+      ...(defaultPath ? { defaultPath } : {}),
+    });
+    return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
 
   ipcMain.handle("agent:chat", (e, params: Json) => {
     const streamId = `s${nextId++}`;

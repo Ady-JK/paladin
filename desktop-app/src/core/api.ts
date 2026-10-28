@@ -4,7 +4,7 @@
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 // No daemon, no addr, no subscribe.
 
-import type { FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, ToolInfo } from "./types";
+import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, ToolInfo } from "./types";
 import { bridge } from "./tauri";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -29,6 +29,46 @@ export function fsList(path: string | null): Promise<FsList> {
 
 export function fsHome(): Promise<string> {
   return invoke<string>("fs_home");
+}
+
+// canPickNative reports whether the host exposes OS file dialogs
+// (Electron). The e2e stub and plain web fall back to in-app pickers.
+export function canPickNative(): boolean {
+  try {
+    return !!bridge().dialog;
+  } catch {
+    return false;
+  }
+}
+
+// pickFiles opens the OS file picker rooted at defaultPath. Null
+// means unavailable or cancelled; empty multi-select never happens.
+export function pickFiles(defaultPath: string | null): Promise<string[] | null> {
+  const dlg = bridge().dialog;
+  if (!dlg) {
+    return Promise.resolve(null);
+  }
+  return dlg.pickFiles(defaultPath);
+}
+
+// pickDirectory opens the OS folder picker rooted at defaultPath.
+export function pickDirectory(defaultPath: string | null): Promise<string | null> {
+  const dlg = bridge().dialog;
+  if (!dlg) {
+    return Promise.resolve(null);
+  }
+  return dlg.pickDirectory(defaultPath);
+}
+
+// fileComplete suggests workspace files and folders for a partial
+// chat path (`@` mentions). Gitignored paths are never suggested;
+// `../` queries complete from the workspace parent.
+export function fileComplete(
+  query: string,
+  cwd: string | null,
+  limit = 20,
+): Promise<FileEntry[]> {
+  return invoke<FileEntry[]>("file_complete", { query, cwd, limit });
 }
 
 export function listProviders(): Promise<ProviderInfo[]> {

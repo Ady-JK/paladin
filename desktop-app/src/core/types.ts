@@ -39,6 +39,18 @@ export type UsageModel = {
   fillPercent?: number;
 };
 
+// FileEntry is one `@` completion row from `file_complete`: Path is
+// the Linux-style chat path (`src/foo.ts`, `../sib/file`, `src/sub/`
+// for folders), ResolvedPath the OS-specific absolute path the
+// composer inserts into the message.
+export type FileEntry = {
+  path: string;
+  display: string;
+  resolvedPath: string;
+  outside: boolean;
+  isDir: boolean;
+};
+
 // SessionUsage is the client-facing usage view from `session_usage`.
 // FillPercent is absent when the model's window is unknown.
 export type SessionUsage = {
@@ -167,12 +179,20 @@ export type FsDirectory = {
   path: string;
 };
 
+// FsFile is a type in this module.
+// It supports the desktop app frontend.
+export type FsFile = {
+  name: string;
+  path: string;
+};
+
 // FsList is a type in this module.
 // It supports the desktop app frontend.
 export type FsList = {
   currentPath: string;
   parentPath: string;
   directories: FsDirectory[];
+  files: FsFile[];
 };
 
 // GroupedLab is a type in this module.

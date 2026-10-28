@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld("paladin", {
     openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   },
 
+  dialog: {
+    pickFiles: (defaultPath: string | null) => ipcRenderer.invoke("dialog:pickFiles", defaultPath),
+    pickDirectory: (defaultPath: string | null) => ipcRenderer.invoke("dialog:pickDirectory", defaultPath),
+  },
+
   windows: {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),

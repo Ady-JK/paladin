@@ -1102,3 +1102,66 @@ func TestOverallUsageAggregates(t *testing.T) {
 		t.Fatalf("got %+v", limited)
 	}
 }
+
+func TestFileCompleteMentions(t *testing.T) {
+	rt, _ := testRuntime(t)
+	ws := t.TempDir()
+	write := func(name, content string) {
+		p := filepath.Join(ws, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("src/main.go", "package main\n")
+	write("src/server/app.go", "package server\n")
+	write(".gitignore", "ignored/\n")
+	write("ignored/x.go", "package x\n")
+	write("notes/todo.txt", "todo\n")
+	sib := filepath.Join(filepath.Dir(ws), "sibling")
+	if err := os.MkdirAll(sib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sib, "outside.txt"), []byte("out\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Force the walk fallback (hermetic: no rg, no git needed).
+	t.Setenv("PATH", "")
+	got, err := rt.FileComplete("src/ma", ws, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].Path != "src/main.go" {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].ResolvedPath != filepath.Join(ws, "src", "main.go") {
+		t.Fatalf("got %+v", got[0])
+	}
+	got, err = rt.FileComplete("", ws, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range got {
+		if strings.Contains(e.Path, "ignored/") {
+			t.Fatalf("gitignored suggested: %+v", e)
+		}
+	}
+	got, err = rt.FileComplete("../sib", ws, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range got {
+		if e.Path == "../sibling/outside.txt" && e.Outside && filepath.IsAbs(e.ResolvedPath) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("outside file missing: %+v", got)
+	}
+	if _, err := rt.FileComplete("x", "", 0); err == nil {
+		t.Fatal("empty workspace accepted")
+	}
+}

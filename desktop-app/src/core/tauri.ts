@@ -25,6 +25,10 @@ export interface PaladinBridge {
   shell: {
     openExternal: (url: string) => Promise<void>;
   };
+  dialog?: {
+    pickFiles: (defaultPath: string | null) => Promise<string[] | null>;
+    pickDirectory: (defaultPath: string | null) => Promise<string | null>;
+  };
   windows: {
     minimize: () => Promise<void>;
     toggleMaximize: () => Promise<void>;

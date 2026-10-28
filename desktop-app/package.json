@@ -1,6 +1,6 @@
 {
   "name": "paladin-desktop",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Paladin desktop (Electron + agent-host sidecar)",
   "author": "paladin",
@@ -18,7 +18,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@fontsource/inter": "^5.3.0",
+    "@fontsource/geist": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0"
   },
   "devDependencies": {
