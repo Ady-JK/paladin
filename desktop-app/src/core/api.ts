@@ -97,6 +97,29 @@ export function updateProvider(
   return invoke<ProviderInfo>("update_provider", { ...entry });
 }
 
+export interface AgentPrompt {
+  systemPrompt: string;
+}
+
+// getPrompt reads the agent prompt file (config/SYSTEM_PROMPT.md) for
+// the Prompt settings pane. Tool guidance and examples are compiled
+// per-OS in the core and always appended with the machine + workspace
+// environment block.
+export function getPrompt(): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("get_prompt");
+}
+
+// setPrompt replaces the prompt file. Turns started afterwards use the
+// new text immediately.
+export function setPrompt(prompt: { systemPrompt: string }): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("set_prompt", { ...prompt });
+}
+
+// resetPrompt rewrites the prompt file from the built-in default.
+export function resetPrompt(): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("reset_prompt");
+}
+
 export function openSession(
   sessionId: string | null,
   cwd: string | null,
@@ -118,8 +141,7 @@ export function sessionHistory(
   return invoke<MessageInfo[]>("session_history", { sessionId, cwd });
 }
 
-export function sessionUsage(
-  sessionId: string,
+export function sessionUsage(  sessionId: string,
   cwd: string | null,
 ): Promise<SessionUsage> {
   return invoke<SessionUsage>("session_usage", { sessionId, cwd });

@@ -19,14 +19,14 @@ import (
 // Template is the reusable blueprint for one kind of agent. The zero
 // value is valid: it uses the runtime's default prompt, all registered
 // tools, and the runtime round cap.
+//
+// The prompt itself is not part of the template: the agent core reads
+// SYSTEM_PROMPT.md and TOOL_GUIDANCE.md from the config dir at turn
+// time (the settings UI edits them), and only an explicit per-request
+// override beats the files.
 type Template struct {
 	// Name identifies the template in a Registry.
 	Name string `json:"name"`
-	// SystemPrompt overrides the runtime base prompt when no explicit
-	// per-request override is supplied.
-	SystemPrompt string `json:"system_prompt,omitempty"`
-	// ToolGuidance overrides the runtime tool guidance block.
-	ToolGuidance string `json:"tool_guidance,omitempty"`
 	// Tools selects a subset by name. Empty means every tool in the
 	// runtime registry.
 	Tools []string `json:"tools,omitempty"`
@@ -50,10 +50,11 @@ type ProviderSource interface {
 	ResolveProvider(name, model string) (inference.Provider, error)
 }
 
-// PromptSource supplies the runtime defaults a template can override.
+// PromptSource supplies the runtime default prompt. The file content
+// is authoritative; only an explicit per-request override beats it.
+// Tool guidance and examples are compiled per-OS inside prompt.
 type PromptSource interface {
 	SystemPrompt(override string) string
-	ToolGuidance() string
 }
 
 // Deps is the runtime-owned set of collaborators Build needs. Keeping
@@ -102,14 +103,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	}
 
 	base := d.Prompts.SystemPrompt(strVal(req.SystemPrompt))
-	if strings.TrimSpace(strVal(req.SystemPrompt)) == "" && strings.TrimSpace(t.SystemPrompt) != "" {
-		base = t.SystemPrompt
-	}
-	guidance := d.Prompts.ToolGuidance()
-	if strings.TrimSpace(t.ToolGuidance) != "" {
-		guidance = t.ToolGuidance
-	}
-	system := prompt.ToolSystem(base, guidance, sess.Meta.Cwd)
+	system := prompt.ToolSystem(base, sess.Meta.Cwd)
 
 	registry := d.Tools
 	shell := d.Shell

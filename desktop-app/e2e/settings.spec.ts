@@ -90,3 +90,20 @@ test("workspace pane saves the default workspace", async ({ page }) => {
   await page.click("#settingsBtn");
   await expect(page.locator("#settingsDefaultWorkspace")).toHaveValue("/home/tester/project");
 });
+
+test("prompt pane loads, saves, and resets the agent prompt", async ({ page }) => {
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavPrompt");
+  await expect(page.locator("#settingsNavPrompt")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#settingsPaneTitle")).toHaveText("Prompt");
+  await expect(page.locator("#settingsSystemPrompt")).toHaveValue("stub system prompt");
+
+  await page.fill("#settingsSystemPrompt", "custom sys");
+  await page.click("#settingsPromptSaveBtn");
+  await expect(page.locator("#toast")).toContainText("Prompt saved");
+  await expect(page.locator("#settingsSystemPrompt")).toHaveValue("custom sys");
+
+  await page.click("#settingsPromptResetBtn");
+  await expect(page.locator("#toast")).toContainText("Prompt reset to default");
+  await expect(page.locator("#settingsSystemPrompt")).toHaveValue("stub system prompt");
+});

@@ -36,8 +36,19 @@ Electron main spawns it with piped stdio:
 | `session_usage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` omitted when the model's window is unknown) |
 | `overall_usage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
 | `delete_session` | `{sessionId,cwd?}` | `bool` |
+| `get_prompt` | `{}` | `Prompt` (`systemPrompt` = `config/SYSTEM_PROMPT.md`; a missing/blank file seeds from the built-in default) |
+| `set_prompt` | `{systemPrompt}` | `Prompt` (blank rejected) |
+| `reset_prompt` | `{}` | `Prompt` (file rewritten from the built-in default) |
 | `stop_chat` | `{sessionId?,cwd?}` | `bool` |
 | `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?}` | streaming (below) |
+
+The prompt file is authoritative: every turn uses it unless the
+`chat` call carries an explicit `systemPrompt` override. Tool
+guidance and examples are compiled per-OS in the core (a Windows turn
+never sees sh text, a Unix turn never sees PowerShell text) and always
+appended with the machine (OS + arch) and session workspace
+environment block. The settings UI edits the file via
+`get/set/reset_prompt`.
 
 ## Responses (stdout)
 

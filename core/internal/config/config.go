@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/prompt"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
@@ -32,6 +33,14 @@ const (
 	PlaceholderKey       = "replace_me"
 
 	KeyringService = "paladin"
+
+	// SystemPromptFileName is the user-editable prompt file under
+	// config/. It holds the system prompt; the agent core reads it at
+	// turn time and the settings UI edits it. A missing or blank file
+	// is seeded from the built-in default. The tool guidance and
+	// examples are compiled in per-OS (ToolGuidance/UsageExamples pick
+	// exactly one OS block), so they live in code, not in a file.
+	SystemPromptFileName = "SYSTEM_PROMPT.md"
 
 	OpencodeCatalogURL    = "https://opencode.ai/inference/go/v1/models"
 	OpencodeUserAgent     = "paladin/1.0"
@@ -170,6 +179,44 @@ func (s *Store) ModelsPath() string {
 	return filepath.Join(s.dataDir, "config", "models.json")
 }
 
+// SystemPromptPath is the user-editable system prompt file.
+func (s *Store) SystemPromptPath() string {
+	return filepath.Join(s.dataDir, "config", SystemPromptFileName)
+}
+
+// LoadSystemPrompt reads the system prompt file, seeding it from the
+// built-in default when missing or blank. The file is authoritative:
+// callers use exactly what it holds.
+func (s *Store) LoadSystemPrompt() string {
+	return loadPromptFile(s.SystemPromptPath(), DefaultSystemPrompt())
+}
+
+func loadPromptFile(path, seed string) string {
+	data, err := os.ReadFile(path)
+	if err == nil && strings.TrimSpace(string(data)) != "" {
+		return string(data)
+	}
+	// Missing, unreadable, or blank: reseed so the file always shows
+	// the text the agent actually uses. A failed reseed still returns
+	// the default so turns keep working.
+	_ = AtomicWrite(path, []byte(seed))
+	return seed
+}
+
+// SaveSystemPrompt replaces the system prompt file. Blank text is
+// rejected: use ResetPrompt to restore the default.
+func (s *Store) SaveSystemPrompt(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("parse: system prompt must not be empty")
+	}
+	return AtomicWrite(s.SystemPromptPath(), []byte(text))
+}
+
+// ResetPrompt rewrites the prompt file from the built-in default.
+func (s *Store) ResetPrompt() error {
+	return AtomicWrite(s.SystemPromptPath(), []byte(DefaultSystemPrompt()))
+}
+
 func (s *Store) LoadProviders() (ProvidersFile, error) {
 	path := s.ProvidersPath()
 	data, err := os.ReadFile(path)
@@ -251,6 +298,10 @@ func (s *Store) SaveModels(file ModelsFile) error {
 	}
 	return AtomicWrite(s.ModelsPath(), data)
 }
+
+// DefaultSystemPrompt returns the built-in system prompt text used to
+// seed the prompt file on first run.
+func DefaultSystemPrompt() string { return prompt.SystemPrompt }
 
 // Resolve the provider to use: explicit name wins, else the default
 // when it has a real key, else the first provider with a real key.
@@ -524,7 +575,6 @@ func SortedKeys[V any](m map[string]V) []string {
 type Config struct {
 	DataDir       string
 	MaxToolRounds uint32
-	SystemPrompt  string
 }
 
 func NewConfig(dataDir string) Config {

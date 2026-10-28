@@ -14,6 +14,35 @@ func testStore(t *testing.T) (*Store, string) {
 	return NewStore(dir, NewMemoryKeyStore()), dir
 }
 
+func TestPromptFileSeedsSavesResets(t *testing.T) {
+	s, dir := testStore(t)
+	// A missing file seeds from the built-in default.
+	if got := s.LoadSystemPrompt(); got == "" || strings.TrimSpace(got) == "" {
+		t.Fatal("empty system prompt")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config", SystemPromptFileName)); err != nil {
+		t.Fatalf("not seeded: %v", err)
+	}
+	// Saved text round-trips verbatim.
+	if err := s.SaveSystemPrompt("custom sys"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LoadSystemPrompt(); got != "custom sys" {
+		t.Fatalf("got %q", got)
+	}
+	// A blank save is rejected so the UI cannot wipe the prompt.
+	if err := s.SaveSystemPrompt("  "); err == nil {
+		t.Fatal("blank system prompt accepted")
+	}
+	// Reset restores the built-in default.
+	if err := s.ResetPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LoadSystemPrompt(); got != DefaultSystemPrompt() {
+		t.Fatal("reset did not restore system prompt")
+	}
+}
+
 func TestClampMaxToolRounds(t *testing.T) {
 	if got := ClampMaxToolRounds(0); got != 100 {
 		t.Fatalf("got %d", got)

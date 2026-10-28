@@ -270,6 +270,20 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(list)
+	case "get_prompt":
+		return ok(rt.GetPrompt())
+	case "set_prompt":
+		updated, err := rt.SetPrompt(stringParam(req.Params, "systemPrompt"))
+		if err != nil {
+			return failed(err)
+		}
+		return ok(updated)
+	case "reset_prompt":
+		updated, err := rt.ResetPrompt()
+		if err != nil {
+			return failed(err)
+		}
+		return ok(updated)
 	case "file_complete":
 		entries, err := rt.FileComplete(stringParam(req.Params, "query"), stringParam(req.Params, "cwd"), int(intParam(req.Params, "limit", 20)))
 		if err != nil {
