@@ -150,6 +150,14 @@ test("new-session folder step browses with crumbs, search, and hidden toggle", a
   await page.click("#sessionSelectFolderBtn");
   await expect(page.locator("#newSessionModelStep")).toBeVisible();
   await expect(page.locator("#sessionFolderLabel")).toContainText("project");
+
+  // The card itself never scrolls; only the list inside does.
+  const cardScroll = await page.locator("#sessionModal .modal-card").evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  expect(cardScroll.scroll).toBeLessThanOrEqual(cardScroll.client + 1);
+
   await page.click("#sessionBackBtn");
   await expect(page.locator("#newSessionFolderStep")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -181,6 +189,14 @@ test("attach picker selects files and folders with crumbs and hidden toggle", as
   // Select file inserts the highlighted file and closes.
   await page.locator('#fileList [data-fb-select][data-fb-kind="file"]').first().click();
   await expect(page.locator('#fileList [data-fb-select][aria-selected="true"]')).toHaveCount(1);
+
+  // The card itself never scrolls; only the list inside does.
+  const cardScroll = await page.locator("#fileModal .modal-card").evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  expect(cardScroll.scroll).toBeLessThanOrEqual(cardScroll.client + 1);
+
   await page.click("#fileSelectFileBtn");
   await expect(dialog).toBeHidden();
   await expect(page.locator("#promptInput")).not.toBeEmpty();

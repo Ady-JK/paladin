@@ -297,6 +297,7 @@
      the new-session folder step and the composer attach dialog. */
   .picker-crumbs {
     display: flex;
+    flex-shrink: 0;
     flex-wrap: wrap;
     align-items: center;
     gap: 2px;
@@ -348,6 +349,7 @@
 
   .picker-toolbar {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 10px;
   }
@@ -417,6 +419,7 @@
 
   .picker-list {
     overflow-y: auto;
+    min-height: 0;
     border-radius: 0.5rem;
     border: 1px solid rgb(226 232 240);
     padding: 4px;

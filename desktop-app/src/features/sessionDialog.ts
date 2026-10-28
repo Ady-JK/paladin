@@ -45,10 +45,14 @@ let query = "";
 let showHidden = false;
 
 // showStep toggles the wizard: folder first, model after confirm.
+// Both steps are flex columns filling the fixed-height card; only the
+// lists inside scroll, headers and footers stay pinned.
 function showStep(which: "folder" | "model"): void {
   const folder = which === "folder";
   newSessionFolderStepEl.classList.toggle("hidden", !folder);
+  newSessionFolderStepEl.classList.toggle("flex", folder);
   newSessionModelStepEl.classList.toggle("hidden", folder);
+  newSessionModelStepEl.classList.toggle("flex", !folder);
   paintIcons(sessionModalEl);
 }
 
