@@ -16,24 +16,36 @@ test("the todo hat stays hidden until the agent plans something", async ({ page 
   await expect(page.locator("#todoHat")).toBeHidden();
 });
 
-test("a resumed session shows its plan in the hat above the composer", async ({ page }) => {
-  // Open the stub session: loadHistory + refreshTodos repopulate the hat.
+test("a resumed session shows its plan latched above the composer", async ({ page }) => {
+  // Open the stub session: loadHistory + refreshTodos repopulate the panel.
   await page.click("#sessionList [data-session]");
   const hat = page.locator("#todoHat");
   await expect(hat).toBeVisible();
+  await expect(hat).toContainText("Plan");
   await expect(hat).toContainText("1/3 finished");
-  await expect(hat).toContainText("Build the hat");
 
-  // The hat sits above the textarea, inside the composer card.
+  // The panel is a separate tab on top of the composer card, latched
+  // onto its top edge — not inside the textarea.
   const hatBox = await hat.boundingBox();
+  const composerBox = await page.locator("#agentView footer .composer-float").boundingBox();
   const inputBox = await page.locator("#promptInput").boundingBox();
-  expect(hatBox && inputBox && hatBox.y < inputBox.y).toBeTruthy();
+  expect(hatBox && composerBox && inputBox).toBeTruthy();
+  if (hatBox && composerBox && inputBox) {
+    // Directly above the composer, sharing its width and edge.
+    expect(Math.abs(hatBox.y + hatBox.height - composerBox.y)).toBeLessThan(4);
+    expect(Math.abs(hatBox.x - composerBox.x)).toBeLessThan(4);
+    expect(Math.abs(hatBox.width - composerBox.width)).toBeLessThan(4);
+    expect(hatBox.y + hatBox.height).toBeLessThan(inputBox.y);
+  }
 
-  // Clicking the bar opens the list upwards with state pills on the right.
+  // Clicking the bar opens the checklist with markers and pills.
   await hat.locator('[data-todo="bar"]').click();
   const list = hat.locator('[data-todo="list"]');
   await expect(list).toBeVisible();
   await expect(list).toContainText("Plan the work");
+  await expect(list).toContainText("✓");
+  await expect(list).toContainText("●");
+  await expect(list).toContainText("○");
   await expect(list).toContainText("not_started");
   await expect(list).toContainText("in_progress");
   await expect(list).toContainText("finished");
