@@ -313,7 +313,7 @@ func baseName(slash string) string {
 // honored, hidden included, .git excluded), falling back to a walk
 // with a minimal .gitignore matcher when rg is missing.
 func listCandidateFiles(root string) ([]string, error) {
-	if rg, err := exec.LookPath("rg"); err == nil {
+	if rg, err := lookPath("rg"); err == nil {
 		if files, ok := rgFiles(rg, root); ok {
 			return files, nil
 		}
@@ -325,6 +325,7 @@ func listCandidateFiles(root string) ([]string, error) {
 // joins the slash-separated rows onto root.
 func rgFiles(rg, root string) ([]string, bool) {
 	cmd := exec.Command(rg, "--files", "--hidden", "--glob", "!.git/", "--", root)
+	cmd.Env = shellEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, false

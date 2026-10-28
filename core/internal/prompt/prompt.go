@@ -467,7 +467,8 @@ Shell (Windows PowerShell):
 const toolGuidanceUnix = `
 
 Shell (Unix sh):
-- The shell is sh: use Unix-style commands (ls, cat, grep) with
+- The shell is sh: your login shell runs each command, so your PATH,
+// aliases and settings apply. Use Unix-style commands (ls, cat, grep) with
   Unix-style absolute paths.`
 
 // ToolGuidance returns the tool mechanics for the running OS: the

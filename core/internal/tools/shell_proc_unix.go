@@ -10,9 +10,7 @@ import (
 )
 
 func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
-	cmd := exec.Command("sh", "-c", cmdStr)
-	cmd.Dir = dir
-	cmd.Env = shellEnv("TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
+	cmd := spawnShellCmd(cmdStr, dir, "TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	outR, err := cmd.StdoutPipe()
 	if err != nil {
@@ -33,9 +31,7 @@ func spawnToLog(cmdStr, dir string, log *os.File) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("sh", "-c", cmdStr)
-	cmd.Dir = dir
-	cmd.Env = shellEnv("TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
+	cmd := spawnShellCmd(cmdStr, dir, "TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = log
 	cmd.Stderr = dup
