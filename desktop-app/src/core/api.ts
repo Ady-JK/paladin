@@ -97,6 +97,31 @@ export function updateProvider(
   return invoke<ProviderInfo>("update_provider", { ...entry });
 }
 
+export interface AgentPrompts {
+  systemPrompt: string;
+  toolGuidance: string;
+}
+
+// getPrompts reads the agent prompt files (SYSTEM_PROMPT.md and
+// TOOL_GUIDANCE.md under config/) for the Prompt settings pane.
+export function getPrompts(): Promise<AgentPrompts> {
+  return invoke<AgentPrompts>("get_prompts");
+}
+
+// setPrompts replaces the prompt files. Either side may be empty to
+// leave it unchanged.
+export function setPrompts(prompts: {
+  systemPrompt: string;
+  toolGuidance: string;
+}): Promise<AgentPrompts> {
+  return invoke<AgentPrompts>("set_prompts", { ...prompts });
+}
+
+// resetPrompts rewrites both prompt files from the built-in defaults.
+export function resetPrompts(): Promise<AgentPrompts> {
+  return invoke<AgentPrompts>("reset_prompts");
+}
+
 export function openSession(
   sessionId: string | null,
   cwd: string | null,
@@ -118,8 +143,7 @@ export function sessionHistory(
   return invoke<MessageInfo[]>("session_history", { sessionId, cwd });
 }
 
-export function sessionUsage(
-  sessionId: string,
+export function sessionUsage(  sessionId: string,
   cwd: string | null,
 ): Promise<SessionUsage> {
   return invoke<SessionUsage>("session_usage", { sessionId, cwd });

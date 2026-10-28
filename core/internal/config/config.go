@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/prompt"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
@@ -32,6 +33,15 @@ const (
 	PlaceholderKey       = "replace_me"
 
 	KeyringService = "paladin"
+
+	// SystemPromptFileName and ToolGuidanceFileName are the
+	// user-editable prompt files under config/. They hold the system
+	// prompt and the tool guidance respectively (together they are the
+	// full agent prompt). The agent core reads them at turn time; the
+	// settings UI edits them. Missing or blank files are seeded from
+	// the built-in defaults.
+	SystemPromptFileName = "SYSTEM_PROMPT.md"
+	ToolGuidanceFileName = "TOOL_GUIDANCE.md"
 
 	OpencodeCatalogURL    = "https://opencode.ai/inference/go/v1/models"
 	OpencodeUserAgent     = "paladin/1.0"
@@ -170,6 +180,67 @@ func (s *Store) ModelsPath() string {
 	return filepath.Join(s.dataDir, "config", "models.json")
 }
 
+// SystemPromptPath is the user-editable system prompt file.
+func (s *Store) SystemPromptPath() string {
+	return filepath.Join(s.dataDir, "config", SystemPromptFileName)
+}
+
+// ToolGuidancePath is the user-editable tool guidance file.
+func (s *Store) ToolGuidancePath() string {
+	return filepath.Join(s.dataDir, "config", ToolGuidanceFileName)
+}
+
+// LoadSystemPrompt reads the system prompt file, seeding it from the
+// built-in default when missing or blank. The file is authoritative:
+// callers use exactly what it holds.
+func (s *Store) LoadSystemPrompt() string {
+	return loadPromptFile(s.SystemPromptPath(), DefaultSystemPrompt())
+}
+
+// LoadToolGuidance reads the tool guidance file, seeding it from the
+// built-in default when missing or blank.
+func (s *Store) LoadToolGuidance() string {
+	return loadPromptFile(s.ToolGuidancePath(), DefaultToolGuidance())
+}
+
+func loadPromptFile(path, seed string) string {
+	data, err := os.ReadFile(path)
+	if err == nil && strings.TrimSpace(string(data)) != "" {
+		return string(data)
+	}
+	// Missing, unreadable, or blank: reseed so the file always shows
+	// the text the agent actually uses. A failed reseed still returns
+	// the default so turns keep working.
+	_ = AtomicWrite(path, []byte(seed))
+	return seed
+}
+
+// SaveSystemPrompt replaces the system prompt file. Blank text is
+// rejected: use ResetPrompts to restore the default.
+func (s *Store) SaveSystemPrompt(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("parse: system prompt must not be empty")
+	}
+	return AtomicWrite(s.SystemPromptPath(), []byte(text))
+}
+
+// SaveToolGuidance replaces the tool guidance file. Blank text is
+// rejected: use ResetPrompts to restore the default.
+func (s *Store) SaveToolGuidance(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("parse: tool guidance must not be empty")
+	}
+	return AtomicWrite(s.ToolGuidancePath(), []byte(text))
+}
+
+// ResetPrompts rewrites both prompt files from the built-in defaults.
+func (s *Store) ResetPrompts() error {
+	if err := AtomicWrite(s.SystemPromptPath(), []byte(DefaultSystemPrompt())); err != nil {
+		return err
+	}
+	return AtomicWrite(s.ToolGuidancePath(), []byte(DefaultToolGuidance()))
+}
+
 func (s *Store) LoadProviders() (ProvidersFile, error) {
 	path := s.ProvidersPath()
 	data, err := os.ReadFile(path)
@@ -251,6 +322,14 @@ func (s *Store) SaveModels(file ModelsFile) error {
 	}
 	return AtomicWrite(s.ModelsPath(), data)
 }
+
+// DefaultSystemPrompt returns the built-in system prompt text used to
+// seed the prompt file on first run.
+func DefaultSystemPrompt() string { return prompt.SystemPrompt }
+
+// DefaultToolGuidance returns the built-in tool guidance text used to
+// seed the guidance file on first run.
+func DefaultToolGuidance() string { return prompt.ToolGuidance }
 
 // Resolve the provider to use: explicit name wins, else the default
 // when it has a real key, else the first provider with a real key.
@@ -524,7 +603,6 @@ func SortedKeys[V any](m map[string]V) []string {
 type Config struct {
 	DataDir       string
 	MaxToolRounds uint32
-	SystemPrompt  string
 }
 
 func NewConfig(dataDir string) Config {

@@ -36,8 +36,16 @@ Electron main spawns it with piped stdio:
 | `session_usage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` omitted when the model's window is unknown) |
 | `overall_usage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
 | `delete_session` | `{sessionId,cwd?}` | `bool` |
+| `get_prompts` | `{}` | `Prompts` (`systemPrompt` = `config/SYSTEM_PROMPT.md`, `toolGuidance` = `config/TOOL_GUIDANCE.md`; missing/blank files seed from the built-in defaults) |
+| `set_prompts` | `{systemPrompt?,toolGuidance?}` | `Prompts` (empty side left unchanged; both empty rejected) |
+| `reset_prompts` | `{}` | `Prompts` (both files rewritten from the built-in defaults) |
 | `stop_chat` | `{sessionId?,cwd?}` | `bool` |
 | `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?}` | streaming (below) |
+
+The prompt files are authoritative: every turn uses them unless the
+`chat` call carries an explicit `systemPrompt` override. The settings
+UI edits them via `get/set/reset_prompts`; there is no other prompt
+store (no `settings.json` prompt keys, no template overrides).
 
 ## Responses (stdout)
 

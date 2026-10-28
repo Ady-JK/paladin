@@ -184,32 +184,10 @@ func TestBuildResolvesEverything(t *testing.T) {
 func TestBuildPromptPrecedence(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000022")
 	d, _, _, _ := testDeps(t, sess)
+	tpl := Template{Name: "custom"}
 
-	// Template beats the runtime default.
-	tpl := Template{Name: "custom", SystemPrompt: "template base", ToolGuidance: "template guidance"}
+	// The runtime default (the prompt files) is used as-is.
 	a, err := tpl.Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(a.system, "template base") || strings.Contains(a.system, "runtime base") {
-		t.Fatalf("template prompt lost: %q", a.system)
-	}
-	if !strings.Contains(a.system, "template guidance") {
-		t.Fatalf("template guidance lost: %q", a.system)
-	}
-
-	// Request beats the template.
-	override := "request base"
-	a, err = tpl.Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi", SystemPrompt: &override})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(a.system, "request base") || strings.Contains(a.system, "template base") {
-		t.Fatalf("request prompt lost: %q", a.system)
-	}
-
-	// A zero template falls back to the runtime defaults.
-	a, err = Template{}.Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,14 +195,24 @@ func TestBuildPromptPrecedence(t *testing.T) {
 		t.Fatalf("runtime prompt lost: %q", a.system)
 	}
 
-	// Whitespace-only overrides do not replace configured values.
+	// Request beats the runtime default.
+	override := "request base"
+	a, err = tpl.Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi", SystemPrompt: &override})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(a.system, "request base") || strings.Contains(a.system, "runtime base") {
+		t.Fatalf("request prompt lost: %q", a.system)
+	}
+
+	// Whitespace-only overrides do not replace the file contents.
 	blank := "   "
 	a, err = tpl.Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi", SystemPrompt: &blank})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(a.system, "template base") {
-		t.Fatalf("blank override clobbered template prompt: %q", a.system)
+	if !strings.Contains(a.system, "runtime base") {
+		t.Fatalf("blank override clobbered runtime prompt: %q", a.system)
 	}
 }
 
@@ -310,17 +298,17 @@ func TestRegistryRegisterGetNamesDefault(t *testing.T) {
 	if err := r.Register(first); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Register(Template{Name: "default", SystemPrompt: "d"}); err != nil {
+	if err := r.Register(Template{Name: "default", MaxRounds: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Register(Template{Name: "first", SystemPrompt: "replaced"}); err != nil {
+	if err := r.Register(Template{Name: "first", MaxRounds: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if names := r.Names(); len(names) != 2 || names[0] != "first" || names[1] != "default" {
 		t.Fatalf("got %+v", names)
 	}
 	got, ok := r.Get("first")
-	if !ok || got.SystemPrompt != "replaced" {
+	if !ok || got.MaxRounds != 9 {
 		t.Fatalf("got %+v %v", got, ok)
 	}
 	if _, ok := r.Get("missing"); ok {

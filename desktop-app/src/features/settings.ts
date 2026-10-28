@@ -17,15 +17,20 @@ import {
   settingsModalEl,
   settingsNavAnalyticsEl,
   settingsNavConnectionEl,
+  settingsNavPromptEl,
   settingsNavProvidersEl,
   settingsNavWorkspaceEl,
   settingsPaneAnalyticsEl,
   settingsPaneConnectionEl,
+  settingsPanePromptEl,
   settingsPaneProvidersEl,
   settingsPaneTitleEl,
   settingsPaneWorkspaceEl,
+  settingsPromptErrorEl,
   settingsProviderHintEl,
   settingsProviderListEl,
+  settingsSystemPromptEl,
+  settingsToolGuidanceEl,
   settingsWorkspaceBrowseBtn,
   settingsWorkspaceErrorEl,
   statusDetailEl,
@@ -49,7 +54,7 @@ import { load as loadAnalytics } from "./analytics";
 
 // SettingsNav is a type in this module.
 // It supports the desktop app frontend.
-export type SettingsNav = "workspace" | "providers" | "connection" | "analytics";
+export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics";
 
 // paintSettingsNav is a const in this module.
 // It supports the desktop app frontend.
@@ -57,6 +62,7 @@ const paintSettingsNav = (tab: SettingsNav): void => {
   const tabs: [SettingsNav, HTMLButtonElement, HTMLElement, string][] = [
     ["workspace", settingsNavWorkspaceEl, settingsPaneWorkspaceEl, "Workspace"],
     ["providers", settingsNavProvidersEl, settingsPaneProvidersEl, "Providers"],
+    ["prompt", settingsNavPromptEl, settingsPanePromptEl, "Prompt"],
     ["connection", settingsNavConnectionEl, settingsPaneConnectionEl, "Connection"],
     ["analytics", settingsNavAnalyticsEl, settingsPaneAnalyticsEl, "Analytics"],
   ];
@@ -77,6 +83,60 @@ const paintSettingsNav = (tab: SettingsNav): void => {
   }
 };
 
+// loadPrompts fills the prompt editor from the agent core files
+// (SYSTEM_PROMPT.md + TOOL_GUIDANCE.md). Failures stay inline so a
+// broken read never looks like an empty prompt.
+const loadPrompts = async (): Promise<void> => {
+  settingsPromptErrorEl.textContent = "";
+  settingsPromptErrorEl.classList.add("hidden");
+  try {
+    const prompts = await api.getPrompts();
+    settingsSystemPromptEl.value = prompts.systemPrompt;
+    settingsToolGuidanceEl.value = prompts.toolGuidance;
+  } catch (error) {
+    settingsPromptErrorEl.textContent = String(error);
+    settingsPromptErrorEl.classList.remove("hidden");
+  }
+};
+
+// savePrompts writes the editor back to the prompt files. Turns
+// started afterwards use the new text immediately.
+const savePrompts = async (): Promise<void> => {
+  settingsPromptErrorEl.textContent = "";
+  settingsPromptErrorEl.classList.add("hidden");
+  try {
+    const updated = await api.setPrompts({
+      systemPrompt: settingsSystemPromptEl.value,
+      toolGuidance: settingsToolGuidanceEl.value,
+    });
+    settingsSystemPromptEl.value = updated.systemPrompt;
+    settingsToolGuidanceEl.value = updated.toolGuidance;
+    toast("Prompt saved");
+  } catch (error) {
+    const message = String(error);
+    settingsPromptErrorEl.textContent = message;
+    settingsPromptErrorEl.classList.remove("hidden");
+    toast(message, "error");
+  }
+};
+
+// resetPrompts rewrites both files from the built-in defaults.
+const resetPrompts = async (): Promise<void> => {
+  settingsPromptErrorEl.textContent = "";
+  settingsPromptErrorEl.classList.add("hidden");
+  try {
+    const updated = await api.resetPrompts();
+    settingsSystemPromptEl.value = updated.systemPrompt;
+    settingsToolGuidanceEl.value = updated.toolGuidance;
+    toast("Prompt reset to defaults");
+  } catch (error) {
+    const message = String(error);
+    settingsPromptErrorEl.textContent = message;
+    settingsPromptErrorEl.classList.remove("hidden");
+    toast(message, "error");
+  }
+};
+// It supports the desktop app frontend.
 // renderProviderList is a const in this module.
 // It supports the desktop app frontend.
 const renderProviderList = (): void => {
@@ -257,6 +317,10 @@ export function initSettings(reconnect: () => Promise<void>): void {
 
   settingsNavWorkspaceEl.addEventListener("click", () => paintSettingsNav("workspace"));
   settingsNavProvidersEl.addEventListener("click", () => paintSettingsNav("providers"));
+  settingsNavPromptEl.addEventListener("click", () => {
+    paintSettingsNav("prompt");
+    void loadPrompts();
+  });
   settingsNavConnectionEl.addEventListener("click", () => {
     paintSettingsConnection();
     paintSettingsNav("connection");
@@ -306,6 +370,13 @@ export function initSettings(reconnect: () => Promise<void>): void {
   $("#settingsRefreshModelsBtn").addEventListener("click", () => {
     void refreshProviders();
     settingsProviderHintEl.textContent = "Fetching models in the background…";
+  });
+
+  $("#settingsPromptSaveBtn").addEventListener("click", () => {
+    void savePrompts();
+  });
+  $("#settingsPromptResetBtn").addEventListener("click", () => {
+    void resetPrompts();
   });
 
   settingsWorkspaceBrowseBtn.addEventListener("click", () => {

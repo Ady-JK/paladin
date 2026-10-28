@@ -357,6 +357,25 @@ async function __paladinBaseInvoke(cmd, args) {
       case "set_workspace":
         window.localStorage.setItem("e2e-workspace", args.path);
         return args.path;
+      case "get_prompts":
+        return (
+          window.__e2ePrompts || {
+            systemPrompt: "stub system prompt",
+            toolGuidance: "stub tool guidance",
+          }
+        );
+      case "set_prompts":
+        window.__e2ePrompts = {
+          systemPrompt: args.systemPrompt || "stub system prompt",
+          toolGuidance: args.toolGuidance || "stub tool guidance",
+        };
+        return window.__e2ePrompts;
+      case "reset_prompts":
+        window.__e2ePrompts = {
+          systemPrompt: "stub system prompt",
+          toolGuidance: "stub tool guidance",
+        };
+        return window.__e2ePrompts;
       case "fs_home":
         return "/home/tester";
       case "file_complete": {

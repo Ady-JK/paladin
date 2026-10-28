@@ -14,6 +14,53 @@ func testStore(t *testing.T) (*Store, string) {
 	return NewStore(dir, NewMemoryKeyStore()), dir
 }
 
+func TestPromptFilesSeedSaveReset(t *testing.T) {
+	s, dir := testStore(t)
+	// Missing files seed from the built-in defaults.
+	if got := s.LoadSystemPrompt(); got == "" || strings.TrimSpace(got) == "" {
+		t.Fatal("empty system prompt")
+	}
+	if got := s.LoadToolGuidance(); got == "" || strings.TrimSpace(got) == "" {
+		t.Fatal("empty tool guidance")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config", SystemPromptFileName)); err != nil {
+		t.Fatalf("not seeded: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config", ToolGuidanceFileName)); err != nil {
+		t.Fatalf("not seeded: %v", err)
+	}
+	// Saved text round-trips verbatim.
+	if err := s.SaveSystemPrompt("custom sys"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveToolGuidance("custom guide"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LoadSystemPrompt(); got != "custom sys" {
+		t.Fatalf("got %q", got)
+	}
+	if got := s.LoadToolGuidance(); got != "custom guide" {
+		t.Fatalf("got %q", got)
+	}
+	// Blank saves are rejected so the UI cannot wipe the prompt.
+	if err := s.SaveSystemPrompt("  "); err == nil {
+		t.Fatal("blank system prompt accepted")
+	}
+	if err := s.SaveToolGuidance(""); err == nil {
+		t.Fatal("blank guidance accepted")
+	}
+	// Reset restores the built-in defaults.
+	if err := s.ResetPrompts(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LoadSystemPrompt(); got != DefaultSystemPrompt() {
+		t.Fatal("reset did not restore system prompt")
+	}
+	if got := s.LoadToolGuidance(); got != DefaultToolGuidance() {
+		t.Fatal("reset did not restore guidance")
+	}
+}
+
 func TestClampMaxToolRounds(t *testing.T) {
 	if got := ClampMaxToolRounds(0); got != 100 {
 		t.Fatalf("got %d", got)

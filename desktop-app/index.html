@@ -449,6 +449,14 @@
             <span>Providers</span>
           </button>
           <button
+            id="settingsNavPrompt"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
+          >
+            <span data-icon="terminal"></span>
+            <span>Prompt</span>
+          </button>
+          <button
             id="settingsNavConnection"
             role="tab"
             class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
@@ -591,6 +599,52 @@
               </div>
               <div id="settingsProviderList" class="space-y-2"></div>
               <p id="settingsProviderHint" class="mt-3 font-mono text-[10px] text-slate-400"></p>
+            </div>
+
+            <div id="settingsPanePrompt" class="hidden space-y-4">
+              <p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                The agent reads <code class="font-mono">config/SYSTEM_PROMPT.md</code> and
+                <code class="font-mono">config/TOOL_GUIDANCE.md</code> on every turn.
+                Edits apply to new turns immediately; a per-message override still wins.
+              </p>
+              <div>
+                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+                  System prompt
+                </label>
+                <textarea
+                  id="settingsSystemPrompt"
+                  rows="10"
+                  spellcheck="false"
+                  class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-[11px] leading-relaxed text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                ></textarea>
+              </div>
+              <div>
+                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+                  Tool guidance
+                </label>
+                <textarea
+                  id="settingsToolGuidance"
+                  rows="10"
+                  spellcheck="false"
+                  class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-[11px] leading-relaxed text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                ></textarea>
+              </div>
+              <p id="settingsPromptError" class="hidden text-[11px] text-agent-rose"></p>
+              <div class="flex gap-2">
+                <button
+                  id="settingsPromptSaveBtn"
+                  class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white hover:bg-accent-700"
+                >
+                  Save prompt
+                </button>
+                <button
+                  id="settingsPromptResetBtn"
+                  class="rounded border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  title="Rewrite both files from the built-in defaults"
+                >
+                  Reset to defaults
+                </button>
+              </div>
             </div>
 
             <div id="settingsPaneConnection" class="hidden space-y-3">

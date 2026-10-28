@@ -16,7 +16,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/inference"
-	"github.com/Ady-JK/paladin/core/internal/prompt"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 	"github.com/Ady-JK/paladin/core/internal/tools"
@@ -48,9 +47,17 @@ type FsFile struct {
 }
 
 type Settings struct {
-	SystemPrompt  string `json:"system_prompt"`
-	ToolGuidance  string `json:"tool_guidance"`
 	MaxToolRounds uint32 `json:"max_tool_rounds"`
+}
+
+// Prompts is the user-editable agent prompt: the system prompt plus
+// the tool guidance, stored as SYSTEM_PROMPT.md and TOOL_GUIDANCE.md
+// under config/. The files are authoritative — they win over every
+// default and template; only an explicit per-request override beats
+// them, and the settings UI edits them.
+type Prompts struct {
+	SystemPrompt string `json:"systemPrompt"`
+	ToolGuidance string `json:"toolGuidance"`
 }
 
 type turnState struct {
@@ -255,22 +262,44 @@ func (r *AgentRuntime) systemPrompt(override string) string {
 	if strings.TrimSpace(override) != "" {
 		return override
 	}
-	if settings := r.loadSettings(); strings.TrimSpace(settings.SystemPrompt) != "" {
-		return settings.SystemPrompt
-	}
-	r.configMu.RLock()
-	defer r.configMu.RUnlock()
-	if strings.TrimSpace(r.config.SystemPrompt) != "" {
-		return r.config.SystemPrompt
-	}
-	return prompt.SystemPrompt
+	return r.store.LoadSystemPrompt()
 }
 
 func (r *AgentRuntime) toolGuidance() string {
-	if settings := r.loadSettings(); strings.TrimSpace(settings.ToolGuidance) != "" {
-		return settings.ToolGuidance
+	return r.store.LoadToolGuidance()
+}
+
+// GetPrompts returns the current prompt file contents for the
+// settings UI.
+func (r *AgentRuntime) GetPrompts() Prompts {
+	return Prompts{SystemPrompt: r.store.LoadSystemPrompt(), ToolGuidance: r.store.LoadToolGuidance()}
+}
+
+// SetPrompts replaces both prompt files. Either side may be empty to
+// leave it unchanged; both empty is rejected.
+func (r *AgentRuntime) SetPrompts(systemPrompt, toolGuidance string) (Prompts, error) {
+	if strings.TrimSpace(systemPrompt) == "" && strings.TrimSpace(toolGuidance) == "" {
+		return Prompts{}, fmt.Errorf("parse: system prompt and tool guidance must not both be empty")
 	}
-	return prompt.ToolGuidance
+	if strings.TrimSpace(systemPrompt) != "" {
+		if err := r.store.SaveSystemPrompt(systemPrompt); err != nil {
+			return Prompts{}, err
+		}
+	}
+	if strings.TrimSpace(toolGuidance) != "" {
+		if err := r.store.SaveToolGuidance(toolGuidance); err != nil {
+			return Prompts{}, err
+		}
+	}
+	return r.GetPrompts(), nil
+}
+
+// ResetPrompts rewrites both prompt files from the built-in defaults.
+func (r *AgentRuntime) ResetPrompts() (Prompts, error) {
+	if err := r.store.ResetPrompts(); err != nil {
+		return Prompts{}, err
+	}
+	return r.GetPrompts(), nil
 }
 
 func (r *AgentRuntime) maxRounds() uint32 {

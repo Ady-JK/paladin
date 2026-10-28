@@ -213,6 +213,9 @@ export const settingsNavConnectionEl = $<HTMLButtonElement>("#settingsNavConnect
 // settingsNavAnalyticsEl is a const in this module.
 // It opens the fleet-wide analytics pane inside settings.
 export const settingsNavAnalyticsEl = $<HTMLButtonElement>("#settingsNavAnalytics");
+// settingsNavPromptEl is a const in this module.
+// It opens the agent prompt editor inside settings.
+export const settingsNavPromptEl = $<HTMLButtonElement>("#settingsNavPrompt");
 // settingsPaneTitleEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneTitleEl = $("#settingsPaneTitle");
@@ -222,6 +225,18 @@ export const settingsPaneWorkspaceEl = $("#settingsPaneWorkspace");
 // settingsPaneProvidersEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneProvidersEl = $("#settingsPaneProviders");
+// settingsPanePromptEl is a const in this module.
+// It hosts the agent prompt (SYSTEM_PROMPT.md / TOOL_GUIDANCE.md) editor.
+export const settingsPanePromptEl = $("#settingsPanePrompt");
+// settingsSystemPromptEl is a const in this module.
+// It edits config/SYSTEM_PROMPT.md.
+export const settingsSystemPromptEl = $<HTMLTextAreaElement>("#settingsSystemPrompt");
+// settingsToolGuidanceEl is a const in this module.
+// It edits config/TOOL_GUIDANCE.md.
+export const settingsToolGuidanceEl = $<HTMLTextAreaElement>("#settingsToolGuidance");
+// settingsPromptErrorEl is a const in this module.
+// It surfaces prompt save failures inline.
+export const settingsPromptErrorEl = $("#settingsPromptError");
 // settingsPaneConnectionEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsPaneConnectionEl = $("#settingsPaneConnection");
