@@ -294,7 +294,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, mes
 			return CancelledError()
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			return RequestError(fmt.Sprintf("%s: responses: the command ran past its timeout", p.name))
+			return RequestError(fmt.Sprintf("%s: responses: model response timed out after %s — the model was still working; try again", p.name, streamTimeout))
 		}
 		return p.mapError("responses", err)
 	}

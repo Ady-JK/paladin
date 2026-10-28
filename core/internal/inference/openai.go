@@ -26,9 +26,13 @@ const (
 )
 
 const (
-	defaultTimeout = 60 * time.Second
-	streamTimeout  = 90 * time.Second
-	listTimeout    = 30 * time.Second
+	defaultTimeout = 180 * time.Second
+	// Reasoning models (notably muse-spark over the Responses API) can
+	// take several minutes on a first turn: tool planning + long output.
+	// A 90s cap turned those slow-but-healthy turns into
+	// "provider unavailable" errors, so stream generously.
+	streamTimeout = 300 * time.Second
+	listTimeout   = 30 * time.Second
 )
 
 func init() {
@@ -354,7 +358,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 			return CancelledError()
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			return RequestError(fmt.Sprintf("%s: stream: the command ran past its timeout", p.name))
+			return RequestError(fmt.Sprintf("%s: stream: model response timed out after %s — the model was still working; try again", p.name, streamTimeout))
 		}
 		return p.mapError("stream", err)
 	}
@@ -409,6 +413,9 @@ func isCancel(err error) bool {
 func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 	if isCancel(err) {
 		return CancelledError()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return RequestError(fmt.Sprintf("%s: %s: model response timed out after %s — the model was still working; try again", p.name, op, defaultTimeout))
 	}
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) && apiErr.StatusCode != 0 {
