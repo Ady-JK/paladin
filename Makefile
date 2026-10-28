@@ -13,7 +13,7 @@ dev: agent-host
 desktop-dev: dev
 
 # Release: sidecar + renderer + electron packaging.
-desktop-build: agent-host-release
+desktop: clean agent-host-release
 	cd desktop-app && pnpm install --prefer-offline && pnpm build
 
 agent-host:
