@@ -19,6 +19,35 @@ test("sending a message opens a session and shows the reply", async ({ page }) =
   expect(chats[0].resume).toBe(false);
 });
 
+test("agent markdown renders while the user bubble stays plain", async ({ page }) => {
+  await page.evaluate(() => {
+    const paladin = (window as any).paladin;
+    const prev = paladin.chat.bind(paladin);
+    paladin.chat = async (params: any, handlers: any) => {
+      const out = await prev(params, handlers);
+      return {
+        ...out,
+        reply:
+          "# Ship it\n\nRun **tests** and *lint*:\n\n- unit\n- e2e\n\n> go fast\n\n[docs](https://example.com)",
+      };
+    };
+  });
+  await page.fill("#promptInput", "explain **boldly**");
+  await page.click("#sendBtn");
+
+  const rows = page.locator("#messages .turn-row");
+  await expect(rows.nth(1).locator("h1")).toHaveText("Ship it");
+  await expect(rows.nth(1).locator("strong").first()).toHaveText("tests");
+  await expect(rows.nth(1).locator("em").first()).toHaveText("lint");
+  await expect(rows.nth(1).locator("ul li")).toHaveCount(2);
+  await expect(rows.nth(1).locator("blockquote")).toContainText("go fast");
+  await expect(rows.nth(1).locator('a[data-ext="https://example.com"]')).toHaveText("docs");
+
+  // The user bubble shows exactly what was typed: no Markdown parsing.
+  await expect(rows.nth(0).locator("strong")).toHaveCount(0);
+  await expect(rows.nth(0)).toContainText("explain **boldly**");
+});
+
 test("a paused turn shows continue and resumes without a new message", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eChatPaused = true;

@@ -3,13 +3,13 @@
 
 import * as api from "../core/api";
 import { attachBtnEl, chatViewEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
-import { renderText } from "../core/format";
+import { renderMarkdown } from "../core/format";
 import { state } from "../core/state";
 import type { ToolView } from "../core/types";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
-import { addTurn, scrollToBottom } from "./chatView";
+import { addTurn, initMessageLinks, scrollToBottom } from "./chatView";
 import { handleMentionKey, expandMentions } from "./mentions";
 import { openFilePicker } from "./filePicker";
 import { refreshSessions } from "./sessions";
@@ -78,7 +78,7 @@ async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
   const newSegment = (after: Node): HTMLElement => {
     const el = document.createElement("div");
     el.className =
-      "whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+      "md whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
     container.insertBefore(el, after.nextSibling);
     return el;
   };
@@ -116,7 +116,7 @@ async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
     paintQueued = true;
     requestAnimationFrame(() => {
       paintQueued = false;
-      segEl.innerHTML = renderText(segment);
+      segEl.innerHTML = renderMarkdown(segment);
       gatedScroll();
     });
   });
@@ -171,7 +171,7 @@ async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
     if (!reply) {
       reply = result.reply;
       segment = result.reply;
-      segEl.innerHTML = renderText(segment);
+      segEl.innerHTML = renderMarkdown(segment);
     }
 
     state.shownMessages++;
@@ -227,6 +227,7 @@ export function requestStop(): void {
 // initChat wires the composer and the stop affordances.
 // It supports the desktop app frontend.
 export function initChat(): void {
+  initMessageLinks();
   attachBtnEl.addEventListener("click", () => {
     openFilePicker();
   });

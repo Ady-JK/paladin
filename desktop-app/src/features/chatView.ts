@@ -2,9 +2,11 @@
 // It supports the desktop app frontend.
 
 import { chatViewEl, inputEl, messagesEl } from "../core/dom";
-import { escapeHtml, renderText, shortPath } from "../core/format";
+import { escapeHtml, renderMarkdown, renderText, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { Turn } from "../core/types";
+import * as api from "../core/api";
+import { toast } from "../ui/toast";
 
 // scrollToBottom is a function in this module.
 // It supports the desktop app frontend.
@@ -60,6 +62,22 @@ export function renderGreeting(): void {
   messagesEl.append(wrapper);
 }
 
+// initMessageLinks routes in-chat Markdown links to the system browser
+// instead of navigating the app window. It supports the desktop app
+// frontend.
+export function initMessageLinks(): void {
+  messagesEl.addEventListener("click", (event) => {
+    const anchor = (event.target as HTMLElement).closest?.("a[data-ext]");
+    if (!anchor) {
+      return;
+    }
+    event.preventDefault();
+    const url = anchor.getAttribute("data-ext");
+    if (url) {
+      void api.openExternalPage(url).catch((error) => toast(String(error), "error"));
+    }
+  });
+}
 // addTurn appends one message row. Codex-style split: user bubbles dock
 // right, agent text docks left, errors read left in red. No names or
 // avatars — the side alone says who is talking.
@@ -84,11 +102,12 @@ export function addTurn(
     textEl.className =
       "max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-red-600 dark:text-red-400";
   } else {
-    wrapper.classList.add("justify-start");
     textEl.className =
-      "max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+      "md max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
   }
-  textEl.innerHTML = renderText(text);
+  // Agent turns render full Markdown (headings, bold, lists, code);
+  // user and error rows stay plain text.
+  textEl.innerHTML = !isUser && !isError ? renderMarkdown(text) : renderText(text);
 
   wrapper.append(textEl);
   messagesEl.append(wrapper);

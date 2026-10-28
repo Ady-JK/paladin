@@ -14,7 +14,7 @@ import {
   workspaceInputEl,
   workspaceLabelEl,
 } from "../core/dom";
-import { dayOf, escapeHtml, renderText, shortPath, splitModel } from "../core/format";
+import { dayOf, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
 import type { SessionEvent, ToolInfo } from "../core/types";
 import { toast } from "../ui/toast";
@@ -255,8 +255,8 @@ export async function loadHistory(id: string): Promise<void> {
     }
     const el = document.createElement("div");
     el.className =
-      "whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
-    el.innerHTML = renderText(text);
+      "md whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+    el.innerHTML = renderMarkdown(text);
     agentBody.append(el);
   };
 
