@@ -5,7 +5,6 @@ import { chatViewEl, inputEl, messagesEl } from "../core/dom";
 import { escapeHtml, renderText, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { Turn } from "../core/types";
-import { icon } from "../icons";
 
 // scrollToBottom is a function in this module.
 // It supports the desktop app frontend.
@@ -61,48 +60,37 @@ export function renderGreeting(): void {
   messagesEl.append(wrapper);
 }
 
-// addTurn is a function in this module.
-// It supports the desktop app frontend.
+// addTurn appends one message row. Codex-style split: user bubbles dock
+// right, agent text docks left, errors read left in red. No names or
+// avatars — the side alone says who is talking.
 export function addTurn(
   role: Turn["role"],
   text: string,
-  timestamp?: number,
 ): { wrapper: HTMLElement; textEl: HTMLElement } {
   const wrapper = document.createElement("div");
-  wrapper.className = "turn-row mx-auto flex max-w-4xl gap-3 text-xs";
+  // Block by default so agent text and tool cards stack vertically;
+  // the user row becomes a flex row to dock its bubble right.
+  wrapper.className = "turn-row mx-auto w-full max-w-4xl text-xs";
 
   const isUser = role === "user";
   const isError = role === "error";
 
-  const avatar = document.createElement("div");
-  avatar.className = `avatar ${isUser ? "avatar-user" : isError ? "avatar-error" : "avatar-agent"}`;
-  avatar.innerHTML = isUser ? "YOU" : isError ? icon("xmark", "h-3 w-3") : icon("bolt", "h-3 w-3");
-
-  const body = document.createElement("div");
-  body.className = "min-w-0 flex-1 space-y-1";
-
-  const when = new Date((timestamp ?? Date.now() / 1000) * 1000).toLocaleTimeString(
-    [],
-    { hour: "2-digit", minute: "2-digit" },
-  );
-
-  const head = document.createElement("div");
-  head.className = "flex items-center gap-2";
-  head.innerHTML = `
-    <span class="font-semibold ${isError ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}">${isUser ? "You" : isError ? "error" : "paladin"}</span>
-    <span class="text-[10px] text-slate-400">${when}</span>
-  `;
-
   const textEl = document.createElement("div");
-  textEl.className = isUser
-    ? "bubble-user whitespace-pre-wrap break-words"
-    : isError
-      ? "whitespace-pre-wrap break-words leading-relaxed text-red-600 dark:text-red-400"
-      : "whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+  if (isUser) {
+    wrapper.classList.add("flex", "justify-end");
+    textEl.className = "bubble-user max-w-[80%] whitespace-pre-wrap break-words";
+  } else if (isError) {
+    wrapper.classList.add("justify-start");
+    textEl.className =
+      "max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-red-600 dark:text-red-400";
+  } else {
+    wrapper.classList.add("justify-start");
+    textEl.className =
+      "max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+  }
   textEl.innerHTML = renderText(text);
 
-  body.append(head, textEl);
-  wrapper.append(avatar, body);
+  wrapper.append(textEl);
   messagesEl.append(wrapper);
 
   scrollToBottom();

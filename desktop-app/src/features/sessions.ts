@@ -11,8 +11,10 @@ import {
   searchInputEl,
   sessionLabelEl,
   sessionListEl,
+  workspaceInputEl,
+  workspaceLabelEl,
 } from "../core/dom";
-import { dayOf, escapeHtml, renderText, splitModel } from "../core/format";
+import { dayOf, escapeHtml, renderText, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
 import type { SessionEvent, ToolInfo } from "../core/types";
 import { toast } from "../ui/toast";
@@ -60,8 +62,11 @@ export async function onSessionEvent(event: SessionEvent): Promise<void> {
 }
 
 export async function refreshSessions(): Promise<void> {
+  // The sidebar shows every workspace's sessions, not just the current
+  // folder's: filtering by cwd hid old sessions whenever the workspace
+  // changed (e.g. after New Session picked another folder).
   try {
-    state.sessions = await api.listSessions(state.cwd || null, 100);
+    state.sessions = await api.listSessions(null, 100);
   } catch (error) {
     console.warn(`refreshSessions failed: ${String(error)}`);
     state.sessions = [];
@@ -166,7 +171,9 @@ export async function deleteSession(id: string): Promise<void> {
   renderSessions();
 
   try {
-    const deleted = await api.deleteSession(id, state.cwd || null);
+    // Null cwd searches every workspace namespace, so sessions from
+    // other folders open instead of 404ing on a cwd mismatch.
+    const deleted = await api.deleteSession(id, null);
 
     if (!deleted) {
       throw new Error("the core did not delete the session");
@@ -190,12 +197,19 @@ export async function deleteSession(id: string): Promise<void> {
 
 export async function openSession(id: string): Promise<void> {
   try {
-    const session = await api.openSession(id, state.cwd || null);
+    // Null cwd searches every workspace namespace; the session brings
+    // its own cwd with it, which becomes the new working folder.
+    const session = await api.openSession(id, null);
 
     state.sessionId = session.sessionId;
     state.cwd = session.cwd;
 
     sessionLabelEl.textContent = state.sessionId.slice(0, 8);
+
+    // The session brings its own workspace: adopt it so the header,
+    // the composer, and the next turn all agree on the folder.
+    workspaceLabelEl.textContent = shortPath(state.cwd);
+    workspaceInputEl.value = state.cwd;
 
     if (session.provider) {
       state.selectedProvider = session.provider;
@@ -219,7 +233,8 @@ export async function openSession(id: string): Promise<void> {
 }
 
 export async function loadHistory(id: string): Promise<void> {
-  const history = await api.sessionHistory(id, state.cwd || null);
+  // Null cwd searches every workspace namespace, matching openSession.
+  const history = await api.sessionHistory(id, null);
 
   messagesEl.innerHTML = "";
   // One layout for the whole transcript: keep the container display:none
@@ -228,14 +243,14 @@ export async function loadHistory(id: string): Promise<void> {
 
   let agentBody: HTMLElement | null = null;
 
-  const openAgent = (text: string, timestamp?: number): void => {
-    const { textEl } = addTurn("agent", text, timestamp);
+  const openAgent = (text: string): void => {
+    const { textEl } = addTurn("agent", text);
     agentBody = textEl.parentElement!;
   };
 
-  const pushAgentText = (text: string, timestamp?: number): void => {
+  const pushAgentText = (text: string): void => {
     if (!agentBody) {
-      openAgent(text, timestamp);
+      openAgent(text);
       return;
     }
     const el = document.createElement("div");
@@ -247,7 +262,7 @@ export async function loadHistory(id: string): Promise<void> {
 
   const pushAgentTool = (tool: ToolInfo): void => {
     if (!agentBody) {
-      openAgent("", undefined);
+      openAgent("");
     }
     // Cap the live DOM copy: the full result stays in the transcript.
     if (tool.result && tool.result.length > 8000) {
@@ -265,9 +280,9 @@ export async function loadHistory(id: string): Promise<void> {
   for (const message of history) {
     if (message.role === "user") {
       agentBody = null;
-      addTurn("user", message.content, message.createdAt);
+      addTurn("user", message.content);
     } else if (message.role === "assistant") {
-      pushAgentText(message.content, message.createdAt);
+      pushAgentText(message.content);
     } else if (message.role === "tool") {
       pushAgentTool({
         id: "",

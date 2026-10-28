@@ -26,7 +26,7 @@ import type { FsList } from "../core/types";
 import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { pickModel } from "./models";
-import { newSession } from "./sessions";
+import { newSession, refreshSessions } from "./sessions";
 import { refreshExternalVisibility } from "./sites";
 import {
   crumbsHTML,
@@ -148,6 +148,9 @@ function startNewSession(): void {
   pickModel(state.selectedProvider, state.selectedModel);
   closeNewSession();
   newSession();
+  // The workspace may have changed folders: refetch the global list so
+  // sessions from other folders stay visible.
+  void refreshSessions();
 }
 
 // initSessionDialog wires the new-session dialog controls.

@@ -25,9 +25,11 @@ test("a notify reminder renders in turn order", async ({ page }) => {
     at = next;
   }
 
+  // No name labels: sides alone say who is talking, so the agent
+  // name must not appear as a row header.
   await expect(
     page.locator("#messages").getByText("paladin", { exact: true }),
-  ).toHaveCount(1);
+  ).toHaveCount(0);
 });
 
 test("expanding a tool row keeps the reading position", async ({ page }) => {

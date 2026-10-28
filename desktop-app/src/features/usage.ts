@@ -136,7 +136,7 @@ export async function refreshUsage(): Promise<void> {
     return;
   }
   try {
-    state.usage = await api.sessionUsage(state.sessionId, state.cwd || null);
+    state.usage = await api.sessionUsage(state.sessionId, null);
   } catch (error) {
     console.warn(`refreshUsage failed: ${String(error)}`);
     return;
