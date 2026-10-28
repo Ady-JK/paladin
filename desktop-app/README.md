@@ -54,9 +54,12 @@ transcript so tool follow-up rounds stay valid.
 
 ## Web embeds
 
-- Chat pages: `WebContentsView` with a persistent partition per page;
-  Gemini and ChatGPT keep their original `persist:paladin-gemini` /
-  `persist:paladin-chatgpt` partitions so existing logins survive.
+- Chat pages: `WebContentsView` sharing one persistent partition
+  (`persist:paladin-sites`), so a Google login in one page carries over
+  to "Sign in with Google" in any other. (Per-page partitions isolated
+  `accounts.google.com` cookies, forcing a second login; the old
+  `persist:paladin-gemini` / `persist:paladin-chatgpt` jars are
+  abandoned, which costs one re-login.)
 - Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
   ordinary entries and any of them can be removed like a custom page.
 - Views stay alive when switching to Agent (hidden, never destroyed);

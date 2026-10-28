@@ -63,9 +63,9 @@ Streaming (`chat` with `id = streamId`):
 - `agent:chat` returns the `streamId` immediately; deltas forward via
   `agent:chat-event`, completion via `agent:chat-done` to the sender.
 - WebContentsViews (`views:*` IPC) are independent of the agent: one
-  persistent partition per page (Gemini and ChatGPT keep their original
-  `persist:paladin-gemini` / `persist:paladin-chatgpt` names), views
-  hidden — never destroyed — on Agent switch, 60s idle drop while hidden.
+  shared persistent partition (`persist:paladin-sites`) across chat
+  pages so Google SSO cookies carry over, views hidden — never
+  destroyed — on Agent switch, 60s idle drop while hidden.
 - The window is frameless; the renderer owns the title bar and sends
   `window:*` for minimize/maximize/close. `views:setTheme` mirrors the
   shell theme onto each guest view's background so the native surface

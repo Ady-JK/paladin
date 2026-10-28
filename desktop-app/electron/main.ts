@@ -147,11 +147,32 @@ function userAgentForView(): string {
 function ensureView(name: string, url: string, partition: string): WebContentsView {
   const existing = views.get(name);
   if (existing) {
-    if (existing.url !== url) {
-      existing.url = url;
-      existing.view.webContents.loadURL(url).catch(() => undefined);
+    // The renderer moved every site page to one shared partition so
+    // Google SSO cookies carry across pages. A view created under an
+    // old per-page partition keeps its old session (the partition is
+    // fixed at creation), so rebuild it once on the shared jar.
+    if (existing.partition !== partition) {
+      if (win) {
+        try {
+          win.contentView.removeChildView(existing.view);
+        } catch {
+          // Already removed.
+        }
+      }
+      try {
+        (existing.view.webContents as any).destroy?.();
+      } catch {
+        // Ignore.
+      }
+      views.delete(name);
+      if (visibleView === name) visibleView = null;
+    } else {
+      if (existing.url !== url) {
+        existing.url = url;
+        existing.view.webContents.loadURL(url).catch(() => undefined);
+      }
+      return existing.view;
     }
-    return existing.view;
   }
   const view = new WebContentsView({
     webPreferences: {
