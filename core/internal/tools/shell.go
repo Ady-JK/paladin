@@ -593,8 +593,7 @@ func (ShellTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "shell",
 		Description: "Run a shell command in a working directory. " +
-			"Pass workdir as workspace/<path> for a directory inside the " +
-			"workspace or as a full absolute path elsewhere; bare relative " +
+			"Pass workdir as a full absolute path; bare relative " +
 			"workdirs are rejected. " +
 			"With background false (the default) the call waits for the command and " +
 			"returns its output; with background true it returns at once with a " +
@@ -609,7 +608,7 @@ func (ShellTool) Definition() ToolDefinition {
 			"properties": map[string]any{
 				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "cancel"}, "description": "What to do: run a command, check a job, or stop a job. Defaults to run."},
 				"job_id":     map[string]any{"type": "string", "description": "The job to check or stop. Empty or missing for a new run."},
-				"workdir":    map[string]any{"type": "string", "description": "Where to run: workspace/<path> for a directory inside the session workspace, or a full absolute path elsewhere. Empty means the workspace root."},
+				"workdir":    map[string]any{"type": "string", "description": "Where to run as a full absolute path. Empty means the workspace root."},
 				"cmd":        map[string]any{"type": "string", "description": "The shell command to run. Required for action run. Relative paths inside the command resolve against workdir."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
 				"notify":     map[string]any{"type": "boolean", "description": "With background true, remind the agent when the job finishes: its final state and output tail arrive on their own in a later round. Defaults to false; ignored without background."},

@@ -20,9 +20,8 @@ func (EditTool) Name() string { return "edit" }
 func (EditTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "edit",
-		Description: "Replace text verbatim in an existing file. Pass the path as " +
-			"workspace/<path> for a file inside the workspace or as a full " +
-			"absolute path elsewhere; bare relative paths are rejected. " +
+		Description: "Replace text verbatim in an existing file. Pass the path as a full " +
+			"absolute path; bare relative paths are rejected. " +
 			"old_string must match " +
 			"exactly as it appears in the file, so read the file first. When " +
 			"old_string occurs more than once the call fails and lists every " +
@@ -33,7 +32,7 @@ func (EditTool) Definition() ToolDefinition {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "The file to edit: workspace/<path> inside the workspace, or a full absolute path outside it."},
+				"path":        map[string]any{"type": "string", "description": "The file to edit as a full absolute path."},
 				"old_string":  map[string]any{"type": "string", "description": "The exact text to find in the file. Must match verbatim, including line endings."},
 				"new_string":  map[string]any{"type": "string", "description": "The replacement text. May be empty to delete old_string."},
 				"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence of old_string. Defaults to false, which requires exactly one match."},

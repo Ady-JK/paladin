@@ -36,13 +36,12 @@ func TestResolveChatPathDotDot(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	// workspace/-prefixed escape degrades to outside instead of failing.
-	got, scope, err = ResolveChatPath("workspace/../etc/hosts", ws)
-	if err != nil {
-		t.Fatal(err)
+	// workspace/ paths are gone: rejected with a pointer to absolutes.
+	if _, _, err := ResolveChatPath("workspace/../etc/hosts", ws); err == nil {
+		t.Fatal("workspace/ prefix accepted")
 	}
-	if scope != ScopeOutside || got != filepath.Join(parent, "etc", "hosts") {
-		t.Fatalf("got %q %q", got, scope)
+	if _, _, err := ResolveChatPath("workspace/sub/a.txt", ws); err == nil {
+		t.Fatal("workspace/ prefix accepted")
 	}
 }
 
@@ -64,11 +63,6 @@ func TestResolveChatPathAbsAndWorkspace(t *testing.T) {
 	inside := filepath.Join(ws, "a.txt")
 	got, scope, err = ResolveChatPath(filepath.ToSlash(inside), ws)
 	if err != nil || scope != ScopeInside || got != inside {
-		t.Fatalf("got %q %q %v", got, scope, err)
-	}
-	// workspace/ prefix.
-	got, scope, err = ResolveChatPath("workspace/sub/a.txt", ws)
-	if err != nil || scope != ScopeInside || got != filepath.Join(ws, "sub", "a.txt") {
 		t.Fatalf("got %q %q %v", got, scope, err)
 	}
 }

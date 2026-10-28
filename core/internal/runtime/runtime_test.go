@@ -908,9 +908,9 @@ func TestChatRunsEveryBuiltinTool(t *testing.T) {
 			id, name, args)
 	}
 	rounds := []string{
-		toolRound("c1", "write", `{"path":"workspace/notes.txt","content":"alpha\n"}`),
-		toolRound("c2", "read", `{"path":"workspace/notes.txt"}`),
-		toolRound("c3", "edit", `{"path":"workspace/notes.txt","old_string":"alpha","new_string":"beta"}`),
+		toolRound("c1", "write", `{"path":"` + filepath.Join(wsDir, "notes.txt") + `","content":"alpha\n"}`),
+		toolRound("c2", "read", `{"path":"` + filepath.Join(wsDir, "notes.txt") + `"}`),
+		toolRound("c3", "edit", `{"path":"` + filepath.Join(wsDir, "notes.txt") + `","old_string":"alpha","new_string":"beta"}`),
 		toolRound("c4", "shell", `{"cmd":"cat notes.txt"}`),
 	}
 	var calls int64

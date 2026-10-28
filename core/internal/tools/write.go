@@ -20,9 +20,8 @@ func (WriteTool) Name() string { return "write" }
 func (WriteTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "write",
-		Description: "Create a file with the given content. Pass the path as " +
-			"workspace/<path> for a file inside the workspace or as a full " +
-			"absolute path elsewhere; bare relative paths are rejected. " +
+		Description: "Create a file with the given content. Pass the path as a full " +
+			"absolute path; bare relative paths are rejected. " +
 			"Missing parent directories are created. " +
 			"When the file already exists the call fails unless overwrite is true, " +
 			"in which case the file is replaced wholesale. Writes outside the " +
@@ -31,7 +30,7 @@ func (WriteTool) Definition() ToolDefinition {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":      map[string]any{"type": "string", "description": "The file to create: workspace/<path> inside the workspace, or a full absolute path outside it."},
+				"path":      map[string]any{"type": "string", "description": "The file to create as a full absolute path."},
 				"content":   map[string]any{"type": "string", "description": "The full content to write into the file."},
 				"overwrite": map[string]any{"type": "boolean", "description": "Replace the file when it already exists. Defaults to false."},
 			},

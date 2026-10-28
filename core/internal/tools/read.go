@@ -42,8 +42,8 @@ func (ReadTool) Name() string { return "read" }
 func (ReadTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "read",
-		Description: "Read a text file from disk. Pass workspace/<path> for a file " +
-			"inside the workspace, or a full absolute path for a file outside it. " +
+		Description: "Read a text file from disk. Pass path as a full " +
+			"absolute path; bare relative paths are rejected. " +
 			"The reply holds the file content, the line range that " +
 			"was returned, and whether more lines follow: continue with a larger offset " +
 			"when it does. Reads outside the workspace are allowed but reported as outside. " +
@@ -51,7 +51,7 @@ func (ReadTool) Definition() ToolDefinition {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "The file to read: workspace/<path> for a file inside the workspace, or a full absolute path for a file outside it."},
+				"path":   map[string]any{"type": "string", "description": "The file to read as a full absolute path."},
 				"offset": map[string]any{"type": "integer", "description": "The first line to read, 1-based. Defaults to 1.", "minimum": 1},
 				"limit":  map[string]any{"type": "integer", "description": "How many lines to read. Defaults to 2000; the content is also capped at 50 KB.", "minimum": 1},
 			},

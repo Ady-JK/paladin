@@ -15,7 +15,7 @@ func TestKeepsStablePrefixOrder(t *testing.T) {
 
 func TestToolSystemMentionsWorkspace(t *testing.T) {
 	p := ToolSystem(SystemPrompt, "/tmp/proj")
-	if !strings.Contains(p, "/tmp/proj") || !strings.Contains(p, "workspace/<path>") {
+	if !strings.Contains(p, "/tmp/proj") || !strings.Contains(p, "full absolute paths") {
 		t.Fatal("workspace missing from prompt")
 	}
 }
@@ -40,7 +40,7 @@ func TestAssembleIncludesSchemasOnlyWhenSet(t *testing.T) {
 
 func TestEnvironmentBlockAndOSName(t *testing.T) {
 	block := EnvironmentBlock("Linux", "/tmp/w")
-	if !strings.Contains(block, "Linux") || !strings.Contains(block, "/tmp/w") || !strings.Contains(block, "workspace/<path>") {
+	if !strings.Contains(block, "Linux") || !strings.Contains(block, "/tmp/w") || !strings.Contains(block, "inside or outside") {
 		t.Fatalf("got %q", block)
 	}
 	if OSName() == "" {
@@ -55,7 +55,7 @@ func TestSystemPromptContent(t *testing.T) {
 	if !strings.Contains(SystemPrompt, "workspace") {
 		t.Fatalf("system prompt lost workspace scope")
 	}
-	if g := ToolGuidance(); !strings.Contains(g, "shell") || !strings.Contains(g, "workspace/<path>") {
+	if g := ToolGuidance(); !strings.Contains(g, "shell") || !strings.Contains(g, "full absolute paths") {
 		t.Fatalf("guidance changed")
 	}
 	if !strings.Contains(UsageExamples(), "overwrite") || !strings.Contains(UsageExamples(), "replace_all") {
@@ -104,7 +104,7 @@ func TestGuidanceIsOSSpecific(t *testing.T) {
 // workspace, no matter what the prompt file holds.
 func TestMachineDetailsAlwaysInjected(t *testing.T) {
 	p := AssembleSystemPrompt("user base", ToolGuidanceFor("linux"), EnvironmentBlock(OSName(), "/w/proj"), UsageExamplesFor("linux"), "")
-	for _, want := range []string{"user base", "/w/proj", "workspace/<path>", "arch "} {
+	for _, want := range []string{"user base", "/w/proj", "scope flag", "arch "} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("compiled prompt lost %q", want)
 		}

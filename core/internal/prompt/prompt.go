@@ -405,7 +405,7 @@ Be autonomous within the user's authorization. Do not confuse autonomy with perm
 
 The objective is not merely to produce an answer. It is to deliver the most useful correct result that the available workspace, tools, and permissions support.`
 
-// toolGuidanceCommon is the OS-agnostic tool mechanics: workspace path
+// toolGuidanceCommon is the OS-agnostic tool mechanics: absolute-path
 // rules, read/write/edit discipline, background jobs. It never names an
 // OS or a shell; exactly one per-OS block below is appended at compile
 // time, so Windows turns never see Unix-tool text and Unix turns never
@@ -416,8 +416,11 @@ Tools:
 - You act on this machine through your tools: run commands with the shell
   tool instead of telling the user to type them themselves.
 - Use the read tool to inspect files instead of guessing what they hold.
-- Pass workspace/<path> for anything inside the workspace and a full
-  absolute path for anything outside it; bare relative paths are rejected.
+- Always pass full absolute paths to path and workdir — for files
+  inside the workspace and outside it alike; bare relative paths are
+  rejected. Every file answer reports a scope flag comparing the path
+  against the session workspace (inside or outside): outside paths are
+  allowed, not errors.
 - Read a file before you describe or change it. When a read reports that
   more lines follow, continue with a larger offset before drawing
   conclusions.
@@ -442,8 +445,8 @@ const toolGuidanceWindows = `
 
 Shell (Windows PowerShell):
 - The shell is PowerShell: always use PowerShell syntax
-  (Get-ChildItem, Get-Content, Select-String, full paths like D:\projects\...
-  or workspace/...). Never use cmd.exe syntax and never assume Unix tools
+  (Get-ChildItem, Get-Content, Select-String, full paths like D:\projects\...).
+  Never use cmd.exe syntax and never assume Unix tools
   (grep, rg, ls, cat, sed, awk) exist — use the built-in PowerShell
   cmdlets instead.
 - List bare paths with Select-Object -ExpandProperty FullName, so no table
@@ -455,7 +458,7 @@ const toolGuidanceUnix = `
 
 Shell (Unix sh):
 - The shell is sh: use Unix-style commands (ls, cat, grep) with
-  Unix-style paths, or workspace/<path> inside the workspace.`
+  Unix-style absolute paths.`
 
 // ToolGuidance returns the tool mechanics for the running OS: the
 // common block plus exactly one OS block.
@@ -473,19 +476,17 @@ func ToolGuidanceFor(goos string) string {
 const usageExamplesCommon = `
 Tool examples:
 
-Paths — every path or workdir follows one rule. workspace/<path>
-means a file inside the workspace; anything else must be a full
-absolute path and is treated as outside the workspace.
-- Wrong: {"path": "src/main.rs"} with no prefix — rejected. Write
-  {"path": "workspace/src/main.rs"} instead.
-- Wrong: {"path": "workspace/../etc/hosts"} escaping the workspace —
-  rejected. Write {"path": "/etc/hosts"} instead.
-- On Windows workspace\subdir works too, but prefer workspace/subdir.
+Paths — every path or workdir is a full absolute path, inside the
+workspace or out; bare relative paths are rejected. Each file answer
+carries a scope flag (inside or outside) comparing the path against
+the session workspace from Environment below — outside is allowed.
+- Wrong: {"path": "src/main.rs"} as a bare relative path — rejected.
+  Write {"path": "/home/user/project/src/main.rs"} instead.
 
 read — inspect file content before describing or changing a file.
-- Project file: {"path": "workspace/src/main.rs"}
+- Project file: {"path": "/home/user/project/src/main.rs"}
 - Short look elsewhere: {"path": "/etc/hosts", "limit": 50}
-- Follow-up page: {"path": "workspace/src/main.rs", "offset": 101, "limit": 100}
+- Follow-up page: {"path": "/home/user/project/src/main.rs", "offset": 101, "limit": 100}
   when the previous read reported that more lines follow.
 - Wrong: {} with no path.
 - Never read a file by catting it through the shell; read gives line
@@ -493,10 +494,10 @@ read — inspect file content before describing or changing a file.
 
 write — create a file with its full content. Missing parent
 directories are created for you.
-- New file: {"path": "workspace/notes/todo.txt", "content": "buy milk\n"}
-- Replace a file you already read: {"path": "workspace/notes/todo.txt",
+- New file: {"path": "/home/user/project/notes/todo.txt", "content": "buy milk\n"}
+- Replace a file you already read: {"path": "/home/user/project/notes/todo.txt",
   "content": "buy milk\nbuy eggs\n", "overwrite": true}.
-- Wrong: {"path": "workspace/notes/todo.txt", "content": "..."} when
+- Wrong: {"path": "/home/user/project/notes/todo.txt", "content": "..."} when
   the file already exists and you did not pass overwrite — the call fails
   with exists true instead of clobbering it.
 - Wrong: writing a file and then describing it from memory — the write
@@ -507,17 +508,17 @@ directories are created for you.
 
 edit — replace text verbatim in a file you already read. old_string
 must match exactly, including line endings.
-- One change: {"path": "workspace/src/main.rs",
+- One change: {"path": "/home/user/project/src/main.rs",
   "old_string": "log.Println(\"hi\")", "new_string": "log.Println(\"hello\")"}.
-- Delete text: {"path": "workspace/src/main.rs",
+- Delete text: {"path": "/home/user/project/src/main.rs",
   "old_string": "\noldHelper()", "new_string": ""}.
-- Every occurrence at once: {"path": "workspace/src/main.rs",
+- Every occurrence at once: {"path": "/home/user/project/src/main.rs",
   "old_string": "TODO", "new_string": "DONE", "replace_all": true}.
-- Ambiguous match: {"path": "workspace/src/main.rs", "old_string": "x",
+- Ambiguous match: {"path": "/home/user/project/src/main.rs", "old_string": "x",
   "new_string": "y"} fails with a count and every occurrence with its
   line numbers and the nearest non-blank lines above and below — retry
   with more surrounding lines in old_string so it matches exactly once.
-- Wrong: {"path": "workspace/src/main.rs", "old_string": "x",
+- Wrong: {"path": "/home/user/project/src/main.rs", "old_string": "x",
   "new_string": "y"} retried unchanged after an ambiguous failure.
   Wrong: guessing old_string from memory — read the file first so the
   match is exact.
@@ -528,11 +529,9 @@ must match exactly, including line endings.
 const usageExamplesShellCommon = `
 shell — build, test and explore on this machine. The action defaults to
 run, so {"cmd": "..."} alone runs a command synchronously.
-- Quick build: {"action": "run", "cmd": "go build ./...", "workdir": "workspace/backend"}
+- Quick build: {"action": "run", "cmd": "go build ./...", "workdir": "/home/user/project/backend"}
 - Wrong: {"cmd": "go build ./...", "workdir": "backend"} with a bare
-  relative workdir — rejected. Write "workdir": "workspace/backend".
-- Wrong: {"cmd": "...", "workdir": "workspace/../other"} escaping the
-  workspace — rejected. Use the absolute path instead.
+  relative workdir — rejected. Write "workdir": "/home/user/project/backend".
 - Slow command, waited out: {"action": "run", "cmd": "go test ./short/...",
   "timeout_ms": 90000}.
 - Slow command alongside other work: {"action": "run", "cmd": "go test ./...",
@@ -549,7 +548,7 @@ run, so {"cmd": "..."} alone runs a command synchronously.
   round — no status polling needed.
 - Wrong: {"action": "run"} with no cmd. Wrong: {"action": "run",
   "cmd": "ls", "workdir": "backend"} with a bare relative path — use
-  workspace/backend or a full absolute path. Wrong: {"action": "status"}
+  a full absolute path. Wrong: {"action": "status"}
   with no job_id. Wrong: {"background": true} for a lone job with nothing
   else to do while it runs — wait synchronously instead.
 - When the user asks to do something on this machine, run it with the
@@ -570,7 +569,7 @@ const usageExamplesShellWindows = `
 // usageExamplesShellUnix shows listing and search the sh way. No
 // PowerShell or cmd.exe appears here.
 const usageExamplesShellUnix = `
-- List directories: {"cmd": "ls workspace/backend"}.
+- List directories: {"cmd": "ls /home/user/project/backend"}.
 - Find a file: {"cmd": "find ~/projects -name go.work 2>/dev/null"}.
   Search likely folders first; never sweep a whole drive at once —
   it takes minutes and times out.
@@ -619,7 +618,7 @@ func ToolSystem(base, sessionCwd string) string {
 // always appended by ToolSystem, so turns never lose machine context
 // even when the user rewrites their prompt file.
 func EnvironmentBlock(os, workspace string) string {
-	return "- The harness runs on " + os + " (arch " + runtime.GOARCH + "); write shell commands in its syntax.\n- The session workspace is " + workspace + "; workspace/<path> resolves inside it."
+	return "- The harness runs on " + os + " (arch " + runtime.GOARCH + "); write shell commands in its syntax.\n- The session workspace is " + workspace + "; file answers flag each path as inside or outside it."
 }
 
 func OSName() string {

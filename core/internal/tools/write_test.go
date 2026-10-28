@@ -9,12 +9,12 @@ import (
 )
 
 func TestWriteToolRefusesClobber(t *testing.T) {
-	ctx, _ := testCtx(t)
+	ctx, ws := testCtx(t)
 	tool := NewWriteTool(NewEngine())
-	if _, err := tool.Call(json.RawMessage(`{"path":"workspace/a.txt","content":"a"}`), ctx); err != nil {
+	if _, err := tool.Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a.txt")+`","content":"a"}`), ctx); err != nil {
 		t.Fatal(err)
 	}
-	_, err := tool.Call(json.RawMessage(`{"path":"workspace/a.txt","content":"b"}`), ctx)
+	_, err := tool.Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a.txt")+`","content":"b"}`), ctx)
 	if err == nil {
 		t.Fatal("expected clobber error")
 	}
@@ -43,11 +43,11 @@ func TestWriteEngineEdges(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ws, "d"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.Write(ws, "workspace/d", "x", false); err == nil {
+	if _, err := engine.Write(ws, filepath.Join(ws, "d"), "x", false); err == nil {
 		t.Fatal("directory write accepted")
 	}
 	// Nested parents are created.
-	res, err := engine.Write(ws, "workspace/a/b/c.txt", "hi\nthere\n", false)
+	res, err := engine.Write(ws, filepath.Join(ws, "a/b/c.txt"), "hi\nthere\n", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestWriteEngineEdges(t *testing.T) {
 		t.Fatalf("got %+v", res)
 	}
 	// Overwrite replaces.
-	res, err = engine.Write(ws, "workspace/a/b/c.txt", "new", true)
+	res, err = engine.Write(ws, filepath.Join(ws, "a/b/c.txt"), "new", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestWriteEngineEdges(t *testing.T) {
 	// Tool-level clobber error carries exists:true.
 	ctx := &ToolCtx{Workspace: ws, SessionDir: dir, Cancel: context.Background()}
 	tool := NewWriteTool(engine)
-	if _, err := tool.Call(json.RawMessage(`{"path":"workspace/a/b/c.txt","content":"x"}`), ctx); err == nil {
+	if _, err := tool.Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a/b/c.txt")+`","content":"x"}`), ctx); err == nil {
 		t.Fatal("clobber accepted")
 	}
 	if _, err := tool.Call(json.RawMessage(`{"path":"","content":"x"}`), ctx); err == nil {

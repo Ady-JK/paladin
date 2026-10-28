@@ -13,7 +13,7 @@ func TestReadsWithOffsetAndLimit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("l1\nl2\nl3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/a.txt","offset":2,"limit":1}`), ctx)
+	out, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a.txt")+`","offset":2,"limit":1}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestRefusesBinaryFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "b.bin"), []byte{0, 1, 2}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/b.bin"}`), ctx); err == nil {
+	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "b.bin")+`"}`), ctx); err == nil {
 		t.Fatal("expected binary rejection")
 	}
 }
@@ -49,7 +49,7 @@ func TestReadRangesAndCaps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("l1\nl2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/a.txt","offset":99}`), ctx)
+	out, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a.txt")+`","offset":99}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestReadRangesAndCaps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "b.txt"), []byte("x\ny"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/b.txt"}`), ctx)
+	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "b.txt")+`"}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestReadRangesAndCaps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "big.txt"), []byte(sb.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/big.txt","limit":2000}`), ctx)
+	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "big.txt")+`","limit":2000}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestReadRangesAndCaps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "long.txt"), []byte(long+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/long.txt"}`), ctx)
+	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "long.txt")+`"}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,16 +109,16 @@ func TestReadRangesAndCaps(t *testing.T) {
 		t.Fatalf("no truncation marker: %q...", resp.Content[:80])
 	}
 	// Missing file, directory, negative args.
-	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/nope.txt"}`), ctx); err == nil {
+	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "nope.txt")+`"}`), ctx); err == nil {
 		t.Fatal("missing accepted")
 	}
 	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace"}`), ctx); err == nil {
 		t.Fatal("directory accepted")
 	}
-	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/a.txt","offset":-1}`), ctx); err == nil {
+	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a.txt")+`","offset":-1}`), ctx); err == nil {
 		t.Fatal("negative offset accepted")
 	}
-	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/a.txt","limit":-2}`), ctx); err == nil {
+	if _, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "a.txt")+`","limit":-2}`), ctx); err == nil {
 		t.Fatal("negative limit accepted")
 	}
 	if _, err := (ReadTool{}).Call(json.RawMessage(`{bad`), ctx); err == nil {
@@ -128,7 +128,7 @@ func TestReadRangesAndCaps(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "crlf.txt"), []byte("a\r\nb\r\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"workspace/crlf.txt"}`), ctx)
+	out, err = (ReadTool{}).Call(json.RawMessage(`{"path":"`+filepath.Join(ws, "crlf.txt")+`"}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

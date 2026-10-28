@@ -16,29 +16,29 @@ test.beforeEach(async ({ page }) => {
       {
         role: "tool",
         content:
-          '{"requested_path":"workspace/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","created":true,"overwritten":false,"bytes":41,"lines":3}',
+          '{"requested_path":"/home/tester/project/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","created":true,"overwritten":false,"bytes":41,"lines":3}',
         createdAt: at,
         name: "write",
         arguments:
-          '{"path":"workspace/app.conf","content":"[server]\\nhost = \\"localhost\\"\\nport = 8080\\n"}',
+          '{"path":"/home/tester/project/app.conf","content":"[server]\\nhost = \\"localhost\\"\\nport = 8080\\n"}',
         status: "ok",
       },
       { role: "assistant", content: "Bumping the port.", createdAt: at },
       {
         role: "tool",
         content:
-          '{"requested_path":"workspace/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","replacements":1,"bytes":41,"lines":3,"match_start_line":3,"match_end_line":3,"matches":[{"start_line":3,"end_line":3}]}',
+          '{"requested_path":"/home/tester/project/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","replacements":1,"bytes":41,"lines":3,"match_start_line":3,"match_end_line":3,"matches":[{"start_line":3,"end_line":3}]}',
         createdAt: at,
         name: "edit",
         arguments:
-          '{"path":"workspace/app.conf","old_string":"port = 8080","new_string":"port = 9090"}',
+          '{"path":"/home/tester/project/app.conf","old_string":"port = 8080","new_string":"port = 9090"}',
         status: "ok",
       },
       {
         role: "tool",
         content: JSON.stringify({
           error: "edit: old text occurs 4 times; retry with more context around the one you want, or replace all",
-          requested_path: "workspace/app.conf",
+          requested_path: "/home/tester/project/app.conf",
           resolved_path: "/home/tester/project/app.conf",
           scope: "inside",
           count: 4,
@@ -52,41 +52,41 @@ test.beforeEach(async ({ page }) => {
         }),
         createdAt: at,
         name: "edit",
-        arguments: '{"path":"workspace/app.conf","old_string":"o","new_string":"0"}',
+        arguments: '{"path":"/home/tester/project/app.conf","old_string":"o","new_string":"0"}',
         status: "failed",
       },
       { role: "assistant", content: "Port bumped; the broad retry needs more context.", createdAt: at },
       {
         role: "tool",
         content: JSON.stringify({
-          error: 'write: path "workspace/app.conf" already exists; pass overwrite to replace it',
-          requested_path: "workspace/app.conf",
+          error: 'write: path "/home/tester/project/app.conf" already exists; pass overwrite to replace it',
+          requested_path: "/home/tester/project/app.conf",
           resolved_path: "/home/tester/project/app.conf",
           scope: "inside",
           exists: true,
         }),
         createdAt: at,
         name: "write",
-        arguments: '{"path":"workspace/app.conf","content":"stale\\n"}',
+        arguments: '{"path":"/home/tester/project/app.conf","content":"stale\\n"}',
         status: "failed",
       },
       {
         role: "tool",
         content:
-          '{"requested_path":"workspace/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","created":false,"overwritten":true,"bytes":6,"lines":1}',
+          '{"requested_path":"/home/tester/project/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","created":false,"overwritten":true,"bytes":6,"lines":1}',
         createdAt: at,
         name: "write",
-        arguments: '{"path":"workspace/app.conf","content":"fresh\\n","overwrite":true}',
+        arguments: '{"path":"/home/tester/project/app.conf","content":"fresh\\n","overwrite":true}',
         status: "ok",
       },
       {
         role: "tool",
         content:
-          '{"requested_path":"workspace/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","replacements":1,"bytes":44,"lines":3,"match_start_line":1,"match_end_line":2,"matches":[{"start_line":1,"end_line":2}]}',
+          '{"requested_path":"/home/tester/project/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","replacements":1,"bytes":44,"lines":3,"match_start_line":1,"match_end_line":2,"matches":[{"start_line":1,"end_line":2}]}',
         createdAt: at,
         name: "edit",
         arguments: JSON.stringify({
-          path: "workspace/app.conf",
+          path: "/home/tester/project/app.conf",
           old_string: "[server]\nhost = \"localhost\"",
           new_string: "[server]\nhost = \"0.0.0.0\"",
           replace_all: true,
@@ -131,7 +131,7 @@ test.beforeEach(async ({ page }) => {
 test("write and edit rows render with summaries", async ({ page }) => {
   await expect(page.locator('[data-tool="write"]')).toHaveCount(3);
   await expect(page.locator('[data-tool="edit"]')).toHaveCount(3);
-  await expect(page.locator('[data-tool="write"]').first()).toContainText("workspace/app.conf");
+  await expect(page.locator('[data-tool="write"]').first()).toContainText("/home/tester/project/app.conf");
 });
 
 // Verifies an expanded write row shows the created file.
@@ -140,7 +140,7 @@ test("write row expands to a rendered file view", async ({ page }) => {
   await page.locator('[data-tool="write"] button').first().click();
   const view = page.locator('[data-fileview="write"]');
   await expect(view).toBeVisible();
-  await expect(view).toContainText("workspace/app.conf");
+  await expect(view).toContainText("/home/tester/project/app.conf");
   await expect(view).toContainText("created");
   await expect(view).toContainText("[server]");
   await expect(view).toContainText("port = 8080");

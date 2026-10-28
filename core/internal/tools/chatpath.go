@@ -3,12 +3,11 @@
 // Chat paths follow one Linux-style rule on every OS: `/` separates
 // segments even on Windows. A bare relative path (`src/foo.ts`)
 // resolves inside the workspace, `../sibling/file` (or deeper `..`)
-// escapes to the workspace's parent chain, `workspace/...` is the
-// explicit inside form, and absolute paths (POSIX `/x` or Windows
-// `C:/x`, backslashes tolerated) resolve as-is. The scope reports
-// whether the target landed inside the workspace or outside it —
-// unlike ResolveScopedPath, escaping is allowed here because `@`
-// mentions deliberately tag files outside the workspace.
+// escapes to the workspace's parent chain, and absolute paths (POSIX
+// `/x` or Windows `C:/x`, backslashes tolerated) resolve as-is. The
+// scope reports whether the target landed inside the workspace or
+// outside it — escaping is allowed here because `@` mentions
+// deliberately tag files outside the workspace.
 package tools
 
 import (
@@ -41,13 +40,8 @@ func ResolveChatPath(input, workspace string) (string, string, error) {
 	}
 
 	var abs string
-	if rest, ok := cutWorkspacePrefix(slash); ok {
-		if workspace == "" {
-			return "", "", ArgsError("no workspace to resolve the path against")
-		}
-		abs = filepath.Join(workspace, filepath.FromSlash(rest))
-		p, scope := markScope(abs, workspace)
-		return p, scope, nil
+	if slash == "workspace" || strings.HasPrefix(slash, "workspace/") {
+		return "", "", ArgsError(`workspace/ paths are no longer supported; use a full absolute path`)
 	}
 	if isChatAbs(slash) {
 		abs = filepath.FromSlash(slash)

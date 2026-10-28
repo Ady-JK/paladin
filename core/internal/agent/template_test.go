@@ -170,7 +170,7 @@ func TestBuildResolvesEverything(t *testing.T) {
 	if a.shell == nil {
 		t.Fatal("default template must keep the shared shell")
 	}
-	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "workspace/<path>") {
+	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "scope flag") {
 		t.Fatalf("system prompt not composed: %q", a.system)
 	}
 	// The tool context is derived from the session, not the request.
@@ -190,7 +190,7 @@ func TestBuildPromptPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "workspace/<path>") {
+	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "scope flag") {
 		t.Fatalf("runtime prompt lost: %q", a.system)
 	}
 

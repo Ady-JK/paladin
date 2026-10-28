@@ -13,15 +13,15 @@ func TestWriteThenEditRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := NewEngine()
-	if _, err := engine.Write(ws, "workspace/a.txt", "hello\n", false); err != nil {
+	if _, err := engine.Write(ws, filepath.Join(ws, "a.txt"), "hello\n", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.Write(ws, "workspace/a.txt", "x", false); err == nil {
+	if _, err := engine.Write(ws, filepath.Join(ws, "a.txt"), "x", false); err == nil {
 		t.Fatal("expected exists error")
 	} else if ee, ok := err.(*EngineError); !ok || ee.Kind != "exists" {
 		t.Fatalf("expected exists, got %v", err)
 	}
-	res, err := engine.Edit(ws, "workspace/a.txt", "hello", "bye", false)
+	res, err := engine.Edit(ws, filepath.Join(ws, "a.txt"), "hello", "bye", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,10 +44,10 @@ func TestEditAmbiguousListsOccurrences(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := NewEngine()
-	if _, err := engine.Write(ws, "workspace/a.txt", "x\nx\n", false); err != nil {
+	if _, err := engine.Write(ws, filepath.Join(ws, "a.txt"), "x\nx\n", false); err != nil {
 		t.Fatal(err)
 	}
-	_, err := engine.Edit(ws, "workspace/a.txt", "x", "y", false)
+	_, err := engine.Edit(ws, filepath.Join(ws, "a.txt"), "x", "y", false)
 	ee, ok := err.(*EngineError)
 	if !ok || ee.Kind != "ambiguous" || ee.Count != 2 {
 		t.Fatalf("expected ambiguous count 2, got %v", err)

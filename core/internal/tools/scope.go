@@ -13,49 +13,38 @@ const (
 	ScopeOutside = "outside"
 )
 
-const workspacePrefix = "workspace"
-
-// ResolveScopedPath resolves a model-supplied path under the scoping
-// rule. workspace/-prefixed input resolves inside the workspace and
-// reports inside; anything else must be an absolute path and reports
-// outside. A prefixed path escaping the workspace is rejected.
+// ResolveScopedPath resolves a model-supplied path. The model always
+// passes a full absolute path; bare relative paths (including the old
+// workspace/ prefix) are rejected. The absolute path is compared
+// against the session workspace internally and reported as inside or
+// outside — flagging only, never a rejection: files outside the
+// workspace are allowed.
 func ResolveScopedPath(tool, field, input, workspace string) (string, string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
 		return "", "", ArgsError(fmt.Sprintf("%s: %s is required", tool, field))
 	}
-	if rest, ok := cutWorkspacePrefix(trimmed); ok {
-		if workspace == "" {
-			return "", "", ArgsError(fmt.Sprintf("%s: no workspace to resolve %s against", tool, field))
-		}
-		joined := filepath.Join(workspace, rest)
-		cleaned := cleanPath(joined)
-		if escapes(cleaned, workspace) {
-			return "", "", ArgsError(fmt.Sprintf("%s: %s must stay inside the workspace; use the absolute path for files outside it", tool, field))
-		}
-		if real, ok := resolveExisting(cleaned); ok {
-			if escapes(real, workspace) {
-				return "", "", ArgsError(fmt.Sprintf("%s: %s must stay inside the workspace; use the absolute path for files outside it", tool, field))
-			}
-		}
-		return cleaned, ScopeInside, nil
-	}
 	if !filepath.IsAbs(trimmed) {
-		return "", "", ArgsError(fmt.Sprintf("%s: %s must start with %s/ for workspace files or be an absolute path, got %q", tool, field, workspacePrefix, trimmed))
+		return "", "", ArgsError(fmt.Sprintf("%s: %s must be a full absolute path, got %q", tool, field, trimmed))
 	}
-	return cleanPath(trimmed), ScopeOutside, nil
+	cleaned := cleanPath(trimmed)
+	return cleaned, scopeOf(cleaned, workspace), nil
 }
 
-func cutWorkspacePrefix(path string) (string, bool) {
-	if path == workspacePrefix {
-		return "", true
-	}
-	for _, sep := range []string{"/", "\\"} {
-		if rest, ok := strings.CutPrefix(path, workspacePrefix+sep); ok {
-			return strings.ReplaceAll(rest, "\\", "/"), true
+// scopeOf compares an absolute path against the workspace: inside when
+// it lands under the workspace root (following symlinks for files
+// that exist), outside otherwise. Empty workspace always reports
+// outside.
+func scopeOf(cleaned, workspace string) string {
+	if workspace != "" && !escapes(cleaned, workspace) {
+		if real, ok := resolveExisting(cleaned); ok {
+			if escapes(real, workspace) {
+				return ScopeOutside
+			}
 		}
+		return ScopeInside
 	}
-	return "", false
+	return ScopeOutside
 }
 
 func cleanPath(path string) string {
