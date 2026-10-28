@@ -17,6 +17,7 @@ import { handleSlashKey, tryHandleSlash } from "./slash";
 import { refreshUsage } from "./usage";
 import { createToolActivity } from "./tools";
 import { handleAskToolEvent } from "./ask";
+import { handleTodoToolEvent, refreshTodos } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
 
 export async function send(resume = false): Promise<void> {
@@ -153,6 +154,9 @@ async function sendExpanded(outgoing: string, resume: boolean, skill: string | n
     if (tool.name === "ask") {
       handleAskToolEvent(state.sessionId || "", tool);
     }
+    if (tool.name === "todo") {
+      handleTodoToolEvent(tool);
+    }
     if (existing) {
       existing.update(tool);
     } else {
@@ -219,8 +223,11 @@ async function sendExpanded(outgoing: string, resume: boolean, skill: string | n
 
     await refreshSessions();
     // Tokens bill even on failed turns, so the pill refreshes on both
-    // paths; refreshUsage keeps the last reading on fetch errors.
+    // paths; refreshUsage keeps the last reading on fetch errors. The
+    // hat already updated live per tool call; the refresh covers any
+    // call that settled after the listener detached.
     void refreshUsage();
+    void refreshTodos();
   } catch (error) {
     state.shownMessages--;
 

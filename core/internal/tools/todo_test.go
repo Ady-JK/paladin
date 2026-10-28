@@ -41,8 +41,8 @@ func TestTodoCreateList(t *testing.T) {
 	ctx := todoCtx(t)
 	content, err := callTodo(ctx, `{"todos":[
 		{"content":"Implement the todo tool","status":"in_progress"},
-		{"content":"Add tests","status":"pending"},
-		{"content":"Run checks","status":"pending"}]}`)
+		{"content":"Add tests","status":"not_started"},
+		{"content":"Run checks","status":"not_started"}]}`)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestTodoCreateList(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %+v", got)
 	}
-	if got[0].Status != TodoInProgress || got[1].Status != TodoPending {
+	if got[0].Status != TodoInProgress || got[1].Status != TodoNotStarted {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -59,23 +59,23 @@ func TestTodoStatusTransitions(t *testing.T) {
 	ctx := todoCtx(t)
 	if _, err := callTodo(ctx, `{"todos":[
 		{"content":"One","status":"in_progress"},
-		{"content":"Two","status":"pending"}]}`); err != nil {
+		{"content":"Two","status":"not_started"}]}`); err != nil {
 		t.Fatal(err)
 	}
 	// Finish the first, start the second: the whole list is replaced.
 	content, err := callTodo(ctx, `{"todos":[
-		{"content":"One","status":"completed"},
+		{"content":"One","status":"finished"},
 		{"content":"Two","status":"in_progress"}]}`)
 	if err != nil {
 		t.Fatalf("transition: %v", err)
 	}
 	got := decodeTodos(t, content)
-	if got[0].Status != TodoCompleted || got[1].Status != TodoInProgress {
+	if got[0].Status != TodoFinished || got[1].Status != TodoInProgress {
 		t.Fatalf("got %+v", got)
 	}
 	// Cancel the remainder.
 	content, err = callTodo(ctx, `{"todos":[
-		{"content":"One","status":"completed"},
+		{"content":"One","status":"finished"},
 		{"content":"Two","status":"cancelled"}]}`)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
@@ -89,7 +89,7 @@ func TestTodoStatusTransitions(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 	got = decodeTodos(t, content)
-	if len(got) != 2 || got[0].Status != TodoCompleted || got[1].Status != TodoCancelled {
+	if len(got) != 2 || got[0].Status != TodoFinished || got[1].Status != TodoCancelled {
 		t.Fatalf("read got %+v", got)
 	}
 	// Reading before any write is an empty list, not an error.
@@ -123,8 +123,18 @@ func TestTodoExactlyOneInProgress(t *testing.T) {
 		t.Fatalf("rejected write left %+v", got)
 	}
 	// Zero in_progress is fine.
-	if _, err := callTodo(ctx, `{"todos":[{"content":"One","status":"pending"}]}`); err != nil {
+	if _, err := callTodo(ctx, `{"todos":[{"content":"One","status":"not_started"}]}`); err != nil {
 		t.Fatalf("no in_progress rejected: %v", err)
+	}
+	// The previous status names still land on their renames.
+	content, err = callTodo(ctx, `{"todos":[
+		{"content":"One","status":"pending"},
+		{"content":"Two","status":"completed"}]}`)
+	if err != nil {
+		t.Fatalf("legacy statuses rejected: %v", err)
+	}
+	if got := decodeTodos(t, content); got[0].Status != TodoNotStarted || got[1].Status != TodoFinished {
+		t.Fatalf("legacy statuses got %+v", got)
 	}
 }
 
@@ -132,14 +142,14 @@ func TestTodoInvalidInput(t *testing.T) {
 	ctx := todoCtx(t)
 	for name, args := range map[string]string{
 		"empty list":    `{"todos":[]}`,
-		"blank content": `{"todos":[{"content":"  ","status":"pending"}]}`,
+		"blank content": `{"todos":[{"content":"  ","status":"not_started"}]}`,
 		"bad status":    `{"todos":[{"content":"One","status":"doing"}]}`,
 		"missing keys":  `{"todos":[{}]}`,
 		"no session":    ``,
 	} {
 		var err error
 		if name == "no session" {
-			_, err = TodoTool{}.Call(json.RawMessage(`{"todos":[{"content":"One","status":"pending"}]}`), &ToolCtx{})
+			_, err = TodoTool{}.Call(json.RawMessage(`{"todos":[{"content":"One","status":"not_started"}]}`), &ToolCtx{})
 		} else {
 			_, err = callTodo(ctx, args)
 		}
@@ -172,7 +182,7 @@ func TestTodoPersistsAcrossRegistries(t *testing.T) {
 	regA := BuiltinRegistry()
 	res := regA.Call(&ToolCall{ID: "1", Name: "todo", Arguments: `{"todos":[
 		{"content":"One","status":"in_progress"},
-		{"content":"Two","status":"pending"}]}`}, ctx)
+		{"content":"Two","status":"not_started"}]}`}, ctx)
 	if res.IsError {
 		t.Fatalf("write: %s", res.Content)
 	}

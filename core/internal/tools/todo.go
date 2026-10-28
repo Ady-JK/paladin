@@ -17,20 +17,22 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
 // Todo statuses. At most one todo may be in_progress at a time.
 const (
-	TodoPending    = "pending"
+	TodoNotStarted = "not_started"
 	TodoInProgress = "in_progress"
-	TodoCompleted  = "completed"
+	TodoFinished   = "finished"
 	TodoCancelled  = "cancelled"
 )
 
 // TodoFileName is the per-session activity list. It lives in the
-// session dir next to meta.json/messages.jsonl/usage.json.
-const TodoFileName = "todos.json"
+// session dir next to meta.json/messages.jsonl/usage.json. The name is
+// shared with the session package's view helper.
+const TodoFileName = session.TodoFileName
 
 // TodoItem is one planned activity: what to do and where it stands.
 type TodoItem struct {
@@ -49,11 +51,14 @@ func (TodoTool) Name() string { return "todo" }
 func (TodoTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "todo",
-		Description: "Track multi-step work with a goal-based activity list. " +
-			"Plan first by writing the whole list, keep exactly one step " +
-			"in_progress at a time, and update statuses as you work. " +
-			"Pass todos to replace the session list; omit todos to read " +
-			"the current list.",
+		Description: "REQUIRED for multi-step work: break the task into a " +
+			"goal-based activity list BEFORE starting, update the statuses " +
+			"as you work, and keep exactly one step in_progress at a time. " +
+			"Every step you are working on MUST be marked in_progress, and " +
+			"every step you finish MUST be marked finished (or cancelled) " +
+			"before you move on — never leave a step in_progress once its " +
+			"work is done. Pass todos to replace the session list; omit " +
+			"todos to read the current list.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -64,7 +69,7 @@ func (TodoTool) Definition() ToolDefinition {
 						"type": "object",
 						"properties": map[string]any{
 							"content": map[string]any{"type": "string", "description": "What to do; one goal-based step."},
-							"status":  map[string]any{"type": "string", "description": "Where the step stands.", "enum": []string{TodoPending, TodoInProgress, TodoCompleted, TodoCancelled}},
+							"status":  map[string]any{"type": "string", "description": "Where the step stands.", "enum": []string{TodoNotStarted, TodoInProgress, TodoFinished, TodoCancelled}},
 						},
 						"required": []string{"content", "status"},
 					},
@@ -115,6 +120,20 @@ func (TodoTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	return string(data), nil
 }
 
+// legacyTodoStatus maps the previous status names (pending,
+// completed) to their renames so stored lists and older prompts keep
+// working.
+func legacyTodoStatus(status string) (string, bool) {
+	switch status {
+	case "pending":
+		return TodoNotStarted, true
+	case "completed":
+		return TodoFinished, true
+	default:
+		return "", false
+	}
+}
+
 // validateTodos trims, checks statuses, and enforces at most one
 // in_progress. Every rejection is a model-visible ArgsError, never a
 // crash: bad input comes back as an error tool result.
@@ -130,10 +149,13 @@ func validateTodos(todos []TodoItem) ([]TodoItem, error) {
 		if content == "" {
 			return nil, ArgsError(fmt.Sprintf("todo: item %d content must not be empty", i+1))
 		}
+		if legacy, ok := legacyTodoStatus(status); ok {
+			status = legacy
+		}
 		switch status {
-		case TodoPending, TodoInProgress, TodoCompleted, TodoCancelled:
+		case TodoNotStarted, TodoInProgress, TodoFinished, TodoCancelled:
 		default:
-			return nil, ArgsError(fmt.Sprintf("todo: item %d status must be one of pending, in_progress, completed or cancelled, got %q", i+1, td.Status))
+			return nil, ArgsError(fmt.Sprintf("todo: item %d status must be one of not_started, in_progress, finished or cancelled, got %q", i+1, td.Status))
 		}
 		if status == TodoInProgress {
 			inProgress++

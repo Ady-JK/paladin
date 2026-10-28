@@ -151,6 +151,14 @@ async function __paladinBaseInvoke(cmd, args) {
             ],
           }
         );
+      case "session_todos":
+        return (
+          window.__e2eTodos || [
+            { content: "Plan the work", status: "finished" },
+            { content: "Build the hat", status: "in_progress" },
+            { content: "Run the checks", status: "not_started" },
+          ]
+        );
       case "overall_usage":
         return (
           window.__e2eOverall || {

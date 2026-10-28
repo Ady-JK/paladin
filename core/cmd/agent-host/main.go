@@ -312,6 +312,12 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(history)
+	case "session_todos":
+		todos, err := rt.SessionTodos(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd"))
+		if err != nil {
+			return failed(err)
+		}
+		return ok(todos)
 	case "session_usage":
 		usage, err := rt.SessionUsage(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd"))
 		if err != nil {

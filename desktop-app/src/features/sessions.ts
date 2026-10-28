@@ -23,6 +23,7 @@ import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, renderGreeting, scrollToBottom } from "./chatView";
 import { createToolActivity } from "./tools";
+import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { syncModelSelects } from "./models";
 import { refreshExternalVisibility } from "./sites";
@@ -224,8 +225,9 @@ export async function openSession(id: string): Promise<void> {
 
     renderSessions();
     // The ledger persists across restarts, so opening a session shows
-    // its last-known totals immediately.
+    // its last-known totals immediately. The todo hat shows its plan.
     void refreshUsage();
+    void refreshTodos();
     setStatus("ready", "ok");
   } catch (error) {
     setStatus(String(error), "error");
@@ -312,6 +314,7 @@ export async function loadHistory(id: string): Promise<void> {
 export function newSession(): void {
   state.sessionId = "";
   clearUsage();
+  clearTodos();
   sessionLabelEl.textContent = "—";
   state.shownMessages = 0;
 

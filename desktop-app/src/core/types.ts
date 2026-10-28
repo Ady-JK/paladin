@@ -264,6 +264,14 @@ export type AskAnswer = {
   answer: string;
 };
 
+// TodoEntry is one row of the session's activity list from
+// `session_todos`: what to do plus where it stands (not_started,
+// in_progress, finished, cancelled).
+export type TodoEntry = {
+  content: string;
+  status: string;
+};
+
 // SideView is a type in this module.
 // It supports the desktop app frontend.
 export type SideView = "agent" | "chat";

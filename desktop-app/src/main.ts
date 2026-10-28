@@ -21,6 +21,7 @@ import { state } from "./core/state";
 import { setStatus } from "./ui/status";
 import { closeMenu } from "./ui/anim";
 import { initChat } from "./features/chat";
+import { initTodos } from "./features/todos";
 import { renderGreeting } from "./features/chatView";
 import { initModelPicker, loadProviders, refreshProviders } from "./features/models";
 import {
@@ -40,6 +41,7 @@ import {
   refreshExternalVisibility,
 } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
+import { clearTodos } from "./features/todos";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initFilePicker, closeFilePicker } from "./features/filePicker";
 import { initMentions } from "./features/mentions";
@@ -69,6 +71,7 @@ async function connect(): Promise<void> {
     sessionLabelEl.textContent = "—";
     state.shownMessages = 0;
     clearUsage();
+    clearTodos();
 
     messagesEl.innerHTML = "";
     renderGreeting();
@@ -92,6 +95,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   initWindow();
   initChat();
+  initTodos();
   initFilePicker();
   initMentions();
   initSlash();

@@ -9,6 +9,13 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
+// TodoEntry is one client-facing activity row from the session's
+// todo list.
+type TodoEntry struct {
+	Content string `json:"content"`
+	Status  string `json:"status"`
+}
+
 const (
 	ToolRunning = "running"
 	ToolOK      = "ok"
@@ -151,6 +158,28 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 		out = []HistoryMessage{}
 	}
 	return out
+}
+
+// TodoFileName is the on-disk activity list; kept here so the runtime
+// can serve it without importing the tools package.
+const TodoFileName = "todos.json"
+
+// TodosView parses a stored todos.json payload into client rows. A
+// missing or empty payload is an empty list.
+func TodosView(data []byte) []TodoEntry {
+	var stored struct {
+		Todos []TodoEntry `json:"todos"`
+	}
+	if len(data) == 0 {
+		return []TodoEntry{}
+	}
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return []TodoEntry{}
+	}
+	if stored.Todos == nil {
+		return []TodoEntry{}
+	}
+	return stored.Todos
 }
 
 func notifyHistoryArgs(content string) string {

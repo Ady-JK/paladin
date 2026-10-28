@@ -445,9 +445,13 @@ Tools:
   other tool calls to make meanwhile — a lone background job only burns
   rounds polling status, so a single job always waits. Add "notify": true
   to a background run to be reminded when it finishes instead of polling.
-- Use the todo tool to track multi-step work: plan first by writing the
-  whole activity list, keep exactly one step in_progress at a time, and
-  update statuses as you work. Skip it for single-step tasks.
+- Use the todo tool to track multi-step work: REQUIRED for multi-step
+  tasks — break the task into a goal-based activity list with the todo
+  tool BEFORE starting, update the statuses as you work, and finish by
+  marking every step finished (or cancelled). Mark the step you are
+  working on in_progress and flip it to finished the moment its work is
+  done; never leave a step in_progress once its work is done. Keep
+  exactly one step in_progress at a time. Skip it for single-step tasks.
 - To find a file, search likely directories first and widen only when they
   come up empty — never start with a full-drive recursive sweep.
 - Never answer that you cannot reach this machine: the shell tool runs
@@ -548,13 +552,18 @@ and the turn continues.
   questions into one call. Wrong: asking anything you could discover
   with read or shell first.
 
-todo — track multi-step work with a goal-based activity list. Pass
-todos to replace the session list; omit todos to read the current list.
+todo — REQUIRED for multi-step work: break the task into a goal-based
+activity list BEFORE starting, update the statuses as you work, and keep
+exactly one step in_progress at a time. Mark the step you are working on
+in_progress and flip it to finished the moment its work is done — never
+leave a step in_progress once its work is done. Pass todos to replace the
+session list; omit todos to read the current list.
 - Plan first: {"todos": [{"content": "Add the todo tool", "status": "in_progress"},
-  {"content": "Add tests", "status": "pending"},
-  {"content": "Run checks", "status": "pending"}]} then update statuses as
-  work proceeds, keeping exactly one step in_progress at a time.
+  {"content": "Add tests", "status": "not_started"},
+  {"content": "Run checks", "status": "not_started"}]} then update statuses as
+  work proceeds, ending with every step finished (or cancelled).
 - Wrong: two steps in_progress at once — the call is rejected. Wrong:
+  finishing work without flipping the step to finished. Wrong:
   using todo for a single read or shell call — plan only multi-step work.
 `
 

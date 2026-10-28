@@ -466,6 +466,27 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	return session.HistoryView(msgs), nil
 }
 
+// SessionTodos returns the session's activity list for the UI's todo
+// hat above the composer: empty when the agent has not planned yet,
+// never an error for a missing file.
+func (r *AgentRuntime) SessionTodos(sessionID, cwd string) ([]session.TodoEntry, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(sess.Dir, session.TodoFileName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []session.TodoEntry{}, nil
+		}
+		return nil, fmt.Errorf("io: session todos: %s", syserr.Str(err))
+	}
+	return session.TodosView(data), nil
+}
+
 // SessionUsage returns the session's billed footprint: accumulated
 // tokens, gateway-reported spend, the model's context window and the
 // fill percentage. Sessions that predate usage tracking (or whose

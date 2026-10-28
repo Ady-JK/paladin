@@ -4,7 +4,7 @@
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 // No daemon, no addr, no subscribe.
 
-import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, SkillEntry, ToolInfo } from "./types";
+import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, SkillEntry, TodoEntry, ToolInfo } from "./types";
 import { bridge } from "./tauri";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -147,6 +147,16 @@ export function sessionHistory(
   cwd: string | null,
 ): Promise<MessageInfo[]> {
   return invoke<MessageInfo[]>("session_history", { sessionId, cwd });
+}
+
+// sessionTodos reads the session's activity list (todos.json) for the
+// todo hat above the composer. Empty when the agent has not planned
+// yet — never an error for a missing file.
+export function sessionTodos(
+  sessionId: string,
+  cwd: string | null,
+): Promise<TodoEntry[]> {
+  return invoke<TodoEntry[]>("session_todos", { sessionId, cwd });
 }
 
 export function sessionUsage(  sessionId: string,
