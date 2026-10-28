@@ -1,76 +1,124 @@
-// filePicker.ts owns the attach-a-file picker behind the composer
-// paperclip button. It mirrors the new-session folder picker but
-// lists files as well as folders, starting at the workspace path.
-// Folders navigate deeper; picking a file inserts its absolute path
-// into the composer so the agent sees exactly which file was tagged.
+// filePicker.ts owns the attach-a-file-or-folder picker behind the
+// composer paperclip button. It is always the in-app native-like
+// browser: breadcrumbs on top, search plus a persisted "Hidden"
+// checkbox, a single-select list, and explicit Select file / Select
+// folder / Cancel buttons. Single click selects, double-click (or the
+// chevron) opens a folder. Select file inserts the highlighted file;
+// Select folder inserts the highlighted folder, or the current folder
+// when a file (or nothing) is highlighted.
 
 import * as api from "../core/api";
 import {
+  fileCrumbsEl,
   fileListEl,
   fileModalEl,
   filePathEl,
+  fileSearchEl,
+  fileSelectFileBtn,
+  fileSelectFolderBtn,
+  fileShowHiddenEl,
   inputEl,
   paintIcons,
 } from "../core/dom";
-import { escapeHtml } from "../core/format";
 import { state } from "../core/state";
 import type { FsList } from "../core/types";
 import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { autosizeComposer } from "./chat";
+import {
+  crumbsHTML,
+  filterEntries,
+  getShowHidden,
+  rowsHTML,
+  setShowHidden,
+  type PickerSelection,
+} from "./picker";
 
 let pickDir = "";
+let currentList: FsList | null = null;
+let selection: PickerSelection | null = null;
+let query = "";
+let showHidden = false;
 
-// fileRows renders the picker list: a parent row, folder rows that
-// navigate, and file rows that insert. Icons run larger than the
-// session picker so touch targets stay comfortable.
-function fileRows(list: FsList): string {
-  const rows: string[] = [];
-
-  if (list.parentPath && list.parentPath !== list.currentPath) {
-    rows.push(`
-      <button
-        data-browse="${escapeHtml(list.parentPath)}"
-        class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-        title="Go to the parent folder"
-      >
-        <span data-icon="angles-left" class="flex-shrink-0 [&>svg]:h-5 [&>svg]:w-5"></span>
-        <span class="truncate">..</span>
-      </button>`);
+// paintPicker repaints crumbs, rows, and footer state from the cached
+// list plus the current filter, selection, and toggle. One entry point
+// keeps search, toggle, browse, and select in sync.
+function paintPicker(): void {
+  if (!currentList) {
+    return;
   }
+  const visible = filterEntries(currentList, showHidden, query);
+  fileCrumbsEl.innerHTML = crumbsHTML(currentList.currentPath);
+  filePathEl.textContent = currentList.currentPath;
+  fileListEl.innerHTML = rowsHTML(
+    { ...currentList, ...visible },
+    selection,
+    { filesEnabled: true },
+  );
+  paintIcons(fileModalEl);
 
-  for (const dir of list.directories) {
-    rows.push(`
-      <button
-        data-browse="${escapeHtml(dir.path)}"
-        class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-        title="${escapeHtml(dir.path)}"
-      >
-        <span data-icon="folder" class="flex-shrink-0 text-agent-amber [&>svg]:h-5 [&>svg]:w-5"></span>
-        <span class="truncate">${escapeHtml(dir.name)}</span>
-      </button>`);
-  }
+  const fileOk = selection?.kind === "file";
+  fileSelectFileBtn.toggleAttribute("disabled", !fileOk);
+  fileSelectFileBtn.classList.toggle("opacity-40", !fileOk);
+  fileSelectFileBtn.classList.toggle("cursor-not-allowed", !fileOk);
 
-  for (const file of list.files) {
-    rows.push(`
-      <button
-        data-pick-file="${escapeHtml(file.path)}"
-        class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-        title="${escapeHtml(file.path)}"
-      >
-        <span data-icon="file-code" class="flex-shrink-0 text-slate-400 [&>svg]:h-5 [&>svg]:w-5"></span>
-        <span class="truncate">${escapeHtml(file.name)}</span>
-      </button>`);
-  }
-
-  if (list.directories.length === 0 && list.files.length === 0) {
-    rows.push(`<p class="px-2 py-1 text-slate-400">empty folder</p>`);
-  }
-
-  return rows.join("");
+  fileListEl.querySelectorAll<HTMLButtonElement>("button[data-fb-crumb]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void browseFilePicker(button.dataset.fbCrumb ?? "");
+    });
+  });
+  // Parent rows and chevrons navigate; stop the chevron from also
+  // selecting so one click opens instead of arming a confirm.
+  fileListEl.querySelectorAll<HTMLElement>("[data-fb-open]").forEach((el) => {
+    el.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const path = (el as HTMLElement).dataset.fbOpen ?? "";
+      void browseFilePicker(path);
+    });
+    el.addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+    });
+  });
+  fileListEl.querySelectorAll<HTMLButtonElement>("button[data-fb-select]").forEach((button) => {
+    const path = button.dataset.fbSelect ?? "";
+    const kind = (button.dataset.fbKind === "file" ? "file" : "folder") as PickerSelection["kind"];
+    button.addEventListener("click", () => {
+      selection = { path, kind };
+      paintPicker();
+      // Keep keyboard focus in the list for fast arrow/tab flows.
+      button.focus();
+    });
+    if (kind === "folder") {
+      button.addEventListener("dblclick", () => {
+        void browseFilePicker(path);
+      });
+    } else {
+      button.addEventListener("dblclick", () => {
+        selection = { path, kind };
+        confirmSelection("file");
+      });
+    }
+  });
 }
 
-// insertPickedPath drops the absolute path at the caret with word spacing,
+async function browseFilePicker(path?: string): Promise<void> {
+  const target = (path ?? pickDir ?? state.cwd ?? "").trim() || null;
+
+  try {
+    const list = await api.fsList(target);
+    currentList = list;
+    pickDir = list.currentPath;
+    // A stale highlight from another folder must not survive.
+    if (selection && !selection.path.startsWith(`${list.currentPath}/`) && selection.path !== list.currentPath) {
+      selection = null;
+    }
+    paintPicker();
+  } catch (error) {
+    toast(String(error), "error");
+  }
+}
+
+// insertPickedPath drops the path at the caret with word spacing,
 // then hands focus back to the composer.
 function insertPickedPath(path: string): void {
   const caret = inputEl.selectionStart ?? inputEl.value.length;
@@ -86,53 +134,40 @@ function insertPickedPath(path: string): void {
   autosizeComposer();
 }
 
-async function browseFilePicker(path?: string): Promise<void> {
-  const target = (path ?? pickDir ?? state.cwd ?? "").trim() || null;
-
-  try {
-    const list = await api.fsList(target);
-    pickDir = list.currentPath;
-    filePathEl.textContent = list.currentPath;
-    fileListEl.innerHTML = fileRows(list);
-    paintIcons(fileListEl);
-
-    fileListEl.querySelectorAll<HTMLButtonElement>("button[data-browse]").forEach((button) => {
-      button.addEventListener("click", () => {
-        void browseFilePicker(button.dataset.browse ?? "");
-      });
-    });
-    fileListEl.querySelectorAll<HTMLButtonElement>("button[data-pick-file]").forEach((button) => {
-      button.addEventListener("click", () => {
-        insertPickedPath(button.dataset.pickFile ?? "");
-        closeFilePicker();
-      });
-    });
-  } catch (error) {
-    toast(String(error), "error");
+// confirmSelection resolves the footer buttons: Select file needs a
+// highlighted file; Select folder takes the highlighted folder, else
+// the current directory (a file highlight never blocks a folder pick).
+function confirmSelection(which: "file" | "folder"): void {
+  if (which === "file") {
+    if (!selection || selection.kind !== "file") {
+      toast("Pick a file from the list first");
+      return;
+    }
+    insertPickedPath(selection.path);
+    return;
+  }
+  if (selection?.kind === "folder") {
+    insertPickedPath(selection.path);
+    return;
+  }
+  if (currentList) {
+    insertPickedPath(currentList.currentPath);
   }
 }
 
-// openFilePicker shows the OS file picker rooted at the workspace
-// path, falling back to the in-app picker where native dialogs are
-// unavailable (e2e stub, plain web). Cancelling stays silent.
+// openFilePicker shows the in-app attach browser rooted at the
+// workspace. Search and toggle restore their persisted state.
 export async function openFilePicker(): Promise<void> {
-  if (api.canPickNative()) {
-    let picked: string[] | null = null;
-    try {
-      picked = await api.pickFiles(state.cwd || null);
-    } catch (error) {
-      toast(String(error), "error");
-      return;
-    }
-    if (picked) {
-      for (const path of picked) {
-        insertPickedPath(path);
-      }
-    }
-    return;
-  }
   pickDir = state.cwd || "";
+  currentList = null;
+  selection = null;
+  query = "";
+  showHidden = getShowHidden();
+  fileSearchEl.value = "";
+  fileShowHiddenEl.checked = showHidden;
+  fileModalEl.classList.add("is-open");
   openModal(fileModalEl);
+  window.setTimeout(() => fileSearchEl.focus(), 60);
   void browseFilePicker();
 }
 
@@ -147,6 +182,19 @@ export function closeFilePicker(): void {
 export function initFilePicker(): void {
   document.querySelector("#fileCloseBtn")?.addEventListener("click", closeFilePicker);
   document.querySelector("#fileCancelBtn")?.addEventListener("click", closeFilePicker);
+  fileSelectFileBtn.addEventListener("click", () => confirmSelection("file"));
+  fileSelectFolderBtn.addEventListener("click", () => confirmSelection("folder"));
+
+  fileSearchEl.addEventListener("input", () => {
+    query = fileSearchEl.value;
+    paintPicker();
+  });
+
+  fileShowHiddenEl.addEventListener("change", () => {
+    showHidden = fileShowHiddenEl.checked;
+    setShowHidden(showHidden);
+    paintPicker();
+  });
 
   fileModalEl.addEventListener("click", (event) => {
     if (event.target === fileModalEl) {

@@ -292,6 +292,241 @@
     transform: none;
   }
 
+  /* ---- Native-like file picker ----
+     Breadcrumb trail, toolbar, single-select list. One shared look for
+     the new-session folder step and the composer attach dialog. */
+  .picker-crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240);
+    background: rgb(241 245 249 / 0.7);
+    padding: 6px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    min-height: 2rem;
+  }
+
+  .dark .picker-crumbs {
+    border-color: rgb(51 65 85 / 0.8);
+    background: rgb(30 41 59 / 0.6);
+  }
+
+  .picker-crumb {
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: rgb(37 99 235);
+  }
+
+  .dark .picker-crumb {
+    color: rgb(147 197 253);
+  }
+
+  .picker-crumb:hover {
+    background: rgb(37 99 235 / 0.1);
+  }
+
+  .picker-crumb-sep {
+    color: rgb(148 163 184);
+    user-select: none;
+  }
+
+  .picker-crumb-current {
+    font-weight: 600;
+    color: rgb(15 23 42);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dark .picker-crumb-current {
+    color: rgb(226 232 240);
+  }
+
+  .picker-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .picker-search {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .picker-search-icon {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    color: rgb(148 163 184);
+    pointer-events: none;
+  }
+
+  .picker-search-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .picker-search-input {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240);
+    background: rgb(241 245 249 / 0.7);
+    padding: 6px 10px 6px 30px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: inherit;
+  }
+
+  .dark .picker-search-input {
+    border-color: rgb(51 65 85);
+    background: rgb(30 41 59 / 0.7);
+  }
+
+  .picker-search-input:focus {
+    outline: none;
+    border-color: var(--color-accent-500);
+  }
+
+  .picker-hidden-toggle {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgb(100 116 139);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .dark .picker-hidden-toggle {
+    color: rgb(148 163 184);
+  }
+
+  .picker-checkbox {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--color-accent-600);
+    cursor: pointer;
+  }
+
+  .picker-list {
+    overflow-y: auto;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240);
+    padding: 4px;
+  }
+
+  .dark .picker-list {
+    border-color: rgb(51 65 85);
+  }
+
+  .picker-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    padding: 7px 10px;
+    text-align: left;
+    font-size: 12px;
+    color: rgb(51 65 85);
+  }
+
+  .dark .picker-row {
+    color: rgb(203 213 225);
+  }
+
+  .picker-row:hover {
+    background: rgb(241 245 249);
+  }
+
+  .dark .picker-row:hover {
+    background: rgb(30 41 59);
+  }
+
+  .picker-row[aria-selected="true"] {
+    border-color: rgb(37 99 235 / 0.45);
+    background: rgb(37 99 235 / 0.1);
+    font-weight: 500;
+  }
+
+  .dark .picker-row[aria-selected="true"] {
+    border-color: rgb(96 165 250 / 0.5);
+    background: rgb(37 99 235 / 0.18);
+  }
+
+  .picker-row-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .picker-row-folder {
+    color: var(--color-agent-amber);
+  }
+
+  .picker-row-file {
+    color: rgb(148 163 184);
+  }
+
+  .picker-row-label {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .picker-row-check {
+    display: none;
+    flex-shrink: 0;
+    color: var(--color-accent-600);
+  }
+
+  .dark .picker-row-check {
+    color: rgb(96 165 250);
+  }
+
+  .picker-row-check svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .picker-row[aria-selected="true"] .picker-row-check {
+    display: inline-flex;
+  }
+
+  .picker-row-open {
+    display: inline-flex;
+    flex-shrink: 0;
+    border-radius: 4px;
+    padding: 2px;
+    color: rgb(148 163 184);
+  }
+
+  .picker-row-open:hover {
+    background: rgb(37 99 235 / 0.15);
+    color: rgb(37 99 235);
+  }
+
+  .picker-row-open svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .picker-empty {
+    padding: 12px 8px;
+    text-align: center;
+    font-size: 12px;
+    color: rgb(148 163 184);
+  }
+
   /* ---- Dropdown / picker pop ---- */
   #modelMenu {
     opacity: 0;

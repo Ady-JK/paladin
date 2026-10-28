@@ -328,6 +328,45 @@ export const toastTextEl = $("#toastText");
 // toastIconEl is a const in this module.
 // It supports the desktop app frontend.
 export const toastIconEl = $("#toastIcon");
+// fileCrumbsEl is a const in this module.
+// It hosts the attach picker breadcrumb trail.
+export const fileCrumbsEl = $("#fileCrumbs");
+// fileSearchEl is a const in this module.
+// It filters the attach picker to matching names.
+export const fileSearchEl = $<HTMLInputElement>("#fileSearch");
+// fileShowHiddenEl is a const in this module.
+// It toggles dotfiles and dotfolders in the attach picker.
+export const fileShowHiddenEl = $<HTMLInputElement>("#fileShowHidden");
+// fileSelectFileBtn is a const in this module.
+// It confirms the highlighted file in the attach picker.
+export const fileSelectFileBtn = $<HTMLButtonElement>("#fileSelectFileBtn");
+// fileSelectFolderBtn is a const in this module.
+// It confirms a folder from the attach picker.
+export const fileSelectFolderBtn = $<HTMLButtonElement>("#fileSelectFolderBtn");
+// newSessionFolderStepEl is a const in this module.
+// It hosts the folder-first step of the new-session wizard.
+export const newSessionFolderStepEl = $("#newSessionFolderStep");
+// newSessionModelStepEl is a const in this module.
+// It hosts the model step shown after a folder is chosen.
+export const newSessionModelStepEl = $("#newSessionModelStep");
+// newSessionCrumbsEl is a const in this module.
+// It hosts the new-session breadcrumb trail.
+export const newSessionCrumbsEl = $("#newSessionCrumbs");
+// newSessionFolderSearchEl is a const in this module.
+// It filters the new-session folder list.
+export const newSessionFolderSearchEl = $<HTMLInputElement>("#newSessionFolderSearch");
+// newSessionShowHiddenEl is a const in this module.
+// It toggles dotfolders in the new-session picker.
+export const newSessionShowHiddenEl = $<HTMLInputElement>("#newSessionShowHidden");
+// sessionSelectFolderBtn is a const in this module.
+// It confirms the folder and advances to the model step.
+export const sessionSelectFolderBtn = $<HTMLButtonElement>("#sessionSelectFolderBtn");
+// sessionBackBtn is a const in this module.
+// It returns from the model step to the folder step.
+export const sessionBackBtn = $<HTMLButtonElement>("#sessionBackBtn");
+// sessionFolderLabelEl is a const in this module.
+// It shows the chosen folder on the model step.
+export const sessionFolderLabelEl = $("#sessionFolderLabel");
 
 // paintIcons replaces [data-icon] placeholders with inline SVG.
 // Pass the subtree that changed: a full-document sweep is O(n) and must
