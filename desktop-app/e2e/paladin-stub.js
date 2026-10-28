@@ -67,6 +67,7 @@ async function __paladinBaseInvoke(cmd, args) {
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
             totalTokens: 25000,
+            lastInputTokens: 25000,
             cost: 0.0042,
             listCost: 0.008,
             hasCost: true,

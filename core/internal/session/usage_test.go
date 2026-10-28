@@ -6,6 +6,9 @@ func TestUsageTotalsAdd(t *testing.T) {
 	var totals UsageTotals
 	totals.AddCall("m", 10, 5, 1, 2, 3, 15, 0.01, 0.02, true, 100)
 	totals.AddCall("m", 4, 1, 0, 0, 0, 5, 0, 0, false, 101)
+	if totals.LastInputTokens != 4 {
+		t.Fatalf("last input %+v", totals)
+	}
 	if totals.Calls != 2 || totals.PromptTokens != 14 || totals.CompletionTokens != 6 ||
 		totals.ReasoningTokens != 1 || totals.CacheReadTokens != 2 || totals.CacheWriteTokens != 3 ||
 		totals.TotalTokens != 20 || totals.UpdatedAt != 101 {
@@ -23,14 +26,20 @@ func TestUsageTotalsAdd(t *testing.T) {
 func TestUsageViewFillPercent(t *testing.T) {
 	var totals UsageTotals
 	totals.AddCall("m", 100, 100, 0, 0, 0, 200, 0.05, 0.1, true, 1)
+	// A later, smaller call moves the context reading even though the
+	// cumulative total only grows: fill is last-call input / window.
+	totals.AddCall("m", 50, 10, 0, 0, 0, 60, 0, 0, false, 2)
 	view := totals.View("s", 1000, true, func(string) (int64, bool) { return 1000, true })
 	if view.SessionID != "s" || !view.ContextKnown || view.ContextWindow != 1000 {
 		t.Fatalf("got %+v", view)
 	}
-	if view.FillPercent == nil || *view.FillPercent != 20 {
+	if view.LastInputTokens != 50 {
+		t.Fatalf("last input %+v", view)
+	}
+	if view.FillPercent == nil || *view.FillPercent != 5 {
 		t.Fatalf("fill %+v", view.FillPercent)
 	}
-	if view.TotalTokens != 200 || !view.HasCost || view.Cost != 0.05 {
+	if view.TotalTokens != 260 || !view.HasCost || view.Cost != 0.05 {
 		t.Fatalf("got %+v", view)
 	}
 	// Unknown window: no percentage, tokens still visible.
@@ -38,7 +47,7 @@ func TestUsageViewFillPercent(t *testing.T) {
 	if unknown.FillPercent != nil || unknown.ContextKnown {
 		t.Fatalf("got %+v", unknown)
 	}
-	if unknown.TotalTokens != 200 {
+	if unknown.TotalTokens != 260 {
 		t.Fatalf("got %+v", unknown)
 	}
 }
@@ -57,6 +66,9 @@ func TestUsageTotalsPerModel(t *testing.T) {
 	a := totals.Models["a"]
 	if a == nil || a.Calls != 2 || a.TotalTokens != 300 || a.ReasoningTokens != 4 {
 		t.Fatalf("model a %+v", totals.Models)
+	}
+	if a.LastInputTokens != 50 || totals.LastInputTokens != 50 {
+		t.Fatalf("last input a=%+v totals=%+v", a, totals)
 	}
 	if !a.HasCost || !closeTo(a.Cost, 0.05) {
 		t.Fatalf("model a cost %+v", a)
@@ -89,13 +101,18 @@ func TestUsageViewModelsSortedWithWindows(t *testing.T) {
 		t.Fatalf("order %+v", view.Models)
 	}
 	am, bm := view.Models[0], view.Models[1]
-	if !am.ContextKnown || am.ContextWindow != 1000 || am.FillPercent == nil || *am.FillPercent != 20 {
+	// a's single call took 100 input tokens (200 total): 100/1000 = 10%.
+	if !am.ContextKnown || am.ContextWindow != 1000 || am.FillPercent == nil || *am.FillPercent != 10 {
 		t.Fatalf("model a %+v", am)
+	}
+	if am.LastInputTokens != 100 {
+		t.Fatalf("model a last input %+v", am)
 	}
 	if am.HasCost {
 		t.Fatalf("model a should not report cost: %+v", am)
 	}
-	if !bm.ContextKnown || bm.FillPercent == nil || *bm.FillPercent != 15 {
+	// b's single call took 10 input tokens (15 total): 10/100 = 10%.
+	if !bm.ContextKnown || bm.FillPercent == nil || *bm.FillPercent != 10 {
 		t.Fatalf("model b %+v", bm)
 	}
 	// Unknown model in the breakdown: no window, no fill.

@@ -47,7 +47,7 @@ func (a *Agent) runLoop() error {
 					break loop
 				}
 				if chunk.Usage != nil {
-					a.turnUsage.Add(*chunk.Usage)
+					a.noteCallUsage(*chunk.Usage)
 				}
 				if chunk.ToolNotice != nil {
 					notice := chunk.ToolNotice
@@ -119,7 +119,7 @@ func (a *Agent) runLoop() error {
 			a.appendDelta(resp.Content)
 			calls = resp.ToolCalls
 			if resp.Usage != nil {
-				a.turnUsage.Add(*resp.Usage)
+				a.noteCallUsage(*resp.Usage)
 			}
 			if resp.Content != "" {
 				if err := a.emit(ChatChunk{Delta: resp.Content}); err != nil {
@@ -289,7 +289,7 @@ loop:
 				}
 			}
 			if chunk.Usage != nil {
-				a.turnUsage.Add(*chunk.Usage)
+				a.noteCallUsage(*chunk.Usage)
 			}
 			if a.stopRequested() {
 				return turnStop{}
@@ -323,7 +323,7 @@ loop:
 		}
 		a.appendDelta(resp.Content)
 		if resp.Usage != nil {
-			a.turnUsage.Add(*resp.Usage)
+			a.noteCallUsage(*resp.Usage)
 		}
 		content := a.reply.String()
 		if err := a.emit(ChatChunk{Delta: content}); err != nil {

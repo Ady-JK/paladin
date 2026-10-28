@@ -1066,7 +1066,8 @@ func TestSessionUsageKnownWindow(t *testing.T) {
 	if info.FillPercent == nil {
 		t.Fatal("no fill percent")
 	}
-	want := float64(2000) / float64(262144) * 100
+	// Fill reads the last call's 1000 input tokens, not the 2000 total.
+	want := float64(1000) / float64(262144) * 100
 	if *info.FillPercent != want {
 		t.Fatalf("got %v want %v", *info.FillPercent, want)
 	}

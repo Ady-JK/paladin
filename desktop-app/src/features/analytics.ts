@@ -59,11 +59,11 @@ function banner(u: OverallUsage): string {
       <div class="mt-0.5 font-mono text-[10px] text-slate-400">${sub}</div>
     </div>`;
   return `<div class="glass-panel grid grid-cols-2 gap-3 rounded-2xl p-4 font-mono sm:grid-cols-3 lg:grid-cols-5">
-    ${cell(NEON.blue, "Input Tokens", u.promptTokens.toLocaleString(), `${share(u.promptTokens)} of total`)}
-    ${cell(NEON.purple, "Output Tokens", u.completionTokens.toLocaleString(), `${share(u.completionTokens)} of total`)}
-    ${cell(NEON.rose, "Reasoning Tokens", u.reasoningTokens.toLocaleString(), u.reasoningTokens > 0 ? `${share(u.reasoningTokens)} of total` : "no thinking billed")}
-    ${cell(NEON.emerald, "Cache Read", u.cacheReadTokens.toLocaleString(), u.cacheReadTokens > 0 ? `${share(u.cacheReadTokens)} · 90% off` : "no cache hits")}
-    ${cell(NEON.amber, "Cache Write", u.cacheWriteTokens.toLocaleString(), u.cacheWriteTokens > 0 ? `${share(u.cacheWriteTokens)} of total` : "no cache writes")}
+    ${cell(NEON.blue, "Input tokens", u.promptTokens.toLocaleString(), `${share(u.promptTokens)} of total`)}
+    ${cell(NEON.purple, "Output tokens", u.completionTokens.toLocaleString(), `${share(u.completionTokens)} of total`)}
+    ${cell(NEON.rose, "Reasoning tokens", u.reasoningTokens.toLocaleString(), u.reasoningTokens > 0 ? `${share(u.reasoningTokens)} of total` : "no thinking billed")}
+    ${cell(NEON.emerald, "Cache read tokens", u.cacheReadTokens.toLocaleString(), u.cacheReadTokens > 0 ? `${share(u.cacheReadTokens)} · 90% off` : "no cache hits")}
+    ${cell(NEON.amber, "Cache write tokens", u.cacheWriteTokens.toLocaleString(), u.cacheWriteTokens > 0 ? `${share(u.cacheWriteTokens)} of total` : "no cache writes")}
   </div>`;
 }
 

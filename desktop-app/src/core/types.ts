@@ -21,7 +21,9 @@ export type SessionInfo = {
   title: string;
 };
 
-// UsageModel is one model's slice of a session's usage.
+// UsageModel is one model's slice of a session's usage. FillPercent is
+// the model's last call input over its window; absent for unknown
+// windows. LastInputTokens is absent on fixtures that predate it.
 export type UsageModel = {
   model: string;
   contextWindow: number;
@@ -33,6 +35,7 @@ export type UsageModel = {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens: number;
+  lastInputTokens?: number;
   cost: number;
   listCost: number;
   hasCost: boolean;
@@ -52,7 +55,9 @@ export type FileEntry = {
 };
 
 // SessionUsage is the client-facing usage view from `session_usage`.
-// FillPercent is absent when the model's window is unknown.
+// FillPercent is the last call's input tokens over the context window;
+// absent when the model's window is unknown. LastInputTokens is absent
+// on fixtures that predate it.
 export type SessionUsage = {
   sessionId: string;
   model: string;
@@ -65,6 +70,7 @@ export type SessionUsage = {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens: number;
+  lastInputTokens?: number;
   cost: number;
   listCost: number;
   hasCost: boolean;

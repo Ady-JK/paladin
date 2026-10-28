@@ -13,19 +13,23 @@ import (
 // gateway-reported USD; HasCost is false when no call has ever reported
 // cost (plain providers), distinguishing "free" from "unknown".
 type UsageTotals struct {
-	SessionID        string  `json:"session_id"`
-	Model            string  `json:"model"`
-	Calls            int64   `json:"calls"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	ReasoningTokens  int64   `json:"reasoning_tokens"`
-	CacheReadTokens  int64   `json:"cache_read_tokens"`
-	CacheWriteTokens int64   `json:"cache_write_tokens"`
-	TotalTokens      int64   `json:"total_tokens"`
-	Cost             float64 `json:"cost"`
-	ListCost         float64 `json:"list_cost"`
-	HasCost          bool    `json:"has_cost"`
-	UpdatedAt        int64   `json:"updated_at"`
+	SessionID        string `json:"session_id"`
+	Model            string `json:"model"`
+	Calls            int64  `json:"calls"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	ReasoningTokens  int64  `json:"reasoning_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	// LastInputTokens is the previous LLM call's input (prompt) tokens.
+	// The context fill reads last-call input over the model window, so
+	// this — not the cumulative total — is what the gauge reports.
+	LastInputTokens int64   `json:"last_input_tokens"`
+	Cost            float64 `json:"cost"`
+	ListCost        float64 `json:"list_cost"`
+	HasCost         bool    `json:"has_cost"`
+	UpdatedAt       int64   `json:"updated_at"`
 	// Models breaks the same counters down per model id, so mid-session
 	// model switches keep their own books. Top-level fields stay the
 	// across-models sum for cheap reads.
@@ -58,16 +62,18 @@ func dayKey(now int64) string {
 
 // ModelUsage is one model's slice of a session's ledger.
 type ModelUsage struct {
-	Calls            int64   `json:"calls"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	ReasoningTokens  int64   `json:"reasoning_tokens"`
-	CacheReadTokens  int64   `json:"cache_read_tokens"`
-	CacheWriteTokens int64   `json:"cache_write_tokens"`
-	TotalTokens      int64   `json:"total_tokens"`
-	Cost             float64 `json:"cost"`
-	ListCost         float64 `json:"list_cost"`
-	HasCost          bool    `json:"has_cost"`
+	Calls            int64 `json:"calls"`
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	ReasoningTokens  int64 `json:"reasoning_tokens"`
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+	// LastInputTokens mirrors UsageTotals: this model's latest call.
+	LastInputTokens int64   `json:"last_input_tokens"`
+	Cost            float64 `json:"cost"`
+	ListCost        float64 `json:"list_cost"`
+	HasCost         bool    `json:"has_cost"`
 }
 
 // AddCall folds one LLM call into the totals. model is the call's model;
@@ -83,6 +89,7 @@ func (t *UsageTotals) AddCall(model string, prompt, completion, reasoning, cache
 	t.CacheReadTokens += cacheRead
 	t.CacheWriteTokens += cacheWrite
 	t.TotalTokens += total
+	t.LastInputTokens = prompt
 	if hasCost {
 		t.Cost += cost
 		t.ListCost += listCost
@@ -105,6 +112,7 @@ func (t *UsageTotals) AddCall(model string, prompt, completion, reasoning, cache
 		m.CacheReadTokens += cacheRead
 		m.CacheWriteTokens += cacheWrite
 		m.TotalTokens += total
+		m.LastInputTokens = prompt
 		if hasCost {
 			m.Cost += cost
 			m.ListCost += listCost
@@ -136,24 +144,28 @@ func (t *UsageTotals) AddCall(model string, prompt, completion, reasoning, cache
 }
 
 // SessionUsage is the client-facing usage view (camelCase, like
-// SessionInfo). FillPercent is nil when the model's window is unknown,
-// so the UI shows raw tokens instead of a misleading percentage.
+// SessionInfo). FillPercent is the last LLM call's input tokens over
+// the context window; nil when the model's window is unknown, so the
+// UI shows raw tokens instead of a misleading percentage.
 type SessionUsage struct {
-	SessionID        string   `json:"sessionId"`
-	Model            string   `json:"model"`
-	ContextWindow    int64    `json:"contextWindow"`
-	ContextKnown     bool     `json:"contextKnown"`
-	Calls            int64    `json:"calls"`
-	PromptTokens     int64    `json:"promptTokens"`
-	CompletionTokens int64    `json:"completionTokens"`
-	ReasoningTokens  int64    `json:"reasoningTokens"`
-	CacheReadTokens  int64    `json:"cacheReadTokens"`
-	CacheWriteTokens int64    `json:"cacheWriteTokens"`
-	TotalTokens      int64    `json:"totalTokens"`
-	Cost             float64  `json:"cost"`
-	ListCost         float64  `json:"listCost"`
-	HasCost          bool     `json:"hasCost"`
-	FillPercent      *float64 `json:"fillPercent,omitempty"`
+	SessionID        string `json:"sessionId"`
+	Model            string `json:"model"`
+	ContextWindow    int64  `json:"contextWindow"`
+	ContextKnown     bool   `json:"contextKnown"`
+	Calls            int64  `json:"calls"`
+	PromptTokens     int64  `json:"promptTokens"`
+	CompletionTokens int64  `json:"completionTokens"`
+	ReasoningTokens  int64  `json:"reasoningTokens"`
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+	TotalTokens      int64  `json:"totalTokens"`
+	// LastInputTokens is the previous LLM call's input tokens; the fill
+	// percentage reads this over the context window.
+	LastInputTokens int64    `json:"lastInputTokens"`
+	Cost            float64  `json:"cost"`
+	ListCost        float64  `json:"listCost"`
+	HasCost         bool     `json:"hasCost"`
+	FillPercent     *float64 `json:"fillPercent,omitempty"`
 	// Models is the per-model breakdown, heaviest session share first.
 	Models []ModelUsageView `json:"models,omitempty"`
 	// Daily is the per-day activity ledger, oldest day first, for the
@@ -175,6 +187,7 @@ type ModelUsageView struct {
 	CacheReadTokens  int64    `json:"cacheReadTokens"`
 	CacheWriteTokens int64    `json:"cacheWriteTokens"`
 	TotalTokens      int64    `json:"totalTokens"`
+	LastInputTokens  int64    `json:"lastInputTokens"`
 	Cost             float64  `json:"cost"`
 	ListCost         float64  `json:"listCost"`
 	HasCost          bool     `json:"hasCost"`
@@ -197,12 +210,13 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 		CacheReadTokens:  t.CacheReadTokens,
 		CacheWriteTokens: t.CacheWriteTokens,
 		TotalTokens:      t.TotalTokens,
+		LastInputTokens:  t.LastInputTokens,
 		Cost:             t.Cost,
 		ListCost:         t.ListCost,
 		HasCost:          t.HasCost,
 	}
 	if known && window > 0 {
-		pct := float64(t.TotalTokens) / float64(window) * 100
+		pct := float64(t.LastInputTokens) / float64(window) * 100
 		out.FillPercent = &pct
 	}
 	for name, m := range t.Models {
@@ -218,6 +232,7 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 			CacheReadTokens:  m.CacheReadTokens,
 			CacheWriteTokens: m.CacheWriteTokens,
 			TotalTokens:      m.TotalTokens,
+			LastInputTokens:  m.LastInputTokens,
 			Cost:             m.Cost,
 			ListCost:         m.ListCost,
 			HasCost:          m.HasCost,
@@ -226,7 +241,7 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 			if w, ok := windowOf(name); ok {
 				mv.ContextWindow, mv.ContextKnown = w, true
 				if w > 0 {
-					pct := float64(m.TotalTokens) / float64(w) * 100
+					pct := float64(m.LastInputTokens) / float64(w) * 100
 					mv.FillPercent = &pct
 				}
 			}

@@ -15,7 +15,7 @@ test("the analytics pane shows the fleet dashboard", async ({ page }) => {
   await expect(body).toContainText("Total tokens");
   await expect(body).toContainText("Sessions");
   await expect(body).toContainText("Prompt cache hit");
-  await expect(body).toContainText("Input Tokens");
+  await expect(body).toContainText("Input tokens");
   await expect(body).toContainText("beam-free");
   await expect(body).toContainText("Recent sessions");
   await expect(body.locator("svg").first()).toBeVisible();

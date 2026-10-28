@@ -236,20 +236,18 @@ func (a *Agent) persist(message string, resume bool) error {
 			return turnFailed{"persist reply: " + err.Error()}
 		}
 	}
-	a.recordUsage()
 	return nil
 }
 
-// recordUsage folds the turn's billed footprint into the session's
-// usage.json ledger. It runs on every persist path (done, stopped and
-// failed turns all spent tokens) and is best-effort: billing must never
-// fail a turn, so errors are swallowed and a corrupt ledger restarts
-// fresh rather than blocking.
-func (a *Agent) recordUsage() {
-	if a.turnUsage.Empty() {
-		return
-	}
-	u := a.turnUsage
+// noteCallUsage folds one LLM call's usage into the turn totals and
+// persists it to the session's usage.json immediately, so the context
+// reading (last call's input over the model window) is current after
+// every round, not just at turn end. It runs on every usage report —
+// done, stopped and failed turns all spent tokens — and is best-effort:
+// billing must never fail a turn, so errors are swallowed and a corrupt
+// ledger restarts fresh rather than blocking.
+func (a *Agent) noteCallUsage(u inference.Usage) {
+	a.turnUsage.Add(u)
 	var totals session.UsageTotals
 	if data, err := os.ReadFile(a.session.UsagePath()); err == nil {
 		_ = json.Unmarshal(data, &totals)
