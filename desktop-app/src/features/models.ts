@@ -19,14 +19,7 @@ import {
   modelSelectBtn,
   modelSelectLabelEl,
   modelTreeEl,
-  newSessionCrumbEl,
-  newSessionFilterBarEl,
-  newSessionFilterClearBtn,
-  newSessionFilterLabelEl,
-  newSessionSearchEl,
-  newSessionTreeEl,
   providerPickEl,
-  sessionModalEl,
 } from "../core/dom";
 import {
   bare,
@@ -149,15 +142,11 @@ export function syncModelSelects(): void {
   paintModel();
 }
 
-// renderTrees repaints the picker trees, but only the visible ones: the
-// new-session tree is pointless work while its modal is closed (and vice
-// versa). The detail pane is cheap and always fresh.
+// renderTrees repaints the composer picker tree while its menu is open.
+// The detail pane is cheap and always fresh.
 export function renderTrees(): void {
   if (!modelMenu.classList.contains("hidden")) {
     modelTreeEl.innerHTML = treeHTML(groupedTree(modelSearchEl.value));
-  }
-  if (!sessionModalEl.classList.contains("hidden")) {
-    newSessionTreeEl.innerHTML = treeHTML(groupedTree(newSessionSearchEl.value));
   }
   modelDetailEl.innerHTML = detailHTML();
 }
@@ -410,24 +399,16 @@ function paintPick(): void {
   const crumb = parts.length > 0 ? parts.join(" / ") : "default";
   modelBreadcrumbEl.textContent = crumb;
   modelBreadcrumbEl.title = crumb;
-  newSessionCrumbEl.textContent = crumb;
-  newSessionCrumbEl.title = crumb;
 
-  const bars: [HTMLElement, HTMLElement][] = [
-    [filterBarEl, filterLabelEl],
-    [newSessionFilterBarEl, newSessionFilterLabelEl],
-  ];
-  for (const [bar, label] of bars) {
-    if (state.treeFilter) {
-      bar.classList.remove("hidden");
-      bar.classList.add("flex");
-      label.textContent =
-        `Showing ${state.treeFilter.provider}` +
-        (state.treeFilter.lab ? ` / ${state.treeFilter.lab}` : "");
-    } else {
-      bar.classList.add("hidden");
-      bar.classList.remove("flex");
-    }
+  if (state.treeFilter) {
+    filterBarEl.classList.remove("hidden");
+    filterBarEl.classList.add("flex");
+    filterLabelEl.textContent =
+      `Showing ${state.treeFilter.provider}` +
+      (state.treeFilter.lab ? ` / ${state.treeFilter.lab}` : "");
+  } else {
+    filterBarEl.classList.add("hidden");
+    filterBarEl.classList.remove("flex");
   }
 }
 
@@ -521,18 +502,16 @@ function moveHighlight(query: string, delta: 1 | -1): void {
   const next = flat[(current + delta + flat.length) % flat.length];
   state.highlightedModel = next.model;
 
-  for (const tree of [modelTreeEl, newSessionTreeEl]) {
-    tree
-      .querySelectorAll("[data-mpick].bg-slate-100,[data-mpick].dark\\:bg-slate-800")
-      .forEach((row) => {
-        row.classList.remove("bg-slate-100", "dark:bg-slate-800");
-      });
-    const row = tree.querySelector(
-      `[data-mpick="${CSS.escape(next.provider)}	${CSS.escape(next.model)}"]`,
-    );
-    row?.classList.add("bg-slate-100", "dark:bg-slate-800");
-    row?.scrollIntoView({ block: "nearest" });
-  }
+  modelTreeEl
+    .querySelectorAll("[data-mpick].bg-slate-100,[data-mpick].dark\\:bg-slate-800")
+    .forEach((row) => {
+      row.classList.remove("bg-slate-100", "dark:bg-slate-800");
+    });
+  const row = modelTreeEl.querySelector(
+    `[data-mpick="${CSS.escape(next.provider)}	${CSS.escape(next.model)}"]`,
+  );
+  row?.classList.add("bg-slate-100", "dark:bg-slate-800");
+  row?.scrollIntoView({ block: "nearest" });
 
   modelDetailEl.innerHTML = detailHTML();
 }
@@ -626,7 +605,6 @@ export function initModelPicker(): void {
     syncModelSelects();
   };
   filterClearBtn.addEventListener("click", clearFilter);
-  newSessionFilterClearBtn.addEventListener("click", clearFilter);
 
   modelSelectBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -647,7 +625,6 @@ export function initModelPicker(): void {
   });
 
   modelTreeEl.addEventListener("click", handleTreeClick);
-  newSessionTreeEl.addEventListener("click", handleTreeClick);
 
   modelSearchEl.addEventListener("input", () => {
     window.clearTimeout(searchTimer);
@@ -676,23 +653,6 @@ export function initModelPicker(): void {
     state.highlightedModel = "";
     syncModelSelects();
     modelSearchEl.focus();
-  });
-
-  newSessionSearchEl.addEventListener("input", () => {
-    window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(() => {
-      state.highlightedModel = "";
-      syncModelSelects();
-    }, 150);
-  });
-  newSessionSearchEl.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      moveHighlight(newSessionSearchEl.value, event.key === "ArrowDown" ? 1 : -1);
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      quickSelect(newSessionSearchEl.value);
-    }
   });
 
   modelQuickBtn.addEventListener("click", () => {

@@ -86,38 +86,14 @@ test("dropdowns filter the tree and clear shows everything", async ({ page }) =>
   await expect(menu).toBeVisible();
 });
 
-test("dialog picker toggles and picks without closing", async ({ page }) => {  await page.click("#newSessionBtn");
-  const dialog = page.locator("#sessionModal");
-  await expect(dialog).toBeVisible();
-
-  // Wizard opens on the folder step; confirm it to reach the model step.
-  await expect(page.locator("#newSessionFolderStep")).toBeVisible();
-  await expect(page.locator("#newSessionModelStep")).toBeHidden();
-  await page.click("#sessionSelectFolderBtn");
-  await expect(page.locator("#newSessionFolderStep")).toBeHidden();
-  await expect(page.locator("#newSessionModelStep")).toBeVisible();
-
-  // Back returns to the folder step for reselecting.
-  await page.click("#sessionBackBtn");
-  await expect(page.locator("#newSessionFolderStep")).toBeVisible();
-  await page.click("#sessionSelectFolderBtn");
-
-  const tree = page.locator("#newSessionTree");
-  await expect(tree.locator("[data-ltoggle]")).toHaveCount(4);
-  await tree.locator('[data-ptoggle="Opencode Go"]').click();
-  await expect(dialog).toBeVisible();
-  await expect(tree.locator("[data-ltoggle]")).toHaveCount(2);
-
-  await tree.locator('[data-ptoggle="Opencode Go"]').click();
-  await tree.locator("[data-mpick]").first().click();
-  await expect(dialog).toBeVisible();
-  await expect(page.locator("#newSessionCrumb")).toHaveText("local / other / llama3.2");
-});
-
-test("new-session folder step browses with crumbs, search, and hidden toggle", async ({ page }) => {
+test("new session is a single folder step that starts with the current model", async ({ page }) => {
   await page.click("#newSessionBtn");
   const dialog = page.locator("#sessionModal");
   await expect(dialog).toBeVisible();
+
+  // No model step: the dialog states which model Start will use.
+  await expect(page.locator("#newSessionModelStep")).toHaveCount(0);
+  await expect(page.locator("#newSessionModelHint")).toContainText("model:");
 
   // Breadcrumbs show the current path with a clickable root.
   await expect(page.locator("#newSessionCrumbs")).toContainText("home");
@@ -130,26 +106,14 @@ test("new-session folder step browses with crumbs, search, and hidden toggle", a
   await page.locator("#newSessionShowHidden").check();
   await expect(page.locator("#newSessionList")).toContainText(".hidden-dir");
   await expect(await page.evaluate(() => window.localStorage.getItem("paladin.showHidden"))).toBe("1");
-  await page.locator("#newSessionShowHidden").uncheck();
-  await expect(page.locator("#newSessionList")).not.toContainText(".hidden-dir");
 
-  // Search filters the current folder (folders only in this step).
-  await page.locator("#newSessionShowHidden").check();
+  // Search filters the current folder.
   await page.fill("#newSessionFolderSearch", "hidden");
   await expect(page.locator("#newSessionList")).toContainText(".hidden-dir");
   await expect(page.locator("#newSessionList")).not.toContainText("project");
   await page.fill("#newSessionFolderSearch", "");
   await page.locator("#newSessionShowHidden").uncheck();
   await expect(page.locator("#newSessionList")).not.toContainText(".hidden-dir");
-
-  // Selecting a folder arms the pending workspace shown in the path.
-  await page.locator('#newSessionList button[data-fb-select$="/project"]').first().click();
-  await expect(page.locator("#newSessionPath")).toContainText("project");
-
-  // Confirming advances to the model step with a way back.
-  await page.click("#sessionSelectFolderBtn");
-  await expect(page.locator("#newSessionModelStep")).toBeVisible();
-  await expect(page.locator("#sessionFolderLabel")).toContainText("project");
 
   // The card itself never scrolls; only the list inside does.
   const cardScroll = await page.locator("#sessionModal .modal-card").evaluate((el) => ({
@@ -158,10 +122,12 @@ test("new-session folder step browses with crumbs, search, and hidden toggle", a
   }));
   expect(cardScroll.scroll).toBeLessThanOrEqual(cardScroll.client + 1);
 
-  await page.click("#sessionBackBtn");
-  await expect(page.locator("#newSessionFolderStep")).toBeVisible();
-  await page.keyboard.press("Escape");
+  // Selecting a folder arms the path line; Start uses it and closes.
+  await page.locator('#newSessionList button[data-fb-select$="/project"]').first().click();
+  await expect(page.locator("#newSessionPath")).toContainText("project");
+  await page.click("#sessionStartBtn");
   await expect(dialog).toBeHidden();
+  await expect(page.locator("#workspaceLabel")).toHaveText("project");
 });
 
 test("attach picker selects files and folders with crumbs and hidden toggle", async ({ page }) => {
