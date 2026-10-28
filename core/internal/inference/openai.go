@@ -66,7 +66,7 @@ func NewOpenAIProvider(name, model, baseURL, apiKey string) *OpenAIProvider {
 	client := openai.NewClient(
 		option.WithBaseURL(baseURL),
 		option.WithAPIKey(apiKey),
-		option.WithMaxRetries(0),
+		option.WithMaxRetries(2),
 	)
 	isOpencode := config.IsOpencodeEndpoint(baseURL)
 	protocol := protocolChat
@@ -406,6 +406,26 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 
 var errClientGone = CancelledError()
 
+// isTransientTransport reports transport blips worth one immediate
+// retry (gateway EOF / reset before any data arrived, 5xx): the model
+// never saw the turn, so resending is safe.
+func isTransientTransport(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, want := range []string{
+		"eof", "connection reset", "connection refused", "broken pipe",
+		"unexpected eof", "status 502", "status 503", "status 504",
+		"bad gateway", "service unavailable", "gateway timeout",
+	} {
+		if strings.Contains(msg, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func isCancel(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
@@ -416,6 +436,9 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return RequestError(fmt.Sprintf("%s: %s: model response timed out after %s — the model was still working; try again", p.name, op, defaultTimeout))
+	}
+	if isTransientTransport(err) {
+		return RequestError(fmt.Sprintf("%s: %s: transient connection (%v) — try again", p.name, op, err))
 	}
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) && apiErr.StatusCode != 0 {

@@ -151,7 +151,19 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 	defer cancel()
 	res, err := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), p.headers(sessionID)...)
 	if err != nil {
-		return ToolResponse{}, p.mapError("responses", err)
+		// One immediate retry for transport blips (EOF/reset before
+		// any response): the SDK retries cover most, this catches the
+		// stragglers without turning a blip into a failed turn.
+		if isTransientTransport(err) {
+			if res2, err2 := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), p.headers(sessionID)...); err2 == nil {
+				res, err = res2, nil
+			} else {
+				err = err2
+			}
+		}
+		if err != nil {
+			return ToolResponse{}, p.mapError("responses", err)
+		}
 	}
 	if res.Error.Message != "" {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: responses: %s", p.name, res.Error.Message))
@@ -176,6 +188,10 @@ type respStreamState struct {
 }
 
 func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
+	return p.doStreamResponses(ctx, system, messages, tools, sessionID, tx, done, true)
+}
+
+func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}, allowRetry bool) error {
 	parent := ctx
 	tctx, cancel := context.WithTimeout(ctx, streamTimeout)
 	defer cancel()
@@ -308,6 +324,11 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, mes
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return RequestError(fmt.Sprintf("%s: responses: model response timed out after %s — the model was still working; try again", p.name, streamTimeout))
+		}
+		// Transport died before any data arrived: retry once with a
+		// fresh stream instead of failing the turn on a gateway blip.
+		if allowRetry && isTransientTransport(err) && !st.sentText && st.text.Len() == 0 && len(st.accs) == 0 {
+			return p.doStreamResponses(parent, system, messages, tools, sessionID, tx, done, false)
 		}
 		return p.mapError("responses", err)
 	}

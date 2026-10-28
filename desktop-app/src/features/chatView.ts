@@ -31,6 +31,13 @@ const STARTERS: Array<{ label: string; prompt: string }> = [
   },
 ];
 
+// dismissGreeting removes the empty-state hero so the first user turn
+// docks at the top of the conversation. Safe to call when no hero
+// exists; other turns must not pile up below the orb/title/chips.
+export function dismissGreeting(): void {
+  messagesEl.querySelectorAll(".greet-hero").forEach((el) => el.remove());
+}
+
 // renderGreeting paints the empty-state hero: drifting orb, panning
 // gradient title, and starter chips that draft prompts.
 export function renderGreeting(): void {

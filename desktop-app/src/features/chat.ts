@@ -9,7 +9,7 @@ import type { ToolView } from "../core/types";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
-import { addTurn, initMessageLinks, scrollToBottom } from "./chatView";
+import { addTurn, dismissGreeting, initMessageLinks, scrollToBottom } from "./chatView";
 import { handleMentionKey, expandMentions } from "./mentions";
 import { openFilePicker } from "./filePicker";
 import { refreshSessions } from "./sessions";
@@ -50,6 +50,7 @@ export async function send(resume = false): Promise<void> {
     }
     inputEl.value = "";
     autosizeComposer();
+    dismissGreeting();
     addTurn("user", message);
     state.shownMessages++;
     return sendExpanded(outgoing, false);

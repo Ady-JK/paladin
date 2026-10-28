@@ -13,6 +13,11 @@ test("sending a message opens a session and shows the reply", async ({ page }) =
   await expect(page.locator("#messages")).toContainText("hello agent");
   await expect(page.locator("#messages")).toContainText("Stub reply to: hello agent");
 
+  // The empty-state hero vanishes so the first user turn docks at the top.
+  await expect(page.locator("#messages .greet-hero")).toHaveCount(0);
+  const first = page.locator("#messages .turn-row").first();
+  await expect(first).toContainText("hello agent");
+
   const chats = await page.evaluate(() => (window as any).__e2eChats);
   expect(chats.length).toBeGreaterThanOrEqual(1);
   expect(chats[0].message).toBe("hello agent");
