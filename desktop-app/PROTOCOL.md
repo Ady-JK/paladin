@@ -64,8 +64,9 @@ Streaming (`chat` with `id = streamId`):
   `agent:chat-event`, completion via `agent:chat-done` to the sender.
 - WebContentsViews (`views:*` IPC) are independent of the agent: one
   shared persistent partition (`persist:paladin-sites`) across chat
-  pages so Google SSO cookies carry over, views hidden — never
-  destroyed — on Agent switch, 60s idle drop while hidden.
+  pages so Google SSO cookies carry over, a single live guest (showing
+  a page destroys the previous view; reloads stay logged in), views
+  hidden — never destroyed — on Agent switch, 60s idle drop while hidden.
 - The window is frameless; the renderer owns the title bar and sends
   `window:*` for minimize/maximize/close. `views:setTheme` mirrors the
   shell theme onto each guest view's background so the native surface

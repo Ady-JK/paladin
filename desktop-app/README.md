@@ -60,6 +60,13 @@ transcript so tool follow-up rounds stay valid.
   `accounts.google.com` cookies, forcing a second login; the old
   `persist:paladin-gemini` / `persist:paladin-chatgpt` jars are
   abandoned, which costs one re-login.)
+- Single live guest: showing a chat page destroys the previous page's
+  view outright — each hidden SPA pins a full renderer, and keeping
+  visited pages alive ballooned past 2GB. Reloads stay logged in
+  (partitions persist on disk).
+- Views stay alive when switching to Agent (hidden, never destroyed);
+  only the selected view gets bounds. Bounds come from the renderer's
+  `#externalHost` rect, one settle move per layout change.
 - Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
   ordinary entries and any of them can be removed like a custom page.
 - Views stay alive when switching to Agent (hidden, never destroyed);
