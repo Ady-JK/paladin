@@ -122,6 +122,10 @@ type Agent struct {
 	toolDefs  []inference.ToolDefinition
 	phase     phase
 	round     uint32
+	// emptyRounds counts consecutive rounds that produced neither text
+	// nor tool calls; three in a row ends the turn (done with progress,
+	// failed without) instead of spinning on a dead gateway.
+	emptyRounds int
 	messages  []inference.LlmMessage
 	records   []transcript.Message
 	reply     strings.Builder
@@ -149,6 +153,7 @@ func newAgent(c runConfig) *Agent {
 			Workspace:  c.session.Meta.Cwd,
 			SessionDir: c.session.Dir,
 			Cancel:     c.ctx,
+			SessionID:  c.session.Meta.SessionID,
 		},
 		system:    c.system,
 		maxRounds: c.maxRounds,

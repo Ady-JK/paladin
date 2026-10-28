@@ -26,6 +26,42 @@ func TestRunEmptyStreamFallsBackToBuffered(t *testing.T) {
 	}
 }
 
+func TestRunPersistentEmptyFailsLoudly(t *testing.T) {
+	// A stream (and its buffered fallback) that never yields text or
+	// calls must not end the turn as a silent READY: three strikes
+	// with zero progress fails so the UI shows an error, not a fake
+	// done that forces another nudge.
+	prov := &mockProvider{
+		streams: []streamScript{{}, {}, {}, {}},
+	}
+	a, _, _, done := testAgent(t, prov, 5)
+	defer close(done)
+	_, err := a.Run()
+	if err == nil {
+		t.Fatal("persistent empty stream ended the turn silently")
+	}
+	if terr, ok := err.(turnFailed); !ok || !strings.Contains(terr.msg, "empty response") {
+		t.Fatalf("got %T %v", err, err)
+	}
+}
+
+func TestRunEmptyRoundRetriesThenRecovers(t *testing.T) {
+	// One dead round followed by a live one: the turn continues and
+	// delivers the later text instead of stopping early.
+	prov := &mockProvider{
+		streams: []streamScript{{}, {chunks: []inference.Chunk{inference.TextChunk("back")}}},
+	}
+	a, _, _, done := testAgent(t, prov, 5)
+	defer close(done)
+	outcome, err := a.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Reply != "back" {
+		t.Fatalf("got %+v", outcome)
+	}
+}
+
 func TestRunToolRound(t *testing.T) {
 	dir := t.TempDir()
 	wsFile := dir + "/note.txt"

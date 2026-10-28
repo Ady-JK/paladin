@@ -40,6 +40,8 @@ Electron main spawns it with piped stdio:
 | `set_prompt` | `{systemPrompt}` | `Prompt` (blank rejected) |
 | `reset_prompt` | `{}` | `Prompt` (file rewritten from the built-in default) |
 | `stop_chat` | `{sessionId?,cwd?}` | `bool` |
+| `answer_ask` | `{sessionId,callId,answers:[{question,answer}]}` | `bool` (false: nothing waiting) |
+| `cancel_ask` | `{sessionId,callId}` | `bool` |
 | `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?}` | streaming (below) |
 
 The prompt file is authoritative: every turn uses it unless the
@@ -66,6 +68,14 @@ Streaming (`chat` with `id = streamId`):
 {"event": "chat/tool", "streamId": "s2", "sessionId": "...", "tool": {...}}
 {"id": "s2", "ok": true, "result": {"sessionId": "...", "reply": "...", "stopped": false, "needsContinue": false}}
 ```
+
+Blocking tools: `ask` registers a pending call and blocks the turn
+until the UI resolves it. A running `ask` tool event opens the
+question wizard (one question at a time, arrows move, Enter advances,
+review screen, Submit sends `answer_ask`); Esc sends `cancel_ask` and
+stops the turn. Settled `ask` events close the wizard. Answers arrive
+as the tool result (`{"answers":[{"question","answer"}]}`) and the
+turn continues on its own.
 
 ## Electron side
 

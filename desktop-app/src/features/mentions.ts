@@ -138,6 +138,7 @@ export function handleMentionKey(event: KeyboardEvent): boolean {
   }
   if (event.key === "Escape") {
     event.preventDefault();
+    event.stopPropagation();
     closeMention();
     return true;
   }

@@ -17,6 +17,11 @@ type ToolCtx struct {
 	Workspace  string
 	SessionDir string
 	Cancel     context.Context
+	// SessionID and CallID identify the running ask call: the agent sets
+	// SessionID once per turn and the registry sets CallID per call so
+	// the ask tool can rendezvous the blocked call with the UI answer.
+	SessionID string
+	CallID    string
 }
 
 // ToolDefinition mirrors the Rust shape sent to the model.
@@ -165,7 +170,7 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) ToolResult {
 	} else {
 		args = json.RawMessage(call.Arguments)
 	}
-	content, err := tool.Call(args, ctx)
+	content, err := tool.Call(args, ctxWithCall(ctx, call.ID))
 	if err != nil {
 		if terr, ok := err.(*ToolError); ok {
 			result.Content = terr.ResultContent()
@@ -177,6 +182,18 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) ToolResult {
 	}
 	result.Content = content
 	return result
+}
+
+// ctxWithCall clones the turn context with the call id stamped in. Call
+// is shared by every tool, so the clone keeps a running ask call from
+// racing the next call's id on the same pointer.
+func ctxWithCall(ctx *ToolCtx, callID string) *ToolCtx {
+	if ctx == nil {
+		return &ToolCtx{CallID: callID}
+	}
+	cp := *ctx
+	cp.CallID = callID
+	return &cp
 }
 
 func errorResult(result ToolResult, message string) ToolResult {
@@ -237,13 +254,14 @@ func (c *Catalog) Instantiate() *Registry {
 }
 
 // BuiltinCatalog is the shipped tool template set: read, write, edit,
-// shell. fileengine and scope stay shared modules behind write/edit.
+// shell, ask. fileengine and scope stay shared modules behind write/edit.
 func BuiltinCatalog() *Catalog {
 	c := NewCatalog()
 	c.Register(Template{Name: "read", New: func() Tool { return ReadTool{} }})
 	c.Register(Template{Name: "write", New: func() Tool { return NewWriteTool(NewEngine()) }})
 	c.Register(Template{Name: "edit", New: func() Tool { return NewEditTool(NewEngine()) }})
 	c.Register(Template{Name: "shell", New: func() Tool { return NewShellTool() }})
+	c.Register(Template{Name: "ask", New: func() Tool { return NewAskTool() }})
 	return c
 }
 

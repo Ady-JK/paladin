@@ -11,10 +11,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/session"
+	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 func testRuntime(t *testing.T) (*AgentRuntime, string) {
@@ -874,14 +876,14 @@ func TestTrackerStopSemantics(t *testing.T) {
 func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 	rt, _ := testRuntime(t)
 	defs := rt.tools.Definitions()
-	if len(defs) != 4 {
+	if len(defs) != 5 {
 		t.Fatalf("got %d", len(defs))
 	}
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"read", "write", "edit", "shell"} {
+	for _, want := range []string{"read", "write", "edit", "shell", "ask"} {
 		if !names[want] {
 			t.Fatalf("missing %q", want)
 		}
@@ -908,9 +910,9 @@ func TestChatRunsEveryBuiltinTool(t *testing.T) {
 			id, name, args)
 	}
 	rounds := []string{
-		toolRound("c1", "write", `{"path":"` + filepath.Join(wsDir, "notes.txt") + `","content":"alpha\n"}`),
-		toolRound("c2", "read", `{"path":"` + filepath.Join(wsDir, "notes.txt") + `"}`),
-		toolRound("c3", "edit", `{"path":"` + filepath.Join(wsDir, "notes.txt") + `","old_string":"alpha","new_string":"beta"}`),
+		toolRound("c1", "write", `{"path":"`+filepath.Join(wsDir, "notes.txt")+`","content":"alpha\n"}`),
+		toolRound("c2", "read", `{"path":"`+filepath.Join(wsDir, "notes.txt")+`"}`),
+		toolRound("c3", "edit", `{"path":"`+filepath.Join(wsDir, "notes.txt")+`","old_string":"alpha","new_string":"beta"}`),
 		toolRound("c4", "shell", `{"cmd":"cat notes.txt"}`),
 	}
 	var calls int64
@@ -982,6 +984,157 @@ func TestChatRunsEveryBuiltinTool(t *testing.T) {
 	}
 	if len(history) != 10 {
 		t.Fatalf("got %d rows: %+v", len(history), history)
+	}
+}
+
+func TestChatAskRoundTripBlocksUntilAnswered(t *testing.T) {
+	wsDir := t.TempDir()
+	askRound := `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-ask-1","function":{"name":"ask","arguments":"{\"questions\":[{\"question\":\"Deploy?\",\"options\":[\"yes\",\"no\"]}]}"}}]}}]}`
+	var calls int64
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		mu.Lock()
+		n := calls
+		calls++
+		mu.Unlock()
+		if n == 0 {
+			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", askRound)
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"deploying yes\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	pointMockAt(rt, server.URL)
+	sess, err := rt.OpenSession("", wsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct {
+		outcome agent.ChatOutcome
+		chunks  []agent.ChatChunk
+	}, 1)
+	go func() {
+		outcome, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "ship it", Cwd: wsDir})
+		done <- struct {
+			outcome agent.ChatOutcome
+			chunks  []agent.ChatChunk
+		}{outcome: outcome, chunks: chunks}
+	}()
+	// The turn blocks inside the ask call until the UI answers.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if rt.ask.Pending(sess.SessionID, "c-ask-1") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ask call never blocked")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Unknown calls fail so the UI can report a moved-on turn.
+	if _, err := rt.AnswerAsk(sess.SessionID, "nope", nil); err == nil {
+		t.Fatal("answer of unknown call passed")
+	}
+	ok, err := rt.AnswerAsk(sess.SessionID, "c-ask-1", []tools.AskAnswer{{Question: "Deploy?", Answer: "yes"}})
+	if err != nil || !ok {
+		t.Fatalf("answer: %v %v", ok, err)
+	}
+	var res struct {
+		outcome agent.ChatOutcome
+		chunks  []agent.ChatChunk
+	}
+	select {
+	case res = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("answered turn never continued")
+	}
+	if res.outcome.Reply != "deploying yes" {
+		t.Fatalf("got %+v", res.outcome)
+	}
+	var askResult string
+	var runningSeen bool
+	for _, c := range res.chunks {
+		if c.Tool == nil || c.Tool.Name != "ask" {
+			continue
+		}
+		if c.Tool.Status == session.ToolRunning {
+			runningSeen = true
+		}
+		if c.Tool.Status == session.ToolOK {
+			askResult = c.Tool.Result
+		}
+	}
+	if !runningSeen {
+		t.Fatal("no running ask event")
+	}
+	if !strings.Contains(askResult, `"answer":"yes"`) || !strings.Contains(askResult, `"question":"Deploy?"`) {
+		t.Fatalf("ask result: %s", askResult)
+	}
+}
+
+func TestCancelAskStopsTurn(t *testing.T) {
+	wsDir := t.TempDir()
+	askRound := `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-ask-9","function":{"name":"ask","arguments":"{\"questions\":[{\"question\":\"Go?\"}]}"}}]}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", askRound)
+	}))
+	defer server.Close()
+
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	pointMockAt(rt, server.URL)
+	sess, err := rt.OpenSession("", wsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type res struct {
+		outcome agent.ChatOutcome
+		err     error
+	}
+	done := make(chan res, 1)
+	tx := make(chan agent.ChatChunk, 256)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		outcome, err := rt.Chat(agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: wsDir}, tx, stop)
+		done <- res{outcome: outcome, err: err}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if rt.ask.Pending(sess.SessionID, "c-ask-9") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ask call never blocked")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !rt.CancelAsk(sess.SessionID, "c-ask-9") {
+		t.Fatal("cancel missed the pending ask")
+	}
+	if rt.CancelAsk(sess.SessionID, "c-ask-9") {
+		t.Fatal("second cancel should report nothing waiting")
+	}
+	var r res
+	select {
+	case r = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("cancelled turn never returned")
+	}
+	if r.err != nil {
+		t.Fatalf("cancel should stop cleanly, got %v", r.err)
+	}
+	if !r.outcome.Stopped {
+		t.Fatalf("got %+v", r.outcome)
 	}
 }
 

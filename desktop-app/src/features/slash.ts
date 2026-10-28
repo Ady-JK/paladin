@@ -126,6 +126,7 @@ export function handleSlashKey(event: KeyboardEvent): boolean {
   }
   if (event.key === "Escape") {
     event.preventDefault();
+    event.stopPropagation();
     closeSlash();
     return true;
   }

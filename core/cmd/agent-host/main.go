@@ -33,6 +33,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
+	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 type Request struct {
@@ -331,6 +332,22 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 		return ok(v)
 	case "stop_chat":
 		return ok(rt.StopIn(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd")))
+	case "answer_ask":
+		var p struct {
+			SessionID string            `json:"sessionId"`
+			CallID    string            `json:"callId"`
+			Answers   []tools.AskAnswer `json:"answers"`
+		}
+		if len(req.Params) > 0 {
+			_ = json.Unmarshal(req.Params, &p)
+		}
+		v, err := rt.AnswerAsk(p.SessionID, p.CallID, p.Answers)
+		if err != nil {
+			return failed(err)
+		}
+		return ok(v)
+	case "cancel_ask":
+		return ok(rt.CancelAsk(stringParam(req.Params, "sessionId"), stringParam(req.Params, "callId")))
 	default:
 		return errResponse(req.ID, fmt.Sprintf("unknown method %q", req.Method))
 	}

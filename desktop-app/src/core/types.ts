@@ -240,6 +240,21 @@ export type ToolView = {
   update: (tool: ToolInfo) => void;
 };
 
+// AskQuestion is one model-posed question in an ask tool call: the
+// question plus up to three suggested options. The wizard always offers
+// a custom typed answer besides the options.
+export type AskQuestion = {
+  question: string;
+  options: string[];
+};
+
+// AskAnswer pairs one asked question with the user's answer, in the
+// order the questions were asked.
+export type AskAnswer = {
+  question: string;
+  answer: string;
+};
+
 // SideView is a type in this module.
 // It supports the desktop app frontend.
 export type SideView = "agent" | "chat";

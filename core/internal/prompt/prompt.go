@@ -429,6 +429,11 @@ Tools:
   tool for small changes to an existing file: old_string must match
   verbatim, and when it matches more than once, retry with more
   surrounding lines so it matches exactly once, or pass replace_all true.
+- Use the ask tool only when blocked on a decision only the user can
+  make: pass an array of questions with up to 3 options each. The UI
+  walks the user through them one at a time and returns every question
+  with its answer, then the turn continues. Discover answers with read
+  and shell first, and batch related questions into one call.
 - Use the shell tool for builds, tests and exploration: run synchronously
   and wait by default, raising timeout_ms for slow commands. Use background
   true only when the command will likely take over 60 seconds AND you have
@@ -524,6 +529,15 @@ must match exactly, including line endings.
   match is exact.
 - Never edit a file with sed or awk through the shell; edit matches
   verbatim and keeps the file unchanged when the match is unclear.
+
+ask — ask the user when only they can decide. The turn waits while the
+user answers, then every question with its answer arrives as the result
+and the turn continues.
+- Pick a deploy target: {"questions": [{"question": "Deploy where?",
+  "options": ["staging", "production"]}]}.
+- Wrong: asking one question per call across many rounds — batch related
+  questions into one call. Wrong: asking anything you could discover
+  with read or shell first.
 `
 
 const usageExamplesShellCommon = `

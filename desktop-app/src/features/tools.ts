@@ -13,6 +13,17 @@ export function toolSummary(name: string, raw: string): string {
 
   try {
     const args = JSON.parse(raw) as Record<string, unknown>;
+    if (name === "ask") {
+      const questions = args.questions;
+      if (Array.isArray(questions) && questions.length > 0) {
+        const first = questions[0] as Record<string, unknown>;
+        const text = typeof first.question === "string" ? first.question : "";
+        const extra =
+          questions.length > 1 ? ` (+${questions.length - 1} more)` : "";
+        return short(text + extra) || `ask${extra}`;
+      }
+      return "ask";
+    }
     if (name === "shell") {
       if (typeof args.cmd === "string" && args.cmd.trim()) {
         return short(args.cmd.trim());

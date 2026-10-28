@@ -121,6 +121,7 @@ type AgentRuntime struct {
 	catalog       *tools.Catalog
 	tools         *tools.Registry
 	shell         *tools.ShellTool
+	ask           *tools.AskTool
 	agents        *agent.Registry
 	tracker       *tracker
 	providersMu   sync.Mutex
@@ -145,6 +146,8 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	registry := catalog.Instantiate()
 	shell, _ := registry.Get("shell")
 	shellTool, _ := shell.(*tools.ShellTool)
+	ask, _ := registry.Get("ask")
+	askTool, _ := ask.(*tools.AskTool)
 	agents := agent.NewRegistry()
 	_ = agents.Register(agent.DefaultTemplate())
 	return &AgentRuntime{
@@ -155,6 +158,7 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		catalog:       catalog,
 		tools:         registry,
 		shell:         shellTool,
+		ask:           askTool,
 		agents:        agents,
 		tracker:       newTracker(),
 		providerCache: map[string]inference.Provider{},
@@ -357,6 +361,35 @@ func (r *AgentRuntime) Stop(sessionID string) bool {
 
 func (r *AgentRuntime) StopIn(sessionID, cwd string) bool {
 	return r.tracker.stop(sessionID, cwd)
+}
+
+// AnswerAsk delivers the user's answers to a blocked ask call. Unknown
+// calls are an error so the UI can report that the turn already moved on.
+// The answered turn continues on its own: the answers come back as the
+// ask tool result and the loop keeps going.
+func (r *AgentRuntime) AnswerAsk(sessionID, callID string, answers []tools.AskAnswer) (bool, error) {
+	if r.ask == nil {
+		return false, fmt.Errorf("ask tool is not available")
+	}
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(callID) == "" {
+		return false, fmt.Errorf("session id and call id are required")
+	}
+	if err := r.ask.Resolve(sessionID, callID, answers); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CancelAsk drops a blocked ask call and stops its turn.
+func (r *AgentRuntime) CancelAsk(sessionID, callID string) bool {
+	if r.ask == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(callID) == "" {
+		return false
+	}
+	if !r.ask.Cancel(sessionID, callID) {
+		return false
+	}
+	r.tracker.stop(sessionID, "")
+	return true
 }
 
 func (r *AgentRuntime) OpenSession(sessionID, cwd string) (Session, error) {

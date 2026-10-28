@@ -106,8 +106,21 @@ func (a *Agent) runLoop() error {
 		if a.stopRequested() {
 			return a.stopWithPartial(roundText.String())
 		}
-		// Empty stream fallback: one buffered completion.
+		// Empty stream fallback: one buffered completion. A round that
+		// yields neither text nor tool calls is usually a gateway blip, so
+		// retry before believing it; three strikes ends the turn. Ending
+		// silent would fake a READY with nothing done (the "random stop"
+		// that forces another nudge), so a turn with zero progress fails
+		// loudly instead.
 		if roundText.Len() == 0 && len(calls) == 0 {
+			if a.emptyRounds >= 2 {
+				if len(a.records) > 0 || a.reply.Len() > 0 {
+					a.finish(phaseDone)
+					return nil
+				}
+				return turnFailed{"model returned an empty response \u2014 try again"}
+			}
+			a.emptyRounds++
 			resp, err := a.provider.CompleteTools(a.ctx, a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
 			if err != nil {
 				if a.stopRequested() {
@@ -126,9 +139,16 @@ func (a *Agent) runLoop() error {
 					return a.stopWithPartial(roundText.String())
 				}
 			}
+			// Still empty after the buffered fallback: retry next round
+			// instead of ending the turn silent (bounded by emptyRounds
+			// above and maxRounds overall).
+			if roundText.Len() == 0 && len(calls) == 0 {
+				continue
+			}
 		}
 		if len(calls) == 0 {
 			if roundText.Len() > 0 {
+				a.emptyRounds = 0
 				a.records = append(a.records, transcript.Message{
 					Role: transcript.RoleAssistant, Content: roundText.String(),
 					CreatedAt: time.Now().UTC(),
@@ -155,6 +175,7 @@ func (a *Agent) runLoop() error {
 			a.finish(phaseDone)
 			return nil
 		}
+		a.emptyRounds = 0
 		text := roundText.String()
 		a.appendAssistant(text, calls)
 		if err := a.runToolsStreaming(calls); err != nil {

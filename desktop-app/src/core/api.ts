@@ -231,6 +231,26 @@ export function stopChat(
   return invoke<boolean>("stop_chat", { sessionId, cwd });
 }
 
+// answerAsk delivers the wizard's answers to a blocked ask tool call.
+// The turn continues on its own once the answers arrive as the tool
+// result. False means nothing was waiting (the turn already moved on).
+export function answerAsk(
+  sessionId: string,
+  callId: string,
+  answers: { question: string; answer: string }[],
+): Promise<boolean> {
+  return invoke<boolean>("answer_ask", { sessionId, callId, answers });
+}
+
+// cancelAsk drops a blocked ask tool call and stops its turn, so the
+// agent never answers its own question after the user walks away.
+export function cancelAsk(
+  sessionId: string | null,
+  callId: string,
+): Promise<boolean> {
+  return invoke<boolean>("cancel_ask", { sessionId, callId });
+}
+
 export function showExternalPage(
   id: string,
   url: string,

@@ -16,6 +16,7 @@ import { refreshSessions } from "./sessions";
 import { handleSlashKey, tryHandleSlash } from "./slash";
 import { refreshUsage } from "./usage";
 import { createToolActivity } from "./tools";
+import { handleAskToolEvent } from "./ask";
 
 export async function send(resume = false): Promise<void> {
   const message = resume ? "" : inputEl.value.trim();
@@ -126,6 +127,9 @@ async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
   const unlistenTool = api.onChatTool((tool) => {
     const existing = toolViews.get(tool.id);
 
+    if (tool.name === "ask") {
+      handleAskToolEvent(state.sessionId || "", tool);
+    }
     if (existing) {
       existing.update(tool);
     } else {

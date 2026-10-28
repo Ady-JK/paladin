@@ -164,7 +164,7 @@ func TestBuildResolvesEverything(t *testing.T) {
 	if a.currentMessage != "hi" || a.currentResume {
 		t.Fatalf("input %q %v", a.currentMessage, a.currentResume)
 	}
-	if len(a.toolDefs) != 4 {
+	if len(a.toolDefs) != 5 {
 		t.Fatalf("default template should use every tool: %+v", a.toolDefs)
 	}
 	if a.shell == nil {
@@ -176,6 +176,9 @@ func TestBuildResolvesEverything(t *testing.T) {
 	// The tool context is derived from the session, not the request.
 	if a.toolCtx.Workspace != sess.Meta.Cwd || a.toolCtx.SessionDir != sess.Dir {
 		t.Fatalf("tool ctx %+v", a.toolCtx)
+	}
+	if a.toolCtx.SessionID != sess.Meta.SessionID {
+		t.Fatalf("tool ctx lost session id: %+v", a.toolCtx)
 	}
 }
 
