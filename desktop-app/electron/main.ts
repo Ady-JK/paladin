@@ -171,6 +171,29 @@ function dropView(name: string): void {
   }
 }
 
+// NO_GUEST_DRAG_CSS neutralizes page-declared `-webkit-app-region: drag`
+// regions inside guest views. ChatGPT's logged-in shell marks its 52px
+// fixed header draggable (PWA window-controls-overlay), and Chromium
+// honors that browser-side: real mouse events in the strip are consumed
+// for window dragging and never reach the page, so the sidebar toggle and
+// search buttons go dead (CDP-injected input still works, which is why it
+// looks like the buttons themselves are broken). Our own titleBar stays
+// the drag handle, so guests lose nothing.
+const NO_GUEST_DRAG_CSS = "html * { -webkit-app-region: no-drag !important; }";
+
+// defuseGuestDrag injects the no-drag override into a guest view. dom-ready
+// fires per navigation, so SPA route changes keep working and full loads
+// re-arm automatically. Failures (view destroyed mid-load) are ignored.
+function defuseGuestDrag(view: WebContentsView): void {
+  view.webContents.on("dom-ready", () => {
+    try {
+      view.webContents.insertCSS(NO_GUEST_DRAG_CSS).catch(() => undefined);
+    } catch {
+      // Destroyed.
+    }
+  });
+}
+
 function ensureView(name: string, url: string, partition: string): WebContentsView {
   const existing = views.get(name);
   if (existing) {
@@ -214,6 +237,7 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
     view.webContents.setUserAgent(ua);
   }
   view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  defuseGuestDrag(view);
   views.set(name, { view, url, partition });
   view.webContents.loadURL(url).catch(() => undefined);
   return view;

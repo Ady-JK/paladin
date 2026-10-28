@@ -64,6 +64,10 @@ transcript so tool follow-up rounds stay valid.
   view outright — each hidden SPA pins a full renderer, and keeping
   visited pages alive ballooned past 2GB. Reloads stay logged in
   (partitions persist on disk).
+- Guest pages cannot hijack the mouse: a `dom-ready` stylesheet forces
+  `-webkit-app-region: no-drag` on every guest, so a page-declared drag
+  region (ChatGPT's logged-in header) can never swallow real clicks
+  browser-side; our own title bar stays the drag handle.
 - Views stay alive when switching to Agent (hidden, never destroyed);
   only the selected view gets bounds. Bounds come from the renderer's
   `#externalHost` rect, one settle move per layout change.
