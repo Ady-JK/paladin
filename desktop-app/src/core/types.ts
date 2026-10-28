@@ -54,6 +54,15 @@ export type FileEntry = {
   isDir: boolean;
 };
 
+// SkillEntry is one `list_skills` row: name, description, source
+// (global/workspace) and defining path.
+export type SkillEntry = {
+  name: string;
+  description: string;
+  source: string;
+  path: string;
+};
+
 // SessionUsage is the client-facing usage view from `session_usage`.
 // FillPercent is the last call's input tokens over the context window;
 // absent when the model's window is unknown. LastInputTokens is absent

@@ -53,6 +53,24 @@ func (f fakePrompts) SystemPrompt(override string) string {
 	return f.base
 }
 
+type fakeSkills struct {
+	skills   map[string]Skill
+	lastCwd  string
+	lastName string
+	err      error
+}
+
+func (f *fakeSkills) LoadSkill(cwd, name string) (Skill, error) {
+	f.lastCwd, f.lastName = cwd, name
+	if f.err != nil {
+		return Skill{}, f.err
+	}
+	if s, ok := f.skills[name]; ok {
+		return s, nil
+	}
+	return Skill{}, errors.New("not found: skill " + name)
+}
+
 func testDeps(t *testing.T, sess transcript.Session) (Deps, *fakeSessions, *fakeProviders, *fakePrompts) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -334,5 +352,60 @@ func TestRegistryRegisterGetNamesDefault(t *testing.T) {
 func TestDefaultTemplateName(t *testing.T) {
 	if DefaultTemplate().Name != "default" {
 		t.Fatalf("got %+v", DefaultTemplate())
+	}
+}
+
+func TestBuildInjectsSkill(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000030")
+	d, _, _, _ := testDeps(t, sess)
+	loaded := &fakeSkills{skills: map[string]Skill{
+		"reviewer": {Name: "reviewer", Content: "do a review"},
+	}}
+	d.Skills = loaded
+	name := "reviewer"
+	a, err := DefaultTemplate().Build(d, Request{
+		SessionID: sess.Meta.SessionID, Message: "check this", Skill: &name,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.lastCwd != sess.Meta.Cwd || loaded.lastName != "reviewer" {
+		t.Fatalf("skill source got %q %q", loaded.lastCwd, loaded.lastName)
+	}
+	if !strings.Contains(a.currentMessage, "check this") ||
+		!strings.Contains(a.currentMessage, "Use this skill (reviewer):") ||
+		!strings.Contains(a.currentMessage, "do a review") {
+		t.Fatalf("skill not injected: %q", a.currentMessage)
+	}
+}
+
+func TestBuildSkillErrors(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000031")
+	d, _, _, _ := testDeps(t, sess)
+	name := "reviewer"
+
+	// No source: naming a skill fails instead of silently dropping it.
+	if _, err := DefaultTemplate().Build(d, Request{
+		SessionID: sess.Meta.SessionID, Message: "hi", Skill: &name,
+	}); err == nil || !strings.Contains(err.Error(), "no skill source") {
+		t.Fatalf("got %v", err)
+	}
+
+	// Unknown skill propagates the lookup error.
+	d.Skills = &fakeSkills{skills: map[string]Skill{}}
+	if _, err := DefaultTemplate().Build(d, Request{
+		SessionID: sess.Meta.SessionID, Message: "hi", Skill: &name,
+	}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("got %v", err)
+	}
+
+	// Skills do not combine with resume.
+	d.Skills = &fakeSkills{skills: map[string]Skill{
+		"reviewer": {Name: "reviewer", Content: "do a review"},
+	}}
+	if _, err := DefaultTemplate().Build(d, Request{
+		SessionID: sess.Meta.SessionID, Resume: true, Skill: &name,
+	}); err == nil || !strings.Contains(err.Error(), "resume") {
+		t.Fatalf("got %v", err)
 	}
 }

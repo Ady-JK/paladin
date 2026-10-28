@@ -1180,6 +1180,67 @@
   transform: scale(0.97);
 }
 
+/* ---- Skill chip: the attached `/skill <name>` for the pending turn. ---- */
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid rgb(16 185 129 / 0.4);
+  background: rgb(16 185 129 / 0.1);
+  padding: 3px 8px;
+  font-size: 0.6875rem;
+  color: #065f46;
+}
+
+.dark .skill-chip {
+  border-color: rgb(16 185 129 / 0.45);
+  background: rgb(16 185 129 / 0.12);
+  color: #a7f3d0;
+}
+
+.skill-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: #10b981;
+  box-shadow: 0 0 8px rgb(16 185 129 / 0.9);
+}
+
+.skill-chip-x {
+  border-radius: 9999px;
+  padding: 0 2px;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.skill-chip-x:hover {
+  opacity: 1;
+}
+
+/* The skill chip inside the user bubble (history): static, no remove. */
+.bubble-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  background: rgb(255 255 255 / 0.14);
+  padding: 1px 8px;
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
+}
+
+.bubble-skill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: #6ee7b7;
+}
+
 /* ---- Purple send: round, glowing. ---- */
 #agentView #sendBtn {
   border-radius: 9999px;

@@ -40,9 +40,10 @@ Electron main spawns it with piped stdio:
 | `set_prompt` | `{systemPrompt}` | `Prompt` (blank rejected) |
 | `reset_prompt` | `{}` | `Prompt` (file rewritten from the built-in default) |
 | `stop_chat` | `{sessionId?,cwd?}` | `bool` |
+| `list_skills` | `{cwd?}` | `SkillEntry[]` (name, description, source, path; content only at turn time) |
 | `answer_ask` | `{sessionId,callId,answers:[{question,answer}]}` | `bool` (false: nothing waiting) |
 | `cancel_ask` | `{sessionId,callId}` | `bool` |
-| `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?}` | streaming (below) |
+| `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?}` | streaming (below) |
 
 The prompt file is authoritative: every turn uses it unless the
 `chat` call carries an explicit `systemPrompt` override. Tool
@@ -76,6 +77,15 @@ review screen, Submit sends `answer_ask`); Esc sends `cancel_ask` and
 stops the turn. Settled `ask` events close the wizard. Answers arrive
 as the tool result (`{"answers":[{"question","answer"}]}`) and the
 turn continues on its own.
+
+Skills: the composer attaches a skill by name (`/skill <name>` picker
+or hand-typed line) and the `chat` call carries it separately in
+`skill`. The sidecar loads `<name>/SKILL.md` (workspace
+`.paladin/skills/` shadows global `config/skills/`) and injects its
+content into the model-facing user message before the LLM call — the
+composer and picker never carry the content. Unknown or oversize
+skills fail the turn with a `not found` / `exceeds` error; `list_skills`
+never returns content.
 
 ## Electron side
 

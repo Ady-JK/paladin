@@ -12,6 +12,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/prompt"
+	"github.com/Ady-JK/paladin/core/internal/skills"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -50,6 +51,11 @@ type ProviderSource interface {
 	ResolveProvider(name, model string) (inference.Provider, error)
 }
 
+// SkillSource loads one skill's content for injection into the turn.
+type SkillSource interface {
+	LoadSkill(cwd, name string) (Skill, error)
+}
+
 // PromptSource supplies the runtime default prompt. The file content
 // is authoritative; only an explicit per-request override beats it.
 // Tool guidance and examples are compiled per-OS inside prompt.
@@ -59,10 +65,13 @@ type PromptSource interface {
 
 // Deps is the runtime-owned set of collaborators Build needs. Keeping
 // them behind interfaces lets a turn be built without a live runtime.
+// Skills is optional: a nil source means no skill lookup, and a Request
+// naming a skill then fails instead of silently dropping it.
 type Deps struct {
 	Sessions  SessionSource
 	Providers ProviderSource
 	Prompts   PromptSource
+	Skills    SkillSource
 	Tools     *tools.Registry
 	Shell     *tools.ShellTool
 	MaxRounds uint32
@@ -102,6 +111,21 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		return nil, err
 	}
 
+	message := req.Message
+	if name := strings.TrimSpace(strVal(req.Skill)); name != "" {
+		if req.Resume {
+			return nil, fmt.Errorf("skill %q cannot be used with resume", name)
+		}
+		if d.Skills == nil {
+			return nil, fmt.Errorf("skill %q is not available: the runtime has no skill source", name)
+		}
+		skill, err := d.Skills.LoadSkill(sess.Meta.Cwd, name)
+		if err != nil {
+			return nil, err
+		}
+		message = FormatSkillMessage(message, skill.Name, skill.Content)
+	}
+
 	base := d.Prompts.SystemPrompt(strVal(req.SystemPrompt))
 	system := prompt.ToolSystem(base, sess.Meta.Cwd)
 
@@ -137,9 +161,25 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		cancel:    d.Cancel,
 		tx:        d.Tx,
 		done:      d.Done,
-		message:   req.Message,
+		message:   message,
 		resume:    req.Resume,
 	}), nil
+}
+
+// Skill is the injected skill content for a turn: the name the
+// composer attached plus the SKILL.md text the model sees. It mirrors
+// skills.Skill without importing the package into the wire contract.
+type Skill struct {
+	Name    string
+	Content string
+}
+
+// FormatSkillMessage builds the model-facing user message: the typed
+// text plus the skill content under a "Use this skill" banner. It
+// delegates to the skills package so the banner text stays identical
+// everywhere the expansion happens.
+func FormatSkillMessage(message, name, content string) string {
+	return skills.Inject(message, skills.Skill{Name: name, Content: content})
 }
 
 func toolDefinitions(registry *tools.Registry) []inference.ToolDefinition {

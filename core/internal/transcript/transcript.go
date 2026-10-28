@@ -125,7 +125,7 @@ func (s *Session) AppendMessage(msg Message) error {
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now().UTC()
 	}
-	f, err := os.OpenFile(filepath.Join(s.Dir, "messages.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(filepath.Join(s.Dir, "messages.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("io: open transcript: %s", syserr.Str(err))
 	}
@@ -136,6 +136,11 @@ func (s *Session) AppendMessage(msg Message) error {
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("io: write message: %s", syserr.Str(err))
+	}
+	// Sync each append so a crash cannot silently drop the tail of the
+	// transcript; message volume is low enough that the cost is noise.
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("io: sync message: %s", syserr.Str(err))
 	}
 	return nil
 }
@@ -173,6 +178,10 @@ func (s *Store) Create(cwd, provider, model string) (Session, error) {
 	id := uuid.New().String()
 	dir := filepath.Join(s.Root, EncodeCwd(cwd), id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Session{}, fmt.Errorf("io: session: create %s: %w", dir, err)
+	}
+	// Session files may hold workspace code, so they are owner-only.
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return Session{}, fmt.Errorf("io: session: create %s: %w", dir, err)
 	}
 	meta := Meta{
@@ -461,7 +470,28 @@ func writeMeta(dir string, meta Meta) error {
 	if err != nil {
 		return fmt.Errorf("io: encode meta: %s", syserr.Str(err))
 	}
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), data, 0o644); err != nil {
+	// Atomic write so a crash mid-write never leaves a half-written
+	// meta.json behind; session files are owner-only (may hold code).
+	tmp, err := os.CreateTemp(dir, "meta-*.tmp")
+	if err != nil {
+		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+	}
+	if err := os.Rename(tmpName, filepath.Join(dir, "meta.json")); err != nil {
+		os.Remove(tmpName)
 		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
 	}
 	return nil

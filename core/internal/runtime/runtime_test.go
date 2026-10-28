@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1354,5 +1355,107 @@ func TestFileCompleteMentions(t *testing.T) {
 	}
 	if _, err := rt.FileComplete("x", "", 0); err == nil {
 		t.Fatal("empty workspace accepted")
+	}
+}
+
+func TestListSkills(t *testing.T) {
+	rt, dir := testRuntime(t)
+	ws := t.TempDir()
+	write := func(root, name, content string) {
+		d := filepath.Join(root, name)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(dir, "config", "skills"), "reviewer", "---\ndescription: Reviews code\n---\n# R")
+	write(filepath.Join(ws, ".paladin", "skills"), "deployer", "# Deploy")
+
+	// The workspace cwd merges both roots.
+	got := rt.ListSkills(ws)
+	if len(got) != 2 || got[0].Name != "deployer" || got[1].Name != "reviewer" {
+		t.Fatalf("got %+v", got)
+	}
+	if got[1].Description != "Reviews code" || got[1].Source != "global" {
+		t.Fatalf("got %+v", got[1])
+	}
+	if got[0].Source != "workspace" {
+		t.Fatalf("got %+v", got[0])
+	}
+	// Empty cwd still lists global skills.
+	if got := rt.ListSkills(""); len(got) != 1 || got[0].Name != "reviewer" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChatInjectsSkillContent(t *testing.T) {
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		data, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(data, &req)
+		for _, m := range req.Messages {
+			if m.Role == "user" {
+				bodies = append(bodies, m.Content)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices": [{"message": {"content": "done"}}]}`)
+	}))
+	defer server.Close()
+	rt, dir := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	pointMockAt(rt, server.URL)
+	ws := t.TempDir()
+	d := filepath.Join(dir, "config", "skills", "reviewer")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte("review guidelines"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.OpenSession("", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := "reviewer"
+	outcome, _ := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "check this", Cwd: ws, Skill: &skill})
+	if outcome.Reply != "done" {
+		t.Fatalf("got %+v", outcome)
+	}
+	if len(bodies) == 0 {
+		t.Fatal("no user message reached the mock provider")
+	}
+	last := bodies[len(bodies)-1]
+	if !strings.Contains(last, "check this") ||
+		!strings.Contains(last, "Use this skill (reviewer):") ||
+		!strings.Contains(last, "review guidelines") {
+		t.Fatalf("skill not injected: %q", last)
+	}
+	// The persisted transcript keeps the expansion, not the short text.
+	history, err := rt.SessionHistory(sess.SessionID, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) == 0 || !strings.Contains(history[0].Content, "Use this skill (reviewer):") {
+		t.Fatalf("transcript missing expansion: %+v", history)
+	}
+
+	// Unknown skills fail the turn instead of dropping content.
+	bad := "nope"
+	tx := make(chan agent.ChatChunk, 16)
+	done := make(chan struct{})
+	defer close(done)
+	if _, err := rt.Chat(agent.Request{SessionID: sess.SessionID, Message: "hi", Cwd: ws, Skill: &bad}, tx, done); err == nil {
+		t.Fatal("unknown skill accepted")
 	}
 }

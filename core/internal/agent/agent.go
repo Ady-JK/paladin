@@ -27,7 +27,10 @@ func NewApiError(code, message string) *ApiError {
 }
 
 // Request is one turn request. The JSON shape is the wire contract with
-// the Electron side and must stay stable.
+// the Electron side and must stay stable. Skill carries a skill name the
+// composer attached via `/skill <name>`: the composer text stays short
+// (`/skill <name> <text>`), and the runtime injects the SKILL.md
+// content into the model-facing message before the LLM call.
 type Request struct {
 	SessionID    string  `json:"sessionId"`
 	Message      string  `json:"message"`
@@ -36,6 +39,7 @@ type Request struct {
 	Model        *string `json:"model"`
 	SystemPrompt *string `json:"systemPrompt"`
 	Resume       bool    `json:"resume"`
+	Skill        *string `json:"skill,omitempty"`
 }
 
 // ToolActivity is one model-requested tool call as shown in the UI.
@@ -126,9 +130,13 @@ type Agent struct {
 	// nor tool calls; three in a row ends the turn (done with progress,
 	// failed without) instead of spinning on a dead gateway.
 	emptyRounds int
-	messages  []inference.LlmMessage
-	records   []transcript.Message
-	reply     strings.Builder
+	// retries counts retried rounds after retryable provider errors
+	// (rate limits, 5xx, transport blips); three per turn, then the
+	// turn fails. Any round progress resets it alongside emptyRounds.
+	retries int
+	messages    []inference.LlmMessage
+	records     []transcript.Message
+	reply       strings.Builder
 	// turnUsage accumulates every LLM call's Usage for the turn, across
 	// all rounds and both streaming and fallback paths.
 	turnUsage inference.Usage
@@ -172,6 +180,8 @@ func newAgent(c runConfig) *Agent {
 func (a *Agent) Run() (ChatOutcome, error) {
 	sessionID := a.session.Meta.SessionID
 	a.phase = phaseRunning
+	a.emptyRounds = 0
+	a.retries = 0
 	a.messages = a.modelMessages(a.currentMessage, a.currentResume)
 
 	err := a.runLoop()

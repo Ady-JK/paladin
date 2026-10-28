@@ -5,6 +5,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -13,6 +14,33 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
+
+// retryUnit is the backoff quantum (2s, 4s, 8s across the 3 attempts).
+// Tests shrink it so retry coverage stays fast.
+var retryUnit = time.Second
+
+// retryRound sleeps with backoff and reports whether the failed round
+// should run again: only for retryable provider errors (rate limits,
+// 5xx, transport blips) with zero round progress, bounded to 3 attempts
+// per turn. Any round progress resets the budget. A partially streamed
+// round never retries — re-issuing it would duplicate visible output.
+func (a *Agent) retryRound(err error, noProgress bool) bool {
+	if !noProgress || !inference.IsRetryable(err) || a.retries >= 3 {
+		return false
+	}
+	wait := time.Duration(2<<a.retries) * retryUnit
+	a.retries++
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-a.ctx.Done():
+		return false
+	case <-a.done:
+		return false
+	}
+}
 
 func (a *Agent) runLoop() error {
 	if len(a.toolDefs) == 0 {
@@ -95,11 +123,17 @@ func (a *Agent) runLoop() error {
 			if inference.IsCancelled(taskErr) || a.stopRequested() {
 				return a.stopWithPartial(roundText.String())
 			}
+			if a.retryRound(taskErr, roundText.Len() == 0 && len(calls) == 0) {
+				continue
+			}
 			return turnFailed{"provider unavailable: " + taskErr.Error()}
 		}
 		if streamErr != nil {
 			if *streamErr == "client went away" {
 				return a.stopWithPartial(roundText.String())
+			}
+			if a.retryRound(errors.New(*streamErr), roundText.Len() == 0 && len(calls) == 0) {
+				continue
 			}
 			return turnFailed{"provider unavailable: " + *streamErr}
 		}
@@ -126,6 +160,9 @@ func (a *Agent) runLoop() error {
 				if a.stopRequested() {
 					return a.stopWithPartial(roundText.String())
 				}
+				if a.retryRound(err, true) {
+					continue
+				}
 				return turnFailed{"provider unavailable: " + err.Error()}
 			}
 			roundText.WriteString(resp.Content)
@@ -149,6 +186,7 @@ func (a *Agent) runLoop() error {
 		if len(calls) == 0 {
 			if roundText.Len() > 0 {
 				a.emptyRounds = 0
+				a.retries = 0
 				a.records = append(a.records, transcript.Message{
 					Role: transcript.RoleAssistant, Content: roundText.String(),
 					CreatedAt: time.Now().UTC(),
@@ -176,6 +214,7 @@ func (a *Agent) runLoop() error {
 			return nil
 		}
 		a.emptyRounds = 0
+		a.retries = 0
 		text := roundText.String()
 		a.appendAssistant(text, calls)
 		if err := a.runToolsStreaming(calls); err != nil {
@@ -300,6 +339,9 @@ loop:
 				if a.stopRequested() {
 					return turnStop{}
 				}
+				if !streamed && a.retryRound(errors.New(chunk.Err), true) {
+					return a.runPlain()
+				}
 				return turnFailed{"provider unavailable: " + chunk.Err}
 			}
 			if chunk.Text != "" {
@@ -329,6 +371,9 @@ loop:
 		if inference.IsCancelled(err) || a.stopRequested() {
 			return turnStop{}
 		}
+		if !streamed && a.retryRound(err, true) {
+			return a.runPlain()
+		}
 		return turnFailed{"provider unavailable: " + err.Error()}
 	}
 	if a.stopRequested() {
@@ -339,6 +384,9 @@ loop:
 		if err != nil {
 			if a.stopRequested() {
 				return turnStop{}
+			}
+			if !streamed && a.retryRound(err, true) {
+				return a.runPlain()
 			}
 			return turnFailed{"provider unavailable: " + err.Error()}
 		}

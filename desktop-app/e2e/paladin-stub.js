@@ -18,6 +18,21 @@ async function __paladinBaseInvoke(cmd, args) {
             title: "notify demo",
           },
         ];
+      case "list_skills":
+        return [
+          {
+            name: "reviewer",
+            description: "Reviews code",
+            source: "global",
+            path: "/home/tester/.config/skills/reviewer/SKILL.md",
+          },
+          {
+            name: "deployer",
+            description: "Ships it",
+            source: "workspace",
+            path: "/home/tester/project/.paladin/skills/deployer/SKILL.md",
+          },
+        ];
       case "open_session":
         return {
           sessionId: "sess-notify-1",
@@ -301,6 +316,7 @@ async function __paladinBaseInvoke(cmd, args) {
           sessionId: inner.sessionId,
           message: inner.message,
           resume: !!inner.resume,
+          skill: inner.skill ?? null,
         });
         if (inner.resume) {
           return {

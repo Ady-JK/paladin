@@ -57,6 +57,7 @@ type ChatParams struct {
 	Model        *string `json:"model"`
 	SystemPrompt *string `json:"systemPrompt"`
 	Resume       bool    `json:"resume"`
+	Skill        *string `json:"skill"`
 }
 
 type StrField struct {
@@ -291,6 +292,8 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(entries)
+	case "list_skills":
+		return ok(rt.ListSkills(stringParam(req.Params, "cwd")))
 	case "open_session":
 		sess, err := rt.OpenSession(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd"))
 		if err != nil {
@@ -363,6 +366,7 @@ func runChat(rt *runtime.AgentRuntime, req Request) {
 		SessionID: p.SessionID, Message: p.Message, Cwd: p.Cwd,
 		Provider: p.Provider, Model: p.Model,
 		SystemPrompt: p.SystemPrompt, Resume: p.Resume,
+		Skill: p.Skill,
 	}
 	tx := make(chan agent.ChatChunk, 128)
 	done := make(chan struct{})

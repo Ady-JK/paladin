@@ -6,6 +6,7 @@ package inference
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
@@ -146,6 +147,53 @@ func CancelledError() *ProviderError         { return &ProviderError{Kind: "canc
 func IsCancelled(err error) bool {
 	if pe, ok := err.(*ProviderError); ok {
 		return pe.Kind == "cancelled"
+	}
+	return false
+}
+
+// IsRetryable reports whether err looks transient: rate limits,
+// overloaded/broken gateways, and transport blips. Auth, quota,
+// content-policy, invalid-request (including context overflow), and
+// timeouts never retry — resending those just burns another round.
+// Matches opencode's isRetryable split (retryable: rate-limit,
+// internal, transport, incomplete-stream).
+func IsRetryable(err error) bool {
+	if err == nil || IsCancelled(err) {
+		return false
+	}
+	var msg string
+	if pe, ok := err.(*ProviderError); ok {
+		if pe.Kind != "request" {
+			return false
+		}
+		msg = strings.ToLower(pe.Message)
+	} else {
+		msg = strings.ToLower(err.Error())
+	}
+	for _, no := range []string{
+		"status 400", "status 401", "status 403", "status 404", "status 422",
+		"unauthorized", "forbidden", "invalid api key", "incorrect api key",
+		"invalid_api_key", "quota", "billing", "credit", "payment",
+		"content policy", "content_policy", "safety", "blocked",
+		"invalid request", "invalid_request", "bad request",
+		"context", "too long", "too large", "max tokens", "max_tokens",
+		"timed out", "timeout", "deadline",
+	} {
+		if strings.Contains(msg, no) {
+			return false
+		}
+	}
+	for _, yes := range []string{
+		"status 429", "status 500", "status 502", "status 503", "status 529",
+		"rate limit", "ratelimit", "too many requests", "overload",
+		"internal error", "server error", "service unavailable",
+		"bad gateway", "gateway timeout", "temporarily",
+		"transient connection", "connection reset", "connection refused",
+		"broken pipe", "eof", "incomplete",
+	} {
+		if strings.Contains(msg, yes) {
+			return true
+		}
 	}
 	return false
 }

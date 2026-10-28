@@ -4,7 +4,7 @@
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 // No daemon, no addr, no subscribe.
 
-import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, ToolInfo } from "./types";
+import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, SkillEntry, ToolInfo } from "./types";
 import { bridge } from "./tauri";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -69,6 +69,14 @@ export function fileComplete(
   limit = 20,
 ): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("file_complete", { query, cwd, limit });
+}
+
+// listSkills discovers skills from the global config dir and the
+// workspace dir. The sidecar returns name/description/source/path only
+// — never SKILL.md content, which stays out of the composer and is
+// injected before the LLM call.
+export function listSkills(cwd: string | null): Promise<SkillEntry[]> {
+  return invoke<SkillEntry[]>("list_skills", { cwd });
 }
 
 export function listProviders(): Promise<ProviderInfo[]> {
@@ -169,6 +177,7 @@ export function chatStream(args: {
   provider: string | null;
   model: string | null;
   systemPrompt: string | null;
+  skill: string | null;
 }): Promise<{ sessionId: string; reply: string; stopped: boolean; needsContinue: boolean }> {
   // The bridge fans deltas/tools out to whoever subscribed via
   // onChatDelta/onChatTool (chat.ts), mirroring the old Tauri events.
@@ -181,6 +190,7 @@ export function chatStream(args: {
       provider: args.provider,
       model: args.model,
       systemPrompt: args.systemPrompt,
+      skill: args.skill,
     },
     {
       onDelta: (delta) => {

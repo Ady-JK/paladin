@@ -17,6 +17,7 @@ import { handleSlashKey, tryHandleSlash } from "./slash";
 import { refreshUsage } from "./usage";
 import { createToolActivity } from "./tools";
 import { handleAskToolEvent } from "./ask";
+import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
 
 export async function send(resume = false): Promise<void> {
   const message = resume ? "" : inputEl.value.trim();
@@ -28,14 +29,35 @@ export async function send(resume = false): Promise<void> {
   }
 
   // Slash commands never reach the agent: they run locally.
+  // `/skill` is the exception: it routes to the agent with the skill
+  // name sent separately — the sidecar injects the SKILL.md content
+  // before the LLM call, so the content never lands in the textarea.
   if (!resume && tryHandleSlash(message)) {
     return;
+  }
+  let skill: string | null = null;
+  let display = message;
+  if (!resume) {
+    const parsed = parseSkillLine(message);
+    if (parsed) {
+      skill = parsed.name;
+      // A hand-typed `/skill <name> <text>` attaches like the picker.
+      // An empty message is allowed: the skill alone is the turn.
+      takeAttached();
+      display = parsed.message;
+      if (!display) {
+        display = `/skill ${skill}`;
+      }
+    } else {
+      skill = takeAttached();
+    }
   }
 
   if (!resume) {
     // Hand-typed @paths resolve to OS-specific absolute paths here;
     // popup-accepted rows are already absolute. The user turn keeps
-    // the original text so the chat shows what was typed.
+    // the original text so the chat shows what was typed — except a
+    // skill turn, which shows a chip plus the message after `/skill`.
     state.busy = true;
     sendBtn.disabled = true;
     sendBtn.classList.add("hidden");
@@ -43,17 +65,17 @@ export async function send(resume = false): Promise<void> {
     setStatus("thinking…", "busy");
     let outgoing: string;
     try {
-      outgoing = await expandMentions(message);
+      outgoing = await expandMentions(display);
     } catch (error) {
       console.warn(`expandMentions failed: ${String(error)}`);
-      outgoing = message;
+      outgoing = display;
     }
     inputEl.value = "";
     autosizeComposer();
     dismissGreeting();
-    addTurn("user", message);
+    addTurn("user", display, { skill });
     state.shownMessages++;
-    return sendExpanded(outgoing, false);
+    return sendExpanded(outgoing, false, skill);
   }
   continueBtn.classList.add("hidden");
 
@@ -62,11 +84,11 @@ export async function send(resume = false): Promise<void> {
   sendBtn.classList.add("hidden");
   pauseBtn.classList.remove("hidden");
   setStatus("thinking…", "busy");
-  return sendExpanded("", true);
+  return sendExpanded("", true, null);
 }
 
 // sendExpanded runs the streaming turn for already-prepared text.
-async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
+async function sendExpanded(outgoing: string, resume: boolean, skill: string | null): Promise<void> {
 
   const { wrapper, textEl: body } = addTurn("agent", "");
   body.innerHTML = `<span class="text-slate-400">${icon("bolt", "h-3 w-3 inline")} thinking…</span>`;
@@ -166,6 +188,7 @@ async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
       provider: state.selectedProvider || null,
       model: state.selectedModel || null,
       systemPrompt: null,
+      skill,
     });
 
     if (!state.sessionId && result.sessionId) {
@@ -207,6 +230,11 @@ async function sendExpanded(outgoing: string, resume: boolean): Promise<void> {
       segEl.innerHTML = `<span class="text-slate-400">interrupted — the tool calls above already ran</span>`;
     }
 
+    // A failed skill turn still names the unknown skill so the user
+    // knows the content never reached the model.
+    if (skill && /not found: skill/i.test(String(error))) {
+      refreshSkillsCache();
+    }
     addTurn("error", String(error));
     setStatus(String(error), "error");
     void refreshUsage();
@@ -240,6 +268,11 @@ export function initChat(): void {
 
   inputEl.addEventListener("keydown", (event) => {
     // Popups first: Enter/Tab/Esc/Arrows belong to them while open.
+    // Skill before slash: `/skill …` matches both prefixes, and the
+    // skill picker is the specific one.
+    if (handleSkillKey(event)) {
+      return;
+    }
     if (handleSlashKey(event)) {
       return;
     }

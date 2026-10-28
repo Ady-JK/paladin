@@ -44,6 +44,7 @@ import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initFilePicker, closeFilePicker } from "./features/filePicker";
 import { initMentions } from "./features/mentions";
 import { initSlash } from "./features/slash";
+import { initSkills } from "./features/skills";
 import { initWindow } from "./features/window";
 
 async function connect(): Promise<void> {
@@ -94,6 +95,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initFilePicker();
   initMentions();
   initSlash();
+  initSkills();
   initModelPicker();
   initSites();
   initSessionDialog();

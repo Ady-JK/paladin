@@ -12,6 +12,7 @@ export interface ChatParams {
   provider: string | null;
   model: string | null;
   systemPrompt: string | null;
+  skill: string | null;
 }
 
 export interface ChatHandlers {

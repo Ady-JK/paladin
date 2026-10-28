@@ -91,6 +91,7 @@ export function initMessageLinks(): void {
 export function addTurn(
   role: Turn["role"],
   text: string,
+  opts?: { skill?: string | null },
 ): { wrapper: HTMLElement; textEl: HTMLElement } {
   const wrapper = document.createElement("div");
   // Block by default so agent text and tool cards stack vertically;
@@ -113,8 +114,17 @@ export function addTurn(
       "md max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
   }
   // Agent turns render full Markdown (headings, bold, lists, code);
-  // user and error rows stay plain text.
-  textEl.innerHTML = !isUser && !isError ? renderMarkdown(text) : renderText(text);
+  // user and error rows stay plain text. A skill turn prefixes a
+  // static chip with the skill name; the SKILL.md content itself is
+  // never pasted here — the sidecar injects it before the LLM call.
+  if (isUser && opts?.skill) {
+    const chip = document.createElement("div");
+    chip.innerHTML = `<span class="bubble-skill"><span class="bubble-skill-dot"></span>/${escapeHtml(opts.skill)}</span>`;
+    textEl.append(chip.firstElementChild!);
+  }
+  const body = document.createElement("div");
+  body.innerHTML = !isUser && !isError ? renderMarkdown(text) : renderText(text);
+  textEl.append(body);
 
   wrapper.append(textEl);
   messagesEl.append(wrapper);

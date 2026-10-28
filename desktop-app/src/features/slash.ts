@@ -11,6 +11,7 @@ import { state } from "../core/state";
 import { toast } from "../ui/toast";
 import { addTurn, renderGreeting } from "./chatView";
 import { newSession } from "./sessions";
+import { parseSkillLine } from "./skills";
 import { openSettings } from "./settings";
 import { openUsageDashboard } from "./usage";
 
@@ -22,6 +23,7 @@ export type SlashCommand = {
 
 export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "new", desc: "Start a fresh session", hint: "/new [first message]" },
+  { name: "skill", desc: "Attach a skill to this turn", hint: "/skill <name> [message]" },
   { name: "models", desc: "Open the model picker", hint: "/models" },
   { name: "settings", desc: "Open settings", hint: "/settings" },
   { name: "config", desc: "Open provider config", hint: "/config" },
@@ -153,12 +155,15 @@ export function handleSlashKey(event: KeyboardEvent): boolean {
   return false;
 }
 
+// slashHelp lists commands; `/skill` names come from the picker.
 function slashHelp(): string {
   return `Slash commands:\n${SLASH_COMMANDS.map((c) => `${c.hint} — ${c.desc}`).join("\n")}`;
 }
 
 // tryHandleSlash runs a `/` command locally. Returns true when the
-// message was consumed and must not reach the agent.
+// message was consumed and must not reach the agent. `/skill` is not
+// consumed here — it reaches the agent via chat.ts, which splits the
+// line and sends the name separately for sidecar injection.
 export function tryHandleSlash(message: string): boolean {
   const trimmed = message.trimStart();
   if (!trimmed.startsWith("/")) {
@@ -175,6 +180,17 @@ export function tryHandleSlash(message: string): boolean {
     return true;
   }
   switch (cmd) {
+    case "/skill":
+      // `/skill <name> [message]` is not consumed here — chat.ts
+      // splits the line and sends the name separately for sidecar
+      // injection. A bare `/skill` never names one, so hint instead
+      // of sending a meaningless line to the model.
+      if (!parseSkillLine(message)) {
+        toast("Usage: /skill <name> [message] — pick a skill from the popup", "error");
+        inputEl.value = "";
+        return true;
+      }
+      return false;
     case "/new":
       newSession();
       inputEl.value = rest;

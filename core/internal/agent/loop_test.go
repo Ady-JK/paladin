@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
@@ -59,6 +60,73 @@ func TestRunEmptyRoundRetriesThenRecovers(t *testing.T) {
 	}
 	if outcome.Reply != "back" {
 		t.Fatalf("got %+v", outcome)
+	}
+}
+
+func TestRunRetryableErrorRetriesThenRecovers(t *testing.T) {
+	old := retryUnit
+	retryUnit = time.Millisecond
+	defer func() { retryUnit = old }()
+	prov := &mockProvider{
+		streams: []streamScript{
+			{err: inference.RequestError("boom: stream: status 503")},
+			{chunks: []inference.Chunk{inference.TextChunk("back")}},
+		},
+	}
+	a, _, _, done := testAgent(t, prov, 5)
+	defer close(done)
+	outcome, err := a.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Reply != "back" {
+		t.Fatalf("got %+v", outcome)
+	}
+	if prov.calls != 2 {
+		t.Fatalf("expected a retry round, got %d stream calls", prov.calls)
+	}
+}
+
+func TestRunNonRetryableErrorFailsFast(t *testing.T) {
+	prov := &mockProvider{
+		streams: []streamScript{{err: inference.RequestError("boom: stream: status 401 unauthorized")}},
+	}
+	a, _, _, done := testAgent(t, prov, 5)
+	defer close(done)
+	start := time.Now()
+	if _, err := a.Run(); err == nil {
+		t.Fatal("auth error retried instead of failing")
+	} else if !strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("got %v", err)
+	}
+	if prov.calls != 1 {
+		t.Fatalf("expected no retry, got %d stream calls", prov.calls)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("non-retryable error slept before failing")
+	}
+}
+
+func TestRunRetryBudgetExhausts(t *testing.T) {
+	old := retryUnit
+	retryUnit = time.Millisecond
+	defer func() { retryUnit = old }()
+	prov := &mockProvider{
+		streams: []streamScript{
+			{err: inference.RequestError("boom: stream: status 503")},
+			{err: inference.RequestError("boom: stream: status 503")},
+			{err: inference.RequestError("boom: stream: status 503")},
+			{err: inference.RequestError("boom: stream: status 503")},
+			{err: inference.RequestError("boom: stream: status 503")},
+		},
+	}
+	a, _, _, done := testAgent(t, prov, 10)
+	defer close(done)
+	if _, err := a.Run(); err == nil {
+		t.Fatal("persistent 503 ended the turn silently")
+	}
+	if prov.calls != 4 {
+		t.Fatalf("expected 1 + 3 retries, got %d stream calls", prov.calls)
 	}
 }
 
