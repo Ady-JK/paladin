@@ -162,6 +162,22 @@ export function clearTodos(): void {
   paint();
 }
 
+// dropFinishedPanel empties the panel when its plan has fully landed:
+// every step finished or cancelled. Called when the user sends a new
+// message so a done plan vanishes at once; the turn's post-send
+// refresh confirms what the backend cleared.
+export function dropFinishedPanel(): void {
+  if (todos.length === 0) {
+    return;
+  }
+  if (!todos.every((t) => t.status === "finished" || t.status === "cancelled")) {
+    return;
+  }
+  todos = [];
+  open = false;
+  paint();
+}
+
 // toggleTodos opens or closes the hat list. Exported for tests.
 export function toggleTodos(): void {
   open = !open;

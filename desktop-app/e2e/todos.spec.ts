@@ -91,3 +91,33 @@ test("a settled todo tool call repaints the hat live", async ({ page }) => {
   await expect(page.locator("#todoHat")).toBeVisible();
   await expect(page.locator("#todoHat")).toContainText("1/1 finished");
 });
+
+test("the next user message retires a finished plan", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eTodos = [{ content: "Ship it", status: "finished" }];
+    const paladin = (window as any).paladin;
+    const prev = paladin.chat.bind(paladin);
+    // The backend drops a finished plan on a new message: mirror it
+    // by emptying the fixture from the second turn on.
+    let turns = 0;
+    paladin.chat = async (params: any, handlers: any) => {
+      turns++;
+      if (turns > 1) {
+        (window as any).__e2eTodos = [];
+      }
+      return prev(params, handlers);
+    };
+  });
+  // First turn paints the finished plan through the live tool path is
+  // covered elsewhere; here the post-turn refresh loads it directly.
+  await page.fill("#promptInput", "first");
+  await page.click("#sendBtn");
+  await expect(page.locator("#messages")).toContainText("Stub reply");
+  await expect(page.locator("#todoHat")).toBeVisible();
+
+  // The next message clears the panel at once, before the reply lands.
+  await page.fill("#promptInput", "something new");
+  await page.click("#sendBtn");
+  await expect(page.locator("#todoHat")).toBeHidden();
+  await expect(page.locator("#messages")).toContainText("Stub reply to: something new");
+});

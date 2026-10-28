@@ -57,7 +57,9 @@ func (TodoTool) Definition() ToolDefinition {
 			"Every step you are working on MUST be marked in_progress, and " +
 			"every step you finish MUST be marked finished (or cancelled) " +
 			"before you move on — never leave a step in_progress once its " +
-			"work is done. Pass todos to replace the session list; omit " +
+			"work is done. A finished plan is cleared when the user sends " +
+			"their next message; plan the new work with a fresh list when " +
+			"it is multi-step. Pass todos to replace the session list; omit " +
 			"todos to read the current list.",
 		Parameters: map[string]any{
 			"type": "object",

@@ -451,7 +451,9 @@ Tools:
   marking every step finished (or cancelled). Mark the step you are
   working on in_progress and flip it to finished the moment its work is
   done; never leave a step in_progress once its work is done. Keep
-  exactly one step in_progress at a time. Skip it for single-step tasks.
+  exactly one step in_progress at a time. A finished plan is cleared
+  when the user sends their next message: plan the new work with a
+  fresh list when it is multi-step. Skip it for single-step tasks.
 - To find a file, search likely directories first and widen only when they
   come up empty — never start with a full-drive recursive sweep.
 - Never answer that you cannot reach this machine: the shell tool runs
@@ -556,7 +558,9 @@ todo — REQUIRED for multi-step work: break the task into a goal-based
 activity list BEFORE starting, update the statuses as you work, and keep
 exactly one step in_progress at a time. Mark the step you are working on
 in_progress and flip it to finished the moment its work is done — never
-leave a step in_progress once its work is done. Pass todos to replace the
+leave a step in_progress once its work is done. A finished plan is
+cleared when the user sends their next message; plan the new work with
+a fresh list when it is multi-step. Pass todos to replace the
 session list; omit todos to read the current list.
 - Plan first: {"todos": [{"content": "Add the todo tool", "status": "in_progress"},
   {"content": "Add tests", "status": "not_started"},

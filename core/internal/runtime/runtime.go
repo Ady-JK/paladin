@@ -337,6 +337,12 @@ func (r *AgentRuntime) Chat(req agent.Request, tx chan<- agent.ChatChunk, done <
 	if !ok {
 		return agent.ChatOutcome{}, fmt.Errorf("no agent template registered")
 	}
+	// A finished plan belongs to the finished work: the user's next
+	// message drops it so the panel goes empty until the agent plans
+	// the new work. Best-effort — a stale file never fails a turn.
+	if sess, lerr := r.transcripts.Load(req.Cwd, req.SessionID); lerr == nil {
+		r.dropFinishedTodos(sess, req.Resume)
+	}
 	built, err := template.Build(agent.Deps{
 		Sessions:  runtimeSessions{r},
 		Providers: runtimeProviders{r},
@@ -485,6 +491,42 @@ func (r *AgentRuntime) SessionTodos(sessionID, cwd string) ([]session.TodoEntry,
 		return nil, fmt.Errorf("io: session todos: %s", syserr.Str(err))
 	}
 	return session.TodosView(data), nil
+}
+
+// ClearSessionTodos drops the session's activity list. A missing file
+// is a no-op so clearing before the first plan never errors.
+func (r *AgentRuntime) ClearSessionTodos(sessionID, cwd string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("session id is required")
+	}
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(sess.Dir, session.TodoFileName)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("io: session todos: %s", syserr.Str(err))
+	}
+	return nil
+}
+
+// dropFinishedTodos removes a fully-landed plan at the start of a new
+// turn: when the user's next message arrives and every step of the
+// stored list is finished or cancelled, the list is dropped so the
+// panel goes empty until the agent plans the new work. Resume turns
+// never drop — they continue the same work — and anything unfinished
+// or unparsable stays put.
+func (r *AgentRuntime) dropFinishedTodos(sess transcript.Session, resume bool) {
+	if resume {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(sess.Dir, session.TodoFileName))
+	if err != nil {
+		return
+	}
+	if !session.TodosFinished(data) {
+		return
+	}
+	_ = os.Remove(filepath.Join(sess.Dir, session.TodoFileName))
 }
 
 // SessionUsage returns the session's billed footprint: accumulated

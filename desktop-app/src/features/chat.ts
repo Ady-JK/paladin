@@ -17,7 +17,7 @@ import { handleSlashKey, tryHandleSlash } from "./slash";
 import { refreshUsage } from "./usage";
 import { createToolActivity } from "./tools";
 import { handleAskToolEvent } from "./ask";
-import { handleTodoToolEvent, refreshTodos } from "./todos";
+import { dropFinishedPanel, handleTodoToolEvent, refreshTodos } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
 
 export async function send(resume = false): Promise<void> {
@@ -35,6 +35,11 @@ export async function send(resume = false): Promise<void> {
   // before the LLM call, so the content never lands in the textarea.
   if (!resume && tryHandleSlash(message)) {
     return;
+  }
+  // A new user message retires a fully-landed plan: the panel goes
+  // empty at once and the agent plans the new work if it is multi-step.
+  if (!resume) {
+    dropFinishedPanel();
   }
   let skill: string | null = null;
   let display = message;

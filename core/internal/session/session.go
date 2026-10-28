@@ -182,6 +182,29 @@ func TodosView(data []byte) []TodoEntry {
 	return stored.Todos
 }
 
+// TodosFinished reports whether a stored activity list holds only
+// terminal work: every item finished or cancelled. A missing,
+// unparsable, or empty list is not finished — only a real plan whose
+// every step landed counts, so a corrupt file is never mistaken for
+// done work and silently dropped.
+func TodosFinished(data []byte) bool {
+	var stored struct {
+		Todos []TodoEntry `json:"todos"`
+	}
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return false
+	}
+	if len(stored.Todos) == 0 {
+		return false
+	}
+	for _, td := range stored.Todos {
+		if td.Status != "finished" && td.Status != "cancelled" {
+			return false
+		}
+	}
+	return true
+}
+
 func notifyHistoryArgs(content string) string {
 	var wire struct {
 		JobID string `json:"job_id"`

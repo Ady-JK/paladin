@@ -447,6 +447,71 @@ func TestSessionHistoryValidation(t *testing.T) {
 	}
 }
 
+func TestNewMessageDropsFinishedPlan(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices": [{"message": {"content": "done"}}]}`)
+	}))
+	defer server.Close()
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	pointMockAt(rt, server.URL)
+	sess, err := rt.OpenSession("", "/tmp/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTodos := func(payload string) {
+		loaded, err := rt.transcripts.Load("/tmp/p", sess.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(loaded.Dir, session.TodoFileName), []byte(payload), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readTodos := func() []session.TodoEntry {
+		todos, err := rt.SessionTodos(sess.SessionID, "/tmp/p")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return todos
+	}
+
+	// A fully-landed plan is dropped by the user's next message.
+	writeTodos(`{"todos":[{"content":"One","status":"finished"},{"content":"Two","status":"cancelled"}]}`)
+	chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "next", Cwd: "/tmp/p"})
+	if got := readTodos(); len(got) != 0 {
+		t.Fatalf("finished plan survived: %+v", got)
+	}
+
+	// An unfinished plan survives the next message.
+	writeTodos(`{"todos":[{"content":"One","status":"finished"},{"content":"Two","status":"in_progress"}]}`)
+	chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "more", Cwd: "/tmp/p"})
+	if got := readTodos(); len(got) != 2 {
+		t.Fatalf("unfinished plan dropped: %+v", got)
+	}
+
+	// Resume never drops, even when everything landed.
+	writeTodos(`{"todos":[{"content":"One","status":"finished"}]}`)
+	chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Resume: true, Cwd: "/tmp/p"})
+	if got := readTodos(); len(got) != 1 {
+		t.Fatalf("resume dropped the plan: %+v", got)
+	}
+
+	// A corrupt file is left alone for the todo tool to report.
+	writeTodos(`{broken`)
+	chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "again", Cwd: "/tmp/p"})
+	loaded, err := rt.transcripts.Load("/tmp/p", sess.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(loaded.Dir, session.TodoFileName)); err != nil {
+		t.Fatalf("corrupt plan removed: %v", err)
+	}
+}
+
 func TestSetDefaultProvider(t *testing.T) {
 	rt, _ := testRuntime(t)
 	if _, err := rt.SetDefaultProvider(""); err == nil {
