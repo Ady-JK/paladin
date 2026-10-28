@@ -39,7 +39,6 @@ const (
 type ShellArgs struct {
 	Action     string `json:"action"`
 	JobID      string `json:"job_id"`
-	Workdir    string `json:"workdir"`
 	Cmd        string `json:"cmd"`
 	Background bool   `json:"background"`
 	Notify     bool   `json:"notify"`
@@ -115,21 +114,6 @@ func shellTimeoutMs(ms int64) (time.Duration, error) {
 		return 0, fmt.Errorf("shell: timeout_ms cannot be negative")
 	}
 	return time.Duration(ms) * time.Millisecond, nil
-}
-
-func (s *ShellTool) resolveWorkdir(workdir, workspace string) (string, error) {
-	trimmed := strings.TrimSpace(workdir)
-	if trimmed == "" {
-		if workspace == "" {
-			return "", fmt.Errorf("shell: no workspace to run in")
-		}
-		return workspace, nil
-	}
-	p, _, err := ResolveScopedPath("shell", "workdir", trimmed, workspace)
-	if err != nil {
-		return "", err
-	}
-	return p, nil
 }
 
 func (s *ShellTool) runSync(cmd, dir string, limit time.Duration, cancel context.Context) (string, error) {
@@ -592,9 +576,9 @@ func (ShellTool) Name() string { return "shell" }
 func (ShellTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "shell",
-		Description: "Run a shell command in a working directory. " +
-			"Pass workdir as a full absolute path; bare relative " +
-			"workdirs are rejected. " +
+		Description: "Run a shell command in the session workspace. " +
+			"There is no workdir: every run starts in the workspace root, " +
+			"so cd inside the command when you need a subdirectory. " +
 			"With background false (the default) the call waits for the command and " +
 			"returns its output; with background true it returns at once with a " +
 			"job_id in running state and writes everything to a log file. " +
@@ -608,8 +592,7 @@ func (ShellTool) Definition() ToolDefinition {
 			"properties": map[string]any{
 				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "cancel"}, "description": "What to do: run a command, check a job, or stop a job. Defaults to run."},
 				"job_id":     map[string]any{"type": "string", "description": "The job to check or stop. Empty or missing for a new run."},
-				"workdir":    map[string]any{"type": "string", "description": "Where to run as a full absolute path. Empty means the workspace root."},
-				"cmd":        map[string]any{"type": "string", "description": "The shell command to run. Required for action run. Relative paths inside the command resolve against workdir."},
+				"cmd":        map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
 				"notify":     map[string]any{"type": "boolean", "description": "With background true, remind the agent when the job finishes: its final state and output tail arrive on their own in a later round. Defaults to false; ignored without background."},
 				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000.", "minimum": 1},
@@ -632,19 +615,19 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		if err != nil {
 			return "", ArgsError(err.Error())
 		}
-		dir, err := s.resolveWorkdir(args.Workdir, ctx.Workspace)
-		if err != nil {
-			return "", ArgsError(err.Error())
+		dir := strings.TrimSpace(ctx.Workspace)
+		if dir == "" {
+			return "", ArgsError("shell: no workspace to run in")
 		}
 		info, statErr := os.Stat(dir)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
-				return "", ArgsError(fmt.Sprintf("shell: workdir %q does not exist", args.Workdir))
+				return "", ArgsError(fmt.Sprintf("shell: workspace %q does not exist", dir))
 			}
-			return "", ArgsError(fmt.Sprintf("shell: workdir %q cannot be used: %s", args.Workdir, syserr.Str(statErr)))
+			return "", ArgsError(fmt.Sprintf("shell: workspace %q cannot be used: %s", dir, syserr.Str(statErr)))
 		}
 		if !info.IsDir() {
-			return "", ArgsError(fmt.Sprintf("shell: workdir %q is not a directory", args.Workdir))
+			return "", ArgsError(fmt.Sprintf("shell: workspace %q is not a directory", dir))
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.

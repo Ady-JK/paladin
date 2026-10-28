@@ -416,7 +416,7 @@ Tools:
 - You act on this machine through your tools: run commands with the shell
   tool instead of telling the user to type them themselves.
 - Use the read tool to inspect files instead of guessing what they hold.
-- Always pass full absolute paths to path and workdir — for files
+- Always pass full absolute paths to path — for files
   inside the workspace and outside it alike; bare relative paths are
   rejected. Every file answer reports a scope flag comparing the path
   against the session workspace (inside or outside): outside paths are
@@ -476,7 +476,7 @@ func ToolGuidanceFor(goos string) string {
 const usageExamplesCommon = `
 Tool examples:
 
-Paths — every path or workdir is a full absolute path, inside the
+Paths — every path is a full absolute path, inside the
 workspace or out; bare relative paths are rejected. Each file answer
 carries a scope flag (inside or outside) comparing the path against
 the session workspace from Environment below — outside is allowed.
@@ -528,10 +528,12 @@ must match exactly, including line endings.
 
 const usageExamplesShellCommon = `
 shell — build, test and explore on this machine. The action defaults to
-run, so {"cmd": "..."} alone runs a command synchronously.
-- Quick build: {"action": "run", "cmd": "go build ./...", "workdir": "/home/user/project/backend"}
-- Wrong: {"cmd": "go build ./...", "workdir": "backend"} with a bare
-  relative workdir — rejected. Write "workdir": "/home/user/project/backend".
+run, and every run starts in the session workspace root: cd inside the
+command when you need a subdirectory.
+- Quick build: {"action": "run", "cmd": "cd backend && go build ./..."}
+- Wrong: {"cmd": "go build ./..."} when the code lives in a subdirectory
+  and you forgot the cd — it builds the wrong tree. Write
+  "cmd": "cd /home/user/project/backend && go build ./...".
 - Slow command, waited out: {"action": "run", "cmd": "go test ./short/...",
   "timeout_ms": 90000}.
 - Slow command alongside other work: {"action": "run", "cmd": "go test ./...",
@@ -546,9 +548,7 @@ run, so {"cmd": "..."} alone runs a command synchronously.
   background run, keep doing other tool calls, and the finished state plus
   the output tail (last 2000 lines or 50 KB) arrive on their own in a later
   round — no status polling needed.
-- Wrong: {"action": "run"} with no cmd. Wrong: {"action": "run",
-  "cmd": "ls", "workdir": "backend"} with a bare relative path — use
-  a full absolute path. Wrong: {"action": "status"}
+- Wrong: {"action": "run"} with no cmd. Wrong: {"action": "status"}
   with no job_id. Wrong: {"background": true} for a lone job with nothing
   else to do while it runs — wait synchronously instead.
 - When the user asks to do something on this machine, run it with the
@@ -558,7 +558,7 @@ run, so {"cmd": "..."} alone runs a command synchronously.
 // usageExamplesShellWindows shows directory listing and file search the
 // PowerShell way. No Unix commands appear here.
 const usageExamplesShellWindows = `
-- List directories: {"cmd": "Get-ChildItem D:\\projects", "workdir": "D:\\"}
+- List directories: {"cmd": "Get-ChildItem D:\\projects"}
   on Windows — always PowerShell cmdlets with Windows paths, never cmd.exe
   commands, never Unix tools like ls or grep, never /d/ style paths.
 - Find a file: {"cmd": "Get-ChildItem D:\\projects -Filter go.work -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName"}
@@ -569,7 +569,9 @@ const usageExamplesShellWindows = `
 // usageExamplesShellUnix shows listing and search the sh way. No
 // PowerShell or cmd.exe appears here.
 const usageExamplesShellUnix = `
-- List directories: {"cmd": "ls /home/user/project/backend"}.
+- List directories: {"cmd": "ls /home/user/project/backend"} still works
+  from the workspace root with an absolute path; prefer
+  {"cmd": "cd backend && ls"} for paths under the workspace.
 - Find a file: {"cmd": "find ~/projects -name go.work 2>/dev/null"}.
   Search likely folders first; never sweep a whole drive at once —
   it takes minutes and times out.

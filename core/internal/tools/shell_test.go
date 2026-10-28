@@ -56,6 +56,29 @@ func TestSyncRunReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestShellFindsGoWithMinimalPath(t *testing.T) {
+	// The sidecar inherits Electron's desktop PATH without the
+	// toolchain dirs, so `go` must still resolve (regression: every
+	// go/build command failed with exit 127 under the app).
+	if _, err := os.Stat("/usr/local/go/bin/go"); err != nil {
+		t.Skip("no system go install")
+	}
+	t.Setenv("PATH", "/usr/bin:/bin")
+	ctx, _ := testCtx(t)
+	tool := NewShellTool()
+	out, err := tool.Call(json.RawMessage(`{"cmd":"go version"}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp ShellResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != JobDone || resp.Output == nil || !strings.Contains(*resp.Output, "go version") {
+		t.Fatalf("got %+v", resp)
+	}
+}
+
 func TestFailingCommandIsToolError(t *testing.T) {
 	ctx, _ := testCtx(t)
 	tool := NewShellTool()
@@ -112,18 +135,16 @@ func TestBackgroundStatusCancel(t *testing.T) {
 }
 
 func TestShellValidation(t *testing.T) {
-	ctx, _ := testCtx(t)
+	ctx, ws := testCtx(t)
 	tool := NewShellTool()
 	for _, args := range []string{
 		`{"action":"run"}`,
-		`{"action":"run","cmd":"","workdir":"workspace"}`,
+		`{"action":"run","cmd":""}`,
 		`{"action":"run","cmd":"echo hi","timeout_ms":-1}`,
-		`{"action":"run","cmd":"echo hi","workdir":"relative"}`,
 		`{"action":"status"}`,
 		`{"action":"cancel"}`,
 		`{"action":"bogus"}`,
 		`{bad`,
-		`{"action":"run","cmd":"echo hi","workdir":"workspace/../etc"}`,
 	} {
 		if _, err := tool.Call(json.RawMessage(args), ctx); err == nil {
 			t.Fatalf("accepted %s", args)
@@ -135,9 +156,10 @@ func TestShellValidation(t *testing.T) {
 	if _, err := tool.Call(json.RawMessage(`{"action":"cancel","job_id":"nope"}`), ctx); err == nil {
 		t.Fatal("unknown cancel accepted")
 	}
-	// Missing workdir.
-	if _, err := tool.Call(json.RawMessage(`{"cmd":"echo hi","workdir":"workspace/nope"}`), ctx); err == nil {
-		t.Fatal("missing workdir accepted")
+	// Missing workspace.
+	badws := &ToolCtx{Workspace: filepath.Join(ws, "nope"), SessionDir: ctx.SessionDir, Cancel: context.Background()}
+	if _, err := tool.Call(json.RawMessage(`{"cmd":"echo hi"}`), badws); err == nil {
+		t.Fatal("missing workspace accepted")
 	}
 	// Background without a session dir.
 	nosess := &ToolCtx{Workspace: ctx.Workspace, Cancel: context.Background()}

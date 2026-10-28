@@ -206,6 +206,19 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, mes
 			if err := send(TextChunk(text)); err != nil {
 				return CancelledError()
 			}
+		case "response.reasoning_summary_text.delta":
+			// Reasoning models think before they answer. Forward the
+			// summary stream so the UI shows progress instead of
+			// minutes of silence; it is not answer text, so it must
+			// not mark sentText (the completed envelope still carries
+			// the real answer below).
+			text := ev.Delta.OfString
+			if text == "" {
+				continue
+			}
+			if err := send(TextChunk(text)); err != nil {
+				return CancelledError()
+			}
 		case "response.output_item.added":
 			if ev.Item.Type != "function_call" {
 				continue

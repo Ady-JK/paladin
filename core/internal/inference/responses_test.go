@@ -99,6 +99,35 @@ func TestStreamResponsesAssemblesTextAndCalls(t *testing.T) {
 	}
 }
 
+func TestStreamResponsesForwardsReasoningLive(t *testing.T) {
+	// Reasoning models think before answering. The summary deltas
+	// must stream (so the UI shows progress) without suppressing the
+	// final answer carried by the completed envelope.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"thinking\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"muse-spark-1.3-contributor\",\"output\":[")
+		fmt.Fprint(w, "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	p := responsesProvider(t, srv)
+	tx := make(chan Chunk, 32)
+	done := make(chan struct{})
+	if err := p.StreamTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess-1", tx, done); err != nil {
+		t.Fatal(err)
+	}
+	close(done)
+	close(tx)
+	var text strings.Builder
+	for c := range tx {
+		text.WriteString(c.Text)
+	}
+	if text.String() != "thinkingdone" {
+		t.Fatalf("got %q", text.String())
+	}
+}
+
 func TestResponsesInputShapes(t *testing.T) {
 	id := "call_1"
 	input := toResponsesInput([]LlmMessage{

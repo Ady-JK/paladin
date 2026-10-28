@@ -11,7 +11,7 @@ import (
 func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "TERM=dumb")
+	cmd.Env = shellEnv("TERM=dumb")
 	outR, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, nil, err
@@ -29,7 +29,7 @@ func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, er
 func spawnToLog(cmdStr, dir string, log *os.File) (*exec.Cmd, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "TERM=dumb")
+	cmd.Env = shellEnv("TERM=dumb")
 	cmd.Stdout = log
 	cmd.Stderr = log
 	if err := cmd.Start(); err != nil {
