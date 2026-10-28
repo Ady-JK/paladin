@@ -30,7 +30,6 @@ import {
   settingsProviderHintEl,
   settingsProviderListEl,
   settingsSystemPromptEl,
-  settingsToolGuidanceEl,
   settingsWorkspaceBrowseBtn,
   settingsWorkspaceErrorEl,
   statusDetailEl,
@@ -83,34 +82,29 @@ const paintSettingsNav = (tab: SettingsNav): void => {
   }
 };
 
-// loadPrompts fills the prompt editor from the agent core files
-// (SYSTEM_PROMPT.md + TOOL_GUIDANCE.md). Failures stay inline so a
-// broken read never looks like an empty prompt.
-const loadPrompts = async (): Promise<void> => {
+// loadPrompt fills the prompt editor from the agent core file
+// (SYSTEM_PROMPT.md). Failures stay inline so a broken read never
+// looks like an empty prompt.
+const loadPrompt = async (): Promise<void> => {
   settingsPromptErrorEl.textContent = "";
   settingsPromptErrorEl.classList.add("hidden");
   try {
-    const prompts = await api.getPrompts();
-    settingsSystemPromptEl.value = prompts.systemPrompt;
-    settingsToolGuidanceEl.value = prompts.toolGuidance;
+    const prompt = await api.getPrompt();
+    settingsSystemPromptEl.value = prompt.systemPrompt;
   } catch (error) {
     settingsPromptErrorEl.textContent = String(error);
     settingsPromptErrorEl.classList.remove("hidden");
   }
 };
 
-// savePrompts writes the editor back to the prompt files. Turns
-// started afterwards use the new text immediately.
-const savePrompts = async (): Promise<void> => {
+// savePrompt writes the editor back to the prompt file. Turns started
+// afterwards use the new text immediately.
+const savePrompt = async (): Promise<void> => {
   settingsPromptErrorEl.textContent = "";
   settingsPromptErrorEl.classList.add("hidden");
   try {
-    const updated = await api.setPrompts({
-      systemPrompt: settingsSystemPromptEl.value,
-      toolGuidance: settingsToolGuidanceEl.value,
-    });
+    const updated = await api.setPrompt({ systemPrompt: settingsSystemPromptEl.value });
     settingsSystemPromptEl.value = updated.systemPrompt;
-    settingsToolGuidanceEl.value = updated.toolGuidance;
     toast("Prompt saved");
   } catch (error) {
     const message = String(error);
@@ -120,15 +114,14 @@ const savePrompts = async (): Promise<void> => {
   }
 };
 
-// resetPrompts rewrites both files from the built-in defaults.
-const resetPrompts = async (): Promise<void> => {
+// resetPrompt rewrites the file from the built-in default.
+const resetPrompt = async (): Promise<void> => {
   settingsPromptErrorEl.textContent = "";
   settingsPromptErrorEl.classList.add("hidden");
   try {
-    const updated = await api.resetPrompts();
+    const updated = await api.resetPrompt();
     settingsSystemPromptEl.value = updated.systemPrompt;
-    settingsToolGuidanceEl.value = updated.toolGuidance;
-    toast("Prompt reset to defaults");
+    toast("Prompt reset to default");
   } catch (error) {
     const message = String(error);
     settingsPromptErrorEl.textContent = message;
@@ -319,7 +312,7 @@ export function initSettings(reconnect: () => Promise<void>): void {
   settingsNavProvidersEl.addEventListener("click", () => paintSettingsNav("providers"));
   settingsNavPromptEl.addEventListener("click", () => {
     paintSettingsNav("prompt");
-    void loadPrompts();
+    void loadPrompt();
   });
   settingsNavConnectionEl.addEventListener("click", () => {
     paintSettingsConnection();
@@ -373,10 +366,10 @@ export function initSettings(reconnect: () => Promise<void>): void {
   });
 
   $("#settingsPromptSaveBtn").addEventListener("click", () => {
-    void savePrompts();
+    void savePrompt();
   });
   $("#settingsPromptResetBtn").addEventListener("click", () => {
-    void resetPrompts();
+    void resetPrompt();
   });
 
   settingsWorkspaceBrowseBtn.addEventListener("click", () => {

@@ -50,14 +50,14 @@ type Settings struct {
 	MaxToolRounds uint32 `json:"max_tool_rounds"`
 }
 
-// Prompts is the user-editable agent prompt: the system prompt plus
-// the tool guidance, stored as SYSTEM_PROMPT.md and TOOL_GUIDANCE.md
-// under config/. The files are authoritative — they win over every
-// default and template; only an explicit per-request override beats
-// them, and the settings UI edits them.
+// Prompts is the user-editable agent prompt: the system prompt file
+// (config/SYSTEM_PROMPT.md). The file is authoritative — it wins over
+// every default; only an explicit per-request override beats it, and
+// the settings UI edits it. Tool guidance and examples are compiled
+// per-OS in code and always appended with the machine + workspace
+// environment block.
 type Prompts struct {
 	SystemPrompt string `json:"systemPrompt"`
-	ToolGuidance string `json:"toolGuidance"`
 }
 
 type turnState struct {
@@ -176,11 +176,10 @@ func (p runtimeProviders) ResolveProvider(name, model string) (inference.Provide
 	return provider, err
 }
 
-// runtimePrompts adapts settings/config prompts to agent.PromptSource.
+// runtimePrompts adapts the prompt file to agent.PromptSource.
 type runtimePrompts struct{ r *AgentRuntime }
 
 func (p runtimePrompts) SystemPrompt(override string) string { return p.r.systemPrompt(override) }
-func (p runtimePrompts) ToolGuidance() string                { return p.r.toolGuidance() }
 
 func (r *AgentRuntime) settingsPath() string {
 	return filepath.Join(r.dataDir, "config", "settings.json")
@@ -265,41 +264,29 @@ func (r *AgentRuntime) systemPrompt(override string) string {
 	return r.store.LoadSystemPrompt()
 }
 
-func (r *AgentRuntime) toolGuidance() string {
-	return r.store.LoadToolGuidance()
+// GetPrompt returns the current prompt file content for the settings
+// UI.
+func (r *AgentRuntime) GetPrompt() Prompts {
+	return Prompts{SystemPrompt: r.store.LoadSystemPrompt()}
 }
 
-// GetPrompts returns the current prompt file contents for the
-// settings UI.
-func (r *AgentRuntime) GetPrompts() Prompts {
-	return Prompts{SystemPrompt: r.store.LoadSystemPrompt(), ToolGuidance: r.store.LoadToolGuidance()}
-}
-
-// SetPrompts replaces both prompt files. Either side may be empty to
-// leave it unchanged; both empty is rejected.
-func (r *AgentRuntime) SetPrompts(systemPrompt, toolGuidance string) (Prompts, error) {
-	if strings.TrimSpace(systemPrompt) == "" && strings.TrimSpace(toolGuidance) == "" {
-		return Prompts{}, fmt.Errorf("parse: system prompt and tool guidance must not both be empty")
+// SetPrompt replaces the prompt file. Blank text is rejected.
+func (r *AgentRuntime) SetPrompt(systemPrompt string) (Prompts, error) {
+	if strings.TrimSpace(systemPrompt) == "" {
+		return Prompts{}, fmt.Errorf("parse: system prompt must not be empty")
 	}
-	if strings.TrimSpace(systemPrompt) != "" {
-		if err := r.store.SaveSystemPrompt(systemPrompt); err != nil {
-			return Prompts{}, err
-		}
-	}
-	if strings.TrimSpace(toolGuidance) != "" {
-		if err := r.store.SaveToolGuidance(toolGuidance); err != nil {
-			return Prompts{}, err
-		}
-	}
-	return r.GetPrompts(), nil
-}
-
-// ResetPrompts rewrites both prompt files from the built-in defaults.
-func (r *AgentRuntime) ResetPrompts() (Prompts, error) {
-	if err := r.store.ResetPrompts(); err != nil {
+	if err := r.store.SaveSystemPrompt(systemPrompt); err != nil {
 		return Prompts{}, err
 	}
-	return r.GetPrompts(), nil
+	return r.GetPrompt(), nil
+}
+
+// ResetPrompt rewrites the prompt file from the built-in default.
+func (r *AgentRuntime) ResetPrompt() (Prompts, error) {
+	if err := r.store.ResetPrompt(); err != nil {
+		return Prompts{}, err
+	}
+	return r.GetPrompt(), nil
 }
 
 func (r *AgentRuntime) maxRounds() uint32 {

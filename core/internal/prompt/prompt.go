@@ -405,17 +405,16 @@ Be autonomous within the user's authorization. Do not confuse autonomy with perm
 
 The objective is not merely to produce an answer. It is to deliver the most useful correct result that the available workspace, tools, and permissions support.`
 
-const ToolGuidance = `
+// toolGuidanceCommon is the OS-agnostic tool mechanics: workspace path
+// rules, read/write/edit discipline, background jobs. It never names an
+// OS or a shell; exactly one per-OS block below is appended at compile
+// time, so Windows turns never see Unix-tool text and Unix turns never
+// see PowerShell text.
+const toolGuidanceCommon = `
 
 Tools:
 - You act on this machine through your tools: run commands with the shell
   tool instead of telling the user to type them themselves.
-- On Windows the shell is PowerShell: always use PowerShell syntax
-  (Get-ChildItem, Get-Content, Select-String, full paths like D:\projects\...
-  or workspace/...). On Linux/macOS the shell is sh: use Linux-style
-  commands there. Never mix the two, and never use cmd.exe syntax or
-  assume Unix tools (grep, rg, ls, cat, sed, awk) exist on Windows —
-  use the built-in PowerShell cmdlets instead.
 - Use the read tool to inspect files instead of guessing what they hold.
 - Pass workspace/<path> for anything inside the workspace and a full
   absolute path for anything outside it; bare relative paths are rejected.
@@ -423,7 +422,7 @@ Tools:
   more lines follow, continue with a larger offset before drawing
   conclusions.
 - Use the write tool to create a new file with its full content, passing
-  overwrite true only to replace an existing file wholesale. Use the edit
+  overwrite true to replace an existing file wholesale. Use the edit
   tool for small changes to an existing file: old_string must match
   verbatim, and when it matches more than once, retry with more
   surrounding lines so it matches exactly once, or pass replace_all true.
@@ -434,13 +433,44 @@ Tools:
   rounds polling status, so a single job always waits. Add "notify": true
   to a background run to be reminded when it finishes instead of polling.
 - To find a file, search likely directories first and widen only when they
-  come up empty — never start with a full-drive recursive sweep. On Windows
-  list bare paths with Select-Object -ExpandProperty FullName, so no table
-  headers pollute the output.
+  come up empty — never start with a full-drive recursive sweep.
 - Never answer that you cannot reach this machine: the shell tool runs
   here, where the workspace lives.`
 
-const UsageExamples = `
+// toolGuidanceWindows is the Windows-only shell discipline.
+const toolGuidanceWindows = `
+
+Shell (Windows PowerShell):
+- The shell is PowerShell: always use PowerShell syntax
+  (Get-ChildItem, Get-Content, Select-String, full paths like D:\projects\...
+  or workspace/...). Never use cmd.exe syntax and never assume Unix tools
+  (grep, rg, ls, cat, sed, awk) exist — use the built-in PowerShell
+  cmdlets instead.
+- List bare paths with Select-Object -ExpandProperty FullName, so no table
+  headers pollute the output.`
+
+// toolGuidanceUnix is the Unix-only shell discipline. Linux and macOS
+// share sh, so one block covers both.
+const toolGuidanceUnix = `
+
+Shell (Unix sh):
+- The shell is sh: use Unix-style commands (ls, cat, grep) with
+  Unix-style paths, or workspace/<path> inside the workspace.`
+
+// ToolGuidance returns the tool mechanics for the running OS: the
+// common block plus exactly one OS block.
+func ToolGuidance() string { return ToolGuidanceFor(runtime.GOOS) }
+
+// ToolGuidanceFor returns the tool mechanics for the named GOOS. Only
+// "windows" takes the PowerShell block; every other OS takes sh.
+func ToolGuidanceFor(goos string) string {
+	if goos == "windows" {
+		return toolGuidanceCommon + toolGuidanceWindows
+	}
+	return toolGuidanceCommon + toolGuidanceUnix
+}
+
+const usageExamplesCommon = `
 Tool examples:
 
 Paths — every path or workdir follows one rule. workspace/<path>
@@ -466,8 +496,8 @@ directories are created for you.
 - New file: {"path": "workspace/notes/todo.txt", "content": "buy milk\n"}
 - Replace a file you already read: {"path": "workspace/notes/todo.txt",
   "content": "buy milk\nbuy eggs\n", "overwrite": true}.
-- Wrong: {"path": "workspace/notes/todo.txt", "content": "..."} when the
-  file already exists and you did not pass overwrite — the call fails
+- Wrong: {"path": "workspace/notes/todo.txt", "content": "..."} when
+  the file already exists and you did not pass overwrite — the call fails
   with exists true instead of clobbering it.
 - Wrong: writing a file and then describing it from memory — the write
   answer only confirms bytes and lines, so read it back when you need
@@ -493,7 +523,9 @@ must match exactly, including line endings.
   match is exact.
 - Never edit a file with sed or awk through the shell; edit matches
   verbatim and keeps the file unchanged when the match is unclear.
+`
 
+const usageExamplesShellCommon = `
 shell — build, test and explore on this machine. The action defaults to
 run, so {"cmd": "..."} alone runs a command synchronously.
 - Quick build: {"action": "run", "cmd": "go build ./...", "workdir": "workspace/backend"}
@@ -501,15 +533,6 @@ run, so {"cmd": "..."} alone runs a command synchronously.
   relative workdir — rejected. Write "workdir": "workspace/backend".
 - Wrong: {"cmd": "...", "workdir": "workspace/../other"} escaping the
   workspace — rejected. Use the absolute path instead.
-- List directories: {"cmd": "ls workspace/backend"} on Linux/macOS,
-  {"cmd": "Get-ChildItem D:\\projects", "workdir": "D:\\"} on Windows.
-  On Windows always use PowerShell cmdlets (Get-ChildItem, Get-Content,
-  Select-String) with Windows paths — never cmd.exe commands, never
-  Unix tools like ls, grep or rg, and never /d/ style paths.
-- Find a file: {"cmd": "Get-ChildItem D:\\projects -Filter go.work -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName"}
-  on Windows (bare paths, no table headers). Search likely folders first;
-  never sweep a whole drive at once — it takes minutes and times out.
-  On Linux/macOS: {"cmd": "find ~/projects -name go.work 2>/dev/null"}.
 - Slow command, waited out: {"action": "run", "cmd": "go test ./short/...",
   "timeout_ms": 90000}.
 - Slow command alongside other work: {"action": "run", "cmd": "go test ./...",
@@ -533,6 +556,38 @@ run, so {"cmd": "..."} alone runs a command synchronously.
   shell tool instead of telling the user to type the command themselves.
 `
 
+// usageExamplesShellWindows shows directory listing and file search the
+// PowerShell way. No Unix commands appear here.
+const usageExamplesShellWindows = `
+- List directories: {"cmd": "Get-ChildItem D:\\projects", "workdir": "D:\\"}
+  on Windows — always PowerShell cmdlets with Windows paths, never cmd.exe
+  commands, never Unix tools like ls or grep, never /d/ style paths.
+- Find a file: {"cmd": "Get-ChildItem D:\\projects -Filter go.work -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName"}
+  (bare paths, no table headers). Search likely folders first;
+  never sweep a whole drive at once — it takes minutes and times out.
+`
+
+// usageExamplesShellUnix shows listing and search the sh way. No
+// PowerShell or cmd.exe appears here.
+const usageExamplesShellUnix = `
+- List directories: {"cmd": "ls workspace/backend"}.
+- Find a file: {"cmd": "find ~/projects -name go.work 2>/dev/null"}.
+  Search likely folders first; never sweep a whole drive at once —
+  it takes minutes and times out.
+`
+
+// UsageExamples returns the tool examples for the running OS.
+func UsageExamples() string { return UsageExamplesFor(runtime.GOOS) }
+
+// UsageExamplesFor returns the tool examples for the named GOOS. Only
+// "windows" takes the PowerShell shell examples.
+func UsageExamplesFor(goos string) string {
+	if goos == "windows" {
+		return usageExamplesCommon + usageExamplesShellCommon + usageExamplesShellWindows
+	}
+	return usageExamplesCommon + usageExamplesShellCommon + usageExamplesShellUnix
+}
+
 // AssembleSystemPrompt builds the tool-capable system prompt. Prefix
 // order is stable for cache friendliness: base, guidance, environment,
 // examples, schemas.
@@ -550,13 +605,21 @@ func AssembleSystemPrompt(base, toolGuidance, environment, examples, schemas str
 	return out.String()
 }
 
-// ToolSystem returns the tool-capable system prompt for a session.
-func ToolSystem(base, guidance, sessionCwd string) string {
-	return AssembleSystemPrompt(base, guidance, EnvironmentBlock(OSName(), sessionCwd), UsageExamples, "")
+// ToolSystem compiles the full turn prompt from the user's file base:
+// the base, the OS-specific tool guidance, then the machine +
+// workspace environment block (always injected, never empty), then
+// the OS-specific tool examples. Prefix order stays stable for prompt
+// cache friendliness: base, guidance, environment, examples.
+func ToolSystem(base, sessionCwd string) string {
+	return AssembleSystemPrompt(base, ToolGuidance(), EnvironmentBlock(OSName(), sessionCwd), UsageExamples(), "")
 }
 
+// EnvironmentBlock reports the machine and workspace every turn runs
+// in: OS + shell, CPU arch, and the session workspace root. It is
+// always appended by ToolSystem, so turns never lose machine context
+// even when the user rewrites their prompt file.
 func EnvironmentBlock(os, workspace string) string {
-	return "- The harness runs on " + os + "; write shell commands in its syntax.\n- The session workspace is " + workspace + "; workspace/<path> resolves inside it."
+	return "- The harness runs on " + os + " (arch " + runtime.GOARCH + "); write shell commands in its syntax.\n- The session workspace is " + workspace + "; workspace/<path> resolves inside it."
 }
 
 func OSName() string {

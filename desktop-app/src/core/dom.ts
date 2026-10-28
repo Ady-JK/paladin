@@ -231,9 +231,6 @@ export const settingsPanePromptEl = $("#settingsPanePrompt");
 // settingsSystemPromptEl is a const in this module.
 // It edits config/SYSTEM_PROMPT.md.
 export const settingsSystemPromptEl = $<HTMLTextAreaElement>("#settingsSystemPrompt");
-// settingsToolGuidanceEl is a const in this module.
-// It edits config/TOOL_GUIDANCE.md.
-export const settingsToolGuidanceEl = $<HTMLTextAreaElement>("#settingsToolGuidance");
 // settingsPromptErrorEl is a const in this module.
 // It surfaces prompt save failures inline.
 export const settingsPromptErrorEl = $("#settingsPromptError");

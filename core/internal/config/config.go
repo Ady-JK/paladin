@@ -34,14 +34,13 @@ const (
 
 	KeyringService = "paladin"
 
-	// SystemPromptFileName and ToolGuidanceFileName are the
-	// user-editable prompt files under config/. They hold the system
-	// prompt and the tool guidance respectively (together they are the
-	// full agent prompt). The agent core reads them at turn time; the
-	// settings UI edits them. Missing or blank files are seeded from
-	// the built-in defaults.
+	// SystemPromptFileName is the user-editable prompt file under
+	// config/. It holds the system prompt; the agent core reads it at
+	// turn time and the settings UI edits it. A missing or blank file
+	// is seeded from the built-in default. The tool guidance and
+	// examples are compiled in per-OS (ToolGuidance/UsageExamples pick
+	// exactly one OS block), so they live in code, not in a file.
 	SystemPromptFileName = "SYSTEM_PROMPT.md"
-	ToolGuidanceFileName = "TOOL_GUIDANCE.md"
 
 	OpencodeCatalogURL    = "https://opencode.ai/inference/go/v1/models"
 	OpencodeUserAgent     = "paladin/1.0"
@@ -185,22 +184,11 @@ func (s *Store) SystemPromptPath() string {
 	return filepath.Join(s.dataDir, "config", SystemPromptFileName)
 }
 
-// ToolGuidancePath is the user-editable tool guidance file.
-func (s *Store) ToolGuidancePath() string {
-	return filepath.Join(s.dataDir, "config", ToolGuidanceFileName)
-}
-
 // LoadSystemPrompt reads the system prompt file, seeding it from the
 // built-in default when missing or blank. The file is authoritative:
 // callers use exactly what it holds.
 func (s *Store) LoadSystemPrompt() string {
 	return loadPromptFile(s.SystemPromptPath(), DefaultSystemPrompt())
-}
-
-// LoadToolGuidance reads the tool guidance file, seeding it from the
-// built-in default when missing or blank.
-func (s *Store) LoadToolGuidance() string {
-	return loadPromptFile(s.ToolGuidancePath(), DefaultToolGuidance())
 }
 
 func loadPromptFile(path, seed string) string {
@@ -216,7 +204,7 @@ func loadPromptFile(path, seed string) string {
 }
 
 // SaveSystemPrompt replaces the system prompt file. Blank text is
-// rejected: use ResetPrompts to restore the default.
+// rejected: use ResetPrompt to restore the default.
 func (s *Store) SaveSystemPrompt(text string) error {
 	if strings.TrimSpace(text) == "" {
 		return fmt.Errorf("parse: system prompt must not be empty")
@@ -224,21 +212,9 @@ func (s *Store) SaveSystemPrompt(text string) error {
 	return AtomicWrite(s.SystemPromptPath(), []byte(text))
 }
 
-// SaveToolGuidance replaces the tool guidance file. Blank text is
-// rejected: use ResetPrompts to restore the default.
-func (s *Store) SaveToolGuidance(text string) error {
-	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("parse: tool guidance must not be empty")
-	}
-	return AtomicWrite(s.ToolGuidancePath(), []byte(text))
-}
-
-// ResetPrompts rewrites both prompt files from the built-in defaults.
-func (s *Store) ResetPrompts() error {
-	if err := AtomicWrite(s.SystemPromptPath(), []byte(DefaultSystemPrompt())); err != nil {
-		return err
-	}
-	return AtomicWrite(s.ToolGuidancePath(), []byte(DefaultToolGuidance()))
+// ResetPrompt rewrites the prompt file from the built-in default.
+func (s *Store) ResetPrompt() error {
+	return AtomicWrite(s.SystemPromptPath(), []byte(DefaultSystemPrompt()))
 }
 
 func (s *Store) LoadProviders() (ProvidersFile, error) {
@@ -326,10 +302,6 @@ func (s *Store) SaveModels(file ModelsFile) error {
 // DefaultSystemPrompt returns the built-in system prompt text used to
 // seed the prompt file on first run.
 func DefaultSystemPrompt() string { return prompt.SystemPrompt }
-
-// DefaultToolGuidance returns the built-in tool guidance text used to
-// seed the guidance file on first run.
-func DefaultToolGuidance() string { return prompt.ToolGuidance }
 
 // Resolve the provider to use: explicit name wins, else the default
 // when it has a real key, else the first provider with a real key.

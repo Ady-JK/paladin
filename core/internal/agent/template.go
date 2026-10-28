@@ -50,10 +50,11 @@ type ProviderSource interface {
 	ResolveProvider(name, model string) (inference.Provider, error)
 }
 
-// PromptSource supplies the runtime defaults a template can override.
+// PromptSource supplies the runtime default prompt. The file content
+// is authoritative; only an explicit per-request override beats it.
+// Tool guidance and examples are compiled per-OS inside prompt.
 type PromptSource interface {
 	SystemPrompt(override string) string
-	ToolGuidance() string
 }
 
 // Deps is the runtime-owned set of collaborators Build needs. Keeping
@@ -102,8 +103,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	}
 
 	base := d.Prompts.SystemPrompt(strVal(req.SystemPrompt))
-	guidance := d.Prompts.ToolGuidance()
-	system := prompt.ToolSystem(base, guidance, sess.Meta.Cwd)
+	system := prompt.ToolSystem(base, sess.Meta.Cwd)
 
 	registry := d.Tools
 	shell := d.Shell

@@ -603,69 +603,63 @@ func TestResolveProviderCatalogDefaultForPlainProvider(t *testing.T) {
 	}
 }
 
-func TestSystemPromptToolGuidanceMaxRounds(t *testing.T) {
+func TestSystemPromptFileMaxRounds(t *testing.T) {
 	rt, dir := testRuntime(t)
 	if got := rt.systemPrompt("override"); got != "override" {
 		t.Fatalf("got %q", got)
 	}
-	// First read seeds the files from the built-in defaults.
+	// First read seeds the file from the built-in default.
 	if got := rt.systemPrompt(""); got != config.DefaultSystemPrompt() {
 		t.Fatalf("system prompt not seeded from default")
-	}
-	if got := rt.toolGuidance(); got != config.DefaultToolGuidance() {
-		t.Fatalf("tool guidance not seeded from default")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "config", config.SystemPromptFileName)); err != nil {
 		t.Fatalf("system prompt file not seeded: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "config", config.ToolGuidanceFileName)); err != nil {
-		t.Fatalf("tool guidance file not seeded: %v", err)
-	}
 	if got := rt.maxRounds(); got != config.DefaultMaxToolRounds {
 		t.Fatalf("got %d", got)
 	}
-	// Edited files are authoritative.
-	edited, err := rt.SetPrompts("custom sys", "custom guide")
+	// The edited file is authoritative.
+	edited, err := rt.SetPrompt("custom sys")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if edited.SystemPrompt != "custom sys" || edited.ToolGuidance != "custom guide" {
+	if edited.SystemPrompt != "custom sys" {
 		t.Fatalf("got %+v", edited)
 	}
 	if got := rt.systemPrompt(""); got != "custom sys" {
 		t.Fatalf("got %q", got)
 	}
-	if got := rt.toolGuidance(); got != "custom guide" {
-		t.Fatalf("got %q", got)
-	}
-	// Per-request override still beats the files.
+	// Per-request override still beats the file.
 	if got := rt.systemPrompt("override"); got != "override" {
 		t.Fatalf("got %q", got)
 	}
-	// Blank files reseed from the defaults instead of breaking turns.
+	// A blank file reseeds from the default instead of breaking turns.
 	if err := os.WriteFile(rt.store.SystemPromptPath(), []byte("  \n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got := rt.systemPrompt(""); got != config.DefaultSystemPrompt() {
 		t.Fatalf("blank file not reseeded")
 	}
-	// Empty save and empty set are rejected.
-	if _, err := rt.SetPrompts("", ""); err == nil {
+	// Empty saves are rejected.
+	if _, err := rt.SetPrompt(""); err == nil {
 		t.Fatal("empty set accepted")
+	}
+	if _, err := rt.SetPrompt("   "); err == nil {
+		t.Fatal("blank set accepted")
 	}
 	if err := rt.store.SaveSystemPrompt(""); err == nil {
 		t.Fatal("empty save accepted")
 	}
-	// Reset restores the built-in defaults.
-	if _, err := rt.SetPrompts("custom sys", "custom guide"); err != nil {
+	// Reset restores the built-in default.
+	if _, err := rt.SetPrompt("custom sys"); err != nil {
 		t.Fatal(err)
 	}
-	reset, err := rt.ResetPrompts()
+	reset, err := rt.ResetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reset.SystemPrompt != config.DefaultSystemPrompt() || reset.ToolGuidance != config.DefaultToolGuidance() {
-		t.Fatalf("reset did not restore defaults")
+	if reset.SystemPrompt != config.DefaultSystemPrompt() {
+		t.Fatalf("reset did not restore default")
 	}
 	// settings.json max rounds still apply; corrupt files fall back.
 	settings := `{"max_tool_rounds":7}`

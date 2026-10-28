@@ -97,29 +97,27 @@ export function updateProvider(
   return invoke<ProviderInfo>("update_provider", { ...entry });
 }
 
-export interface AgentPrompts {
+export interface AgentPrompt {
   systemPrompt: string;
-  toolGuidance: string;
 }
 
-// getPrompts reads the agent prompt files (SYSTEM_PROMPT.md and
-// TOOL_GUIDANCE.md under config/) for the Prompt settings pane.
-export function getPrompts(): Promise<AgentPrompts> {
-  return invoke<AgentPrompts>("get_prompts");
+// getPrompt reads the agent prompt file (config/SYSTEM_PROMPT.md) for
+// the Prompt settings pane. Tool guidance and examples are compiled
+// per-OS in the core and always appended with the machine + workspace
+// environment block.
+export function getPrompt(): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("get_prompt");
 }
 
-// setPrompts replaces the prompt files. Either side may be empty to
-// leave it unchanged.
-export function setPrompts(prompts: {
-  systemPrompt: string;
-  toolGuidance: string;
-}): Promise<AgentPrompts> {
-  return invoke<AgentPrompts>("set_prompts", { ...prompts });
+// setPrompt replaces the prompt file. Turns started afterwards use the
+// new text immediately.
+export function setPrompt(prompt: { systemPrompt: string }): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("set_prompt", { ...prompt });
 }
 
-// resetPrompts rewrites both prompt files from the built-in defaults.
-export function resetPrompts(): Promise<AgentPrompts> {
-  return invoke<AgentPrompts>("reset_prompts");
+// resetPrompt rewrites the prompt file from the built-in default.
+export function resetPrompt(): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("reset_prompt");
 }
 
 export function openSession(

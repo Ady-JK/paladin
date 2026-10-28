@@ -270,19 +270,16 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(list)
-	case "get_prompts":
-		return ok(rt.GetPrompts())
-	case "set_prompts":
-		updated, err := rt.SetPrompts(
-			stringParam(req.Params, "systemPrompt"),
-			stringParam(req.Params, "toolGuidance"),
-		)
+	case "get_prompt":
+		return ok(rt.GetPrompt())
+	case "set_prompt":
+		updated, err := rt.SetPrompt(stringParam(req.Params, "systemPrompt"))
 		if err != nil {
 			return failed(err)
 		}
 		return ok(updated)
-	case "reset_prompts":
-		updated, err := rt.ResetPrompts()
+	case "reset_prompt":
+		updated, err := rt.ResetPrompt()
 		if err != nil {
 			return failed(err)
 		}

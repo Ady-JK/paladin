@@ -43,8 +43,7 @@ func (f *fakeProviders) ResolveProvider(name, model string) (inference.Provider,
 }
 
 type fakePrompts struct {
-	base     string
-	guidance string
+	base string
 }
 
 func (f fakePrompts) SystemPrompt(override string) string {
@@ -53,7 +52,6 @@ func (f fakePrompts) SystemPrompt(override string) string {
 	}
 	return f.base
 }
-func (f fakePrompts) ToolGuidance() string { return f.guidance }
 
 func testDeps(t *testing.T, sess transcript.Session) (Deps, *fakeSessions, *fakeProviders, *fakePrompts) {
 	t.Helper()
@@ -61,7 +59,7 @@ func testDeps(t *testing.T, sess transcript.Session) (Deps, *fakeSessions, *fake
 	t.Cleanup(cancel)
 	sessions := &fakeSessions{sess: sess}
 	providers := &fakeProviders{provider: &mockProvider{}}
-	prompts := &fakePrompts{base: "runtime base", guidance: "runtime guidance"}
+	prompts := &fakePrompts{base: "runtime base"}
 	registry := tools.BuiltinRegistry()
 	shell, _ := registry.Get("shell")
 	shellTool, _ := shell.(*tools.ShellTool)
@@ -172,7 +170,7 @@ func TestBuildResolvesEverything(t *testing.T) {
 	if a.shell == nil {
 		t.Fatal("default template must keep the shared shell")
 	}
-	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "runtime guidance") {
+	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "workspace/<path>") {
 		t.Fatalf("system prompt not composed: %q", a.system)
 	}
 	// The tool context is derived from the session, not the request.
@@ -186,12 +184,13 @@ func TestBuildPromptPrecedence(t *testing.T) {
 	d, _, _, _ := testDeps(t, sess)
 	tpl := Template{Name: "custom"}
 
-	// The runtime default (the prompt files) is used as-is.
+	// The runtime default (the prompt file) is used as-is, with the
+	// OS-specific guidance compiled in.
 	a, err := tpl.Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "runtime guidance") {
+	if !strings.Contains(a.system, "runtime base") || !strings.Contains(a.system, "workspace/<path>") {
 		t.Fatalf("runtime prompt lost: %q", a.system)
 	}
 
