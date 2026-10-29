@@ -8,7 +8,7 @@
 import * as api from "../core/api";
 import { continueBtn, messagesEl, pauseBtn, sendBtn, statusDetailEl } from "../core/dom";
 import { state } from "../core/state";
-import type { AttachSnapshot, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
+import type { Approval, AttachSnapshot, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
 import { setStatus } from "../ui/status";
 import { toast } from "../ui/toast";
 import { escapeHtml } from "../core/format";
@@ -19,8 +19,10 @@ import { handleTodoToolEvent, refreshTodos } from "./todos";
 import { refreshUsage } from "./usage";
 import { refreshSessions, renderSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
+import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
+import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
 
-export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "paused";
+export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "paused" | "approval";
 
 type Entry = {
   sessionId: string;
@@ -34,11 +36,20 @@ type Entry = {
   // Outcome badge for a session finished while not on screen.
   badge: "" | "done" | "error" | "paused";
   asks: Map<string, ToolInfo>;
+  // Approval cards still waiting on the user, by call id.
+  approvals: Map<string, Approval>;
+  // The sidecar said a turn awaits approval before we saw its events.
+  awaitingHint: boolean;
   paused: boolean;
   // Events that land while an attach is in flight wait here.
   attaching: TurnEvent[] | null;
   // Recently finished turn ids: a late submit reply must not revive them.
   finished: Set<string>;
+  // What the running turn is doing, for the working bar: tools still
+  // running (id → label) and whether the reply is streaming.
+  tools: Map<string, string>;
+  phase: WorkingPhase;
+  since: number;
 };
 
 const entries = new Map<string, Entry>();
@@ -60,9 +71,14 @@ function entry(sessionId: string): Entry {
       users: new Map(),
       badge: "",
       asks: new Map(),
+      approvals: new Map(),
+      awaitingHint: false,
       paused: false,
       attaching: null,
       finished: new Set(),
+      tools: new Map(),
+      phase: "thinking",
+      since: 0,
     };
     entries.set(sessionId, e);
   }
@@ -99,6 +115,7 @@ function mount(e: Entry): void {
 export function liveBadge(sessionId: string): LiveBadge {
   const e = entries.get(sessionId);
   if (!e) return "";
+  if (e.running && (e.approvals.size > 0 || e.awaitingHint)) return "approval";
   if (e.asks.size > 0 && !visible(sessionId)) return "input";
   if (e.running) return "running";
   if (e.queued.length > 0) return "queued";
@@ -126,6 +143,8 @@ export function syncComposer(): void {
   sendBtn.classList.remove("hidden");
   sendBtn.title = busy ? "Queue after the running turn" : "Send";
   continueBtn.classList.toggle("hidden", !(e?.paused && !busy && e.queued.length === 0));
+  paintWorking();
+  syncWorktreeChip();
 }
 
 function queuedRow(e: Entry, turn: TurnInfo): HTMLElement {
@@ -154,6 +173,7 @@ function promote(row: HTMLElement): void {
 
 function newView(e: Entry): TurnView {
   return new TurnView({
+    sessionId: e.sessionId,
     visible: () => visible(e.sessionId),
     tool: (tool) => onTool(e, tool),
   });
@@ -183,6 +203,13 @@ function onTool(e: Entry, tool: ToolInfo): void {
 // promoted in place) and a fresh agent view right after it.
 function startTurn(e: Entry, turn: TurnInfo): TurnView {
   e.queued = e.queued.filter((q) => q.turnId !== turn.turnId);
+  if (e.running?.turnId !== turn.turnId) {
+    e.tools.clear();
+    e.approvals.clear();
+    e.awaitingHint = !!turn.awaitingApproval;
+    e.phase = "thinking";
+    e.since = 0;
+  }
   e.running = turn;
   e.paused = false;
   let anchor: HTMLElement | null = e.users.get(turn.turnId) ?? null;
@@ -251,7 +278,99 @@ function apply(e: Entry, ev: TurnEvent): void {
     default: {
       const view = e.views.get(ev.turnId);
       view?.apply(ev);
+      if (e.running?.turnId === ev.turnId && track(e, ev) && visible(e.sessionId)) {
+        paintWorking();
+      }
     }
+  }
+}
+
+// track folds a live event into the entry's activity. True when the
+// working bar text may have changed.
+function track(e: Entry, ev: TurnEvent): boolean {
+  switch (ev.event) {
+    case "chat/tool": {
+      const tool = ev.tool;
+      if (!tool) return false;
+      if (tool.status === "running") e.tools.set(tool.id, workingLabel(tool));
+      else e.tools.delete(tool.id);
+      if (e.tools.size === 0) e.phase = "thinking";
+      return true;
+    }
+    case "chat/delta":
+      if (e.phase === "writing" && e.tools.size === 0) return false;
+      e.phase = "writing";
+      return true;
+    case "chat/retry":
+      e.phase = "retrying";
+      return true;
+    case "chat/compact":
+      e.phase = "compacting";
+      return true;
+    case "chat/approval":
+      return noteApproval(e, ev.approval);
+  }
+  return false;
+}
+
+// noteApproval keeps the entry's waiting set in step with the cards.
+function noteApproval(e: Entry, ap: Approval | undefined): boolean {
+  if (!ap?.id) return false;
+  e.awaitingHint = false;
+  if (ap.state === "pending") e.approvals.set(ap.id, ap);
+  else e.approvals.delete(ap.id);
+  sidebar();
+  return true;
+}
+
+// ticker refreshes the working bar's elapsed time once a second.
+let ticker = 0;
+
+// paintWorking shows what the visible session's running turn is doing:
+// a spinner, how long it has run, and its current step. It stays up for
+// the whole turn so a quiet stretch never looks like a stall.
+export function paintWorking(): void {
+  const el = workingBar();
+  const e = state.sessionId ? entries.get(state.sessionId) : undefined;
+  const turn = e?.running;
+  if (!e || !turn) {
+    el.classList.add("hidden");
+    window.clearInterval(ticker);
+    ticker = 0;
+    return;
+  }
+  if (!e.since) {
+    const started = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
+    e.since = Number.isFinite(started) ? started : Date.now();
+  }
+  const labels = [...e.tools.values()];
+  const waiting = e.approvals.size > 0 || e.awaitingHint;
+  const what = waiting
+    ? "Waiting for approval"
+    : turn.compact
+      ? "Compacting context"
+      : labels.length
+        ? labels[labels.length - 1]
+        : PHASE_TEXT[e.phase];
+  el.classList.remove("hidden");
+  el.dataset.phase = waiting ? "approval" : labels.length ? "tool" : e.phase;
+  el.querySelector(".working-title")!.textContent = turn.mode === "plan" ? "Planning" : "Working";
+  el.querySelector(".working-time")!.textContent = formatElapsed(Date.now() - e.since);
+  const whatEl = el.querySelector<HTMLElement>(".working-what")!;
+  whatEl.textContent = what;
+  whatEl.title = what;
+  const more = labels.length > 1 ? `+${labels.length - 1} more` : "";
+  const queued = e.queued.length ? `${e.queued.length} queued` : "";
+  el.querySelector(".working-more")!.textContent = [more, queued].filter(Boolean).join(" · ");
+  if (!ticker) {
+    ticker = window.setInterval(() => {
+      const cur = state.sessionId ? entries.get(state.sessionId) : undefined;
+      if (!cur?.running) {
+        paintWorking();
+        return;
+      }
+      el.querySelector(".working-time")!.textContent = formatElapsed(Date.now() - cur.since);
+    }, 1000);
   }
 }
 
@@ -271,6 +390,10 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     return;
   }
   e.running = null;
+  e.tools.clear();
+  e.approvals.clear();
+  e.awaitingHint = false;
+  e.since = 0;
   for (const [id, ask] of e.asks) {
     // A turn that ended cannot still be waiting for an answer.
     handleAskToolEvent(e.sessionId, { ...ask, status: "failed" });
@@ -313,6 +436,7 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     // the last live event.
     void refreshUsage();
     void refreshTodos();
+    void refreshWorktreeBar();
   } else if (!quiet) {
     e.badge = failure ? "error" : turn.needsContinue ? "paused" : "done";
     const what = failure ? "failed" : turn.needsContinue ? "paused at the round cap" : "finished";
@@ -375,7 +499,12 @@ export function finishAttach(sessionId: string, snap: AttachSnapshot): void {
     }
   }
   e.running = live;
+  e.approvals.clear();
+  e.awaitingHint = false;
   if (live && !live.persisted) {
+    for (const ev of snap.events ?? []) {
+      if (ev.event === "chat/approval") noteApproval(e, ev.approval);
+    }
     let view = e.views.get(live.turnId);
     let user = e.users.get(live.turnId) ?? null;
     if (!view) {
@@ -471,6 +600,7 @@ export async function bootLive(): Promise<void> {
     const e = entry(t.sessionId);
     if (t.state === "running") {
       if (e.running?.turnId !== t.turnId) e.running = t;
+      e.awaitingHint = !!t.awaitingApproval && e.approvals.size === 0;
     } else if (t.state === "queued" && !e.queued.some((q) => q.turnId === t.turnId)) {
       e.queued.push(t);
     }

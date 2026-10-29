@@ -36,8 +36,6 @@ import type { GroupedLab, GroupedProvider, ProviderInfo } from "../core/types";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
 import { icon } from "../icons";
 
-// MODEL_KEY is a const in this module.
-// It supports the desktop app frontend.
 const MODEL_KEY = "paladin.model";
 
 export async function loadProviders(): Promise<void> {
@@ -52,8 +50,6 @@ export async function loadProviders(): Promise<void> {
   state.onProvidersChanged();
 }
 
-// restoreModel is a function in this module.
-// It supports the desktop app frontend.
 function restoreModel(): void {
   state.selectedProvider = "";
   state.selectedLab = "";
@@ -104,8 +100,6 @@ function restoreModel(): void {
   paintModel();
 }
 
-// syncModelSelects is a function in this module.
-// It supports the desktop app frontend.
 export function syncModelSelects(): void {
   collapsedProviders.delete(bare(state.selectedProvider));
   collapsedLabs.delete(labKey(bare(state.selectedProvider), bare(state.selectedLab)));
@@ -139,8 +133,6 @@ export function renderTrees(): void {
   modelDetailEl.innerHTML = detailHTML();
 }
 
-// groupedTree is a function in this module.
-// It supports the desktop app frontend.
 export function groupedTree(
   query: string,
   filter: { provider: string; lab: string } | null = state.treeFilter,
@@ -214,8 +206,6 @@ export function groupedTree(
   return out;
 }
 
-// flatModels is a function in this module.
-// It supports the desktop app frontend.
 function flatModels(tree: GroupedProvider[]): { provider: string; model: string }[] {
   const out: { provider: string; model: string }[] = [];
   for (const p of tree) {
@@ -312,8 +302,6 @@ function treeHTML(tree: GroupedProvider[]): string {
   return out;
 }
 
-// detailHTML is a function in this module.
-// It supports the desktop app frontend.
 function detailHTML(): string {
   const target = state.highlightedModel || state.selectedModel;
   const info = state.providers.find((p) => p.name === state.selectedProvider);
@@ -341,8 +329,6 @@ function detailHTML(): string {
     ${apiType ? row("API", apiType) : ""}`;
 }
 
-// paintPick is a function in this module.
-// It supports the desktop app frontend.
 function paintPick(): void {
   const pickedProvider = bare(state.selectedProvider);
   const pickedLab = bare(state.selectedLab);
@@ -400,8 +386,6 @@ function paintPick(): void {
   }
 }
 
-// preferReal is a function in this module.
-// It supports the desktop app frontend.
 function preferReal(infos: ProviderInfo[], display: string): ProviderInfo | undefined {
   return (
     infos.find((i) => i.name === display) ??
@@ -410,8 +394,6 @@ function preferReal(infos: ProviderInfo[], display: string): ProviderInfo | unde
   );
 }
 
-// applyProviderGroup is a function in this module.
-// It supports the desktop app frontend.
 function applyProviderGroup(display: string): void {
   const group = groupedTree("", null).find((g) => g.display === display);
   if (!group) {
@@ -434,8 +416,6 @@ function applyProviderGroup(display: string): void {
   }
 }
 
-// applyLabGroup is a function in this module.
-// It supports the desktop app frontend.
 function applyLabGroup(display: string): void {
   const group = groupedTree("", null).find((g) => g.display === bare(state.selectedProvider));
   const lab = group?.labs.find((l) => l.display === display);
@@ -445,8 +425,6 @@ function applyLabGroup(display: string): void {
   }
 }
 
-// pickModel is a function in this module.
-// It supports the desktop app frontend.
 export function pickModel(name: string, model: string): void {
   const provider = state.providers.find((p) => p.name === name);
   if (!provider) {
@@ -461,8 +439,6 @@ export function pickModel(name: string, model: string): void {
   syncModelSelects();
 }
 
-// quickSelect is a function in this module.
-// It supports the desktop app frontend.
 function quickSelect(query: string): boolean {
   const flat = flatModels(groupedTree(query));
   const target =
@@ -477,8 +453,6 @@ function quickSelect(query: string): boolean {
   return true;
 }
 
-// moveHighlight is a function in this module.
-// It supports the desktop app frontend.
 function moveHighlight(query: string, delta: 1 | -1): void {
   const flat = flatModels(groupedTree(query));
   if (flat.length === 0) {
@@ -504,8 +478,6 @@ function moveHighlight(query: string, delta: 1 | -1): void {
   modelDetailEl.innerHTML = detailHTML();
 }
 
-// persistModel is a function in this module.
-// It supports the desktop app frontend.
 function persistModel(): void {
   try {
     localStorage.setItem(
@@ -516,8 +488,6 @@ function persistModel(): void {
   }
 }
 
-// paintModel is a function in this module.
-// It supports the desktop app frontend.
 function paintModel(): void {
   const provider = bare(state.selectedProvider);
   const short = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "";
@@ -532,7 +502,6 @@ function paintModel(): void {
 }
 
 // handleTreeClick toggles provider/lab groups and picks models.
-// It supports the desktop app frontend.
 export function handleTreeClick(event: Event): void {
   event.stopPropagation();
   const toggle = (event.target as HTMLElement).closest<HTMLElement>("[data-ptoggle],[data-ltoggle]");
@@ -565,7 +534,6 @@ export function handleTreeClick(event: Event): void {
 }
 
 // initModelPicker wires the model menu, dropdowns, and search fields.
-// It supports the desktop app frontend.
 export function initModelPicker(): void {
   let searchTimer = 0;
   providerPickEl.addEventListener("change", () => {

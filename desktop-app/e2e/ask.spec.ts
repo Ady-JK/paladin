@@ -8,15 +8,15 @@ const QUESTIONS = [
 ];
 
 // Installs a stub turn that emits a running ask tool call, then resolves
-// the chat promise once the wizard answers through answer_ask.
-async function stubAskTurn(page: import("@playwright/test").Page) {
+// the chat promise once the wizard answers through answerAsk.
+async function stubAskTurn(page: import("@playwright/test").Page, questions: unknown[] = QUESTIONS) {
   await page.evaluate((questions) => {
     const w = window as any;
     w.__e2eAskAnswers = null;
     w.__e2eAskCancelled = null;
     const base = window.__paladinBaseInvoke.bind(window);
     window.__paladinBaseInvoke = async (cmd: string, args: any) => {
-      if (cmd === "answer_ask") {
+      if (cmd === "answerAsk") {
         w.__e2eAskAnswers = args.answers;
         const handlers = w.__e2eAskHandlers;
         handlers?.onTool({
@@ -34,7 +34,7 @@ async function stubAskTurn(page: import("@playwright/test").Page) {
         });
         return true;
       }
-      if (cmd === "cancel_ask") {
+      if (cmd === "cancelAsk") {
         w.__e2eAskCancelled = args.callId;
         w.__e2eAskDone?.({
           sessionId: "sess-notify-1",
@@ -46,7 +46,7 @@ async function stubAskTurn(page: import("@playwright/test").Page) {
       }
       return base(cmd, args);
     };
-    (window as any).paladin.chat = (params: any, handlers: any) => {
+    (window as any).__e2eRunTurn = (params: any, handlers: any) => {
       const ww = window as any;
       ww.__e2eAskHandlers = handlers;
       ww.__e2eChats = ww.__e2eChats || [];
@@ -64,7 +64,7 @@ async function stubAskTurn(page: import("@playwright/test").Page) {
         }, 50);
       });
     };
-  }, QUESTIONS);
+  }, questions);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -125,4 +125,39 @@ test("Escape cancels the wizard and stops the turn", async ({ page }) => {
   await expect(modal).toBeHidden();
   const cancelled = await page.evaluate(() => (window as any).__e2eAskCancelled);
   expect(cancelled).toBe("c-ask-1");
+});
+
+test("a multiple-choice question takes several options plus free text", async ({ page }) => {
+  await stubAskTurn(page, [
+    {
+      question: "Which checks?",
+      options: ["lint", "unit", "e2e", "types", "bench"],
+      multiple: true,
+    },
+  ]);
+  await page.fill("#promptInput", "ship it");
+  await page.click("#sendBtn");
+  const modal = page.locator("#askModal");
+  await expect(modal).toBeVisible();
+  await expect(modal).toContainText("Pick any");
+  // All five options show (up to six are allowed), as checkboxes.
+  await expect(modal.locator('[data-ask-opt][role="checkbox"]')).toHaveCount(5);
+  // Nothing is preselected for multi-select.
+  await expect(modal.locator('[data-ask-opt][aria-checked="true"]')).toHaveCount(0);
+  await modal.getByRole("checkbox", { name: /lint/ }).click();
+  await page.keyboard.press("3");
+  await expect(modal.locator('[data-ask-opt][aria-checked="true"]')).toHaveCount(2);
+  // Toggling again unselects.
+  await page.keyboard.press("3");
+  await page.keyboard.press("5");
+  await modal.locator('[data-ask="custom"]').fill("fuzz");
+  await page.keyboard.press("Enter");
+  await expect(modal).toContainText("Review");
+  await expect(modal).toContainText("lint, bench, fuzz");
+  await page.keyboard.press("Enter");
+  await expect(modal).toBeHidden();
+  const answers = await page.evaluate(() => (window as any).__e2eAskAnswers);
+  expect(answers).toEqual([
+    { question: "Which checks?", answer: "lint, bench, fuzz", selected: ["lint", "bench"] },
+  ]);
 });

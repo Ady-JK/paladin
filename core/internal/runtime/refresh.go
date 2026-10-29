@@ -1,7 +1,8 @@
-// Package runtime: refresh.go fetches provider model catalogs. Fetching
+// refresh.go fetches provider model catalogs. Fetching
 // is always user-initiated: nothing here runs on startup or when a
 // provider is added or edited, so no provider is contacted unless the
 // user asks for it.
+
 package runtime
 
 import (

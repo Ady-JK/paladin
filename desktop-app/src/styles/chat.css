@@ -1,0 +1,368 @@
+/* ============ Chat skin: graphite ============
+   Neutral surfaces, a centred reading column, plain agent prose, a muted
+   user block and one-line tool rows. Violet only marks focus, links and
+   live progress. Unlayered on purpose: the skin wins over utilities. */
+
+#agentView {
+  background: var(--color-slate-50);
+}
+
+.dark #agentView {
+  background: var(--color-slate-950);
+}
+
+.dark #chatView {
+  background: transparent;
+}
+
+#chatView {
+  position: relative;
+}
+
+#messages .turn-row {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  margin-top: 1.5rem;
+}
+
+/* Live rows sit in display:contents roots, so spacing is per row. */
+#messages > .turn-row:first-child,
+#messages > .live-root:first-child > .turn-row:first-child {
+  margin-top: 0;
+}
+
+.agent-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-slate-800);
+}
+
+.dark .agent-text,
+.dark #messages .turn-row > .md {
+  color: var(--color-slate-200);
+}
+
+.turn-muted {
+  color: var(--color-slate-500);
+}
+
+/* "thinking…" shimmers instead of spinning. */
+.thinking-ph {
+  background: linear-gradient(90deg, var(--color-slate-500) 30%, var(--color-slate-300) 50%, var(--color-slate-500) 70%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: -100% center;
+  }
+}
+
+/* ---- User message: a muted block docked right. ---- */
+.bubble-user {
+  max-width: 80%;
+  border-radius: 14px;
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+  padding: 10px 16px;
+  box-shadow: none;
+  border: 0;
+}
+
+.dark .bubble-user {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+
+/* ---- Tool calls: one quiet line each, folded into runs. ---- */
+.tool-run {
+  margin: 6px 0;
+}
+
+.tool-run + .agent-text:empty + .tool-run {
+  margin-top: 0;
+}
+
+.tool-row-head,
+.tool-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 12px);
+  min-width: 0;
+  margin-left: -6px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  color: var(--color-slate-500);
+  cursor: pointer;
+}
+
+.tool-row-head:hover,
+.tool-run-head:hover {
+  background: rgb(0 0 0 / 0.035);
+  color: var(--color-slate-600);
+}
+
+.dark .tool-row-head,
+.dark .tool-run-head {
+  color: var(--color-slate-400);
+}
+
+.dark .tool-row-head:hover,
+.dark .tool-run-head:hover {
+  background: rgb(255 255 255 / 0.035);
+  color: var(--color-slate-300);
+}
+
+.tool-row-head:active,
+.tool-run-head:active {
+  transform: none;
+}
+
+.tool-row-head:focus-visible,
+.tool-run-head:focus-visible {
+  outline: 2px solid rgb(146 134 214 / 0.55);
+  outline-offset: 0;
+}
+
+.tool-row-head [hidden],
+.tool-run-head [hidden] {
+  display: none !important;
+}
+
+.tool-ico {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-slate-400);
+}
+
+.dark .tool-ico {
+  color: var(--color-slate-500);
+}
+
+.tool-verb {
+  flex: none;
+  font-weight: 500;
+  color: var(--color-slate-700);
+}
+
+.dark .tool-verb {
+  color: var(--color-slate-300);
+}
+
+.tool-detail,
+.tool-now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-now {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-slate-400);
+}
+
+.dark .tool-now {
+  color: var(--color-slate-500);
+}
+
+.tool-chip {
+  min-width: 0;
+  max-width: 64ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 6px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-100);
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.375rem;
+  color: var(--color-slate-700);
+}
+
+.dark .tool-chip {
+  border-color: rgb(255 255 255 / 0.07);
+  background: rgb(255 255 255 / 0.045);
+  color: var(--color-slate-300);
+}
+
+.tool-fail {
+  flex: none;
+  font-size: 0.75rem;
+  color: #dc2626;
+}
+
+.dark .tool-fail {
+  color: #f87171;
+}
+
+.tool-row[data-status="failed"] > .tool-row-head .tool-ico {
+  color: #dc2626;
+}
+
+.dark .tool-row[data-status="failed"] > .tool-row-head .tool-ico {
+  color: #f87171;
+}
+
+.tool-caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-slate-400);
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 160ms ease;
+}
+
+.tool-run-head:hover .tool-caret,
+.tool-run-head:focus-visible .tool-caret,
+.tool-run.is-open > .tool-run-head .tool-caret {
+  opacity: 1;
+}
+
+.tool-run.is-open > .tool-run-head .tool-caret {
+  transform: rotate(90deg);
+}
+
+.tool-run.is-group > .tool-run-list {
+  margin: 2px 0 4px 7px;
+  padding-left: 13px;
+  border-left: 1px solid var(--color-slate-200);
+}
+
+.dark .tool-run.is-group > .tool-run-list {
+  border-left-color: var(--color-slate-800);
+}
+
+.tool-spin {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 1.5px solid rgb(146 134 214 / 0.25);
+  border-top-color: var(--color-accent-500);
+  animation: live-spin 0.8s linear infinite;
+}
+
+.tool-body {
+  margin: 4px 0 10px 24px;
+  border-radius: 10px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  padding: 10px;
+  font-size: 0.75rem;
+}
+
+.dark .tool-body {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+}
+
+/* ---- Markdown code blocks and links on the graphite skin. ---- */
+#messages .md .md-pre {
+  border-radius: 10px;
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-800);
+  font-size: 0.8125rem;
+  padding: 12px 14px;
+}
+
+.dark #messages .md .md-pre {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+  color: var(--color-slate-200);
+}
+
+#messages .md .md-code {
+  background: var(--color-slate-100);
+  border: 1px solid var(--color-slate-200);
+  padding: 0.05rem 0.35rem;
+}
+
+.dark #messages .md .md-code {
+  background: rgb(255 255 255 / 0.05);
+  border-color: rgb(255 255 255 / 0.07);
+  color: var(--color-slate-200);
+}
+
+#messages .md .md-li::marker {
+  color: var(--color-slate-400);
+}
+
+.dark #messages .md .md-link {
+  color: var(--color-accent-400);
+  text-decoration-color: rgb(170 160 228 / 0.4);
+}
+
+/* The plan tab latches onto the composer's top edge. */
+.composer-float.rounded-t-none {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top-width: 0;
+}
+
+#todoHat > div {
+  border-radius: 22px 22px 0 0;
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-50);
+}
+
+.dark #todoHat > div {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+}
+
+#todoHat [data-todo="bar"] {
+  font-weight: 500;
+  color: var(--color-slate-500);
+}
+
+/* ---- Composer controls ---- */
+#agentView #sendBtn {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 9999px;
+  background: var(--color-slate-900);
+  color: #fff;
+  box-shadow: none;
+}
+
+.dark #agentView #sendBtn {
+  background: var(--color-slate-100);
+  color: var(--color-slate-950);
+}
+
+#agentView #sendBtn:hover {
+  filter: brightness(1.15);
+}
+
+.dark #agentView #sendBtn:hover {
+  filter: brightness(0.9);
+}
+
+#agentView #sendBtn:disabled {
+  opacity: 0.3;
+}
+
+#promptInput {
+  font-size: 0.9375rem;
+}

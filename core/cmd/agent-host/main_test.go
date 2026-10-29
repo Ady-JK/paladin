@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,15 +31,6 @@ func testRuntime(t *testing.T) *runtime.AgentRuntime {
 	return rt
 }
 
-func rawParams(t *testing.T, v any) json.RawMessage {
-	t.Helper()
-	data, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
 func callUnary(rt *runtime.AgentRuntime, id, method string, params any) Response {
 	var raw json.RawMessage
 	if params != nil {
@@ -46,6 +38,35 @@ func callUnary(rt *runtime.AgentRuntime, id, method string, params any) Response
 		raw = data
 	}
 	return runUnary(rt, &Request{ID: json.RawMessage(`"` + id + `"`), Method: method, Params: raw})
+}
+
+// runTurnOut submits a turn like the client does and returns every
+// stdout line (the submit response, then the turn's events) once the hub
+// is idle again.
+func runTurnOut(t *testing.T, rt *runtime.AgentRuntime, p ChatParams) string {
+	t.Helper()
+	installTurnSink(rt)
+	return captureStdout(t, func() {
+		emit(callUnary(rt, "submit", "submitChat", p))
+		deadline := time.Now().Add(20 * time.Second)
+		for len(rt.Turns()) > 0 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
+}
+
+// turnDone returns the turn of the first turn/done event in out.
+func turnDone(t *testing.T, out string) map[string]any {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var msg map[string]any
+		if json.Unmarshal([]byte(line), &msg) == nil && msg["event"] == "turn/done" {
+			turn, _ := msg["turn"].(map[string]any)
+			return turn
+		}
+	}
+	t.Fatalf("no turn/done in %q", out)
+	return nil
 }
 
 func mustOK(t *testing.T, resp Response) {
@@ -85,7 +106,7 @@ func TestErrResponseDefaultsMessage(t *testing.T) {
 }
 
 func TestListProvidersSeedsHermetic(t *testing.T) {
-	resp := callUnary(testRuntime(t), "1", "list_providers", nil)
+	resp := callUnary(testRuntime(t), "1", "listProviders", nil)
 	mustOK(t, resp)
 	data, _ := json.Marshal(resp.Result)
 	var infos []config.ProviderInfo
@@ -110,65 +131,65 @@ func TestListProvidersSeedsHermetic(t *testing.T) {
 
 func TestRefreshProvidersStarts(t *testing.T) {
 	rt := testRuntime(t)
-	resp := callUnary(rt, "1", "refresh_providers", nil)
+	resp := callUnary(rt, "1", "refreshProviders", nil)
 	mustOK(t, resp)
 	rt.WaitRefresh()
 }
 
 func TestRefreshOneProvider(t *testing.T) {
 	rt := testRuntime(t)
-	resp := callUnary(rt, "1", "refresh_providers", map[string]string{"name": "openrouter"})
+	resp := callUnary(rt, "1", "refreshProviders", map[string]string{"name": "openrouter"})
 	mustOK(t, resp)
 	res, ok := resp.Result.(runtime.RefreshResult)
 	if !ok || res.Name != "openrouter" || res.Count != 1 {
 		t.Fatalf("unexpected result %#v", resp.Result)
 	}
-	mustFail(t, callUnary(rt, "2", "refresh_providers", map[string]string{"name": "missing"}), "not found")
+	mustFail(t, callUnary(rt, "2", "refreshProviders", map[string]string{"name": "missing"}), "not found")
 }
 
 func TestSetDefaultProviderValidation(t *testing.T) {
 	rt := testRuntime(t)
-	mustFail(t, callUnary(rt, "1", "set_default_provider", map[string]string{"name": ""}), "required")
-	mustFail(t, callUnary(rt, "1", "set_default_provider", map[string]string{"name": "missing"}), "not found")
-	mustOK(t, callUnary(rt, "1", "set_default_provider", map[string]string{"name": "openrouter"}))
+	mustFail(t, callUnary(rt, "1", "setDefaultProvider", map[string]string{"name": ""}), "required")
+	mustFail(t, callUnary(rt, "1", "setDefaultProvider", map[string]string{"name": "missing"}), "not found")
+	mustOK(t, callUnary(rt, "1", "setDefaultProvider", map[string]string{"name": "openrouter"}))
 }
 
 func TestAddUpdateProviderValidation(t *testing.T) {
 	rt := testRuntime(t)
-	mustFail(t, callUnary(rt, "1", "add_provider", map[string]string{"name": "", "apiUrl": "https://x/v1", "apiKey": "k"}), "required")
-	mustFail(t, callUnary(rt, "2", "add_provider", nil), "required")
-	ok := callUnary(rt, "3", "add_provider", map[string]string{"name": "vault", "apiUrl": "https://x/v1", "apiKey": "sk-v", "apiType": "openai"})
+	mustFail(t, callUnary(rt, "1", "addProvider", map[string]string{"name": "", "apiUrl": "https://x/v1", "apiKey": "k"}), "required")
+	mustFail(t, callUnary(rt, "2", "addProvider", nil), "required")
+	ok := callUnary(rt, "3", "addProvider", map[string]string{"name": "vault", "apiUrl": "https://x/v1", "apiKey": "sk-v", "apiType": "openai"})
 	mustOK(t, ok)
-	mustFail(t, callUnary(rt, "4", "update_provider", map[string]string{"name": "missing", "apiUrl": "https://x/v1", "apiType": "openai"}), "not found")
-	mustFail(t, callUnary(rt, "5", "update_provider", map[string]string{"name": ""}), "required")
-	upd := callUnary(rt, "6", "update_provider", map[string]string{"name": "vault", "apiUrl": "https://y/v2", "apiType": "openai"})
+	mustFail(t, callUnary(rt, "4", "updateProvider", map[string]string{"name": "missing", "apiUrl": "https://x/v1", "apiType": "openai"}), "not found")
+	mustFail(t, callUnary(rt, "5", "updateProvider", map[string]string{"name": ""}), "required")
+	upd := callUnary(rt, "6", "updateProvider", map[string]string{"name": "vault", "apiUrl": "https://y/v2", "apiType": "openai"})
 	mustOK(t, upd)
 }
 
 func TestWorkspaceRoundTrip(t *testing.T) {
 	rt := testRuntime(t)
-	resp := callUnary(rt, "1", "get_workspace", nil)
+	resp := callUnary(rt, "1", "getWorkspace", nil)
 	mustOK(t, resp)
 	dir := t.TempDir()
-	setResp := callUnary(rt, "2", "set_workspace", map[string]string{"path": dir})
+	setResp := callUnary(rt, "2", "setWorkspace", map[string]string{"path": dir})
 	mustOK(t, setResp)
 	if s, _ := setResp.Result.(string); s != dir {
 		t.Fatalf("got %v", setResp.Result)
 	}
-	mustFail(t, callUnary(rt, "3", "set_workspace", map[string]string{"path": filepath.Join(dir, "missing")}), "not reachable")
-	// resolve_workspace: explicit cwd wins, else home.
-	got := callUnary(rt, "4", "resolve_workspace", map[string]string{"cwd": "/tmp/x"})
+	mustFail(t, callUnary(rt, "3", "setWorkspace", map[string]string{"path": filepath.Join(dir, "missing")}), "not reachable")
+	// resolveWorkspace: explicit cwd wins, else home.
+	got := callUnary(rt, "4", "resolveWorkspace", map[string]string{"cwd": "/tmp/x"})
 	mustOK(t, got)
 	if s, _ := got.Result.(string); s != "/tmp/x" {
 		t.Fatalf("got %v", got.Result)
 	}
-	home := callUnary(rt, "5", "resolve_workspace", nil)
+	home := callUnary(rt, "5", "resolveWorkspace", nil)
 	mustOK(t, home)
 	if s, _ := home.Result.(string); s == "" {
 		t.Fatal("empty home")
 	}
-	if h := callUnary(rt, "6", "fs_home", nil); !h.OK {
-		t.Fatal("fs_home failed")
+	if h := callUnary(rt, "6", "fsHome", nil); !h.OK {
+		t.Fatal("fsHome failed")
 	}
 }
 
@@ -178,75 +199,98 @@ func TestFsList(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp := callUnary(rt, "1", "fs_list", map[string]string{"path": dir})
+	resp := callUnary(rt, "1", "fsList", map[string]string{"path": dir})
 	mustOK(t, resp)
-	mustFail(t, callUnary(rt, "2", "fs_list", map[string]string{"path": filepath.Join(dir, "missing")}), "does not exist")
+	mustFail(t, callUnary(rt, "2", "fsList", map[string]string{"path": filepath.Join(dir, "missing")}), "does not exist")
 }
 
 func TestSessionLifecycleWithoutKey(t *testing.T) {
 	rt := testRuntime(t)
-	// No usable provider: open_session must fail before touching disk.
-	mustFail(t, callUnary(rt, "1", "open_session", map[string]string{"cwd": "/tmp/p"}), "placeholder")
-	mustFail(t, callUnary(rt, "2", "open_session", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
-	mustOK(t, callUnary(rt, "3", "list_sessions", map[string]string{"cwd": "/tmp/p"}))
-	mustFail(t, callUnary(rt, "4", "session_history", map[string]string{"sessionId": "", "cwd": "/tmp/p"}), "required")
-	mustFail(t, callUnary(rt, "5", "delete_session", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
-	// stop_chat on idle runtime reports false.
-	resp := callUnary(rt, "6", "stop_chat", map[string]string{"sessionId": "s"})
+	// No usable provider: openSession must fail before touching disk.
+	mustFail(t, callUnary(rt, "1", "openSession", map[string]string{"cwd": "/tmp/p"}), "placeholder")
+	mustFail(t, callUnary(rt, "2", "openSession", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
+	mustOK(t, callUnary(rt, "3", "listSessions", map[string]string{"cwd": "/tmp/p"}))
+	mustFail(t, callUnary(rt, "4", "sessionHistory", map[string]string{"sessionId": "", "cwd": "/tmp/p"}), "required")
+	mustFail(t, callUnary(rt, "5", "deleteSession", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
+	// stopChat on idle runtime reports false.
+	resp := callUnary(rt, "6", "stopChat", map[string]string{"sessionId": "s"})
 	mustOK(t, resp)
 	if b, _ := resp.Result.(bool); b {
 		t.Fatal("idle stop should be false")
 	}
 }
 
-func TestParamHelpers(t *testing.T) {
-	if got := stringParam(nil, "x"); got != "" {
+func TestArgsAreLenientPerField(t *testing.T) {
+	if got := parseArgs(nil).str("x"); got != "" {
 		t.Fatalf("got %q", got)
 	}
-	if got := stringParam(json.RawMessage(`{bad`), "x"); got != "" {
+	if got := parseArgs(json.RawMessage(`{bad`)).str("x"); got != "" {
 		t.Fatalf("got %q", got)
 	}
-	if got := stringParam(json.RawMessage(`{"x":123}`), "x"); got != "" {
+	a := parseArgs(json.RawMessage(`{"x":123,"s":"v","limit":5,"bad":"x","on":true,"off":"yes"}`))
+	if got := a.str("x"); got != "" {
 		t.Fatalf("non-string should be empty, got %q", got)
 	}
-	if got := stringParam(json.RawMessage(`{"x":"v"}`), "x"); got != "v" {
+	if got := a.str("s"); got != "v" {
 		t.Fatalf("got %q", got)
 	}
-	if got := intParam(nil, "limit", 100); got != 100 {
+	if got := parseArgs(nil).num("limit", 100); got != 100 {
 		t.Fatalf("got %d", got)
 	}
-	if got := intParam(json.RawMessage(`{"limit":5}`), "limit", 100); got != 5 {
+	if got := a.num("limit", 100); got != 5 {
 		t.Fatalf("got %d", got)
 	}
-	if got := intParam(json.RawMessage(`{"limit":"x"}`), "limit", 100); got != 100 {
+	if got := a.num("bad", 100); got != 100 {
 		t.Fatalf("got %d", got)
 	}
-	var p StrField
-	_ = json.Unmarshal(json.RawMessage(`{"name":"n"}`), &p)
-	if strFieldParams(json.RawMessage(`{"name":"n"}`)).Name != "n" {
-		t.Fatal("strFieldParams failed")
+	if !a.flag("on") || a.flag("off") || a.flag("missing") {
+		t.Fatal("flag: only a JSON true is true")
 	}
-	if strFieldParams(nil).Name != "" {
-		t.Fatal("nil params should be empty")
+	var into struct {
+		S string `json:"s"`
+	}
+	if err := a.decode(&into); err != nil || into.S != "v" {
+		t.Fatalf("decode: %v %+v", err, into)
+	}
+	if err := parseArgs(nil).decode(&into); err != nil {
+		t.Fatalf("empty params decode: %v", err)
 	}
 }
 
-func TestChatErrorsWithoutKey(t *testing.T) {
+// Every method PROTOCOL.md documents must be dispatchable, and nothing
+// undocumented may sneak into the table.
+func TestEveryDocumentedMethodIsRegistered(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "desktop-app", "PROTOCOL.md"))
+	if err != nil {
+		t.Skip("PROTOCOL.md not found:", err)
+	}
+	documented := map[string]bool{}
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z][a-zA-Z0-9]*)` \\|").FindAllStringSubmatch(string(doc), -1) {
+		documented[m[1]] = true
+	}
+	if len(documented) < 40 {
+		t.Fatalf("parsed only %d methods from PROTOCOL.md", len(documented))
+	}
+	for name := range documented {
+		if _, ok := methods[name]; !ok {
+			t.Errorf("documented method %q is not registered", name)
+		}
+	}
+	for name := range methods {
+		if !documented[name] {
+			t.Errorf("registered method %q is not documented in PROTOCOL.md", name)
+		}
+	}
+}
+
+func TestUnknownMethodFails(t *testing.T) {
 	rt := testRuntime(t)
-	out := captureStdout(t, func() {
-		runChat(rt, Request{
-			ID:     json.RawMessage(`"7"`),
-			Method: "chat",
-			Params: rawParams(t, ChatParams{SessionID: "", Message: "hi", Cwd: "/tmp/p"}),
-		})
-	})
-	var resp Response
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &resp); err != nil {
-		t.Fatalf("not a response: %q", out)
-	}
-	if resp.OK {
-		t.Fatalf("keyless chat should fail: %s", out)
-	}
+	mustFail(t, callUnary(rt, "9", "no_such_method", nil), `unknown method "no_such_method"`)
+}
+
+func TestSubmitChatRejectsAMissingSession(t *testing.T) {
+	rt := testRuntime(t)
+	mustFail(t, callUnary(rt, "7", "submitChat", ChatParams{Message: "hi", Cwd: "/tmp/p"}), "sessionId is required")
 }
 
 func TestChatFullTurnInProcess(t *testing.T) {
@@ -257,8 +301,8 @@ func TestChatFullTurnInProcess(t *testing.T) {
 	defer server.Close()
 	dir := t.TempDir()
 	rt := runtime.WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore())
-	mustOK(t, callUnary(rt, "1", "add_provider", map[string]string{"name": "mock", "apiUrl": server.URL, "apiKey": "sk-live", "apiType": "openai"}))
-	openResp := callUnary(rt, "2", "open_session", map[string]string{"cwd": "/tmp/p2"})
+	mustOK(t, callUnary(rt, "1", "addProvider", map[string]string{"name": "mock", "apiUrl": server.URL, "apiKey": "sk-live", "apiType": "openai"}))
+	openResp := callUnary(rt, "2", "openSession", map[string]string{"cwd": "/tmp/p2"})
 	mustOK(t, openResp)
 	data, _ := json.Marshal(openResp.Result)
 	var sess struct {
@@ -267,54 +311,28 @@ func TestChatFullTurnInProcess(t *testing.T) {
 	if err := json.Unmarshal(data, &sess); err != nil || sess.SessionID == "" {
 		t.Fatalf("open: %v %s", err, data)
 	}
-	out := captureStdout(t, func() {
-		runChat(rt, Request{
-			ID:     json.RawMessage(`"9"`),
-			Method: "chat",
-			Params: rawParams(t, ChatParams{SessionID: sess.SessionID, Message: "hi", Cwd: "/tmp/p2"}),
-		})
-	})
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("want delta + final, got %q", out)
-	}
+	out := runTurnOut(t, rt, ChatParams{SessionID: sess.SessionID, Message: "hi", Cwd: "/tmp/p2"})
 	var deltas int
-	var final Response
-	for _, line := range lines {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		var msg map[string]any
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			t.Fatalf("bad line %q: %v", line, err)
 		}
 		if msg["event"] == "chat/delta" {
 			deltas++
-			if msg["delta"] != "hello" {
+			if msg["delta"] != "hello" || msg["sessionId"] != sess.SessionID {
 				t.Fatalf("delta: %v", msg)
-			}
-		} else {
-			if err := json.Unmarshal([]byte(line), &final); err != nil {
-				t.Fatal(err)
 			}
 		}
 	}
 	if deltas != 1 {
 		t.Fatalf("want 1 delta, got %d in %q", deltas, out)
 	}
-	if !final.OK {
-		t.Fatalf("final not ok: %q", out)
-	}
-	var result struct {
-		SessionID string `json:"sessionId"`
-		Reply     string `json:"reply"`
-	}
-	data, _ = json.Marshal(final.Result)
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Reply != "hello" || result.SessionID != sess.SessionID {
-		t.Fatalf("got %+v", result)
+	if turn := turnDone(t, out); turn["reply"] != "hello" || turn["sessionId"] != sess.SessionID || turn["error"] != nil {
+		t.Fatalf("got %+v", turn)
 	}
 	// History persisted through the protocol.
-	hist := callUnary(rt, "10", "session_history", map[string]string{"sessionId": sess.SessionID, "cwd": "/tmp/p2"})
+	hist := callUnary(rt, "10", "sessionHistory", map[string]string{"sessionId": sess.SessionID, "cwd": "/tmp/p2"})
 	mustOK(t, hist)
 	hdata, _ := json.Marshal(hist.Result)
 	var rows []any
@@ -439,7 +457,7 @@ func TestEndToEndStdioProtocol(t *testing.T) {
 	if msg := h.call("1", "ping", nil); msg["ok"] != true {
 		t.Fatalf("ping: %v", msg)
 	}
-	if msg := h.call("2", "list_providers", nil); msg["ok"] != true {
+	if msg := h.call("2", "listProviders", nil); msg["ok"] != true {
 		t.Fatalf("list: %v", msg)
 	} else if arr, _ := msg["result"].([]any); len(arr) != 2 {
 		t.Fatalf("seeds: %v", msg)
@@ -461,26 +479,26 @@ func TestEndToEndStdioProtocol(t *testing.T) {
 	if msg := h.call("5", "ping", nil); msg["ok"] != true {
 		t.Fatalf("host died after blank line: %v", msg)
 	}
-	if msg := h.call("6", "open_session", map[string]string{"cwd": "/tmp/e2e"}); msg["ok"] != false {
+	if msg := h.call("6", "openSession", map[string]string{"cwd": "/tmp/e2e"}); msg["ok"] != false {
 		t.Fatalf("keyless open should fail: %v", msg)
 	}
-	if msg := h.call("7", "set_workspace", map[string]string{"path": dir}); msg["ok"] != true {
-		t.Fatalf("set_workspace: %v", msg)
+	if msg := h.call("7", "setWorkspace", map[string]string{"path": dir}); msg["ok"] != true {
+		t.Fatalf("setWorkspace: %v", msg)
 	}
-	if msg := h.call("8", "get_workspace", nil); msg["ok"] != true || msg["result"] != dir {
-		t.Fatalf("get_workspace: %v", msg)
+	if msg := h.call("8", "getWorkspace", nil); msg["ok"] != true || msg["result"] != dir {
+		t.Fatalf("getWorkspace: %v", msg)
 	}
-	if msg := h.call("9", "fs_list", map[string]string{"path": dir}); msg["ok"] != true {
-		t.Fatalf("fs_list: %v", msg)
+	if msg := h.call("9", "fsList", map[string]string{"path": dir}); msg["ok"] != true {
+		t.Fatalf("fsList: %v", msg)
 	}
-	if msg := h.call("10", "stop_chat", map[string]string{"sessionId": "x"}); msg["ok"] != true || msg["result"] != false {
-		t.Fatalf("stop_chat: %v", msg)
+	if msg := h.call("10", "stopChat", map[string]string{"sessionId": "x"}); msg["ok"] != true || msg["result"] != false {
+		t.Fatalf("stopChat: %v", msg)
 	}
-	if msg := h.call("11", "delete_session", map[string]string{"sessionId": "nope", "cwd": dir}); msg["ok"] != false {
+	if msg := h.call("11", "deleteSession", map[string]string{"sessionId": "nope", "cwd": dir}); msg["ok"] != false {
 		t.Fatalf("delete missing should fail: %v", msg)
 	}
 	// Invalid params shape still yields an error response, not a crash.
-	if _, err := h.stdin.Write([]byte("{\"id\":\"12\",\"method\":\"add_provider\",\"params\":[1,2]}\n")); err != nil {
+	if _, err := h.stdin.Write([]byte("{\"id\":\"12\",\"method\":\"addProvider\",\"params\":[1,2]}\n")); err != nil {
 		t.Fatal(err)
 	}
 	for h.scan.Scan() {
@@ -526,14 +544,14 @@ func TestEndToEndChatOverStdio(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := startHost(t, bin, dir)
-	open := h.call("1", "open_session", map[string]string{"cwd": dir})
+	open := h.call("1", "openSession", map[string]string{"cwd": dir})
 	if open["ok"] != true {
 		t.Fatalf("open: %v", open)
 	}
 	sessID := open["result"].(map[string]any)["sessionId"].(string)
-	// Chat streams delta events then a final unary response with the id.
+	// submitChat answers at once; the turn streams deltas, then turn/done.
 	if _, err := h.stdin.Write(fmt.Appendf(nil,
-		`{"id":"2","method":"chat","params":{"sessionId":%q,"message":"hi","cwd":%q}}`+"\n", sessID, dir)); err != nil {
+		`{"id":"2","method":"submitChat","params":{"sessionId":%q,"message":"hi","cwd":%q}}`+"\n", sessID, dir)); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -552,18 +570,18 @@ func TestEndToEndChatOverStdio(t *testing.T) {
 		if msg["event"] == "chat/delta" {
 			sawDelta = true
 		}
-		if mid, _ := msg["id"].(string); mid == "2" {
+		if mid, _ := msg["id"].(string); mid == "2" && msg["ok"] != true {
+			t.Fatalf("submit failed: %v", msg)
+		}
+		if msg["event"] == "turn/done" {
 			sawFinal = true
-			if msg["ok"] != true {
-				t.Fatalf("chat failed: %v", msg)
-			}
-			res := msg["result"].(map[string]any)
-			if res["reply"] != "hi there" || res["sessionId"] != sessID {
-				t.Fatalf("result: %v", msg)
+			turn := msg["turn"].(map[string]any)
+			if turn["reply"] != "hi there" || turn["sessionId"] != sessID {
+				t.Fatalf("turn: %v", msg)
 			}
 		}
 	}
-	hist := h.call("3", "session_history", map[string]string{"sessionId": sessID, "cwd": dir})
+	hist := h.call("3", "sessionHistory", map[string]string{"sessionId": sessID, "cwd": dir})
 	if hist["ok"] != true {
 		t.Fatalf("history: %v", hist)
 	}
@@ -574,6 +592,6 @@ func TestEndToEndChatOverStdio(t *testing.T) {
 
 func TestSessionUsageMethod(t *testing.T) {
 	rt := testRuntime(t)
-	mustFail(t, callUnary(rt, "1", "session_usage", map[string]string{"sessionId": "", "cwd": "/tmp/p"}), "required")
-	mustFail(t, callUnary(rt, "2", "session_usage", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
+	mustFail(t, callUnary(rt, "1", "sessionUsage", map[string]string{"sessionId": "", "cwd": "/tmp/p"}), "required")
+	mustFail(t, callUnary(rt, "2", "sessionUsage", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
 }

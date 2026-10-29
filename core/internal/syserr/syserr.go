@@ -1,6 +1,5 @@
-// Package syserr formats OS errors like Rust's io::Error Display
-// ("No such file or directory (os error 2)") so messages match the
-// Rust core byte for byte.
+// Package syserr formats OS errors as "No such file or directory
+// (os error 2)": readable, with the errno for bug reports.
 package syserr
 
 import (
@@ -9,7 +8,7 @@ import (
 	"syscall"
 )
 
-// Str renders err in Rust io::Error Display form for common errnos.
+// Str renders err as "<description> (os error N)" for common errnos.
 func Str(err error) string {
 	if err == nil {
 		return ""

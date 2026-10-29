@@ -269,6 +269,13 @@ func describe(content string) string {
 	return ""
 }
 
+// SplitFrontmatter cuts a leading `---` block off content; see
+// splitFrontmatter.
+func SplitFrontmatter(content string) (fm, rest string, ok bool) { return splitFrontmatter(content) }
+
+// FrontmatterValue reads a top-level `key: value` frontmatter line.
+func FrontmatterValue(fm, key string) string { return frontmatterValue(fm, key) }
+
 // splitFrontmatter cuts a leading `---` block off content, returning
 // the block and the rest. ok is false when there is no opening fence
 // or no closing fence.

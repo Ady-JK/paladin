@@ -1,4 +1,4 @@
-// Package tools: shell_env.go builds the child-process environment.
+// shell_env.go builds the child-process environment.
 //
 // The sidecar is usually spawned by the Electron app, which inherits a
 // minimal desktop PATH (/usr/bin:/bin) without the toolchain dirs a
@@ -6,6 +6,7 @@
 // "not found" even though they work in the user's terminal. Every
 // shell spawn goes through shellEnv so the model can rely on the same
 // commands the user has.
+
 package tools
 
 import (

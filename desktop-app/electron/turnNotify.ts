@@ -25,6 +25,12 @@ export function noteFor(msg: any): TurnNote | null {
     }
     return null;
   }
+  if (msg.event === "chat/approval") {
+    const ap = msg.approval;
+    if (!ap || ap.state !== "pending") return null;
+    const what = ap.command ? String(ap.command) : ap.path ? `Write ${ap.path}` : "A tool call";
+    return { sessionId, title: "Paladin · needs approval", body: clip(what) };
+  }
   if (msg.event !== "turn/done" || !msg.turn) return null;
   const turn = msg.turn;
   // The user stopped or dropped it themselves: nothing to tell them.

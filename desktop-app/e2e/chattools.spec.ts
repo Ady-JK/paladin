@@ -69,12 +69,12 @@ test("@../ tags a file outside the workspace", async ({ page }) => {
   await expect(page.locator("#promptInput")).toHaveValue("/home/tester/sibling/outside.txt");
 });
 
-test("the slash popup completes /he to /help", async ({ page }) => {
+test("the slash popup completes /he to /help with Tab", async ({ page }) => {
   await page.click("#promptInput");
   await page.fill("#promptInput", "/he");
   const popup = page.locator("#slashPopup");
   await expect(popup).toBeVisible();
   await expect(popup).toContainText("/help");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
   await expect(page.locator("#promptInput")).toHaveValue("/help ");
 });

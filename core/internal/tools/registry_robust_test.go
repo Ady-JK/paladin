@@ -13,9 +13,7 @@ func (panicTool) Definition() ToolDefinition {
 	return ToolDefinition{Name: "boom", Parameters: map[string]any{"type": "object"}}
 }
 func (panicTool) Call(json.RawMessage, *ToolCtx) (string, error) {
-	var m map[string]int
-	m["x"] = 1 // nil map write
-	return "", nil
+	panic("boom")
 }
 
 type echoTool struct{ name string }

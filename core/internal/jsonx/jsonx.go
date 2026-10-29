@@ -1,5 +1,5 @@
-// Package jsonx mirrors serde_json output: compact or indented JSON
-// without HTML escaping, so bytes match the Rust core exactly.
+// Package jsonx marshals compact or indented JSON without HTML
+// escaping, so <, > and & reach the client as written.
 package jsonx
 
 import (
@@ -38,12 +38,4 @@ func MarshalIndent(v any) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func MustMarshalIndent(v any) []byte {
-	out, err := MarshalIndent(v)
-	if err != nil {
-		return []byte("{}")
-	}
-	return out
 }

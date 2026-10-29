@@ -1,6 +1,7 @@
-// Package tools owns the model-facing tool registry: read, write,
-// edit, shell. fileengine and scope stay shared modules behind
-// write/edit.
+// Package tools owns the model-facing tools (read, write, edit, shell,
+// ask, todo, skill, session_search) and the registry that serves them to
+// the agent loop. fileengine and scope are the shared file-safety layer
+// behind write and edit.
 package tools
 
 import (
@@ -12,12 +13,17 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
+
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 )
 
 // ToolCtx is per-turn tool context.
 type ToolCtx struct {
-	Workspace  string
+	Workspace string
+	// Project is the folder project-scoped state (folder memory) keys
+	// on; it differs from Workspace for worktree sessions.
+	Project    string
 	SessionDir string
 	Cancel     context.Context
 	// SessionID and CallID identify the running ask call: the agent sets
@@ -25,9 +31,11 @@ type ToolCtx struct {
 	// the ask tool can rendezvous the blocked call with the UI answer.
 	SessionID string
 	CallID    string
+	// Sandbox confines shell commands; nil runs them unconfined.
+	Sandbox *sandbox.Policy
 }
 
-// ToolDefinition mirrors the Rust shape sent to the model.
+// ToolDefinition is the tool schema sent to the model.
 type ToolDefinition struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -49,8 +57,8 @@ type ToolResult struct {
 	IsError bool
 }
 
-// ToolError mirrors the Rust ToolError. Failed carries model-facing
-// output; its message is the human summary.
+// ToolError is a failed tool call. Failed carries model-facing output;
+// its message is the human summary.
 type ToolError struct {
 	Kind    string
 	Content string
@@ -176,6 +184,22 @@ func (r *Registry) ParallelSafe(name string) bool {
 	return ok && p.ParallelSafe()
 }
 
+// Mutating is implemented by tools that may change files in the
+// workspace, so the harness can snapshot around them for undo.
+type Mutating interface {
+	Mutates() bool
+}
+
+// Mutates reports whether the named tool may change workspace files.
+func (r *Registry) Mutates(name string) bool {
+	resolved, ok := r.resolveName(name)
+	if !ok {
+		return false
+	}
+	m, ok := r.tools[resolved].(Mutating)
+	return ok && m.Mutates()
+}
+
 func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 	result = ToolResult{CallID: call.ID, Name: call.Name}
 	name, ok := r.resolveName(call.Name)
@@ -212,6 +236,23 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 	}
 	result.Content = content
 	return result
+}
+
+// Prepare resolves the canonical tool name and repaired arguments the
+// way Call will, so a permission gate judges exactly what would run.
+func (r *Registry) Prepare(call *ToolCall) (string, json.RawMessage, bool) {
+	name, ok := r.resolveName(call.Name)
+	if !ok {
+		return "", nil, false
+	}
+	if len(call.Arguments) == 0 || isBlank(call.Arguments) {
+		return name, json.RawMessage("null"), true
+	}
+	fixed, ok := repairArgs(call.Arguments)
+	if !ok {
+		return "", nil, false
+	}
+	return name, json.RawMessage(fixed), true
 }
 
 // ctxWithCall clones the turn context with the call id stamped in. Call

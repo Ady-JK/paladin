@@ -1,6 +1,6 @@
 // mentions.ts owns `@` file/folder mentions in the composer.
 //
-// Typing `@` opens a popup backed by the `file_complete` sidecar
+// Typing `@` opens a popup backed by the `fileComplete` sidecar
 // method (ripgrep-powered, .gitignore honored, `../` escapes to the
 // workspace parent). Picking a row inserts the row's OS-specific
 // absolute path into the message, so the agent sees exactly which

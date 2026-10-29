@@ -12,7 +12,7 @@ async function setup(page: Page): Promise<void> {
     const w = window as any;
     const base = w.__paladinBaseInvoke;
     w.__paladinBaseInvoke = async (cmd: string, args: any) => {
-      if (cmd === "list_sessions") {
+      if (cmd === "listSessions") {
         return ids.map((id: string, i: number) => ({
           sessionId: id,
           cwd: "/home/tester/project",
@@ -23,12 +23,12 @@ async function setup(page: Page): Promise<void> {
           title: `title ${id}`,
         }));
       }
-      if (cmd === "session_history") return [];
+      if (cmd === "sessionHistory") return [];
       return base(cmd, args);
     };
     w.__held = {};
     w.__ran = [];
-    w.paladin.chat = (params: any, handlers: any) =>
+    w.__e2eRunTurn = (params: any, handlers: any) =>
       new Promise((resolve) => {
         w.__ran.push(params.message);
         w.__held[params.message] = { handlers, resolve };

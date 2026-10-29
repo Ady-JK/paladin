@@ -1,0 +1,98 @@
+/* ============ Worktrees ============ */
+.wt-merge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.wt-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 160ms ease;
+}
+.wt-chip.hidden {
+  display: none;
+}
+.wt-chip:hover {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .wt-chip {
+  color: var(--color-slate-400);
+}
+.dark .wt-chip:hover {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.wt-chip.is-on,
+.dark .wt-chip.is-on {
+  border-color: rgb(146 134 214 / 0.5);
+  background: rgb(146 134 214 / 0.12);
+  color: rgb(110 96 200);
+  box-shadow: 0 0 0 3px rgb(146 134 214 / 0.1);
+}
+.dark .wt-chip.is-on {
+  color: rgb(186 176 240);
+}
+.session-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 88px;
+  flex-shrink: 1;
+  min-width: 0;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: rgb(146 134 214 / 0.12);
+  color: rgb(110 96 200);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 16px;
+}
+.dark .session-branch {
+  color: rgb(186 176 240);
+}
+.session-branch > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.confirm-discard {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgb(183 121 31 / 0.08);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-slate-700);
+}
+.dark .confirm-discard {
+  color: var(--color-slate-200);
+}
+.confirm-discard.hidden {
+  display: none;
+}
+.confirm-discard input {
+  margin-top: 2px;
+  accent-color: var(--color-agent-rose);
+}
+.confirm-discard-note {
+  display: block;
+  color: var(--color-slate-500);
+}

@@ -16,7 +16,7 @@ import {
 } from "../core/dom";
 import { escapeAttr, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
-import type { SessionEvent, SessionInfo, ToolInfo } from "../core/types";
+import type { SessionInfo, ToolInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
@@ -30,40 +30,10 @@ import { syncModelSelects } from "./models";
 import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
 import type { MessageInfo } from "../core/types";
 import { refreshExternalVisibility } from "./sites";
-
-export async function onSessionEvent(event: SessionEvent): Promise<void> {
-  // Slow-consumer recovery: the core counts drops per subscriber and tags
-  // the next delivered event with missed > 0. A gapped stream cannot be
-  // trusted, so refetch the list and the open transcript instead of applying
-  // the single event.
-  if (event.missed && event.missed > 0) {
-    console.warn(
-      `session stream gapped, missed ${event.missed} event(s); refetching`,
-    );
-    await refreshSessions();
-    if (state.sessionId) {
-      try {
-        await loadHistory(state.sessionId);
-      } catch (error) {
-        console.warn(`refetch after gap failed: ${String(error)}`);
-      }
-    }
-    return;
-  }
-
-  if (event.kind === "message_added") {
-    if (event.sessionId === state.sessionId && event.messageCount > state.shownMessages) {
-      try {
-        await loadHistory(event.sessionId);
-      } catch (error) {
-        console.warn(`loadHistory failed: ${String(error)}`);
-      }
-    }
-    return;
-  }
-
-  await refreshSessions();
-}
+import { forkSessionById, renameSessionById } from "./sessionActions";
+import { resetDraft, syncPermChip } from "./permissions";
+import { paintRevert, setRevert } from "./undo";
+import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -80,6 +50,8 @@ export async function refreshSessions(): Promise<void> {
 }
 
 const FOLD_KEY = "paladin.foldedProjects";
+// renaming is the row being renamed inline; renders keep its input.
+let renaming: { id: string; draft: string } | null = null;
 const RECENT_COUNT = 5;
 
 function loadFolded(): Set<string> {
@@ -109,14 +81,19 @@ function sessionRow(session: SessionInfo): string {
   const live = liveBadge(session.sessionId);
   return `
     <div${live ? ` data-live="${live}"` : ""} class="session-row group${active ? " is-active" : ""}">
-      <button data-session="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)}">
+      ${
+        renaming?.id === session.sessionId
+          ? `<input class="session-rename" data-rename="${escapeAttr(session.sessionId)}" value="${escapeHtml(renaming.draft)}" spellcheck="false" aria-label="Session title" />`
+          : `<button data-session="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)}">
         <span class="truncate">${escapeHtml(title)}</span>
-      </button>
+      </button>`
+      }
+      ${session.worktree ? `<span class="session-branch" title="Worktree ${escapeAttr(session.worktree.path)}">${icon("code-branch", "h-2.5 w-2.5")}<span>${escapeHtml(session.worktree.branch.replace(/^paladin\//, ""))}</span></span>` : ""}
       ${liveIndicator(session.sessionId, live)}
       ${resBadge(session.sessionId)}
       <span class="session-count">${session.messageCount}</span>
-      <button data-delete="${escapeAttr(session.sessionId)}" class="session-del" title="Delete the session">
-        ${icon("trash", "h-3 w-3")}
+      <button data-row-menu="${escapeAttr(session.sessionId)}" class="session-del session-more" title="More" aria-haspopup="menu">
+        ${icon("sl-more", "h-3.5 w-3.5")}
       </button>
     </div>`;
 }
@@ -141,9 +118,11 @@ export function renderSessions(): void {
 
   const projects = new Map<string, SessionInfo[]>();
   for (const session of visible) {
-    const group = projects.get(session.cwd) ?? [];
+    // Worktree sessions live under the project they branched from.
+    const key = session.worktree?.origin || session.cwd;
+    const group = projects.get(key) ?? [];
     group.push(session);
-    projects.set(session.cwd, group);
+    projects.set(key, group);
   }
 
   let html = `<div class="side-label">Projects</div>`;
@@ -179,7 +158,90 @@ export function renderSessions(): void {
     html += `</div></div>`;
   }
 
+  const focused = document.activeElement instanceof HTMLInputElement && document.activeElement.matches(".session-rename");
   sessionListEl.innerHTML = html;
+  if (renaming) {
+    const input = sessionListEl.querySelector<HTMLInputElement>(`input[data-rename="${CSS.escape(renaming.id)}"]`);
+    if (input) {
+      wireRename(input, focused);
+    }
+  }
+}
+
+function wireRename(input: HTMLInputElement, keepCaret: boolean): void {
+  const id = input.dataset.rename ?? "";
+  input.focus();
+  if (!keepCaret) {
+    input.select();
+  }
+  let done = false;
+  const end = (commit: boolean) => {
+    if (done || renaming?.id !== id) return;
+    done = true;
+    const title = input.value.trim();
+    const before = state.sessions.find((s) => s.sessionId === id)?.title ?? "";
+    renaming = null;
+    renderSessions();
+    if (commit && title && title !== before) {
+      void renameSessionById(id, title);
+    }
+  };
+  input.addEventListener("input", () => {
+    if (renaming?.id === id) renaming.draft = input.value;
+  });
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      end(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      end(false);
+    }
+  });
+  input.addEventListener("blur", () => end(true));
+}
+
+function startRename(id: string): void {
+  const s = state.sessions.find((x) => x.sessionId === id);
+  renaming = { id, draft: s?.title || "" };
+  renderSessions();
+}
+
+let rowMenu: HTMLElement | null = null;
+
+function closeRowMenu(): void {
+  rowMenu?.remove();
+  rowMenu = null;
+}
+
+// openRowMenu is the Codex-style "⋯" menu of a sidebar session.
+function openRowMenu(id: string, anchor: HTMLElement): void {
+  closeRowMenu();
+  const menu = document.createElement("div");
+  menu.id = "sessionRowMenu";
+  menu.setAttribute("role", "menu");
+  menu.className = "row-menu";
+  const item = (act: string, label: string, ic: Parameters<typeof icon>[0], danger = false) =>
+    `<button type="button" role="menuitem" data-row-act="${act}" class="row-menu-item${danger ? " is-danger" : ""}">${icon(ic, "h-3.5 w-3.5")}<span>${label}</span></button>`;
+  menu.innerHTML = item("rename", "Rename", "tl-pencil") + item("fork", "Fork", "sl-fork") + item("fork-wt", "Fork into worktree", "code-branch") + `<div class="row-menu-sep"></div>` + item("delete", "Delete", "trash", true);
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  menu.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w))}px`;
+  menu.style.top = `${r.bottom + 4 + h > window.innerHeight ? r.top - h - 4 : r.bottom + 4}px`;
+  menu.addEventListener("click", (event) => {
+    const act = (event.target as HTMLElement).closest<HTMLElement>("[data-row-act]")?.dataset.rowAct;
+    if (!act) return;
+    closeRowMenu();
+    if (act === "rename") startRename(id);
+    else if (act === "fork") void forkSessionById(id);
+    else if (act === "fork-wt") void forkIntoWorktree(id);
+    else if (act === "delete") askDelete(id);
+  });
+  rowMenu = menu;
+  menu.querySelector<HTMLElement>("[role=menuitem]")?.focus();
 }
 
 const LIVE_LABELS: Record<string, string> = {
@@ -188,6 +250,7 @@ const LIVE_LABELS: Record<string, string> = {
   done: "Finished in the background",
   error: "Failed in the background",
   input: "Waiting for your answer",
+  approval: "Waiting for approval",
   paused: "Paused at the round cap",
 };
 
@@ -204,27 +267,42 @@ function liveIndicator(sessionId: string, live: string): string {
   return `<span class="live-ind live-${live}" title="${escapeHtml(label)}" role="status" aria-label="${escapeHtml(label)}">${mark}${extra}</span>`;
 }
 
-// askDelete is a function in this module.
-// It supports the desktop app frontend.
 function askDelete(id: string): void {
   const session = state.sessions.find((s) => s.sessionId === id);
 
   state.pendingDelete = id;
   confirmTitleEl.textContent = session?.title || "this session";
+  const wrap = confirmModalEl.querySelector<HTMLElement>("#confirmDiscardWrap");
+  const box = confirmModalEl.querySelector<HTMLInputElement>("#confirmDiscard");
+  wrap?.classList.add("hidden");
+  if (box) box.checked = false;
 
   openModal(confirmModalEl);
   void refreshExternalVisibility();
+
+  // A worktree with uncommitted work is kept unless the user opts in.
+  const wt = session?.worktree;
+  if (wt && wrap) {
+    void api
+      .worktreeStatus(id, session.cwd)
+      .then((st) => {
+        if (state.pendingDelete !== id || !st.exists || st.changed === 0) return;
+        const n = st.changed;
+        confirmModalEl.querySelector("#confirmDiscardCount")!.textContent = `${n} uncommitted ${n === 1 ? "change" : "changes"}`;
+        confirmModalEl.querySelector("#confirmDiscardBranch")!.textContent = wt.branch;
+        wrap.classList.remove("hidden");
+      })
+      .catch(() => {});
+  }
 }
 
-// closeConfirm is a function in this module.
-// It supports the desktop app frontend.
 export function closeConfirm(): void {
   closeModal(confirmModalEl);
   state.pendingDelete = "";
   void refreshExternalVisibility();
 }
 
-export async function deleteSession(id: string): Promise<void> {
+export async function deleteSession(id: string, discardWorktree = false): Promise<void> {
   if (!id) {
     return;
   }
@@ -239,7 +317,7 @@ export async function deleteSession(id: string): Promise<void> {
   try {
     // Null cwd searches every workspace namespace, so sessions from
     // other folders open instead of 404ing on a cwd mismatch.
-    const deleted = await api.deleteSession(id, null);
+    const deleted = await api.deleteSession(id, null, discardWorktree);
 
     if (!deleted) {
       throw new Error("the core did not delete the session");
@@ -270,9 +348,13 @@ export async function openSession(id: string): Promise<void> {
 
     state.sessionId = session.sessionId;
     state.cwd = session.cwd;
+    syncPermChip();
 
     sessionLabelEl.textContent = state.sessionId.slice(0, 8);
     paintResources();
+    setRevert(session.sessionId, session.revert);
+    setWorktree(session.worktree);
+    syncWorktreeChip();
 
     // The session brings its own workspace: adopt it so the header,
     // the composer, and the next turn all agree on the folder.
@@ -377,7 +459,7 @@ function renderHistory(history: MessageInfo[]): void {
     if (message.role === "user") {
       agentBody = null;
       run = null;
-      addTurn("user", message.content);
+      addTurn("user", message.content, { index: message.index, revertable: message.index !== undefined });
     } else if (message.role === "assistant") {
       pushAgentText(message.content);
     } else if (message.role === "system" && message.kind === "compaction") {
@@ -401,10 +483,6 @@ function renderHistory(history: MessageInfo[]): void {
 
   messagesEl.style.display = "";
 
-  state.shownMessages = history.filter(
-    (message) => message.role === "user" || message.role === "assistant",
-  ).length;
-
   if (messagesEl.childElementCount === 0) {
     renderGreeting();
   }
@@ -412,15 +490,16 @@ function renderHistory(history: MessageInfo[]): void {
   scrollToBottom();
 }
 
-// newSession is a function in this module.
-// It supports the desktop app frontend.
 export function newSession(): void {
   state.sessionId = "";
+  resetDraft();
   clearUsage();
   clearTodos();
   paintResources();
   sessionLabelEl.textContent = "—";
-  state.shownMessages = 0;
+  paintRevert();
+  setWorktree(null);
+  syncWorktreeChip();
 
   messagesEl.innerHTML = "";
   renderGreeting();
@@ -431,7 +510,6 @@ export function newSession(): void {
 }
 
 // initSessions wires the session search and the delete confirm dialog.
-// It supports the desktop app frontend.
 export function initSessions(): void {
   let searchTimer = 0;
   searchInputEl.addEventListener("input", () => {
@@ -439,12 +517,35 @@ export function initSessions(): void {
     searchTimer = window.setTimeout(renderSessions, 120);
   });
 
+  document.addEventListener("mousedown", (event) => {
+    if (rowMenu && !rowMenu.contains(event.target as Node) && !(event.target as HTMLElement).closest("[data-row-menu]")) {
+      closeRowMenu();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && rowMenu) {
+      closeRowMenu();
+    }
+  });
+  sessionListEl.addEventListener("dblclick", (event) => {
+    const pick = (event.target as HTMLElement).closest<HTMLElement>("[data-session]");
+    if (pick?.dataset.session) {
+      startRename(pick.dataset.session);
+    }
+  });
   sessionListEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
-    const del = target.closest<HTMLElement>("[data-delete]");
-    if (del?.dataset.delete) {
+    const more = target.closest<HTMLElement>("[data-row-menu]");
+    if (more?.dataset.rowMenu) {
       event.stopPropagation();
-      askDelete(del.dataset.delete);
+      if (rowMenu) {
+        closeRowMenu();
+      } else {
+        openRowMenu(more.dataset.rowMenu, more);
+      }
+      return;
+    }
+    if (target.closest("input.session-rename")) {
       return;
     }
     const fold = target.closest<HTMLElement>("[data-fold]");
@@ -468,8 +569,9 @@ export function initSessions(): void {
 
   confirmModalEl.querySelector("#confirmDeleteBtn")?.addEventListener("click", () => {
     const id = state.pendingDelete;
+    const discard = !!confirmModalEl.querySelector<HTMLInputElement>("#confirmDiscard")?.checked;
     closeConfirm();
-    void deleteSession(id);
+    void deleteSession(id, discard);
   });
 
   confirmModalEl.addEventListener("click", (event) => {

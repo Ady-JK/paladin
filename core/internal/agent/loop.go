@@ -1,6 +1,7 @@
-// Package agent: loop.go is the per-turn execution loop. It streams one
+// loop.go is the per-turn execution loop. It streams one
 // model round, runs any requested tools, appends the results, and
 // repeats until the model stops asking for tools or the round cap is hit.
+
 package agent
 
 import (
@@ -15,6 +16,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -37,95 +39,27 @@ func (a *Agent) runLoop() error {
 		if a.stopRequested() {
 			return turnStop{}
 		}
-		a.sentLen = len(a.messages)
-		prx := make(chan inference.Chunk, 64)
-		providerErr := make(chan error, 1)
-		go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
-			defer close(prx)
-			providerErr <- guardProvider(func() error {
-				return a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
-			})
-		}(append([]inference.LlmMessage(nil), a.messages...), append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
-		var roundText strings.Builder
-		var calls []inference.ToolCall
-		var streamErr *string
-	loop:
-		for {
-			select {
-			case chunk, ok := <-prx:
-				if !ok {
-					break loop
-				}
-				if chunk.Err != "" {
-					streamErr = &chunk.Err
-					break loop
-				}
-				if chunk.Usage != nil {
-					a.noteCallUsage(*chunk.Usage)
-				}
-				if chunk.ToolNotice != nil {
-					notice := chunk.ToolNotice
-					name := notice.Name
-					if name == "" {
-						name = "tool"
-					}
-					a.noteNotice(notice.ID, name)
-					if err := a.emit(ChatChunk{Tool: &ToolActivity{
-						ID: notice.ID, Name: name, Arguments: "{}",
-						Status: session.ToolRunning,
-					}}); err != nil {
-						se := "client went away"
-						streamErr = &se
-						break loop
-					}
-				}
-				if chunk.Text != "" {
-					roundText.WriteString(chunk.Text)
-					a.appendDelta(chunk.Text)
-					if err := a.emit(ChatChunk{Delta: chunk.Text}); err != nil {
-						se := "client went away"
-						streamErr = &se
-						break loop
-					}
-				}
-				if len(chunk.ToolCalls) > 0 {
-					calls = chunk.ToolCalls
-				}
-				if a.stopRequested() {
-					break loop
-				}
-			case <-a.ctx.Done():
-				break loop
-			case <-a.done:
-				se := "client went away"
-				streamErr = &se
-				break loop
-			}
-		}
-		taskErr := <-providerErr
+		round := a.streamRound()
 		if a.stopRequested() {
-			return a.stopWithPartial(roundText.String())
+			return a.stopWithPartial(round.text)
 		}
-		if taskErr != nil {
-			if inference.IsCancelled(taskErr) || a.stopRequested() {
-				return a.stopWithPartial(roundText.String())
+		if err := round.providerErr; err != nil {
+			if inference.IsCancelled(err) || a.stopRequested() {
+				return a.stopWithPartial(round.text)
 			}
-			if a.recoverRound(taskErr, roundText.Len() == 0 && len(calls) == 0) {
+			if a.recoverRound(err, round.empty()) {
 				continue
 			}
-			return roundFailure(taskErr)
+			return roundFailure(err)
 		}
-		if streamErr != nil {
-			if *streamErr == "client went away" {
-				return a.stopWithPartial(roundText.String())
-			}
-			if a.recoverRound(errors.New(*streamErr), roundText.Len() == 0 && len(calls) == 0) {
+		if round.clientGone {
+			return a.stopWithPartial(round.text)
+		}
+		if err := round.streamErr; err != nil {
+			if a.recoverRound(err, round.empty()) {
 				continue
 			}
-			return roundFailure(errors.New(*streamErr))
-		}
-		if a.stopRequested() {
-			return a.stopWithPartial(roundText.String())
+			return roundFailure(err)
 		}
 		// Empty stream fallback: one buffered completion. A round that
 		// yields neither text nor tool calls is usually a gateway blip, so
@@ -133,7 +67,7 @@ func (a *Agent) runLoop() error {
 		// silent would fake a READY with nothing done (the "random stop"
 		// that forces another nudge), so a turn with zero progress fails
 		// loudly instead.
-		if roundText.Len() == 0 && len(calls) == 0 {
+		if round.empty() {
 			if a.emptyRounds >= 2 {
 				if len(a.records) > 0 || a.reply.Len() > 0 {
 					a.finish(phaseDone)
@@ -142,74 +76,174 @@ func (a *Agent) runLoop() error {
 				return turnFailed{"model returned an empty response \u2014 try again"}
 			}
 			a.emptyRounds++
-			resp, err := a.provider.CompleteTools(a.ctx, a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
+			retry, err := a.completeBuffered(&round)
 			if err != nil {
-				if a.stopRequested() {
-					return a.stopWithPartial(roundText.String())
-				}
-				if a.recoverRound(err, true) {
-					continue
-				}
-				return roundFailure(err)
-			}
-			roundText.WriteString(resp.Content)
-			a.appendDelta(resp.Content)
-			calls = resp.ToolCalls
-			if resp.Usage != nil {
-				a.noteCallUsage(*resp.Usage)
-			}
-			if resp.Content != "" {
-				if err := a.emit(ChatChunk{Delta: resp.Content}); err != nil {
-					return a.stopWithPartial(roundText.String())
-				}
+				return err
 			}
 			// Still empty after the buffered fallback: retry next round
 			// instead of ending the turn silent (bounded by emptyRounds
 			// above and maxRounds overall).
-			if roundText.Len() == 0 && len(calls) == 0 {
+			if retry || round.empty() {
 				continue
 			}
 		}
-		if len(calls) == 0 {
-			if roundText.Len() > 0 {
-				a.emptyRounds = 0
-				a.retries, a.timeoutRetries = 0, 0
-				a.records = append(a.records, transcript.Message{
-					Role: transcript.RoleAssistant, Content: roundText.String(),
-					CreatedAt: time.Now().UTC(),
-				})
-			}
-			if a.shell != nil &&
-				a.shell.PendingNotify(a.session.Meta.SessionID) &&
-				!a.shell.WaitPendingNotify(a.session.Meta.SessionID, a.ctx) {
-				if a.stopRequested() {
-					return turnStop{}
-				}
-				return a.stopWithPartial(roundText.String())
-			}
-			drained := len(a.records)
-			if err := a.drainNotifications(); err != nil {
-				return err
-			}
-			if len(a.records) != drained {
+		if len(round.calls) == 0 {
+			more, err := a.finishTextRound(round.text)
+			if more {
 				continue
 			}
-			if a.stopRequested() {
-				return turnStop{}
-			}
-			a.finish(phaseDone)
-			return nil
+			return err
 		}
 		a.emptyRounds = 0
 		a.retries, a.timeoutRetries = 0, 0
-		text := roundText.String()
-		a.appendAssistant(text, calls)
-		if err := a.runToolsStreaming(calls); err != nil {
+		a.appendAssistant(round.text, round.calls)
+		if err := a.runToolsStreaming(round.calls); err != nil {
 			return err
 		}
 	}
 	a.finish(phaseNeedsContinue)
 	return nil
+}
+
+// roundResult is what one streamed model round produced.
+type roundResult struct {
+	text  string
+	calls []inference.ToolCall
+	// providerErr is the provider call's own error; streamErr an error
+	// chunk it streamed.
+	providerErr error
+	streamErr   error
+	// clientGone: the turn's client stopped listening mid-round.
+	clientGone bool
+}
+
+func (r roundResult) empty() bool { return r.text == "" && len(r.calls) == 0 }
+
+// streamRound streams one model round, forwarding text and tool notices
+// to the client as they arrive.
+func (a *Agent) streamRound() roundResult {
+	a.sentLen = len(a.messages)
+	prx := make(chan inference.Chunk, 64)
+	providerErr := make(chan error, 1)
+	go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
+		defer close(prx)
+		providerErr <- guardProvider(func() error {
+			return a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
+		})
+	}(append([]inference.LlmMessage(nil), a.messages...), append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
+	var res roundResult
+	var text strings.Builder
+loop:
+	for {
+		select {
+		case chunk, ok := <-prx:
+			if !ok {
+				break loop
+			}
+			if chunk.Err != "" {
+				res.streamErr = errors.New(chunk.Err)
+				break loop
+			}
+			if chunk.Usage != nil {
+				a.noteCallUsage(*chunk.Usage)
+			}
+			if notice := chunk.ToolNotice; notice != nil {
+				name := notice.Name
+				if name == "" {
+					name = "tool"
+				}
+				a.noteNotice(notice.ID, name)
+				if err := a.emit(ChatChunk{Tool: &ToolActivity{
+					ID: notice.ID, Name: name, Arguments: "{}",
+					Status: session.ToolRunning,
+				}}); err != nil {
+					res.clientGone = true
+					break loop
+				}
+			}
+			if chunk.Text != "" {
+				text.WriteString(chunk.Text)
+				a.appendDelta(chunk.Text)
+				if err := a.emit(ChatChunk{Delta: chunk.Text}); err != nil {
+					res.clientGone = true
+					break loop
+				}
+			}
+			if len(chunk.ToolCalls) > 0 {
+				res.calls = chunk.ToolCalls
+			}
+			if a.stopRequested() {
+				break loop
+			}
+		case <-a.ctx.Done():
+			break loop
+		case <-a.done:
+			res.clientGone = true
+			break loop
+		}
+	}
+	res.providerErr = <-providerErr
+	res.text = text.String()
+	return res
+}
+
+// completeBuffered retries an empty streamed round as one buffered
+// completion, filling round in. retry asks the loop to start the next
+// round; err ends the turn.
+func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
+	resp, err := a.provider.CompleteTools(a.ctx, a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
+	if err != nil {
+		if a.stopRequested() {
+			return false, a.stopWithPartial(round.text)
+		}
+		if a.recoverRound(err, true) {
+			return true, nil
+		}
+		return false, roundFailure(err)
+	}
+	round.text += resp.Content
+	a.appendDelta(resp.Content)
+	round.calls = resp.ToolCalls
+	if resp.Usage != nil {
+		a.noteCallUsage(*resp.Usage)
+	}
+	if resp.Content != "" {
+		if err := a.emit(ChatChunk{Delta: resp.Content}); err != nil {
+			return false, a.stopWithPartial(round.text)
+		}
+	}
+	return false, nil
+}
+
+// finishTextRound settles a round that answered without tool calls. The
+// turn ends there unless background shell jobs are still due to report
+// (more: run another round with their results).
+func (a *Agent) finishTextRound(text string) (more bool, err error) {
+	if text != "" {
+		a.emptyRounds = 0
+		a.retries, a.timeoutRetries = 0, 0
+		a.records = append(a.records, transcript.Message{
+			Role: transcript.RoleAssistant, Content: text,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+	sid := a.session.Meta.SessionID
+	// The wait only fails when the turn is stopped; text is already recorded.
+	if a.shell != nil && a.shell.PendingNotify(sid) && !a.shell.WaitPendingNotify(sid, a.ctx) {
+		return false, turnStop{}
+	}
+	drained := len(a.records)
+	if err := a.drainNotifications(); err != nil {
+		return false, err
+	}
+	if len(a.records) != drained {
+		return true, nil
+	}
+	if a.stopRequested() {
+		return false, turnStop{}
+	}
+	a.finish(phaseDone)
+	return false, nil
 }
 
 func (a *Agent) stopWithPartial(roundText string) error {
@@ -287,7 +321,7 @@ func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
 	}
 	exec := func(i int) {
 		c := batch[i]
-		results[i] = a.tools.Call(&tools.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments}, a.toolCtx)
+		results[i] = a.callGated(&tools.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments})
 	}
 	if len(batch) == 1 {
 		if run[0] {
@@ -307,6 +341,44 @@ func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
 	}
 	wg.Wait()
 	return results
+}
+
+// callGated runs one call through the permission gate: refused calls
+// never reach the tool, approved shell calls run in the gate's sandbox,
+// and a sandbox block may be escalated to one unconfined rerun.
+func (a *Agent) callGated(call *tools.ToolCall) tools.ToolResult {
+	if a.gate == nil {
+		return a.callTool(call, a.toolCtx)
+	}
+	name, args, ok := a.tools.Prepare(call)
+	if !ok {
+		return a.callTool(call, a.toolCtx)
+	}
+	notify := func(ap permission.Approval) { _ = a.emit(ChatChunk{Approval: &ap}) }
+	auth := a.gate.Authorize(a.ctx, call.ID, name, args, notify)
+	if !auth.Run {
+		return tools.ToolResult{CallID: call.ID, Name: name, IsError: true, Content: auth.Content}
+	}
+	ctx := *a.toolCtx
+	ctx.Sandbox = auth.Sandbox
+	result := a.callTool(call, &ctx)
+	if auth.Sandbox == nil || !result.IsError || !tools.SandboxBlocked(result.Content) {
+		return result
+	}
+	if !a.gate.Escalate(a.ctx, call.ID, name, args, notify) {
+		return result
+	}
+	ctx.Sandbox = nil
+	return a.callTool(call, &ctx)
+}
+
+// callTool runs the tool itself, bracketed by the step recorder when it
+// may change files. Approval waits stay outside the bracket.
+func (a *Agent) callTool(call *tools.ToolCall, ctx *tools.ToolCtx) tools.ToolResult {
+	if a.steps == nil || !a.tools.Mutates(call.Name) {
+		return a.tools.Call(call, ctx)
+	}
+	return a.steps.Track(call.ID, call.Name, func() tools.ToolResult { return a.tools.Call(call, ctx) })
 }
 
 // settleAborted answers calls that will never run so the transcript

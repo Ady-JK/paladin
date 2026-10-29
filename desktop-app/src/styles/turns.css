@@ -1,0 +1,276 @@
+/* ---- Greeting: calm title and quiet chips. ---- */
+.greet-hero {
+  position: relative;
+  text-align: center;
+  padding: 14vh 1rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.greet-orb {
+  display: none;
+}
+
+.greet-title {
+  font-size: clamp(1.6rem, 3vw, 2.1rem);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--color-slate-900);
+}
+
+.dark .greet-title {
+  color: var(--color-slate-100);
+}
+
+.greet-sub {
+  margin-top: 8px;
+  font-size: 0.9375rem;
+  color: var(--color-slate-500);
+  text-align: center;
+}
+
+.greet-chips {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+.greet-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-200);
+  background: transparent;
+  padding: 7px 14px;
+  font-size: 0.8125rem;
+  color: var(--color-slate-700);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.dark .greet-chip {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+
+.greet-chip:hover {
+  border-color: var(--color-slate-300);
+  background: var(--color-slate-100);
+}
+
+.dark .greet-chip:hover {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-900);
+}
+
+/* ---- Skill chip: the attached `/skill <name>` for the pending turn. ---- */
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid rgb(146 134 214 / 0.35);
+  background: rgb(146 134 214 / 0.08);
+  padding: 3px 8px;
+  font-size: 0.6875rem;
+  color: var(--color-accent-700);
+}
+
+.dark .skill-chip {
+  color: var(--color-accent-400);
+}
+
+.skill-chip-dot,
+.bubble-skill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-accent-500);
+}
+
+.skill-chip-x {
+  border-radius: 9999px;
+  padding: 0 2px;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.skill-chip-x:hover {
+  opacity: 1;
+}
+
+/* The skill chip inside the user bubble (history): static, no remove. */
+.bubble-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid rgb(146 134 214 / 0.35);
+  background: rgb(146 134 214 / 0.1);
+  padding: 1px 8px;
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  margin-bottom: 6px;
+}
+
+/* ---- Turn notices: provider retry + context compaction. ---- */
+.chat-notice {
+  margin: 8px 0;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-600);
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.dark .chat-notice {
+  background: var(--color-slate-900);
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+
+.chat-divider {
+  display: flex;
+  flex-direction: column;
+  margin: 16px 0;
+  font-size: 0.8125rem;
+  color: var(--color-slate-500);
+}
+.chat-divider > .chat-divider-label,
+.chat-divider summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: default;
+}
+.chat-divider summary {
+  cursor: pointer;
+  list-style: none;
+}
+.chat-divider summary::-webkit-details-marker {
+  display: none;
+}
+.chat-divider > .chat-divider-label::before,
+.chat-divider > .chat-divider-label::after,
+.chat-divider summary::before,
+.chat-divider summary::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.3;
+}
+.chat-divider summary:focus-visible {
+  outline: 2px solid rgb(146 134 214 / 0.55);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.chat-divider-summary {
+  margin-top: 8px;
+  border-radius: 10px;
+  background: var(--color-slate-100);
+  color: var(--color-slate-800);
+  padding: 12px 16px;
+  white-space: pre-wrap;
+}
+.dark .chat-divider-summary {
+  background: var(--color-slate-900);
+  color: var(--color-slate-200);
+}
+
+/* ---- Live turns: per-session roots, queued bubbles, sidebar state. ---- */
+.live-root {
+  display: contents;
+}
+.turn-queued .bubble-user {
+  opacity: 0.6;
+  outline: 1px dashed var(--color-slate-400);
+  outline-offset: -1px;
+}
+.queued-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-400);
+  padding: 0 4px 0 8px;
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+}
+.queued-chip button {
+  border-radius: 9999px;
+  padding: 0 4px;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+.queued-chip button:hover,
+.queued-chip button:focus-visible {
+  opacity: 1;
+  background: rgb(127 127 127 / 0.2);
+  outline: none;
+}
+.live-ind {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-accent-600);
+}
+.dark .live-ind {
+  color: var(--color-accent-400);
+}
+.live-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  border: 1.5px solid rgb(146 134 214 / 0.25);
+  border-top-color: currentColor;
+  animation: live-spin 0.8s linear infinite;
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+.live-queued .live-dot {
+  background: transparent;
+  border: 1.5px solid currentColor;
+}
+.live-input .live-dot,
+.live-paused .live-dot {
+  background: #e0a800;
+}
+.live-input .live-dot {
+  animation: soft-ping 1.6s ease-out infinite;
+}
+.live-error .live-dot {
+  background: var(--color-agent-rose);
+}
+@keyframes live-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Frozen shell: no motion behind a guest page. ---- */
+body.guest-visible .thinking-ph,
+body.guest-visible .tool-spin {
+  animation: none;
+}

@@ -26,9 +26,8 @@ test("sending a message opens a session and shows the reply", async ({ page }) =
 
 test("agent markdown renders while the user bubble stays plain", async ({ page }) => {
   await page.evaluate(() => {
-    const paladin = (window as any).paladin;
-    const prev = paladin.chat.bind(paladin);
-    paladin.chat = async (params: any, handlers: any) => {
+    const prev = (window as any).__e2eRunTurn;
+    (window as any).__e2eRunTurn = async (params: any, handlers: any) => {
       const out = await prev(params, handlers);
       return {
         ...out,

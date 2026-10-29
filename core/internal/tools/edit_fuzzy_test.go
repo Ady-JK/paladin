@@ -144,3 +144,25 @@ func TestEditToolReportsFuzzyStrategy(t *testing.T) {
 }
 
 func jsonQuote(s string) string { return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"` }
+
+func TestEditRejectsInvalidUTF8WithoutChangingFile(t *testing.T) {
+	dir, path := editFixture(t, "before ")
+	if err := os.WriteFile(path, append([]byte("before "), append([]byte{0xff}, []byte(" target\nafter\n")...)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewEngine().Edit(dir, path, "target", "changed", false)
+	if err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("expected invalid UTF-8 guidance, got %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("rejected edit changed bytes: got %v, want %v", got, original)
+	}
+}

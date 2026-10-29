@@ -7,10 +7,15 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
-func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
+func spawnPiped(cmdStr, dir string, sb *sandbox.Policy) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
 	cmd := spawnShellCmd(cmdStr, dir, "TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
+	if err := confine(cmd, sb); err != nil {
+		return nil, nil, nil, err
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	outR, err := cmd.StdoutPipe()
 	if err != nil {
@@ -26,12 +31,16 @@ func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, er
 	return cmd, outR, errR, nil
 }
 
-func spawnToLog(cmdStr, dir string, log *os.File) (*exec.Cmd, error) {
+func spawnToLog(cmdStr, dir string, log *os.File, sb *sandbox.Policy) (*exec.Cmd, error) {
 	dup, err := duplicateFile(log)
 	if err != nil {
 		return nil, err
 	}
 	cmd := spawnShellCmd(cmdStr, dir, "TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
+	if err := confine(cmd, sb); err != nil {
+		dup.Close()
+		return nil, err
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = log
 	cmd.Stderr = dup

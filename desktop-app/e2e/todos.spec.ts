@@ -66,9 +66,8 @@ test("a settled todo tool call repaints the hat live", async ({ page }) => {
   // list to match the live events.
   await page.evaluate(() => {
     (window as any).__e2eTodos = [{ content: "Ship it", status: "finished" }];
-    const paladin = (window as any).paladin;
-    const prev = paladin.chat.bind(paladin);
-    paladin.chat = async (params: any, handlers: any) => {
+    const prev = (window as any).__e2eRunTurn;
+    (window as any).__e2eRunTurn = async (params: any, handlers: any) => {
       handlers.onTool({
         id: "todo-2",
         name: "todo",
@@ -95,12 +94,11 @@ test("a settled todo tool call repaints the hat live", async ({ page }) => {
 test("the next user message retires a finished plan", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eTodos = [{ content: "Ship it", status: "finished" }];
-    const paladin = (window as any).paladin;
-    const prev = paladin.chat.bind(paladin);
+    const prev = (window as any).__e2eRunTurn;
     // The backend drops a finished plan on a new message: mirror it
     // by emptying the fixture from the second turn on.
     let turns = 0;
-    paladin.chat = async (params: any, handlers: any) => {
+    (window as any).__e2eRunTurn = async (params: any, handlers: any) => {
       turns++;
       if (turns > 1) {
         (window as any).__e2eTodos = [];

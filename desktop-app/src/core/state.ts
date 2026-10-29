@@ -9,6 +9,8 @@ export const state = {
   usage: null as SessionUsage | null,
   escArmedAt: 0,
   busy: false,
+  // mode is the composer's turn mode: plan keeps the agent read-only.
+  mode: "build" as "build" | "plan",
   cwd: "",
   sessions: [] as SessionInfo[],
   providers: [] as ProviderInfo[],
@@ -18,7 +20,6 @@ export const state = {
   pendingDelete: "",
   dark: true,
   collapsed: false,
-  shownMessages: 0,
   highlightedModel: "",
   treeFilter: null as { provider: string; lab: string } | null,
   sideView: "agent" as SideView,

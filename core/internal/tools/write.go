@@ -1,4 +1,5 @@
-// Package tools: write.go creates a file with full content.
+// write.go creates a file with full content.
+
 package tools
 
 import (
@@ -16,6 +17,9 @@ type WriteTool struct {
 func NewWriteTool(engine Engine) *WriteTool { return &WriteTool{engine: engine} }
 
 func (WriteTool) Name() string { return "write" }
+
+// Mutates marks the tool for undo snapshots.
+func (WriteTool) Mutates() bool { return true }
 
 func (WriteTool) Definition() ToolDefinition {
 	return ToolDefinition{

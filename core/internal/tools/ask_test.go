@@ -55,7 +55,7 @@ func TestAskRejectsBadArguments(t *testing.T) {
 		{"empty list", `{"questions":[]}`, "required"},
 		{"empty question", `{"questions":[{"question":"  "}]}`, "empty"},
 		{"too many questions", `{"questions":[` + strings.Repeat(`{"question":"q"},`, 10) + `{"question":"last"}]}`, "at most 10"},
-		{"too many options", `{"questions":[{"question":"q","options":["a","b","c","d"]}]}`, "at most 3"},
+		{"too many options", `{"questions":[{"question":"q","options":["a","b","c","d","e","f","g"]}]}`, "at most 6"},
 		{"empty option", `{"questions":[{"question":"q","options":["a","  "]}]}`, "empty"},
 	}
 	for _, tc := range cases {
@@ -206,5 +206,28 @@ func TestAskRegistryStampsCallID(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAskMultipleSelection(t *testing.T) {
+	qs, err := parseAskQuestions(json.RawMessage(`{"questions":[{"question":"Which?","options":["a","b","c"],"multiple":true},{"question":"One?","options":["x","y"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !qs[0].Multiple || qs[1].Multiple {
+		t.Fatalf("multiple flag lost: %+v", qs)
+	}
+	out, err := summarizeAsk(qs, []AskAnswer{{Selected: []string{"a", "c"}}, {Answer: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"answer":"a, c"`) || !strings.Contains(out, `"selected":["a","c"]`) {
+		t.Fatalf("out = %s", out)
+	}
+	if _, err := summarizeAsk(qs, []AskAnswer{{Selected: []string{"a"}}, {Selected: []string{"x", "y"}}}); err == nil {
+		t.Fatal("single-choice question must reject several selections")
+	}
+	if _, err := summarizeAsk(qs, []AskAnswer{{Selected: []string{}}, {Answer: "x"}}); err == nil {
+		t.Fatal("empty multi answer must fail")
 	}
 }

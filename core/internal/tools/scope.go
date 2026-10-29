@@ -1,4 +1,5 @@
-// Package tools: scope.go resolves model-supplied paths.
+// scope.go resolves model-supplied paths.
+
 package tools
 
 import (

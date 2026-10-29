@@ -1,5 +1,6 @@
-// Package agent: messages.go shapes the on-disk transcript into the
+// messages.go shapes the on-disk transcript into the
 // model-facing message list and renders background-job notices.
+
 package agent
 
 import (

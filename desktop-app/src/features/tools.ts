@@ -4,11 +4,8 @@
 import { escapeHtml, ordinal, splitLines, tryParseJson } from "../core/format";
 import type { DiffRow, MatchSpan, ToolInfo, ToolView } from "../core/types";
 import { icon, type IconName } from "../icons";
-import { state } from "../core/state";
-import { toolBodyHtml } from "./toolBodies";
+import { relPath, toolBodyHtml } from "./toolBodies";
 
-// toolSummary is a function in this module.
-// It supports the desktop app frontend.
 export function toolSummary(name: string, raw: string): string {
   const short = (text: string) =>
     text.length > 120 ? `${text.slice(0, 120)}…` : text;
@@ -407,15 +404,6 @@ function kindOf(name: string): ToolKind {
   return KINDS[name] ?? OTHER;
 }
 
-// relPath shows workspace files relative to the workspace root.
-function relPath(path: string): string {
-  const root = state.cwd.replace(/[\\/]+$/, "");
-  if (root && path.startsWith(root) && /[\\/]/.test(path.charAt(root.length))) {
-    return path.slice(root.length + 1);
-  }
-  return path;
-}
-
 function parseArgs(raw: string): Record<string, unknown> {
   const parsed = tryParseJson(raw);
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
@@ -485,7 +473,11 @@ function paintToolHead(row: HTMLElement, head: HTMLElement, tool: ToolInfo): voi
   const label = toolLabel(tool);
   row.dataset.status = tool.status;
   const ico = head.querySelector<HTMLElement>(".tool-ico")!;
-  ico.innerHTML = tool.status === "running" ? '<span class="tool-spin"></span>' : icon(toolIcon(tool.name), "h-4 w-4");
+  const kind = tool.status === "running" ? "spin" : toolIcon(tool.name);
+  if (ico.dataset.glyph !== kind) {
+    ico.dataset.glyph = kind;
+    ico.innerHTML = tool.status === "running" ? '<span class="tool-spin"></span>' : icon(kind, "h-4 w-4");
+  }
   head.querySelector(".tool-verb")!.textContent = label.verb;
   const detail = head.querySelector<HTMLElement>(".tool-detail")!;
   detail.textContent = label.detail;

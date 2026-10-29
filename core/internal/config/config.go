@@ -1,5 +1,5 @@
 // Package config owns provider catalog persistence, validation, and
-// secret storage. Disk layout matches the Rust core exactly:
+// secret storage. Disk layout under the data dir:
 // config/providers.json, config/models.json, sessions/, logs/.
 package config
 
@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -85,8 +84,8 @@ func ParseApiType(s string) (ApiType, error) {
 // here; it lives in the OS keychain behind KeyStore.
 type Provider struct {
 	Name    string  `json:"name"`
-	ApiURL  string  `json:"api_url"`
-	ApiType ApiType `json:"api_type"`
+	ApiURL  string  `json:"apiUrl"`
+	ApiType ApiType `json:"apiType"`
 	Model   string  `json:"model"`
 }
 
@@ -108,14 +107,14 @@ type ProviderInput struct {
 }
 
 type ProvidersFile struct {
-	DefaultProvider string     `json:"default_provider"`
+	DefaultProvider string     `json:"defaultProvider"`
 	Providers       []Provider `json:"providers"`
 	Workspace       string     `json:"workspace"`
 }
 
 type ProviderModels struct {
-	AllModels     []string `json:"all_models"`
-	EnabledModels []string `json:"enabled_models"`
+	AllModels     []string `json:"allModels"`
+	EnabledModels []string `json:"enabledModels"`
 }
 
 type ModelsFile struct {
@@ -529,7 +528,7 @@ func IsOpencodeEndpoint(apiURL string) bool {
 }
 
 // AtomicWrite writes data to path via a temp file + rename, with
-// 0700 dirs and 0600 files on unix like the Rust core.
+// 0700 dirs and 0600 files on unix.
 func AtomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if dir == "." || dir == "" {
@@ -561,17 +560,7 @@ func AtomicWrite(path string, data []byte) error {
 	return nil
 }
 
-// SortedKeys returns sorted provider names; used for deterministic output.
-func SortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// Config mirrors the Rust core Config.
+// Config is the runtime configuration fixed at startup.
 type Config struct {
 	DataDir       string
 	MaxToolRounds uint32

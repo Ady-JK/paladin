@@ -1,0 +1,221 @@
+/* ============ Memory pane ============ */
+#memoryBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mem-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-slate-500);
+}
+.mem-refresh,
+.mem-folder {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-200);
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--color-slate-600);
+  transition: background-color 120ms ease;
+}
+.dark .mem-refresh,
+.dark .mem-folder {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-300);
+}
+.mem-refresh:hover,
+.mem-folder:hover {
+  background: var(--color-slate-100);
+}
+.dark .mem-refresh:hover,
+.dark .mem-folder:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.mem-section {
+  border-radius: 14px;
+  border: 1px solid var(--color-slate-200);
+  padding: 12px 14px;
+  background: rgb(255 255 255 / 0.6);
+  box-shadow: 0 4px 16px -12px rgb(15 15 30 / 0.2);
+}
+.dark .mem-section {
+  border-color: rgb(255 255 255 / 0.07);
+  background: rgb(255 255 255 / 0.02);
+}
+.mem-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mem-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-slate-900);
+}
+.dark .mem-title {
+  color: var(--color-slate-100);
+}
+.mem-cwd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-slate-400);
+}
+.mem-blurb {
+  margin-top: 2px;
+  color: var(--color-slate-500);
+}
+.mem-usage {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}
+.mem-bar {
+  display: block;
+  width: 72px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--color-slate-200);
+  overflow: hidden;
+}
+.dark .mem-bar {
+  background: rgb(255 255 255 / 0.08);
+}
+.mem-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent-500);
+  transition: width 240ms ease;
+}
+.mem-usage.is-warm .mem-bar > span {
+  background: var(--color-agent-amber);
+}
+.mem-usage.is-hot .mem-bar > span {
+  background: var(--color-agent-rose);
+}
+.mem-list {
+  margin: 10px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mem-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  transition: background-color 120ms ease;
+}
+.mem-entry:hover {
+  background: var(--color-slate-100);
+}
+.dark .mem-entry:hover {
+  background: rgb(255 255 255 / 0.04);
+}
+.mem-entry-text {
+  min-width: 0;
+  flex: 1;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-slate-700);
+}
+.dark .mem-entry-text {
+  color: var(--color-slate-200);
+}
+.mem-x {
+  display: flex;
+  border-radius: 6px;
+  padding: 3px;
+  color: var(--color-slate-400);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.mem-entry:hover .mem-x,
+.mem-x:focus-visible {
+  opacity: 1;
+}
+.mem-x:hover {
+  color: var(--color-agent-rose);
+}
+.mem-none,
+.mem-empty {
+  padding: 4px 8px;
+  color: var(--color-slate-400);
+}
+.mem-error {
+  color: var(--color-agent-rose);
+}
+.mem-add,
+.mem-edit {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-slate-800);
+  outline: none;
+  resize: vertical;
+}
+.dark .mem-add,
+.dark .mem-edit {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+.mem-add:focus,
+.mem-edit:focus {
+  border-color: var(--color-accent-500);
+}
+.mem-folders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-slate-500);
+}
+.mem-folder em {
+  font-style: normal;
+  color: var(--color-slate-400);
+}
+
+/* Multiple-choice ask options: square checks. */
+.ask-check {
+  display: flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1.5px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.7;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.ask-check.is-on {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-500);
+  color: #fff;
+  opacity: 1;
+}

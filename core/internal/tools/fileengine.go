@@ -1,4 +1,5 @@
-// Package tools: fileengine.go is the shared engine behind write/edit.
+// fileengine.go is the shared engine behind write/edit.
+
 package tools
 
 import (
@@ -6,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
@@ -60,7 +62,7 @@ type Occurrence struct {
 	After      *ContextLine
 }
 
-// EngineError mirrors the Rust EngineError Display strings.
+// EngineError is a file-engine failure with a model-facing message.
 type EngineError struct {
 	Kind          string
 	Message       string
@@ -156,9 +158,12 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: path %q cannot be read: %s", requestedPath, syserr.Str(err))}
 	}
 	if hasNul(raw) {
-		return EditResult{}, &EngineError{Kind: "message", Message: "edit: the file is binary, not text"}
+		return EditResult{}, &EngineError{Kind: "message", Message: "edit: the file contains NUL bytes and is binary, not text; use a binary-aware tool instead"}
 	}
-	content := lossyString(raw)
+	if !utf8.Valid(raw) {
+		return EditResult{}, &EngineError{Kind: "message", Message: "edit: the file is not valid UTF-8; convert it to UTF-8 before editing"}
+	}
+	content := string(raw)
 	strategy := MatchExact
 	spans := exactSpans(content, oldText, newText)
 	if len(spans) == 0 {
@@ -316,13 +321,6 @@ func hasNul(b []byte) bool {
 		}
 	}
 	return false
-}
-
-func lossyString(b []byte) string {
-	// Rust String::from_utf8_lossy: replaces invalid sequences with U+FFFD.
-	// Go's strings.ToValidUTF8 on a string converted from bytes treats
-	// each invalid byte as U+FFFD the same way.
-	return strings.ToValidUTF8(string(b), "�")
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {

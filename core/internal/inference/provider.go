@@ -1,6 +1,7 @@
 // Package inference owns LLM providers: the Provider interface, the
-// provider template registry, and the OpenAI-compatible implementation
-// (backed by openai-go).
+// provider template registry, and the OpenAI-compatible (chat and
+// responses), Anthropic and Google implementations, plus the shared
+// retry/stall resilience and usage accounting.
 package inference
 
 import (
@@ -121,7 +122,7 @@ func providerTemplate(apiType config.ApiType) (ProviderTemplate, bool) {
 	return t, ok
 }
 
-// ProviderError mirrors the Rust ProviderError Display strings.
+// ProviderError is a classified provider failure (Kind) with a user-facing message.
 type ProviderError struct {
 	Kind    string
 	Message string
@@ -220,7 +221,6 @@ func BuildProvider(apiType config.ApiType, name, model, baseURL, apiKey string) 
 }
 
 func quote(s string) string {
-	// Rust {:?} on strings; %q matches for the ids we use.
 	return "\"" + s + "\""
 }
 

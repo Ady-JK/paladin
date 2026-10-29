@@ -1,0 +1,186 @@
+/* ============ Approvals ============
+   Amber marks "waiting on you"; destructive / escalate cards turn rose. */
+.approval-card {
+  --ap-tint: 224 168 0;
+  margin: 8px 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgb(var(--ap-tint) / 0.4);
+  background: linear-gradient(180deg, rgb(var(--ap-tint) / 0.07), rgb(var(--ap-tint) / 0.02));
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.05),
+    0 8px 24px -12px rgb(var(--ap-tint) / 0.45);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  animation: turn-in 220ms ease-out;
+}
+.approval-card.is-destructive,
+.approval-card.is-escalate {
+  --ap-tint: 225 86 104;
+}
+.approval-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.approval-ico {
+  display: inline-flex;
+  color: rgb(var(--ap-tint));
+}
+.approval-title {
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .approval-title {
+  color: var(--color-slate-100);
+}
+.approval-reasons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.approval-reason {
+  border-radius: 9999px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgb(var(--ap-tint));
+  background: rgb(var(--ap-tint) / 0.12);
+}
+.approval-subject {
+  margin: 8px 0 10px;
+  max-height: 9.5em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-slate-800);
+}
+.dark .approval-subject {
+  border-color: var(--color-slate-700);
+  background: rgb(2 6 23 / 0.45);
+  color: var(--color-slate-100);
+}
+.approval-prompt {
+  margin-right: 8px;
+  color: var(--color-slate-400);
+  user-select: none;
+}
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.approval-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-white, #fff);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-slate-700);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.dark .approval-btn {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.approval-btn:hover {
+  border-color: var(--color-slate-300);
+  transform: translateY(-1px);
+}
+.approval-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(146 134 214 / 0.55);
+}
+.approval-btn:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.approval-btn.is-primary {
+  border-color: var(--color-accent-600);
+  background: var(--color-accent-600);
+  color: #fff;
+}
+.approval-btn.is-primary:hover {
+  background: var(--color-accent-700);
+}
+.approval-btn.is-deny {
+  margin-left: auto;
+  color: var(--color-agent-rose);
+}
+.approval-btn kbd {
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  opacity: 0.7;
+  background: rgb(148 163 184 / 0.18);
+}
+.approval-card.is-resolved {
+  border-color: var(--color-slate-200);
+  background: transparent;
+  box-shadow: none;
+  padding: 5px 10px;
+}
+.dark .approval-card.is-resolved {
+  border-color: var(--color-slate-800);
+}
+.approval-receipt {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+}
+.approval-receipt-ico {
+  display: inline-flex;
+  color: var(--color-agent-emerald, #10b981);
+}
+.approval-card.is-denied .approval-receipt-ico {
+  color: var(--color-agent-rose);
+}
+.approval-receipt-what {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: var(--color-slate-600);
+}
+.dark .approval-receipt-what {
+  color: var(--color-slate-300);
+}
+.approval-receipt-sep {
+  opacity: 0.5;
+}
+.approval-receipt-cmd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.live-approval .live-dot {
+  background: #e0a800;
+  animation: soft-ping 1.6s ease-out infinite;
+}
+.working-bar[data-phase="approval"] .working-what {
+  color: #b58900;
+  font-weight: 500;
+}
+.dark .working-bar[data-phase="approval"] .working-what {
+  color: #e0b84a;
+}

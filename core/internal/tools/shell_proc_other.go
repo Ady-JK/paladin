@@ -6,10 +6,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
-func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
+func spawnPiped(cmdStr, dir string, sb *sandbox.Policy) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
+	if err := confine(cmd, sb); err != nil {
+		return nil, nil, nil, err
+	}
 	cmd.Dir = dir
 	cmd.Env = shellEnv("TERM=dumb")
 	outR, err := cmd.StdoutPipe()
@@ -26,8 +31,11 @@ func spawnPiped(cmdStr, dir string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, er
 	return cmd, outR, errR, nil
 }
 
-func spawnToLog(cmdStr, dir string, log *os.File) (*exec.Cmd, error) {
+func spawnToLog(cmdStr, dir string, log *os.File, sb *sandbox.Policy) (*exec.Cmd, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
+	if err := confine(cmd, sb); err != nil {
+		return nil, err
+	}
 	cmd.Dir = dir
 	cmd.Env = shellEnv("TERM=dumb")
 	cmd.Stdout = log

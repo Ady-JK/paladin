@@ -19,7 +19,7 @@ async function setup(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     const w = window as any;
-    w.paladin.chat = (_params: any, handlers: any) =>
+    w.__e2eRunTurn = (_params: any, handlers: any) =>
       new Promise((resolve) => {
         w.__h = handlers;
         w.__done = () => resolve({ sessionId: "", reply: "", stopped: false, needsContinue: false });
@@ -151,10 +151,10 @@ test("history transcripts group calls the same way", async ({ page }) => {
     const p = (window as any).paladin;
     const prev = p.invoke.bind(p);
     p.invoke = async (cmd: string, args: any) => {
-      if (cmd === "list_sessions") {
+      if (cmd === "listSessions") {
         return [{ sessionId: "sess-hist", cwd: "/home/tester/project", createdAt: at, provider: "p", model: "m", messageCount: 8, title: "hist" }];
       }
-      if (cmd === "session_history") return history;
+      if (cmd === "sessionHistory") return history;
       return prev(cmd, args);
     };
   });
@@ -164,4 +164,43 @@ test("history transcripts group calls the same way", async ({ page }) => {
   await expect(runs(page)).toHaveCount(2);
   await expect(runs(page).nth(0).locator(".tool-run-head")).toHaveText(/Read 3 files/);
   await expect(runs(page).nth(1).locator(".tool-chip")).toHaveText("go test ./...");
+});
+
+test("parallel tool updates keep nodes stable and the group animates shut", async ({ page }) => {
+  await setup(page);
+  await emit(page, [
+    tool("p1", "shell", { cmd: "make a" }, "running", ""),
+    tool("p2", "shell", { cmd: "make b" }, "running", ""),
+  ]);
+  const run = runs(page).first();
+  await expect(run.locator(".tool-run-head")).toHaveText(/Running|Ran/);
+  // Tag the live nodes, push more updates, and check nothing was rebuilt
+  // (a rebuilt spinner restarts its rotation and the head flickers).
+  await page.evaluate(() => {
+    const run = document.querySelector("#messages [data-tool-run]")!;
+    (run.querySelector(".tool-run-head .tool-spin") as any).__tag = "head";
+    (run.querySelector(".tool-run-head .tool-verb") as any).__tag = "verb";
+    (run.querySelector('.tool-row[data-tool="shell"] .tool-spin') as any).__tag = "row";
+  });
+  await emit(page, [
+    tool("p3", "read", { path: "src/a.ts" }, "running", ""),
+    tool("p2", "shell", { cmd: "make b" }, "ok", "ok"),
+  ]);
+  await expect(run.locator(".tool-run-head")).toContainText(/reading 1 file/);
+  const tags = await page.evaluate(() => {
+    const run = document.querySelector("#messages [data-tool-run]")!;
+    return {
+      head: (run.querySelector(".tool-run-head .tool-spin") as any)?.__tag,
+      verb: (run.querySelector(".tool-run-head .tool-verb") as any)?.__tag,
+      row: (run.querySelector('.tool-row[data-tool="shell"] .tool-spin') as any)?.__tag,
+    };
+  });
+  expect(tags).toEqual({ head: "head", verb: "verb", row: "row" });
+  // The folded list collapses with a transition rather than display:none.
+  await run.locator(".tool-run-head").click();
+  await expect(run.locator(".tool-row").first()).toBeVisible();
+  await run.locator(".tool-run-head").click();
+  await expect(run.locator(".tool-row").first()).toBeHidden();
+  const css = await run.locator(".tool-run-list").evaluate((el) => getComputedStyle(el).display);
+  expect(css).toBe("grid");
 });

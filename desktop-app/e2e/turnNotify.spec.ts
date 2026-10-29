@@ -35,3 +35,10 @@ test("a running ask asks for input; other events are ignored", () => {
   expect(noteFor({ event: "turn/start", sessionId: "s1", turn: {} })).toBeNull();
   expect(noteFor(null)).toBeNull();
 });
+
+test("a pending approval notifies; resolved ones are silent", () => {
+  const ap = { event: "chat/approval", sessionId: "s3", approval: { id: "c1", state: "pending", command: "npm install x" } };
+  expect(noteFor(ap)).toEqual({ sessionId: "s3", title: "Paladin · needs approval", body: "npm install x" });
+  expect(noteFor({ ...ap, approval: { id: "c2", state: "pending", path: "/etc/hosts" } })!.body).toBe("Write /etc/hosts");
+  expect(noteFor({ ...ap, approval: { ...ap.approval, state: "approved" } })).toBeNull();
+});

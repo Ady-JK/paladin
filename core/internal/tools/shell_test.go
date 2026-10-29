@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func sleepMs(ms int) {
@@ -326,5 +327,55 @@ func TestShellBackgroundLifecycle(t *testing.T) {
 	}
 	if deadlineHit {
 		t.Fatal("failed job never reported failure")
+	}
+}
+
+func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
+	ctx, _ := testCtx(t)
+	tool := NewShellTool()
+	cmd := `python3 -c "import sys; sys.stdout.write('head-'); sys.stdout.flush(); sys.stderr.write('e'*100000); sys.stdout.write(('x'*100000)+'-tail-marker')"`
+	out, err := tool.Call(json.RawMessage(`{"cmd":`+jsonQuote(cmd)+`,"timeout_ms":3000}`), ctx)
+	if err != nil {
+		t.Fatalf("command deadlocked or failed: %v", err)
+	}
+	var resp ShellResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Output == nil || resp.Truncated == nil || !*resp.Truncated {
+		t.Fatalf("expected truncated output, got %+v", resp)
+	}
+	if len(*resp.Output) > MaxShellOutput+len(shellTruncatedMarker)+8 {
+		t.Fatalf("output exceeded cap: %d bytes", len(*resp.Output))
+	}
+	capture := newShellOutputCapture(MaxShellOutput)
+	_, _ = capture.Write([]byte("head-" + strings.Repeat("界", MaxShellOutput) + "-tail-marker"))
+	bytes, wasTruncated := capture.result()
+	if !utf8.Valid(bytes) {
+		t.Fatal("captured output split a UTF-8 character")
+	}
+	code := 0
+	encoded, failure := finishSync(bytes, wasTruncated, waitResult{code: &code}, false)
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	if err := json.Unmarshal([]byte(encoded), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Output == nil || !strings.HasPrefix(*resp.Output, "head-") || !strings.Contains(*resp.Output, "-tail-marker") {
+		t.Fatalf("truncated output must preserve head and tail: %q", *resp.Output)
+	}
+}
+
+func TestShellTimeoutOverflowRejected(t *testing.T) {
+	if _, err := shellTimeoutMs(int64(^uint64(0) >> 1)); err == nil {
+		t.Fatal("overflowing timeout accepted")
+	}
+}
+
+func TestShellRunRejectsNilContextWithoutPanicking(t *testing.T) {
+	_, err := NewShellTool().Call(json.RawMessage(`{"cmd":"echo hi"}`), nil)
+	if err == nil || !strings.Contains(err.Error(), "no workspace") {
+		t.Fatalf("expected a workspace validation error, got %v", err)
 	}
 }

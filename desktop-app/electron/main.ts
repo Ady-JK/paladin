@@ -43,8 +43,8 @@ type AppTheme = "dark" | "light";
 let appTheme: AppTheme = "dark";
 
 function chromeColor(): string {
-  // Matches the palette in styles.css: slate-950 is #06090e.
-  return appTheme === "dark" ? "#06090e" : "#ffffff";
+  // Matches the dark shell background in src/styles/base.css (slate-950).
+  return appTheme === "dark" ? "#17171a" : "#ffffff";
 }
 
 function paintViewBackground(entry: ViewEntry): void {
@@ -471,34 +471,6 @@ app.whenReady().then(() => {
       ...(defaultPath ? { defaultPath } : {}),
     });
     return res.canceled ? null : (res.filePaths[0] ?? null);
-  });
-
-  ipcMain.handle("agent:chat", (e, params: Json) => {
-    const streamId = `s${nextId++}`;
-    pending.set(streamId, {
-      resolve: () => undefined,
-      reject: () => undefined,
-    });
-    // Completion arrives as {id: streamId, ok, result|error}; forward it
-    // to this sender only, then forget the stream.
-    const orig = pending.get(streamId)!;
-    pending.set(streamId, {
-      resolve: (result) => {
-        e.sender.send("agent:chat-done", { streamId, ok: true, result });
-        orig.resolve(result);
-      },
-      reject: (err) => {
-        e.sender.send("agent:chat-done", { streamId, ok: false, error: String(err?.message ?? err) });
-        orig.reject(err);
-      },
-    });
-    try {
-      sendLine({ id: streamId, method: "chat", params });
-    } catch (err) {
-      pending.delete(streamId);
-      throw err;
-    }
-    return streamId;
   });
 
   ipcMain.handle("views:ensure", (_e, name: string, url: string, partition: string) => {

@@ -43,6 +43,13 @@ func pointMockAt(rt *AgentRuntime, url string) {
 	}
 }
 
+// runTurnSync drives one turn straight through runTurn, without the
+// hub, and closes tx when it returns.
+func runTurnSync(rt *AgentRuntime, req agent.Request, tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
+	defer close(tx)
+	return rt.runTurn(context.Background(), req, nil, tx, done)
+}
+
 func chatToEnd(t *testing.T, rt *AgentRuntime, req agent.Request) (agent.ChatOutcome, []agent.ChatChunk) {
 	t.Helper()
 	tx := make(chan agent.ChatChunk, 256)
@@ -57,7 +64,7 @@ func chatToEnd(t *testing.T, rt *AgentRuntime, req agent.Request) (agent.ChatOut
 			chunks = append(chunks, c)
 		}
 	}()
-	outcome, err := rt.Chat(req, tx, done)
+	outcome, err := runTurnSync(rt, req, tx, done)
 	wg.Wait()
 	if err != nil {
 		t.Fatal(err)
@@ -135,18 +142,6 @@ func TestAddProviderKeychainFailureLeavesCatalogUntouched(t *testing.T) {
 	}
 }
 
-func TestConcurrentTurnRejected(t *testing.T) {
-	rt, _ := testRuntime(t)
-	noop := func() {}
-	if !rt.tracker.track("s", "/tmp", noop) {
-		t.Fatal("first track must succeed")
-	}
-	if rt.tracker.track("s", "/tmp", noop) {
-		t.Fatal("second track must fail")
-	}
-	rt.tracker.untrack("s")
-}
-
 func TestFullTurnWithMockProvider(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -187,7 +182,7 @@ func TestFullTurnWithMockProvider(t *testing.T) {
 		for range tx {
 		}
 	}()
-	outcome, err := rt.Chat(req, tx, done)
+	outcome, err := runTurnSync(rt, req, tx, done)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,25 +206,19 @@ func TestChatValidation(t *testing.T) {
 	newTx := func() (chan agent.ChatChunk, chan struct{}) {
 		return make(chan agent.ChatChunk, 8), make(chan struct{})
 	}
-	// Missing session id.
-	tx, done := newTx()
-	if _, err := rt.Chat(agent.Request{Message: "hi", Cwd: "/tmp/p"}, tx, done); err == nil {
+	if _, _, err := rt.SubmitTurn(agent.Request{Message: "hi", Cwd: "/tmp/p"}, SubmitOpts{}); err == nil {
 		t.Fatal("missing session accepted")
 	}
-	close(done)
-	// Missing message without resume.
 	sess, err := rt.OpenSession("", "/tmp/p")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, done = newTx()
-	if _, err := rt.Chat(agent.Request{SessionID: sess.SessionID, Cwd: "/tmp/p"}, tx, done); err == nil {
+	if _, _, err := rt.SubmitTurn(agent.Request{SessionID: sess.SessionID, Cwd: "/tmp/p"}, SubmitOpts{}); err == nil {
 		t.Fatal("empty message accepted")
 	}
-	close(done)
 	// Unknown session.
-	tx, done = newTx()
-	if _, err := rt.Chat(agent.Request{SessionID: "00000000-0000-4000-8000-000000000099", Message: "hi", Cwd: "/tmp/p"}, tx, done); err == nil {
+	tx, done := newTx()
+	if _, err := runTurnSync(rt, agent.Request{SessionID: "00000000-0000-4000-8000-000000000099", Message: "hi", Cwd: "/tmp/p"}, tx, done); err == nil {
 		t.Fatal("unknown session accepted")
 	}
 	close(done)
@@ -240,7 +229,7 @@ func TestChatValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx, done = newTx()
-	if _, err := rt2.Chat(agent.Request{SessionID: sess2.Meta.SessionID, Message: "hi", Cwd: "/tmp/p"}, tx, done); err == nil {
+	if _, err := runTurnSync(rt2, agent.Request{SessionID: sess2.Meta.SessionID, Message: "hi", Cwd: "/tmp/p"}, tx, done); err == nil {
 		t.Fatal("keyless chat accepted")
 	}
 	close(done)
@@ -337,60 +326,12 @@ func TestChatPlainTextTurn(t *testing.T) {
 	}
 }
 
-func TestChatConcurrentTurnRejected(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"choices": [{"message": {"content": "done"}}]}`)
-	}))
-	defer server.Close()
+func TestStopInWithNothingRunning(t *testing.T) {
 	rt, _ := testRuntime(t)
-	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
-		t.Fatal(err)
-	}
-	pointMockAt(rt, server.URL)
-	sess, err := rt.OpenSession("", "/tmp/proj")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Hold the tracker directly: second Chat must fail fast.
-	rt.tracker.track(sess.SessionID, "/tmp/proj", func() {})
-	tx := make(chan agent.ChatChunk, 8)
-	done := make(chan struct{})
-	defer close(done)
-	if _, err := rt.Chat(agent.Request{SessionID: sess.SessionID, Message: "hi", Cwd: "/tmp/proj"}, tx, done); err == nil {
-		t.Fatal("concurrent turn accepted")
-	}
-	<-tx // consume the closed channel artifact? Chat defers close(tx) even on error.
-}
-
-func TestStopAndStopIn(t *testing.T) {
-	rt, _ := testRuntime(t)
-	noop := func() {}
-	if rt.Stop("missing") {
+	if rt.StopIn("missing", "") || rt.StopIn("", "/tmp/nowhere") {
 		t.Fatal("stop false positive")
 	}
-	rt.tracker.track("s1", "/tmp/a", noop)
-	rt.tracker.track("s2", "/tmp/b", noop)
-	// Stop cancels but keeps the entry (idempotent, like the Rust core).
-	if !rt.Stop("s1") {
-		t.Fatal("first stop failed")
-	}
-	if !rt.Stop("s1") {
-		t.Fatal("stop should be idempotent")
-	}
-	if !rt.StopIn("", "/tmp/b") {
-		t.Fatal("stop-in by cwd")
-	}
-	if rt.StopIn("", "/tmp/nowhere") {
-		t.Fatal("stop-in false positive")
-	}
-	// StopIn with session id ignores cwd.
-	rt.tracker.track("s3", "/tmp/c", noop)
-	if !rt.StopIn("s3", "/tmp/other") {
-		t.Fatal("stop-in by id")
-	}
 }
-
 func TestOpenSessionValidation(t *testing.T) {
 	rt, _ := testRuntime(t)
 	if _, err := rt.OpenSession("", ""); err == nil {
@@ -730,7 +671,7 @@ func TestSystemPromptFileMaxRounds(t *testing.T) {
 		t.Fatalf("reset did not restore default")
 	}
 	// settings.json max rounds still apply; corrupt files fall back.
-	settings := `{"max_tool_rounds":7}`
+	settings := `{"maxToolRounds":7}`
 	if err := os.MkdirAll(filepath.Dir(rt.settingsPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -883,8 +824,7 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 		t.Fatalf("unreachable hosts should save nothing: %+v", models)
 	}
 	// Mock catalog server populates models.
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data": [{"id": "zebra"}, {"id": "apple"}]}`)
 	}))
@@ -923,40 +863,17 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 	}
 }
 
-func TestTrackerStopSemantics(t *testing.T) {
-	tr := newTracker()
-	if tr.stop("missing", "") {
-		t.Fatal("false positive")
-	}
-	tr.track("a", "/x", func() {})
-	tr.track("b", "/y", func() {})
-	if !tr.stop("", "/x") {
-		t.Fatal("cwd stop failed")
-	}
-	if !tr.stop("b", "") {
-		t.Fatal("id stop failed")
-	}
-	// Stop cancels without removing entries (matches the Rust core), so a
-	// fresh tracker is what reports idle.
-	if newTracker().stop("", "") {
-		t.Fatal("fresh tracker should be idle")
-	}
-	if newTracker().stop("missing", "") {
-		t.Fatal("fresh tracker false positive")
-	}
-}
-
 func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 	rt, _ := testRuntime(t)
 	defs := rt.tools.Definitions()
-	if len(defs) != 6 {
+	if len(defs) != 9 {
 		t.Fatalf("got %d", len(defs))
 	}
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"read", "write", "edit", "shell", "ask", "todo"} {
+	for _, want := range []string{"read", "write", "edit", "shell", "ask", "todo", "memory", "skill", "session_search"} {
 		if !names[want] {
 			t.Fatalf("missing %q", want)
 		}
@@ -1169,18 +1086,10 @@ func TestCancelAskStopsTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	type res struct {
-		outcome agent.ChatOutcome
-		err     error
+	_, done, err := rt.SubmitTurn(agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: wsDir}, SubmitOpts{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	done := make(chan res, 1)
-	tx := make(chan agent.ChatChunk, 256)
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		outcome, err := rt.Chat(agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: wsDir}, tx, stop)
-		done <- res{outcome: outcome, err: err}
-	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if rt.ask.Pending(sess.SessionID, "c-ask-9") {
@@ -1197,17 +1106,14 @@ func TestCancelAskStopsTurn(t *testing.T) {
 	if rt.CancelAsk(sess.SessionID, "c-ask-9") {
 		t.Fatal("second cancel should report nothing waiting")
 	}
-	var r res
+	var final TurnInfo
 	select {
-	case r = <-done:
+	case final = <-done:
 	case <-time.After(15 * time.Second):
 		t.Fatal("cancelled turn never returned")
 	}
-	if r.err != nil {
-		t.Fatalf("cancel should stop cleanly, got %v", r.err)
-	}
-	if !r.outcome.Stopped {
-		t.Fatalf("got %+v", r.outcome)
+	if final.Error != "" || !final.Stopped {
+		t.Fatalf("cancel should stop cleanly, got %+v", final)
 	}
 }
 
@@ -1273,7 +1179,7 @@ func TestSessionUsageKnownWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	var totals session.UsageTotals
-	totals.AddCall("kimi-k2.6", 1000, 1000, 0, 0, 0, 2000, 0.05, 0.1, true, 1)
+	totals.AddCall("kimi-k2.6", usageCall(1000, 1000, 0, 0, 0, 2000, 0.05, 0.1, true), 1)
 	data, err := json.Marshal(totals)
 	if err != nil {
 		t.Fatal(err)
@@ -1326,9 +1232,9 @@ func TestOverallUsageAggregates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ta session.UsageTotals
-	ta.AddCall("beam-free", 100, 50, 0, 10, 0, 150, 0.01, 0.02, true, 1790966400)
+	ta.AddCall("beam-free", usageCall(100, 50, 0, 10, 0, 150, 0.01, 0.02, true), 1790966400)
 	var tb session.UsageTotals
-	tb.AddCall("kimi-k2.6", 200, 100, 5, 0, 5, 300, 0.02, 0.04, true, 1790966400)
+	tb.AddCall("kimi-k2.6", usageCall(200, 100, 5, 0, 5, 300, 0.02, 0.04, true), 1790966400)
 	for _, tc := range []struct {
 		sess   string
 		totals session.UsageTotals
@@ -1513,13 +1419,19 @@ func TestChatInjectsSkillContent(t *testing.T) {
 		!strings.Contains(last, "review guidelines") {
 		t.Fatalf("skill not injected: %q", last)
 	}
-	// The persisted transcript keeps the expansion, not the short text.
+	// The transcript keeps the expansion for the model; history shows
+	// the short typed text.
 	history, err := rt.SessionHistory(sess.SessionID, ws)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) == 0 || !strings.Contains(history[0].Content, "Use this skill (reviewer):") {
-		t.Fatalf("transcript missing expansion: %+v", history)
+	if len(history) == 0 || history[0].Content != "check this" {
+		t.Fatalf("history should show the typed text: %+v", history)
+	}
+	stored, _ := rt.transcripts.Load(ws, sess.SessionID)
+	raw, _ := stored.History()
+	if len(raw) == 0 || !strings.Contains(raw[0].Content, "Use this skill (reviewer):") {
+		t.Fatalf("transcript missing expansion: %+v", raw)
 	}
 
 	// Unknown skills fail the turn instead of dropping content.
@@ -1527,7 +1439,16 @@ func TestChatInjectsSkillContent(t *testing.T) {
 	tx := make(chan agent.ChatChunk, 16)
 	done := make(chan struct{})
 	defer close(done)
-	if _, err := rt.Chat(agent.Request{SessionID: sess.SessionID, Message: "hi", Cwd: ws, Skill: &bad}, tx, done); err == nil {
+	if _, err := runTurnSync(rt, agent.Request{SessionID: sess.SessionID, Message: "hi", Cwd: ws, Skill: &bad}, tx, done); err == nil {
 		t.Fatal("unknown skill accepted")
+	}
+}
+
+// usageCall builds one LLM call's counters for AddCall.
+func usageCall(prompt, completion, reasoning, cacheRead, cacheWrite, total int64, cost, listCost float64, hasCost bool) session.Counters {
+	return session.Counters{
+		PromptTokens: prompt, CompletionTokens: completion, ReasoningTokens: reasoning,
+		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, TotalTokens: total,
+		Cost: cost, ListCost: listCost, HasCost: hasCost,
 	}
 }

@@ -1,4 +1,5 @@
-// Package tools: edit.go replaces text verbatim in an existing file.
+// edit.go replaces text verbatim in an existing file.
+
 package tools
 
 import (
@@ -16,6 +17,9 @@ type EditTool struct {
 func NewEditTool(engine Engine) *EditTool { return &EditTool{engine: engine} }
 
 func (EditTool) Name() string { return "edit" }
+
+// Mutates marks the tool for undo snapshots.
+func (EditTool) Mutates() bool { return true }
 
 func (EditTool) Definition() ToolDefinition {
 	return ToolDefinition{

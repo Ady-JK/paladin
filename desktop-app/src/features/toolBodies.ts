@@ -35,7 +35,8 @@ function parse(raw: string): unknown {
   }
 }
 
-function relPath(path: string): string {
+// relPath shows workspace files relative to the workspace root.
+export function relPath(path: string): string {
   const root = state.cwd.replace(/[\\/]+$/, "");
   if (root && path.startsWith(root) && /[\\/]/.test(path.charAt(root.length))) {
     return path.slice(root.length + 1);

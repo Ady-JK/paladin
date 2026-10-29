@@ -1,5 +1,6 @@
-// Package inference: google.go implements the Google Generative Language
+// google.go implements the Google Generative Language
 // dialect used by OpenCode Go for Gemini models.
+
 package inference
 
 import (

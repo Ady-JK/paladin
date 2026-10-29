@@ -51,6 +51,47 @@ type SessionInfo struct {
 	Provider     string `json:"provider"`
 	SessionID    string `json:"sessionId"`
 	Title        string `json:"title"`
+	// Revert is the session's pending undo, if any.
+	Revert *RevertInfo `json:"revert,omitempty"`
+	// Worktree is set for sessions working in a managed git worktree.
+	Worktree *WorktreeInfo `json:"worktree,omitempty"`
+}
+
+// WorktreeInfo is the client view of a session's worktree.
+type WorktreeInfo struct {
+	RepoRoot   string `json:"repoRoot"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	BaseBranch string `json:"baseBranch,omitempty"`
+	Origin     string `json:"origin"`
+}
+
+// WorktreeView converts a stored worktree link for the client.
+func WorktreeView(wt *transcript.Worktree) *WorktreeInfo {
+	if wt == nil {
+		return nil
+	}
+	return &WorktreeInfo{RepoRoot: wt.RepoRoot, Path: wt.Path, Branch: wt.Branch, BaseBranch: wt.BaseBranch, Origin: wt.Origin}
+}
+
+// RevertInfo is the client view of a pending undo.
+type RevertInfo struct {
+	Index     int      `json:"index"`
+	Restored  []string `json:"restored"`
+	Skipped   []string `json:"skipped"`
+	Snapshots bool     `json:"snapshots"`
+}
+
+// RevertView converts a stored revert for the client.
+func RevertView(rv *transcript.Revert) *RevertInfo {
+	if rv == nil {
+		return nil
+	}
+	out := &RevertInfo{Index: rv.Index, Restored: []string{}, Skipped: append([]string{}, rv.Skipped...), Snapshots: rv.Snapshots}
+	for _, f := range rv.Restored {
+		out.Restored = append(out.Restored, f.Path)
+	}
+	return out
 }
 
 func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo {
@@ -70,6 +111,8 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 		Model:        model,
 		MessageCount: messageCount,
 		Title:        title,
+		Revert:       RevertView(meta.Revert),
+		Worktree:     WorktreeView(meta.Worktree),
 	}
 }
 
@@ -79,6 +122,8 @@ type HistoryMessage struct {
 	Arguments *string `json:"arguments,omitempty"`
 	Content   string  `json:"content"`
 	CreatedAt int64   `json:"createdAt"`
+	// Index is a user row's transcript position, the handle for undo.
+	Index *int `json:"index,omitempty"`
 	// Kind tags special rows; "compaction" is a context-compaction
 	// divider whose Content is the summary.
 	Kind       *string `json:"kind,omitempty"`
@@ -107,7 +152,7 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 		}
 	}
 	var out []HistoryMessage
-	for _, msg := range msgs {
+	for i, msg := range msgs {
 		if msg.Replay {
 			continue
 		}
@@ -162,11 +207,20 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 		default:
 			role = "tool"
 		}
-		out = append(out, HistoryMessage{
+		content := msg.Content
+		if msg.Role == transcript.RoleUser && msg.Display != "" {
+			content = msg.Display
+		}
+		row := HistoryMessage{
 			Role:      role,
-			Content:   msg.Content,
+			Content:   content,
 			CreatedAt: msg.CreatedAt.Unix(),
-		})
+		}
+		if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
+			idx := i
+			row.Index = &idx
+		}
+		out = append(out, row)
 	}
 	if out == nil {
 		out = []HistoryMessage{}

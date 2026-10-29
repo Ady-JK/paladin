@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
 )
 
@@ -255,6 +255,23 @@ func TestHubStopSessionStopsRunningAndDropsQueue(t *testing.T) {
 	runs.finish("other")
 }
 
+func TestHubStopRunningKeepsTheQueue(t *testing.T) {
+	h, runs, log := newTestHub(t, 4)
+	if h.StopRunning("A") {
+		t.Fatal("nothing is running yet")
+	}
+	submit(t, h, "A", "running")
+	submit(t, h, "A", "next")
+	if !h.StopRunning("A") {
+		t.Fatal("stop missed the running turn")
+	}
+	evs := log.waitFor(t, "next starts", func(evs []TurnEvent) bool { return hasEvent(evs, "turn/start", "next") })
+	if e := findEvent(evs, "turn/done", "running"); e == nil || !e.Turn.Stopped {
+		t.Fatalf("running turn should report stopped: %s", describe(evs))
+	}
+	runs.finish("next")
+}
+
 func TestHubCancelQueuedTurnOnly(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
 	submit(t, h, "A", "one")
@@ -398,7 +415,7 @@ func TestHubReportsRunErrors(t *testing.T) {
 
 func TestHubEventsAreSequencedAndTagged(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
-	info, done, err := h.Submit(agent.Request{SessionID: "A", Message: "m", Cwd: "/w"}, SubmitOpts{StreamID: json.RawMessage(`"s7"`), Display: "shown"})
+	info, done, err := h.Submit(agent.Request{SessionID: "A", Message: "m", Cwd: "/w"}, SubmitOpts{Display: "shown"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +430,7 @@ func TestHubEventsAreSequencedAndTagged(t *testing.T) {
 			t.Fatalf("seq not increasing: %s", describe(log.all()))
 		}
 		prev = e.Seq
-		if e.SessionID != "A" || e.TurnID != info.TurnID || string(e.StreamID) != `"s7"` {
+		if e.SessionID != "A" || e.TurnID != info.TurnID {
 			t.Fatalf("untagged event %+v", e)
 		}
 	}
@@ -444,4 +461,49 @@ func TestHubShutdownStopsEverything(t *testing.T) {
 	if _, _, err := h.Submit(agent.Request{SessionID: "C", Message: "c"}, SubmitOpts{}); err == nil {
 		t.Fatal("submit after shutdown must fail")
 	}
+}
+
+func TestHubApprovalEventsReplayAndFlagTheTurn(t *testing.T) {
+	h, runs, log := newTestHub(t, 4)
+	step := make(chan struct{})
+	resolved := make(chan struct{})
+	runs.behavior["m"] = func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+		tx <- agent.ChatChunk{Approval: &permission.Approval{ID: "c1", Tool: "shell", Command: "npm i", State: permission.StatePending}}
+		<-step
+		tx <- agent.ChatChunk{Approval: &permission.Approval{ID: "c1", Tool: "shell", Command: "npm i", State: permission.StateApproved, Decision: "once"}}
+		<-resolved
+		gate(func() {})
+		return agent.ChatOutcome{Reply: "ok"}, nil
+	}
+	submit(t, h, "A", "m")
+	log.waitFor(t, "approval", func(evs []TurnEvent) bool {
+		for _, e := range evs {
+			if e.Event == "chat/approval" && e.Approval != nil && e.Approval.ID == "c1" {
+				return true
+			}
+		}
+		return false
+	})
+	att, _ := h.Attach("A", nil)
+	if att.Turn == nil || !att.Turn.AwaitingApproval {
+		t.Fatalf("turn should await approval: %+v", att.Turn)
+	}
+	if len(att.Events) != 1 || att.Events[0].Approval == nil || att.Events[0].Approval.State != permission.StatePending {
+		t.Fatalf("replay %+v", att.Events)
+	}
+	close(step)
+	log.waitFor(t, "approved", func(evs []TurnEvent) bool {
+		for _, e := range evs {
+			if e.Approval != nil && e.Approval.State == permission.StateApproved {
+				return true
+			}
+		}
+		return false
+	})
+	att, _ = h.Attach("A", nil)
+	if att.Turn.AwaitingApproval || len(att.Events) != 1 || att.Events[0].Approval.State != permission.StateApproved {
+		t.Fatalf("after resolve: turn %+v events %+v", att.Turn, att.Events)
+	}
+	close(resolved)
+	log.waitFor(t, "done", func(evs []TurnEvent) bool { return hasEvent(evs, "turn/done", "m") })
 }

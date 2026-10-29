@@ -1,6 +1,7 @@
-// Package agent: template.go is the composition layer. A Template is a
+// template.go is the composition layer. A Template is a
 // reusable blueprint (prompt, tool set, round cap); Build resolves it
 // against runtime dependencies into a ready-to-run Agent.
+
 package agent
 
 import (
@@ -33,7 +34,7 @@ type Template struct {
 	Tools []string `json:"tools,omitempty"`
 	// MaxRounds caps tool rounds for this agent. Zero means the runtime
 	// default.
-	MaxRounds uint32 `json:"max_tool_rounds,omitempty"`
+	MaxRounds uint32 `json:"maxToolRounds,omitempty"`
 }
 
 // DefaultTemplate is the built-in single agent.
@@ -56,6 +57,27 @@ type SkillSource interface {
 	LoadSkill(cwd, name string) (Skill, error)
 }
 
+// SectionSource supplies extra system-prompt sections for a session:
+// project instructions (AGENTS.md), the skill catalog, and the frozen
+// memory snapshot. Empty strings are skipped; order is kept so the
+// prompt prefix stays cache-stable across turns.
+type SectionSource interface {
+	SystemSections(sess transcript.Session) []string
+}
+
+// Command is a resolved prompt command: its expanded prompt and the
+// mode it asks for ("" keeps the request's mode).
+type Command struct {
+	Name   string
+	Prompt string
+	Mode   string
+}
+
+// CommandSource resolves `/name args` prompt commands.
+type CommandSource interface {
+	LoadCommand(cwd, name, args string) (Command, error)
+}
+
 // PromptSource supplies the runtime default prompt. The file content
 // is authoritative; only an explicit per-request override beats it.
 // Tool guidance and examples are compiled per-OS inside prompt.
@@ -72,6 +94,8 @@ type Deps struct {
 	Providers ProviderSource
 	Prompts   PromptSource
 	Skills    SkillSource
+	Sections  SectionSource
+	Commands  CommandSource
 	Tools     *tools.Registry
 	Shell     *tools.ShellTool
 	MaxRounds uint32
@@ -81,6 +105,10 @@ type Deps struct {
 	Done      <-chan struct{}
 	// PersistGate, when set, wraps the end-of-turn transcript write.
 	PersistGate func(persist func())
+	// Gate, when set, authorizes and sandboxes each tool call.
+	Gate ToolGate
+	// Steps, when set, records each file-changing tool run for undo.
+	Steps StepRecorder
 }
 
 // Build resolves a Template into an Agent. Everything the loop needs
@@ -88,10 +116,18 @@ type Deps struct {
 // here, before any model call happens.
 func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	if strings.TrimSpace(req.SessionID) == "" {
-		return nil, fmt.Errorf("sessionId is required: create one with open_session first")
+		return nil, fmt.Errorf("sessionId is required: create one with openSession first")
 	}
-	if strings.TrimSpace(req.Message) == "" && !req.Resume {
+	command := strings.TrimSpace(strVal(req.Command))
+	if strings.TrimSpace(req.Message) == "" && !req.Resume && !req.Compact && command == "" {
 		return nil, fmt.Errorf("message is required")
+	}
+	mode := strings.TrimSpace(req.Mode)
+	if mode != "" && mode != ModeBuild && mode != ModePlan {
+		return nil, fmt.Errorf("mode must be %q or %q, got %q", ModeBuild, ModePlan, mode)
+	}
+	if req.Compact && (req.Resume || command != "" || strVal(req.Skill) != "") {
+		return nil, fmt.Errorf("compact cannot be combined with resume, a command or a skill")
 	}
 	if d.Sessions == nil || d.Providers == nil || d.Prompts == nil {
 		return nil, fmt.Errorf("agent template %q: missing runtime dependencies", t.Name)
@@ -114,6 +150,26 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	}
 
 	message := req.Message
+	display := req.Display
+	if command != "" {
+		if req.Resume {
+			return nil, fmt.Errorf("command %q cannot be used with resume", command)
+		}
+		if d.Commands == nil {
+			return nil, fmt.Errorf("command %q is not available: the runtime has no command source", command)
+		}
+		cmd, err := d.Commands.LoadCommand(sess.Meta.Cwd, command, strings.TrimSpace(req.Message))
+		if err != nil {
+			return nil, err
+		}
+		if display == "" {
+			display = strings.TrimSpace("/" + cmd.Name + " " + strings.TrimSpace(req.Message))
+		}
+		message = cmd.Prompt
+		if cmd.Mode != "" && mode == "" {
+			mode = cmd.Mode
+		}
+	}
 	if name := strings.TrimSpace(strVal(req.Skill)); name != "" {
 		if req.Resume {
 			return nil, fmt.Errorf("skill %q cannot be used with resume", name)
@@ -125,11 +181,21 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		if err != nil {
 			return nil, err
 		}
+		if display == "" {
+			display = req.Message
+		}
 		message = FormatSkillMessage(message, skill.Name, skill.Content)
 	}
 
 	base := d.Prompts.SystemPrompt(strVal(req.SystemPrompt))
 	system := prompt.ToolSystem(base, sess.Meta.Cwd)
+	if d.Sections != nil {
+		for _, section := range d.Sections.SystemSections(sess) {
+			if section = strings.TrimSpace(section); section != "" {
+				system += "\n\n" + section
+			}
+		}
+	}
 
 	registry := d.Tools
 	shell := d.Shell
@@ -143,6 +209,11 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		if raw, ok := subset.Get("shell"); ok {
 			shell, _ = raw.(*tools.ShellTool)
 		}
+	}
+
+	if mode == ModePlan {
+		registry, shell = planRegistry(registry, shell)
+		system += "\n\n" + prompt.PlanMode
 	}
 
 	maxRounds := d.MaxRounds
@@ -164,8 +235,12 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		tx:          d.Tx,
 		done:        d.Done,
 		persistGate: d.PersistGate,
+		gate:        d.Gate,
+		steps:       d.Steps,
 		message:     message,
+		display:     display,
 		resume:      req.Resume,
+		compactOnly: req.Compact,
 	}), nil
 }
 
@@ -257,4 +332,31 @@ func (r *Registry) Default() (Template, bool) {
 		return r.byName[name], true
 	}
 	return Template{}, false
+}
+
+// planWriteTools are dropped in plan mode.
+var planWriteTools = map[string]bool{"write": true, "edit": true}
+
+// planRegistry is the read-only view of a registry: no file writers,
+// and a shell that refuses anything but inspection commands. The real
+// shell stays as the agent's job-notice source.
+func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *tools.ShellTool) {
+	out := tools.NewRegistry()
+	for _, name := range r.Names() {
+		if planWriteTools[name] {
+			continue
+		}
+		t, _ := r.Get(name)
+		if name == "shell" {
+			sh, ok := t.(*tools.ShellTool)
+			if !ok {
+				continue
+			}
+			shell = sh
+			out.Register(tools.NewPlanShell(sh))
+			continue
+		}
+		out.Register(t)
+	}
+	return out, shell
 }

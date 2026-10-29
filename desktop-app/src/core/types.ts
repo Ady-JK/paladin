@@ -1,16 +1,40 @@
 // types.ts holds the shared frontend types.
 // It keeps every feature module speaking the same shapes.
 
-// Turn is a type in this module.
-// It supports the desktop app frontend.
 export type Turn = {
   role: "user" | "agent" | "error";
   text: string;
   pending?: boolean;
 };
 
-// SessionInfo is a type in this module.
-// It supports the desktop app frontend.
+export type CommandEntry = {
+  name: string;
+  description: string;
+  argumentHint?: string;
+  mode?: string;
+  source: string;
+  path?: string;
+};
+
+export type MemoryTarget = "user" | "global" | "project";
+
+export type MemoryView = {
+  target: MemoryTarget;
+  cwd?: string;
+  path: string;
+  entries: string[];
+  used: number;
+  limit: number;
+};
+
+export type MemoryProject = {
+  cwd: string;
+  key: string;
+  entries: number;
+  used: number;
+  limit: number;
+};
+
 export type SessionInfo = {
   sessionId: string;
   cwd: string;
@@ -19,6 +43,78 @@ export type SessionInfo = {
   model: string;
   messageCount: number;
   title: string;
+  revert?: RevertInfo;
+  worktree?: WorktreeInfo;
+};
+
+// RevertInfo is a session's pending undo: the transcript is hidden from
+// index on and files were rewound until the next message (or Redo).
+export type RevertInfo = {
+  index: number;
+  restored: string[];
+  skipped: string[];
+  snapshots: boolean;
+};
+
+// WorktreeInfo links a session to its managed git worktree. origin is
+// the project folder it branched from.
+export type WorktreeInfo = {
+  repoRoot: string;
+  path: string;
+  branch: string;
+  baseBranch?: string;
+  origin: string;
+};
+
+export type RevertPreview = {
+  index: number;
+  turns: number;
+  files: string[];
+  conflicts: string[];
+  snapshots: boolean;
+};
+
+export type RevertResult = {
+  index: number;
+  message: string;
+  restored: string[];
+  skipped: string[];
+  snapshots: boolean;
+};
+
+export type GitInfo = {
+  repo: boolean;
+  root?: string;
+  branch?: string;
+  hasCommits: boolean;
+};
+
+export type WorktreeStatus = {
+  exists: boolean;
+  changed: number;
+  ahead: number;
+  branch: string;
+  baseBranch?: string;
+  into: string;
+  path: string;
+  repoRoot: string;
+};
+
+export type MergeResult = {
+  merged: boolean;
+  nothingToMerge: boolean;
+  commit?: string;
+  conflicts: string[];
+  into?: string;
+};
+
+export type OpenedSession = {
+  sessionId: string;
+  cwd: string;
+  provider: string;
+  model: string;
+  revert?: RevertInfo;
+  worktree?: WorktreeInfo;
 };
 
 // UsageModel is one model's slice of a session's usage. FillPercent is
@@ -42,7 +138,7 @@ export type UsageModel = {
   fillPercent?: number;
 };
 
-// FileEntry is one `@` completion row from `file_complete`: Path is
+// FileEntry is one `@` completion row from `fileComplete`: Path is
 // the Linux-style chat path (`src/foo.ts`, `../sib/file`, `src/sub/`
 // for folders), ResolvedPath the OS-specific absolute path the
 // composer inserts into the message.
@@ -54,7 +150,7 @@ export type FileEntry = {
   isDir: boolean;
 };
 
-// SkillEntry is one `list_skills` row: name, description, source
+// SkillEntry is one `listSkills` row: name, description, source
 // (global/workspace) and defining path.
 export type SkillEntry = {
   name: string;
@@ -63,7 +159,7 @@ export type SkillEntry = {
   path: string;
 };
 
-// SessionUsage is the client-facing usage view from `session_usage`.
+// SessionUsage is the client-facing usage view from `sessionUsage`.
 // FillPercent is the last call's input tokens over the context window;
 // absent when the model's window is unknown. LastInputTokens is absent
 // on fixtures that predate it.
@@ -122,7 +218,7 @@ export type OverallSessionEntry = {
   hasCost: boolean;
 };
 
-// OverallUsage is the fleet-wide rollup from `overall_usage`.
+// OverallUsage is the fleet-wide rollup from `overallUsage`.
 export type OverallUsage = {
   sessionCount: number;
   sessionsWithUsage: number;
@@ -142,8 +238,6 @@ export type OverallUsage = {
   daily?: DailyPoint[];
 };
 
-// MessageInfo is a type in this module.
-// It supports the desktop app frontend.
 export type MessageInfo = {
   role: string;
   content: string;
@@ -154,6 +248,8 @@ export type MessageInfo = {
   // kind tags special rows: "compaction" is a context-compaction
   // divider whose content is the summary.
   kind?: string;
+  // index is a user row's transcript position, the handle for undo.
+  index?: number;
 };
 
 // RetryInfo is a chat/retry event: a failed round runs again after
@@ -175,26 +271,12 @@ export type CompactionInfo = {
   error?: string;
 };
 
-// ToolInfo is a type in this module.
-// It supports the desktop app frontend.
 export type ToolInfo = {
   id: string;
   name: string;
   arguments: string;
   result: string;
   status: "running" | "ok" | "failed";
-};
-
-// SessionEvent is a type in this module.
-// It supports the desktop app frontend.
-export type SessionEvent = {
-  kind: string;
-  sessionId: string;
-  cwd: string;
-  messageCount: number;
-  // Events dropped for a slow client before this one; nonzero means the
-  // stream gapped and the view should refetch.
-  missed?: number;
 };
 
 // RefreshResult is one provider's catalog refresh outcome.
@@ -205,8 +287,6 @@ export type RefreshResult = {
   error?: string;
 };
 
-// ProviderInfo is a type in this module.
-// It supports the desktop app frontend.
 export type ProviderInfo = {
   name: string;
   apiType: string;
@@ -217,22 +297,16 @@ export type ProviderInfo = {
   hasKey?: boolean;
 };
 
-// FsDirectory is a type in this module.
-// It supports the desktop app frontend.
 export type FsDirectory = {
   name: string;
   path: string;
 };
 
-// FsFile is a type in this module.
-// It supports the desktop app frontend.
 export type FsFile = {
   name: string;
   path: string;
 };
 
-// FsList is a type in this module.
-// It supports the desktop app frontend.
 export type FsList = {
   currentPath: string;
   parentPath: string;
@@ -240,15 +314,11 @@ export type FsList = {
   files: FsFile[];
 };
 
-// GroupedLab is a type in this module.
-// It supports the desktop app frontend.
 export type GroupedLab = {
   display: string;
   models: { provider: string; id: string }[];
 };
 
-// GroupedProvider is a type in this module.
-// It supports the desktop app frontend.
 export type GroupedProvider = {
   display: string;
   infos: ProviderInfo[];
@@ -272,8 +342,6 @@ export type MatchSpan = {
   end: number;
 };
 
-// ToolView is a type in this module.
-// It supports the desktop app frontend.
 export type ToolView = {
   el: HTMLElement;
   update: (tool: ToolInfo) => void;
@@ -285,6 +353,8 @@ export type ToolView = {
 export type AskQuestion = {
   question: string;
   options: string[];
+  // multiple lets the user pick any number of the options.
+  multiple?: boolean;
 };
 
 // AskAnswer pairs one asked question with the user's answer, in the
@@ -292,22 +362,19 @@ export type AskQuestion = {
 export type AskAnswer = {
   question: string;
   answer: string;
+  selected?: string[];
 };
 
 // TodoEntry is one row of the session's activity list from
-// `session_todos`: what to do plus where it stands (not_started,
+// `sessionTodos`: what to do plus where it stands (not_started,
 // in_progress, finished, cancelled).
 export type TodoEntry = {
   content: string;
   status: string;
 };
 
-// SideView is a type in this module.
-// It supports the desktop app frontend.
 export type SideView = "agent" | "chat";
 
-// ChatEntry is a type in this module.
-// It supports the desktop app frontend.
 export type ChatEntry = {
   id: string;
   title: string;
@@ -325,6 +392,9 @@ export type TurnInfo = {
   message: string;
   display?: string;
   skill?: string;
+  command?: string;
+  mode?: string;
+  compact?: boolean;
   resume?: boolean;
   state: TurnState;
   persisted?: boolean;
@@ -332,6 +402,8 @@ export type TurnInfo = {
   stopped?: boolean;
   needsContinue?: boolean;
   cancelled?: boolean;
+  permissions?: string;
+  awaitingApproval?: boolean;
   error?: string;
   queuedAt?: string;
   startedAt?: string;
@@ -344,12 +416,45 @@ export type TurnEvent = {
   seq: number;
   sessionId: string;
   turnId: string;
-  streamId?: string;
   delta?: string;
   tool?: ToolInfo;
   retry?: RetryInfo;
   compaction?: CompactionInfo;
+  approval?: Approval;
   turn?: TurnInfo;
+};
+
+// Permission presets, rules and the approval card the gate sends.
+export type PermissionPreset = "read-only" | "auto" | "full-access";
+export type ApprovalDecision = "once" | "session" | "folder" | "deny";
+
+export type PermissionRule = {
+  tool: "shell" | "write";
+  pattern: string;
+  action: "allow" | "deny";
+};
+
+export type Approval = {
+  id: string;
+  tool: string;
+  kind: "shell" | "write" | "escalate" | string;
+  command?: string;
+  path?: string;
+  reasons?: string[];
+  destructive?: boolean;
+  choices?: ApprovalDecision[];
+  remember?: PermissionRule[];
+  state: "pending" | "approved" | "denied";
+  decision?: ApprovalDecision | "interrupted";
+};
+
+export type PermissionsView = {
+  global: PermissionRule[];
+  folder: PermissionRule[];
+  session: PermissionRule[];
+  folders: { cwd: string; rules: PermissionRule[] }[];
+  sandbox: { kind: string };
+  presets: PermissionPreset[];
 };
 
 // AttachSnapshot is a session's persisted history plus whatever is

@@ -4,3 +4,5 @@ dist-electron/
 release/
 .vite/
 *.log
+test-results/
+playwright-report/

@@ -7,7 +7,7 @@
 // visible, and rows are patched in place rather than re-rendered.
 
 import * as api from "../core/api";
-import { bridge } from "../core/tauri";
+import { bridge } from "../core/bridge";
 import { escapeAttr, escapeHtml } from "../core/format";
 import { state } from "../core/state";
 import type { ResourceSnapshot, ResourceUsage } from "../core/types";
@@ -18,7 +18,6 @@ let core: ResourceSnapshot | null = null;
 let app: ResourceUsage | null = null;
 let timer = 0;
 let inFlight = false;
-let stopped = false;
 
 function interval(): number {
   const override = (window as unknown as { __paladinResInterval?: number }).__paladinResInterval;
@@ -205,7 +204,7 @@ async function sample(): Promise<void> {
 
 function schedule(): void {
   window.clearTimeout(timer);
-  if (stopped || document.visibilityState === "hidden") {
+  if (document.visibilityState === "hidden") {
     return;
   }
   timer = window.setTimeout(() => {
@@ -229,7 +228,3 @@ export function initResources(): void {
   refreshResources();
 }
 
-export function stopResources(): void {
-  stopped = true;
-  window.clearTimeout(timer);
-}

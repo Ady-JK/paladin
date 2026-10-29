@@ -186,7 +186,7 @@ func TestRuntimeConcurrencyCapFromSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config", "settings.json"), []byte(`{"max_concurrent_turns":1}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config", "settings.json"), []byte(`{"maxConcurrentTurns":1}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	a, b := openIn(t, rt), openIn(t, rt)
@@ -209,7 +209,7 @@ func TestMaxConcurrentTurnsDefaultsAndClamps(t *testing.T) {
 		t.Fatalf("default %d", got)
 	}
 	_ = os.MkdirAll(filepath.Join(dir, "config"), 0o755)
-	_ = os.WriteFile(filepath.Join(dir, "config", "settings.json"), []byte(`{"max_concurrent_turns":999}`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "settings.json"), []byte(`{"maxConcurrentTurns":999}`), 0o644)
 	if got := rt.maxConcurrentTurns(); got != maxConcurrentTurnsCap {
 		t.Fatalf("clamp %d", got)
 	}
@@ -222,7 +222,7 @@ func TestRuntimeStopAndDeleteWhileRunning(t *testing.T) {
 	cwd := cwdOf(t, rt, a)
 	_, done, _ := rt.SubmitTurn(agent.Request{SessionID: a, Message: "x", Cwd: cwd}, SubmitOpts{})
 	log.waitFor(t, "delta", func(evs []TurnEvent) bool { return countEvents(evs, "chat/delta") >= 1 })
-	if !rt.Stop(a) {
+	if !rt.StopIn(a, "") {
 		t.Fatal("stop found nothing")
 	}
 	if f := <-done; !f.Stopped {

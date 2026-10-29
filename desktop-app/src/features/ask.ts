@@ -2,7 +2,7 @@
 // user through a blocked ask tool call one question at a time.
 // ArrowLeft/ArrowRight move between questions, Enter advances (Submit
 // on the review screen), Esc cancels the call and stops the turn.
-// Answers go back through answer_ask so the agent turn continues on
+// Answers go back through answerAsk so the agent turn continues on
 // its own with every question and answer as the tool result.
 import { answerAsk, cancelAsk } from "../core/api";
 import { escapeHtml } from "../core/format";
@@ -17,12 +17,17 @@ type Wizard = {
   // option index, or -1 when the answer is custom-typed (or empty).
   answers: string[];
   picked: number[];
+  // chosen[i] holds the checked options of a multiple-choice question;
+  // answers[i] is then only its extra free text.
+  chosen: Set<number>[];
   index: number; // questions.length means the review screen.
   overlay: HTMLElement;
   body: HTMLElement;
   submitted: boolean;
   onKey: (event: KeyboardEvent) => void;
 };
+
+const MAX_OPTIONS = 6;
 
 let active: Wizard | null = null;
 const queued: Wizard[] = [];
@@ -54,13 +59,17 @@ export function parseAskArgs(raw: string): AskQuestion[] | null {
     }
     const options: string[] = [];
     if (Array.isArray(rec.options)) {
-      for (const opt of rec.options.slice(0, 3)) {
+      for (const opt of rec.options.slice(0, MAX_OPTIONS)) {
         if (typeof opt === "string" && opt.trim()) {
           options.push(opt);
         }
       }
     }
-    out.push({ question: rec.question.trim(), options });
+    const q: AskQuestion = { question: rec.question.trim(), options };
+    if (rec.multiple === true && options.length > 1) {
+      q.multiple = true;
+    }
+    out.push(q);
   }
   return out;
 }
@@ -87,8 +96,9 @@ export function handleAskToolEvent(
     sessionId,
     callId: tool.id,
     questions,
-    answers: questions.map((q) => (q.options.length > 0 ? q.options[0] ?? "" : "")),
-    picked: questions.map((q) => (q.options.length > 0 ? 0 : -1)),
+    answers: questions.map((q) => (q.options.length > 0 && !q.multiple ? q.options[0] ?? "" : "")),
+    picked: questions.map((q) => (q.options.length > 0 && !q.multiple ? 0 : -1)),
+    chosen: questions.map(() => new Set<number>()),
     index: 0,
     overlay: document.createElement("div"),
     body: document.createElement("div"),
@@ -161,7 +171,7 @@ function openWizard(wizard: Wizard): void {
       event.preventDefault();
       event.stopPropagation();
       void cancelWizard();
-    } else if (/^[1-3]$/.test(event.key) && wizard.index < wizard.questions.length && !(event.target instanceof HTMLInputElement)) {
+    } else if (/^[1-6]$/.test(event.key) && wizard.index < wizard.questions.length && !(event.target instanceof HTMLInputElement)) {
       const pick = Number(event.key) - 1;
       if (pick < (wizard.questions[wizard.index]?.options.length ?? 0)) {
         event.preventDefault();
@@ -225,9 +235,33 @@ function pickOption(questionIdx: number, optionIdx: number): void {
   if (value === undefined) {
     return;
   }
+  if (wizard.questions[questionIdx]?.multiple) {
+    const set = wizard.chosen[questionIdx]!;
+    if (!set.delete(optionIdx)) set.add(optionIdx);
+    paintWizard();
+    return;
+  }
   wizard.picked[questionIdx] = optionIdx;
   wizard.answers[questionIdx] = value;
   paintWizard();
+}
+
+// answerText is a question's answer as sent: the picked option or the
+// typed text; for multiple choice, the checked options then the text.
+function answerText(wizard: Wizard, i: number): string {
+  const q = wizard.questions[i];
+  const typed = (wizard.answers[i] ?? "").trim();
+  if (!q?.multiple) {
+    return typed;
+  }
+  return [...selectedOf(wizard, i), typed].filter(Boolean).join(", ");
+}
+
+function selectedOf(wizard: Wizard, i: number): string[] {
+  const q = wizard.questions[i];
+  const set = wizard.chosen[i];
+  if (!q || !set) return [];
+  return [...set].sort((a, b) => a - b).map((k) => q.options[k] ?? "").filter(Boolean);
 }
 
 function advanceWizard(): void {
@@ -236,13 +270,12 @@ function advanceWizard(): void {
     return;
   }
   if (wizard.index < wizard.questions.length) {
-    const answer = (wizard.answers[wizard.index] ?? "").trim();
-    if (!answer) {
+    if (!answerText(wizard, wizard.index)) {
       toast("Type an answer or pick an option first");
       paintWizard(true);
       return;
     }
-    wizard.answers[wizard.index] = answer;
+    wizard.answers[wizard.index] = (wizard.answers[wizard.index] ?? "").trim();
     wizard.index += 1;
     paintWizard();
     return;
@@ -256,7 +289,7 @@ async function submitWizard(): Promise<void> {
     return;
   }
   for (let i = 0; i < wizard.questions.length; i++) {
-    if (!(wizard.answers[i] ?? "").trim()) {
+    if (!answerText(wizard, i)) {
       wizard.index = i;
       toast("Answer every question before submitting");
       paintWizard(true);
@@ -264,10 +297,16 @@ async function submitWizard(): Promise<void> {
     }
   }
   wizard.submitted = true;
-  const answers = wizard.questions.map((q, i) => ({
-    question: q.question,
-    answer: (wizard.answers[i] ?? "").trim(),
-  }));
+  const answers = wizard.questions.map((q, i) => {
+    const out: { question: string; answer: string; selected?: string[] } = {
+      question: q.question,
+      answer: answerText(wizard, i),
+    };
+    if (q.multiple) {
+      out.selected = selectedOf(wizard, i);
+    }
+    return out;
+  });
   closeWizard(true);
   try {
     const ok = await answerAsk(wizard.sessionId, wizard.callId, answers);
@@ -277,6 +316,19 @@ async function submitWizard(): Promise<void> {
   } catch (error) {
     toast(`Answer failed: ${String(error)}`);
   }
+}
+
+function optionCheckbox(questionIdx: number, text: string, optionIdx: number, checked: boolean): string {
+  const ring = checked
+    ? "border-accent-500 bg-accent-500/10 text-slate-900 dark:text-slate-100"
+    : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300";
+  return (
+    `<button type="button" role="checkbox" aria-checked="${checked}" data-ask-opt="${questionIdx}:${optionIdx}" ` +
+    `class="ask-opt flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs ${ring}">` +
+    `<span class="ask-check${checked ? " is-on" : ""}" aria-hidden="true">${checked ? "✓" : ""}</span>` +
+    `<span class="min-w-0 flex-1 break-words">${escapeHtml(text)}</span>` +
+    `<span class="text-[10px] text-slate-400">${optionIdx + 1}</span></button>`
+  );
 }
 
 function optionButton(questionIdx: number, text: string, optionIdx: number, selected: boolean): string {
@@ -309,18 +361,24 @@ function paintWizard(focusCustom = false): void {
     return;
   }
   const picked = wizard.picked[wizard.index] ?? -1;
-  const custom = picked === -1 ? (wizard.answers[wizard.index] ?? "") : "";
+  const multi = !!q.multiple;
+  const custom = picked === -1 || multi ? (wizard.answers[wizard.index] ?? "") : "";
+  const chosen = wizard.chosen[wizard.index] ?? new Set<number>();
+  const n1 = q.options.length;
   wizard.body.innerHTML =
     `<div class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Question ${wizard.index + 1} of ${n}</div>` +
     `<div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">${escapeHtml(q.question)}</div>` +
+    (n1 > 0 ? `<div class="mt-1 text-[11px] text-slate-400">${multi ? "Pick any that apply" : "Pick one"} — or type your own</div>` : "") +
     `<div class="mt-3 space-y-2">` +
-    q.options.map((opt, i) => optionButton(wizard.index, opt, i, picked === i)).join("") +
+    q.options
+      .map((opt, i) => (multi ? optionCheckbox(wizard.index, opt, i, chosen.has(i)) : optionButton(wizard.index, opt, i, picked === i)))
+      .join("") +
     `</div>` +
-    `<input data-ask="custom" type="text" placeholder="Type your own answer…" value="${escapeHtml(custom)}" spellcheck="false" ` +
+    `<input data-ask="custom" type="text" placeholder="${multi ? "Add something else…" : "Type your own answer…"}" value="${escapeHtml(custom)}" spellcheck="false" ` +
     `class="mt-2 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" />` +
     `<div class="mt-4 flex items-center justify-between">` +
     `<button type="button" data-ask="back" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400" ${wizard.index === 0 ? "disabled" : ""}>← Back</button>` +
-    `<span class="text-[10px] text-slate-400">← → move · Enter next · 1–3 pick</span>` +
+    `<span class="text-[10px] text-slate-400">← → move · Enter next${n1 ? ` · 1–${n1} ${multi ? "toggle" : "pick"}` : ""}</span>` +
     `<button type="button" data-ask="next" class="rounded-lg bg-accent-500 px-3 py-1.5 text-xs font-semibold text-white">${wizard.index === n - 1 ? "Review →" : "Next →"}</button>` +
     `</div>`;
   wizard.body.querySelectorAll("[data-ask-opt]").forEach((el) => {
@@ -336,7 +394,9 @@ function paintWizard(focusCustom = false): void {
     if (!wizard) {
       return;
     }
-    wizard.picked[wizard.index] = -1;
+    if (!multi) {
+      wizard.picked[wizard.index] = -1;
+    }
     wizard.answers[wizard.index] = customInput.value;
   });
   wizard.body.querySelector('[data-ask="back"]')?.addEventListener("click", () => stepWizard(-1));
@@ -349,7 +409,7 @@ function paintWizard(focusCustom = false): void {
 function paintReview(wizard: Wizard): void {
   const rows = wizard.questions
     .map((q, i) => {
-      const answer = (wizard.answers[i] ?? "").trim() || "—";
+      const answer = answerText(wizard, i) || "—";
       return (
         `<button type="button" data-ask-jump="${i}" class="block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-slate-300 dark:border-slate-700">` +
         `<div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">${escapeHtml(q.question)}</div>` +

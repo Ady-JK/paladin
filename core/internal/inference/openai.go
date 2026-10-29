@@ -1,4 +1,5 @@
-// Package inference: openai.go is the OpenAI-compatible provider.
+// openai.go is the OpenAI-compatible provider.
+
 package inference
 
 import (
@@ -109,8 +110,6 @@ func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
 func (p *OpenAIProvider) streamOptions(sessionID string) []option.RequestOption {
 	return append(p.headers(sessionID), option.WithMaxRetries(0))
 }
-
-func (p *OpenAIProvider) chatURL() string { return p.baseURL + "/chat/completions" }
 
 // catalogURL derives the model list endpoint from the configured base.
 // OpenCode's documented base is .../go/openai/v1 while its model list is

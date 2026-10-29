@@ -1,11 +1,51 @@
 package session
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+// addCall keeps the table-style tests short.
+func addCall(t *UsageTotals, model string, prompt, completion, reasoning, cacheRead, cacheWrite, total int64, cost, listCost float64, hasCost bool, now int64) {
+	t.AddCall(model, Counters{
+		PromptTokens: prompt, CompletionTokens: completion, ReasoningTokens: reasoning,
+		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, TotalTokens: total,
+		Cost: cost, ListCost: listCost, HasCost: hasCost,
+	}, now)
+}
+
+func TestCountersAddKeepsSpendOnlyWhenReported(t *testing.T) {
+	var c Counters
+	c.Add(Counters{Calls: 1, PromptTokens: 3, TotalTokens: 4, Cost: 0.5, ListCost: 1, HasCost: true})
+	c.Add(Counters{Calls: 2, CompletionTokens: 1, TotalTokens: 1, Cost: 9, ListCost: 9})
+	want := Counters{Calls: 3, PromptTokens: 3, CompletionTokens: 1, TotalTokens: 5, Cost: 0.5, ListCost: 1, HasCost: true}
+	if c != want {
+		t.Fatalf("got %+v want %+v", c, want)
+	}
+}
+
+func TestUsageFileIsCamelCase(t *testing.T) {
+	var totals UsageTotals
+	addCall(&totals, "m", 1, 1, 0, 0, 0, 2, 0.1, 0.2, true, 1790880000)
+	data, err := json.Marshal(totals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"promptTokens"`, `"lastInputTokens"`, `"hasCost"`, `"updatedAt"`, `"models"`, `"daily"`} {
+		if !strings.Contains(string(data), key) {
+			t.Errorf("missing %s in %s", key, data)
+		}
+	}
+	if strings.Contains(string(data), "_") && strings.Contains(string(data), "_tokens") {
+		t.Errorf("snake_case key in %s", data)
+	}
+}
 
 func TestUsageTotalsAdd(t *testing.T) {
 	var totals UsageTotals
-	totals.AddCall("m", 10, 5, 1, 2, 3, 15, 0.01, 0.02, true, 100)
-	totals.AddCall("m", 4, 1, 0, 0, 0, 5, 0, 0, false, 101)
+	addCall(&totals, "m", 10, 5, 1, 2, 3, 15, 0.01, 0.02, true, 100)
+	addCall(&totals, "m", 4, 1, 0, 0, 0, 5, 0, 0, false, 101)
 	if totals.LastInputTokens != 4 {
 		t.Fatalf("last input %+v", totals)
 	}
@@ -25,10 +65,10 @@ func TestUsageTotalsAdd(t *testing.T) {
 
 func TestUsageViewFillPercent(t *testing.T) {
 	var totals UsageTotals
-	totals.AddCall("m", 100, 100, 0, 0, 0, 200, 0.05, 0.1, true, 1)
+	addCall(&totals, "m", 100, 100, 0, 0, 0, 200, 0.05, 0.1, true, 1)
 	// A later, smaller call moves the context reading even though the
 	// cumulative total only grows: fill is last-call input / window.
-	totals.AddCall("m", 50, 10, 0, 0, 0, 60, 0, 0, false, 2)
+	addCall(&totals, "m", 50, 10, 0, 0, 0, 60, 0, 0, false, 2)
 	view := totals.View("s", 1000, true, func(string) (int64, bool) { return 1000, true })
 	if view.SessionID != "s" || !view.ContextKnown || view.ContextWindow != 1000 {
 		t.Fatalf("got %+v", view)
@@ -54,9 +94,9 @@ func TestUsageViewFillPercent(t *testing.T) {
 
 func TestUsageTotalsPerModel(t *testing.T) {
 	var totals UsageTotals
-	totals.AddCall("b", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1)
-	totals.AddCall("a", 100, 100, 4, 1, 2, 200, 0.05, 0.1, true, 2)
-	totals.AddCall("a", 50, 50, 0, 0, 0, 100, 0, 0, false, 3)
+	addCall(&totals, "b", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1)
+	addCall(&totals, "a", 100, 100, 4, 1, 2, 200, 0.05, 0.1, true, 2)
+	addCall(&totals, "a", 50, 50, 0, 0, 0, 100, 0, 0, false, 3)
 	if totals.Calls != 3 || totals.TotalTokens != 315 || totals.PromptTokens != 160 {
 		t.Fatalf("totals %+v", totals)
 	}
@@ -78,7 +118,7 @@ func TestUsageTotalsPerModel(t *testing.T) {
 		t.Fatalf("model b %+v", totals.Models)
 	}
 	// Empty model still bills the session but keeps no per-model book.
-	totals.AddCall("", 1, 0, 0, 0, 0, 1, 0, 0, false, 4)
+	addCall(&totals, "", 1, 0, 0, 0, 0, 1, 0, 0, false, 4)
 	if totals.TotalTokens != 316 || len(totals.Models) != 2 {
 		t.Fatalf("got %+v", totals)
 	}
@@ -86,8 +126,8 @@ func TestUsageTotalsPerModel(t *testing.T) {
 
 func TestUsageViewModelsSortedWithWindows(t *testing.T) {
 	var totals UsageTotals
-	totals.AddCall("b", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1)
-	totals.AddCall("a", 100, 100, 0, 0, 0, 200, 0, 0, false, 2)
+	addCall(&totals, "b", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1)
+	addCall(&totals, "a", 100, 100, 0, 0, 0, 200, 0, 0, false, 2)
 	windows := map[string]int64{"a": 1000, "b": 100}
 	view := totals.View("s", 1000, true, func(m string) (int64, bool) {
 		w, ok := windows[m]
@@ -116,7 +156,7 @@ func TestUsageViewModelsSortedWithWindows(t *testing.T) {
 		t.Fatalf("model b %+v", bm)
 	}
 	// Unknown model in the breakdown: no window, no fill.
-	totals.AddCall("zzz", 7, 0, 0, 0, 0, 7, 0, 0, false, 3)
+	addCall(&totals, "zzz", 7, 0, 0, 0, 0, 7, 0, 0, false, 3)
 	view = totals.View("s", 1000, true, func(m string) (int64, bool) {
 		w, ok := windows[m]
 		return w, ok
@@ -141,8 +181,8 @@ func closeTo(got, want float64) bool {
 func TestUsageTotalsDaily(t *testing.T) {
 	var totals UsageTotals
 	// 2026-10-26 and 2026-10-27 UTC.
-	totals.AddCall("m", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1790880000)
-	totals.AddCall("m", 20, 10, 0, 0, 0, 30, 0.02, 0.04, true, 1790966400)
+	addCall(&totals, "m", 10, 5, 0, 0, 0, 15, 0.01, 0.02, true, 1790880000)
+	addCall(&totals, "m", 20, 10, 0, 0, 0, 30, 0.02, 0.04, true, 1790966400)
 	if len(totals.Daily) != 2 {
 		t.Fatalf("daily %+v", totals.Daily)
 	}

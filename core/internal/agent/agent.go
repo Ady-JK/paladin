@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -42,7 +43,24 @@ type Request struct {
 	SystemPrompt *string `json:"systemPrompt"`
 	Resume       bool    `json:"resume"`
 	Skill        *string `json:"skill,omitempty"`
+	// Command names a custom/builtin prompt command (`/review`); Message
+	// then holds its arguments.
+	Command *string `json:"command,omitempty"`
+	// Mode is "build" (default) or "plan" (read-only tools).
+	Mode string `json:"mode,omitempty"`
+	// Compact runs a manual compaction instead of a model turn.
+	Compact bool `json:"compact,omitempty"`
+	// Display is the user's short form of the message for history.
+	Display string `json:"display,omitempty"`
+	// Permissions is the approval preset: "read-only", "auto"
+	// (default) or "full-access".
+	Permissions string `json:"permissions,omitempty"`
 }
+
+const (
+	ModeBuild = "build"
+	ModePlan  = "plan"
+)
 
 // ToolActivity is one model-requested tool call as shown in the UI.
 type ToolActivity struct {
@@ -66,6 +84,22 @@ type ChatChunk struct {
 	Retry         *RetryStatus  `json:"retry,omitempty"`
 	// Compaction reports context compaction progress.
 	Compaction *CompactionStatus `json:"compaction,omitempty"`
+	// Approval reports a permission prompt and its resolution.
+	Approval *permission.Approval `json:"approval,omitempty"`
+}
+
+// ToolGate decides whether a tool call may run, and under which
+// sandbox. A nil gate runs everything unconfined.
+type ToolGate interface {
+	Authorize(ctx context.Context, callID, name string, args json.RawMessage, notify func(permission.Approval)) permission.Auth
+	Escalate(ctx context.Context, callID, name string, args json.RawMessage, notify func(permission.Approval)) bool
+}
+
+// StepRecorder brackets each run of a file-changing tool, e.g. with
+// workspace snapshots for undo. It must call run exactly once and return
+// its result; recording is best-effort and must never fail the call.
+type StepRecorder interface {
+	Track(callID, name string, run func() tools.ToolResult) tools.ToolResult
 }
 
 // ChatOutcome is the summary returned when a turn finishes.
@@ -100,6 +134,8 @@ func (e turnFailed) Error() string { return e.msg }
 // runConfig is everything a template resolves before the loop starts.
 type runConfig struct {
 	persistGate func(persist func())
+	gate        ToolGate
+	steps       StepRecorder
 	session     transcript.Session
 	provider    inference.Provider
 	tools       *tools.Registry
@@ -113,7 +149,9 @@ type runConfig struct {
 	tx          chan<- ChatChunk
 	done        <-chan struct{}
 	message     string
+	display     string
 	resume      bool
+	compactOnly bool
 }
 
 // Agent runs one turn. Built by Template.Build and dropped at exit;
@@ -127,6 +165,8 @@ type Agent struct {
 	cancel    context.CancelFunc
 	ctx       context.Context
 	toolCtx   *tools.ToolCtx
+	gate      ToolGate
+	steps     StepRecorder
 	system    string
 	maxRounds uint32
 	history   []transcript.Message
@@ -171,7 +211,10 @@ type Agent struct {
 	// currentMessage and currentResume are the turn input, held so Run
 	// can persist exactly what was asked.
 	currentMessage string
+	currentDisplay string
 	currentResume  bool
+	// compactOnly runs a manual /compact instead of a model turn.
+	compactOnly bool
 }
 
 func newAgent(c runConfig) *Agent {
@@ -191,6 +234,7 @@ func newAgent(c runConfig) *Agent {
 		ctx:      c.ctx,
 		toolCtx: &tools.ToolCtx{
 			Workspace:  c.session.Meta.Cwd,
+			Project:    c.session.Meta.ProjectCwd(),
 			SessionDir: c.session.Dir,
 			Cancel:     c.ctx,
 			SessionID:  c.session.Meta.SessionID,
@@ -204,9 +248,13 @@ func newAgent(c runConfig) *Agent {
 		done:      c.done,
 
 		persistGate: c.persistGate,
+		gate:        c.gate,
+		steps:       c.steps,
 
 		currentMessage: c.message,
+		currentDisplay: c.display,
 		currentResume:  c.resume,
+		compactOnly:    c.compactOnly,
 	}
 }
 
@@ -217,6 +265,9 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	a.emptyRounds = 0
 	a.retries, a.timeoutRetries = 0, 0
 	a.messages = a.modelMessages(a.currentMessage, a.currentResume)
+	if a.compactOnly {
+		return a.runCompact()
+	}
 
 	err := a.safeLoop()
 	a.settleNotices(nil)
@@ -301,7 +352,11 @@ func (a *Agent) save() error {
 
 func (a *Agent) persist(message string, resume bool) error {
 	if !resume {
-		if err := a.session.Append(transcript.RoleUser, message); err != nil {
+		msg := transcript.UserMessage(message)
+		if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(message) {
+			msg.Display = a.currentDisplay
+		}
+		if err := a.session.AppendMessage(msg); err != nil {
 			return turnFailed{"persist user message: " + err.Error()}
 		}
 	}
@@ -310,7 +365,7 @@ func (a *Agent) persist(message string, resume bool) error {
 			return turnFailed{"persist turn: " + err.Error()}
 		}
 	}
-	if len(a.toolDefs) == 0 && (a.reply.Len() > 0 || resume) {
+	if len(a.toolDefs) == 0 && !a.compactOnly && (a.reply.Len() > 0 || resume) {
 		if err := a.session.Append(transcript.RoleAssistant, a.reply.String()); err != nil {
 			return turnFailed{"persist reply: " + err.Error()}
 		}
@@ -335,10 +390,17 @@ func (a *Agent) noteCallUsage(u inference.Usage) {
 		_ = json.Unmarshal(data, &totals)
 	}
 	totals.SessionID = a.session.Meta.SessionID
-	totals.AddCall(a.provider.Model(),
-		u.PromptTokens, u.CompletionTokens, u.ReasoningTokens,
-		u.CacheReadTokens, u.CacheWriteTokens, u.TotalTokens,
-		u.Cost, u.ListCost, u.HasCost, time.Now().UTC().Unix())
+	totals.AddCall(a.provider.Model(), session.Counters{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		ReasoningTokens:  u.ReasoningTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+		TotalTokens:      u.TotalTokens,
+		Cost:             u.Cost,
+		ListCost:         u.ListCost,
+		HasCost:          u.HasCost,
+	}, time.Now().UTC().Unix())
 	if data, err := json.MarshalIndent(totals, "", "  "); err == nil {
 		_ = os.WriteFile(a.session.UsagePath(), data, 0o644)
 	}

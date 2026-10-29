@@ -45,7 +45,7 @@ func TestParsePS(t *testing.T) {
 
 func TestSnapshotAttributesProcessTreesToSessions(t *testing.T) {
 	procs := []Proc{
-		{PID: 100, PPID: 1, PGID: 100, CPU: 3, RSS: 30 << 20},  // the core itself
+		{PID: 100, PPID: 1, PGID: 100, CPU: 3, RSS: 30 << 20},   // the core itself
 		{PID: 201, PPID: 100, PGID: 201, CPU: 10, RSS: 1 << 20}, // session a: sh
 		{PID: 202, PPID: 201, PGID: 201, CPU: 40, RSS: 4 << 20}, // a: child
 		{PID: 203, PPID: 202, PGID: 203, CPU: 5, RSS: 2 << 20},  // a: grandchild in own group

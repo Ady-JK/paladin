@@ -1,9 +1,10 @@
-// Package inference: models.go is the static per-model context window
+// models.go is the static per-model context window
 // table. Values are exact ids from Models.dev (the same source OpenCode
 // itself uses: the `opencode` and `opencode-go` providers), verified
 // 2026-10-27. Only omen-alpha and qwen3.7-max have no entry anywhere and
 // resolve to DefaultContextWindow (known=false) until real values are
 // supplied.
+
 package inference
 
 // DefaultContextWindow is the assumed window for models with no table

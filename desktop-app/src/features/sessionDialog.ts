@@ -129,15 +129,11 @@ export async function openNewSession(): Promise<void> {
   await browseNewSession();
 }
 
-// closeNewSession is a function in this module.
-// It supports the desktop app frontend.
 export function closeNewSession(): void {
   closeModal(sessionModalEl);
   void refreshExternalVisibility();
 }
 
-// startNewSession is a function in this module.
-// It supports the desktop app frontend.
 function startNewSession(): void {
   if (state.pendingWorkspace.trim()) {
     state.cwd = state.pendingWorkspace.trim();
@@ -154,7 +150,6 @@ function startNewSession(): void {
 }
 
 // initSessionDialog wires the new-session dialog controls.
-// It supports the desktop app frontend.
 export function initSessionDialog(): void {
   $("#sessionCloseBtn").addEventListener("click", closeNewSession);
   $("#sessionCancelBtn").addEventListener("click", closeNewSession);

@@ -1,14 +1,10 @@
 
-// Icon is a type in this module.
-// It supports the desktop app frontend.
 type Icon = {
   d: string;
   line?: boolean;
   thin?: boolean;
 };
 
-// ICONS is a const in this module.
-// It supports the desktop app frontend.
 const ICONS: Record<string, Icon> = {
   bolt: { d: "M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5Z" },
   comments: { d: "M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z" },
@@ -133,17 +129,34 @@ const ICONS: Record<string, Icon> = {
   "rl-folder": { d: "M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9.5Z", line: true, thin: true },
   "rl-pulse": { d: "M3 12h4l2.5-6 5 12 2.5-6h4", line: true, thin: true },
   "rl-chevron": { d: "m9 6 6 6-6 6", line: true, thin: true },
+  // Thin outline glyphs for the slash palette.
+  "sl-compact": { d: "M4 9h16M4 15h16M9 4l3 3 3-3M9 20l3-3 3 3", line: true, thin: true },
+  "tl-undo": { d: "M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11", line: true, thin: true },
+  "sl-merge": { d: "M6 3v18M6 9a6 6 0 0 0 6 6h3M18 15a2 2 0 1 0 0 .01M6 3a2 2 0 1 0 0 .01", line: true, thin: true },
+  "sl-fork": { d: "M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1M6 3a2 2 0 1 0 0 .01M18 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM6 9v12", line: true, thin: true },
+  "sl-plan": { d: "M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1ZM8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12l2 2 4-4M8 17h8", line: true, thin: true },
+  "sl-build": { d: "M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6Z", line: true, thin: true },
+  "sl-memory": { d: "M9.5 3a3.5 3.5 0 0 0-3.4 4.3A3.5 3.5 0 0 0 5 14a3.5 3.5 0 0 0 4.5 6.4V3Zm5 0a3.5 3.5 0 0 1 3.4 4.3A3.5 3.5 0 0 1 19 14a3.5 3.5 0 0 1-4.5 6.4V3ZM9.5 9H8m6.5 0H16m-6.5 5H8m6.5 0H16", line: true, thin: true },
+  "sl-review": { d: "M11 19a8 8 0 1 1 5.3-2L21 21.7M8 11l2 2 4-4", line: true, thin: true },
+  "sl-model": { d: "M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Zm0 0v18M4 7.5l8 4.5 8-4.5", line: true, thin: true },
+  "sl-usage": { d: "M4 20V10m6 10V4m6 16v-7m4 7H2", line: true, thin: true },
+  "sl-clear": { d: "M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3", line: true, thin: true },
+  "sl-help": { d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.6-2.4 2.2-2.4 3.6m0 3h.01", line: true, thin: true },
+  "sl-skill": { d: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9L12 3Z", line: true, thin: true },
+  "sl-prompt": { d: "M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm3 5 2 2-2 2m4 0h4", line: true, thin: true },
+  "sl-new": { d: "M12 5v14M5 12h14", line: true, thin: true },
+  "sl-sliders": { d: "M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6M9 8h6m2 8h6", line: true, thin: true },
+  "sl-more": { d: "M5 12h.01M12 12h.01M19 12h.01", line: true },
+  "sl-shield": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Z", line: true, thin: true },
+  "sl-shield-check": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Zm-3 9 2 2 4-4", line: true, thin: true },
+  "sl-shield-off": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3ZM4 4l16 16", line: true, thin: true },
+  "sl-eye": { d: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z", line: true, thin: true },
+  "sl-init": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M12 11v6m-3-3h6", line: true, thin: true },
 };
 
-// IconName is a type in this module.
-// It supports the desktop app frontend.
 export type IconName = keyof typeof ICONS;
 
-// icon is a function in this module.
-// It supports the desktop app frontend.
 export function icon(name: IconName, className = "h-3 w-3"): string {
-// entry is a const in this module.
-// It supports the desktop app frontend.
   const entry = ICONS[name];
   if (!entry) {
     return "";

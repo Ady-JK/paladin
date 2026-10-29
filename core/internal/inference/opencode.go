@@ -1,6 +1,7 @@
-// Package inference: opencode.go routes OpenCode Go models to the protocol
+// opencode.go routes OpenCode Go models to the protocol
 // their gateway exposes. OpenCode serves most models over OpenAI chat
 // completions, but some (GPT, Grok, Muse) only over the Responses API.
+
 package inference
 
 import (

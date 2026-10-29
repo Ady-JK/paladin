@@ -1,20 +1,9 @@
-// tauri.ts probes for the native bridge.
-// Under Electron the preload exposes window.paladin; under plain web
-// (or e2e with a stub) it is whatever the host injected. The name stays
-// so every call site keeps working unchanged.
-
-import type { CompactionInfo, RetryInfo, ToolInfo } from "./types";
-
-export interface ChatStreamHandlers {
-  onDelta: (delta: string) => void;
-  onTool: (tool: ToolInfo) => void;
-  onRetry?: (retry: RetryInfo) => void;
-  onCompact?: (compaction: CompactionInfo) => void;
-}
+// bridge.ts probes for the native bridge.
+// Under Electron the preload exposes window.paladin; in e2e runs the
+// Playwright stub injects the same shape.
 
 export interface PaladinBridge {
   invoke: (method: string, params?: unknown) => Promise<unknown>;
-  chat: (params: Record<string, unknown>, handlers: ChatStreamHandlers) => Promise<unknown>;
   // onEvent subscribes to every turn event of every session.
   onEvent?: (cb: (msg: unknown) => void) => () => void;
   // A native notification was clicked: open that session.
@@ -53,7 +42,7 @@ declare global {
   }
 }
 
-export function hasTauri(): boolean {
+export function hasBridge(): boolean {
   return window.paladin !== undefined;
 }
 

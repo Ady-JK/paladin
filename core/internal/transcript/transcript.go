@@ -38,12 +38,12 @@ type ToolCall struct {
 type Message struct {
 	Role       Role        `json:"role"`
 	Content    string      `json:"content"`
-	CreatedAt  time.Time   `json:"created_at"`
-	ToolCalls  *[]ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID *string     `json:"tool_call_id,omitempty"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	ToolCalls  *[]ToolCall `json:"toolCalls,omitempty"`
+	ToolCallID *string     `json:"toolCallId,omitempty"`
 	Name       *string     `json:"name,omitempty"`
-	IsError    bool        `json:"is_error,omitempty"`
-	IsNotify   bool        `json:"is_notify,omitempty"`
+	IsError    bool        `json:"isError,omitempty"`
+	IsNotify   bool        `json:"isNotify,omitempty"`
 	// Compaction marks a summary checkpoint: the model view restarts
 	// here, with Content as the summary of everything before it.
 	Compaction *Compaction `json:"compaction,omitempty"`
@@ -51,12 +51,16 @@ type Message struct {
 	// compaction marker. It feeds the model view only; the original
 	// already shows in history.
 	Replay bool `json:"replay,omitempty"`
+	// Display is the user's short form of an expanded user message
+	// (`/review`, `/skill x …`); history and titles show it while the
+	// model keeps seeing Content.
+	Display string `json:"display,omitempty"`
 }
 
 // Compaction describes one context compaction checkpoint.
 type Compaction struct {
 	// TokensBefore is the estimated context size that triggered it.
-	TokensBefore int64 `json:"tokens_before"`
+	TokensBefore int64 `json:"tokensBefore"`
 	// Reason is "auto" (threshold) or "overflow" (provider rejected).
 	Reason string `json:"reason"`
 }
@@ -65,13 +69,67 @@ type Compaction struct {
 func (m Message) IsCompaction() bool { return m.Role == RoleSystem && m.Compaction != nil }
 
 type Meta struct {
-	SchemaVersion uint32    `json:"schema_version"`
-	SessionID     string    `json:"session_id"`
+	SchemaVersion uint32    `json:"schemaVersion"`
+	SessionID     string    `json:"sessionId"`
 	Cwd           string    `json:"cwd"`
-	CreatedAt     time.Time `json:"created_at"`
+	CreatedAt     time.Time `json:"createdAt"`
 	Provider      *string   `json:"provider,omitempty"`
 	Model         *string   `json:"model,omitempty"`
+	// Title is a user-chosen name; empty means derive from messages.
+	Title string `json:"title,omitempty"`
+	// ForkedFrom is the source session id of a fork.
+	ForkedFrom string `json:"forkedFrom,omitempty"`
+	// Revert is a pending undo: messages from Index on are hidden and
+	// dropped by the next turn, or brought back by a redo.
+	Revert *Revert `json:"revert,omitempty"`
+	// Worktree is set when the session works in a managed git worktree.
+	Worktree *Worktree `json:"worktree,omitempty"`
 }
+
+// Worktree ties a session to a managed git worktree.
+type Worktree struct {
+	RepoRoot   string `json:"repoRoot"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	Base       string `json:"base"`
+	BaseBranch string `json:"baseBranch,omitempty"`
+	// Origin is the folder the worktree was made from; project-scoped
+	// state such as folder memory stays keyed on it.
+	Origin string `json:"origin"`
+}
+
+// ProjectCwd is the folder project-scoped state belongs to: the
+// worktree's origin folder, or the session's own folder.
+func (m Meta) ProjectCwd() string {
+	if m.Worktree != nil && m.Worktree.Origin != "" {
+		return m.Worktree.Origin
+	}
+	return m.Cwd
+}
+
+// Revert records a pending undo so it can be redone or committed.
+type Revert struct {
+	// Index is the transcript position of the reverted user message.
+	Index int `json:"index"`
+	// Pre is the workspace snapshot taken just before the revert.
+	Pre string `json:"pre,omitempty"`
+	// Restored lists the files the revert rewrote, each with the
+	// snapshot entry it wrote ("" when it deleted the file).
+	Restored []RevertFile `json:"restored,omitempty"`
+	// Skipped lists files left alone because they changed since.
+	Skipped []string `json:"skipped,omitempty"`
+	// Snapshots is false when only the conversation was reverted.
+	Snapshots bool `json:"snapshots"`
+}
+
+// RevertFile is one file rewritten by a revert.
+type RevertFile struct {
+	Path  string `json:"path"`
+	Wrote string `json:"wrote"`
+}
+
+// MaxTitleRunes caps a user-chosen session title.
+const MaxTitleRunes = 120
 
 const SchemaVersion = 1
 
@@ -106,7 +164,10 @@ func (m Message) Visible() bool {
 func TitleFor(messages []Message) string {
 	for _, msg := range messages {
 		if msg.Role == RoleUser && msg.Visible() {
-			title := strings.TrimSpace(msg.Content)
+			title := strings.TrimSpace(msg.Display)
+			if title == "" {
+				title = strings.TrimSpace(msg.Content)
+			}
 			if title == "" {
 				continue
 			}
@@ -164,6 +225,31 @@ func (s *Session) AppendMessage(msg Message) error {
 		return fmt.Errorf("io: sync message: %s", syserr.Str(err))
 	}
 	return nil
+}
+
+// SaveMeta writes the session's metadata atomically.
+func (s *Session) SaveMeta() error {
+	return writeMeta(s.Dir, s.Meta)
+}
+
+// Truncate keeps the first n transcript messages, atomically.
+func (s *Session) Truncate(n int) error {
+	msgs, err := s.History()
+	if err != nil {
+		return err
+	}
+	if n < 0 || n >= len(msgs) {
+		return nil
+	}
+	var buf []byte
+	for _, m := range msgs[:n] {
+		line, err := jsonx.Marshal(m)
+		if err != nil {
+			return fmt.Errorf("io: encode message: %s", syserr.Str(err))
+		}
+		buf = append(append(buf, line...), '\n')
+	}
+	return atomicWrite(s.Dir, "messages.jsonl", buf)
 }
 
 func (s *Session) History() ([]Message, error) {
@@ -388,7 +474,84 @@ func info(dir string, meta Meta) Info {
 			count++
 		}
 	}
-	return Info{Meta: meta, MessageCount: count, Title: TitleFor(msgs)}
+	title := strings.TrimSpace(meta.Title)
+	if title == "" {
+		title = TitleFor(msgs)
+	}
+	return Info{Meta: meta, MessageCount: count, Title: title}
+}
+
+// Fork copies a session's transcript into a new session in the same
+// workspace. The copy is independent: later turns on either side never
+// touch the other.
+func (s *Store) Fork(cwd, sessionID string) (Session, error) {
+	return s.ForkTo(cwd, sessionID, "", nil)
+}
+
+// ForkTo forks into another folder (empty means the source's own),
+// tied to wt; a same-folder fork keeps the source's worktree.
+func (s *Store) ForkTo(cwd, sessionID, target string, wt *Worktree) (Session, error) {
+	src, err := s.Load(cwd, sessionID)
+	if err != nil {
+		return Session{}, err
+	}
+	msgs, err := src.History()
+	if err != nil {
+		return Session{}, err
+	}
+	// A pending undo hides the tail; the fork starts from what is shown.
+	if rv := src.Meta.Revert; rv != nil && rv.Index >= 0 && rv.Index < len(msgs) {
+		msgs = msgs[:rv.Index]
+	}
+	provider, model := "", ""
+	if src.Meta.Provider != nil {
+		provider = *src.Meta.Provider
+	}
+	if src.Meta.Model != nil {
+		model = *src.Meta.Model
+	}
+	if target == "" {
+		target, wt = src.Meta.Cwd, src.Meta.Worktree
+	}
+	fork, err := s.Create(target, provider, model)
+	if err != nil {
+		return Session{}, err
+	}
+	for _, m := range msgs {
+		if err := fork.AppendMessage(m); err != nil {
+			_ = os.RemoveAll(fork.Dir)
+			return Session{}, err
+		}
+	}
+	title := strings.TrimSpace(src.Meta.Title)
+	if title == "" {
+		title = TitleFor(msgs)
+	}
+	if title == "" {
+		title = "Session"
+	}
+	fork.Meta.Title = shorten(title, MaxTitleRunes-7) + " (fork)"
+	fork.Meta.ForkedFrom = src.Meta.SessionID
+	fork.Meta.Worktree = wt
+	if err := writeMeta(fork.Dir, fork.Meta); err != nil {
+		_ = os.RemoveAll(fork.Dir)
+		return Session{}, err
+	}
+	return fork, nil
+}
+
+// Rename sets a session's title; an empty title restores the derived one.
+func (s *Store) Rename(cwd, sessionID, title string) error {
+	title = strings.Join(strings.Fields(title), " ")
+	if len([]rune(title)) > MaxTitleRunes {
+		return fmt.Errorf("invalid: title is longer than %d characters", MaxTitleRunes)
+	}
+	sess, err := s.Load(cwd, sessionID)
+	if err != nil {
+		return err
+	}
+	sess.Meta.Title = title
+	return writeMeta(sess.Dir, sess.Meta)
 }
 
 // EncodeCwd encodes a cwd to a namespace dir: escapes `-`, `:`, `/`,
@@ -491,29 +654,33 @@ func writeMeta(dir string, meta Meta) error {
 	if err != nil {
 		return fmt.Errorf("io: encode meta: %s", syserr.Str(err))
 	}
-	// Atomic write so a crash mid-write never leaves a half-written
-	// meta.json behind; session files are owner-only (may hold code).
-	tmp, err := os.CreateTemp(dir, "meta-*.tmp")
+	return atomicWrite(dir, "meta.json", data)
+}
+
+// atomicWrite replaces dir/name so a crash never leaves a half-written
+// file behind; session files are owner-only (they may hold code).
+func atomicWrite(dir, name string, data []byte) error {
+	tmp, err := os.CreateTemp(dir, name+"-*.tmp")
 	if err != nil {
-		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+		return fmt.Errorf("io: write %s: %s", name, syserr.Str(err))
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+		return fmt.Errorf("io: write %s: %s", name, syserr.Str(err))
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+		return fmt.Errorf("io: write %s: %s", name, syserr.Str(err))
 	}
 	if err := os.Chmod(tmpName, 0o600); err != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+		return fmt.Errorf("io: write %s: %s", name, syserr.Str(err))
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, "meta.json")); err != nil {
+	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
 		os.Remove(tmpName)
-		return fmt.Errorf("io: write meta: %s", syserr.Str(err))
+		return fmt.Errorf("io: write %s: %s", name, syserr.Str(err))
 	}
 	return nil
 }

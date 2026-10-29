@@ -1,4 +1,4 @@
-// Package tools: chatpath.go resolves user-typed chat paths.
+// chatpath.go resolves user-typed chat paths.
 //
 // Chat paths follow one Linux-style rule on every OS: `/` separates
 // segments even on Windows. A bare relative path (`src/foo.ts`)
@@ -8,6 +8,7 @@
 // scope reports whether the target landed inside the workspace or
 // outside it — escaping is allowed here because `@` mentions
 // deliberately tag files outside the workspace.
+
 package tools
 
 import (

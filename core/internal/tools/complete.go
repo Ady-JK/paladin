@@ -1,4 +1,4 @@
-// Package tools: complete.go powers `@` mentions in chat.
+// complete.go powers `@` mentions in chat.
 //
 // CompleteFiles lists files and folders under the workspace (or its
 // parent chain for `../` queries) for the composer's autocomplete
@@ -9,6 +9,7 @@
 // every row also carries the OS-specific absolute path, which is what
 // the composer inserts into the message so the agent sees exactly
 // which file or folder was tagged.
+
 package tools
 
 import (
@@ -198,12 +199,12 @@ func fuzzyScore(query, target string) (int, bool) {
 	if query == "" {
 		return 0, true
 	}
-	qr, tr := []rune(query), []rune(target)
+	tr := []rune(target)
 	ti := 0
 	cost := 0
 	run := 0
 	first := -1
-	for _, qc := range qr {
+	for _, qc := range query {
 		found := -1
 		for i := ti; i < len(tr); i++ {
 			if tr[i] == qc {

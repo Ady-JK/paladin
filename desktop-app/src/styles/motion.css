@@ -1,0 +1,685 @@
+/* ============ Motion, blur, gradients ============
+   GPU-only animation (opacity + transform). Anything that animates
+   layout (width/height/top/left) is excluded so streaming stays at 60fps.
+   Every animation below collapses under prefers-reduced-motion. */
+
+@layer base {
+  /* Keep app chrome above any backdrop. */
+  body > div {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@layer components {
+  /* ---- Frameless window drag regions ----
+     The OS frame is off, so the top strips are the title bar. Controls
+     inside them opt back out, otherwise clicks would start a drag. */
+  #brandBar,
+  #titleBar {
+    -webkit-app-region: drag;
+  }
+
+  #brandBar button,
+  #brandBar input,
+  #titleBar button,
+  #titleBar input,
+  #titleBar a {
+    -webkit-app-region: no-drag;
+  }
+
+  /* ---- Sidebar + header glass ---- */
+  #sidebar {
+    transition: width 240ms cubic-bezier(0.32, 0.72, 0.28, 1), background-color 200ms ease;
+  }
+
+  .dark #sidebar {
+    background: var(--color-slate-900);
+  }
+
+  .dark #titleBar {
+    background: var(--color-slate-950);
+  }
+
+  /* Sidebar text cross-fades instead of snapping when collapsing. */
+  #sidebar .sidebar-text {
+    transition: opacity 180ms ease;
+  }
+
+  #sidebar.w-0 .sidebar-text {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* ---- Modal overlays: blurred dim + spring card ---- */
+  .modal-overlay {
+    opacity: 0;
+    transition: opacity 180ms ease;
+    background: rgb(2 6 23 / 0.55);
+    backdrop-filter: blur(10px) saturate(1.2);
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  }
+
+  .modal-overlay.is-open {
+    opacity: 1;
+  }
+
+  .modal-overlay.is-closing {
+    opacity: 0;
+  }
+
+  .modal-overlay .modal-card {
+    opacity: 0;
+    transform: translateY(14px) scale(0.965);
+    transform-origin: center;
+    transition:
+      opacity 220ms ease,
+      transform 260ms cubic-bezier(0.22, 1.1, 0.36, 1);
+    box-shadow:
+      0 24px 70px -12px rgb(0 0 0 / 0.45),
+      0 0 0 1px rgb(148 163 184 / 0.12),
+      0 0 44px -12px rgb(99 102 241 / 0.35);
+  }
+
+  .modal-overlay.is-open .modal-card {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .modal-overlay.is-closing .modal-card {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+    transition:
+      opacity 150ms ease,
+      transform 160ms ease-in;
+  }
+
+  .dark .modal-overlay .modal-card {
+    background:
+      linear-gradient(180deg, rgb(30 41 59 / 0.5), transparent 32%),
+      var(--color-slate-900);
+  }
+
+  /* Nested provider card shares the spring. */
+  #providerCard .modal-card {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+    transition:
+      opacity 200ms ease,
+      transform 240ms cubic-bezier(0.22, 1.1, 0.36, 1);
+  }
+
+  #providerCard.is-open .modal-card {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ---- Native-like file picker ----
+     Breadcrumb trail, toolbar, single-select list. One shared look for
+     the new-session folder step and the composer attach dialog. */
+  .picker-crumbs {
+    display: flex;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240);
+    background: rgb(241 245 249 / 0.7);
+    padding: 6px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    min-height: 2rem;
+  }
+
+  .dark .picker-crumbs {
+    border-color: rgb(51 65 85 / 0.8);
+    background: rgb(30 41 59 / 0.6);
+  }
+
+  .picker-crumb {
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: rgb(37 99 235);
+  }
+
+  .dark .picker-crumb {
+    color: rgb(147 197 253);
+  }
+
+  .picker-crumb:hover {
+    background: rgb(37 99 235 / 0.1);
+  }
+
+  .picker-crumb-sep {
+    color: rgb(148 163 184);
+    user-select: none;
+  }
+
+  .picker-crumb-current {
+    font-weight: 600;
+    color: rgb(15 23 42);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dark .picker-crumb-current {
+    color: rgb(226 232 240);
+  }
+
+  .picker-toolbar {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .picker-search {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .picker-search-icon {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    color: rgb(148 163 184);
+    pointer-events: none;
+  }
+
+  .picker-search-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .picker-search-input {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240);
+    background: rgb(241 245 249 / 0.7);
+    padding: 6px 10px 6px 30px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: inherit;
+  }
+
+  .dark .picker-search-input {
+    border-color: rgb(51 65 85);
+    background: rgb(30 41 59 / 0.7);
+  }
+
+  .picker-search-input:focus {
+    outline: none;
+    border-color: var(--color-accent-500);
+  }
+
+  .picker-hidden-toggle {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgb(100 116 139);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .dark .picker-hidden-toggle {
+    color: rgb(148 163 184);
+  }
+
+  .picker-checkbox {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--color-accent-600);
+    cursor: pointer;
+  }
+
+  .picker-list {
+    overflow-y: auto;
+    min-height: 0;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(226 232 240);
+    padding: 4px;
+  }
+
+  .dark .picker-list {
+    border-color: rgb(51 65 85);
+  }
+
+  .picker-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    padding: 7px 10px;
+    text-align: left;
+    font-size: 12px;
+    color: rgb(51 65 85);
+  }
+
+  .dark .picker-row {
+    color: rgb(203 213 225);
+  }
+
+  .picker-row:hover {
+    background: rgb(241 245 249);
+  }
+
+  .dark .picker-row:hover {
+    background: rgb(30 41 59);
+  }
+
+  .picker-row[aria-selected="true"] {
+    border-color: rgb(37 99 235 / 0.45);
+    background: rgb(37 99 235 / 0.1);
+    font-weight: 500;
+  }
+
+  .dark .picker-row[aria-selected="true"] {
+    border-color: rgb(96 165 250 / 0.5);
+    background: rgb(37 99 235 / 0.18);
+  }
+
+  .picker-row-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .picker-row-folder {
+    color: var(--color-agent-amber);
+  }
+
+  .picker-row-file {
+    color: rgb(148 163 184);
+  }
+
+  .picker-row-label {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .picker-row-check {
+    display: none;
+    flex-shrink: 0;
+    color: var(--color-accent-600);
+  }
+
+  .dark .picker-row-check {
+    color: rgb(96 165 250);
+  }
+
+  .picker-row-check svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .picker-row[aria-selected="true"] .picker-row-check {
+    display: inline-flex;
+  }
+
+  .picker-row-open {
+    display: inline-flex;
+    flex-shrink: 0;
+    border-radius: 4px;
+    padding: 2px;
+    color: rgb(148 163 184);
+  }
+
+  .picker-row-open:hover {
+    background: rgb(37 99 235 / 0.15);
+    color: rgb(37 99 235);
+  }
+
+  .picker-row-open svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .picker-empty {
+    padding: 12px 8px;
+    text-align: center;
+    font-size: 12px;
+    color: rgb(148 163 184);
+  }
+
+  /* ---- Dropdown / picker pop ---- */
+  #modelMenu {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    transform-origin: bottom left;
+    transition:
+      opacity 150ms ease,
+      transform 190ms cubic-bezier(0.22, 1.1, 0.36, 1);
+  }
+
+  #modelMenu.is-open {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ---- Views cross-fade ---- */
+  #agentView,
+  #externalView {
+    animation: view-in 220ms ease both;
+  }
+
+  /* ---- Rows drift in ---- */
+  .turn-row {
+    animation: turn-in 260ms cubic-bezier(0.22, 0.9, 0.36, 1) both;
+  }
+
+  .session-row,
+  .pick-row {
+    transition:
+      transform 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease;
+  }
+
+  .session-row:hover,
+  .pick-row:hover {
+    transform: translateX(2px);
+  }
+
+  /* ---- Buttons: lift + press ---- */
+  button {
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease,
+      transform 120ms ease,
+      box-shadow 180ms ease,
+      opacity 150ms ease;
+  }
+
+  button:active {
+    transform: scale(0.97);
+  }
+
+  /* Primary actions: a quiet solid fill, inverted per theme. */
+  #sessionStartBtn,
+  #siteAddBtn,
+  #settingsWorkspaceSaveBtn {
+    background: var(--color-slate-900);
+    color: #fff;
+  }
+
+  .dark #sessionStartBtn,
+  .dark #siteAddBtn,
+  .dark #settingsWorkspaceSaveBtn {
+    background: var(--color-slate-100);
+    color: var(--color-slate-950);
+  }
+
+  #sessionStartBtn:hover,
+  #siteAddBtn:hover,
+  #settingsWorkspaceSaveBtn:hover {
+    filter: brightness(1.12);
+  }
+
+  .dark #sessionStartBtn:hover,
+  .dark #siteAddBtn:hover,
+  .dark #settingsWorkspaceSaveBtn:hover {
+    filter: brightness(0.92);
+  }
+
+  /* ---- Composer: one calm rounded card, Codex-style ---- */
+  .composer-float {
+    border-radius: 22px;
+    border: 1px solid var(--color-slate-200);
+    background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.12);
+    transition:
+      border-color 160ms ease,
+      box-shadow 200ms ease;
+  }
+
+  .dark .composer-float {
+    border-color: var(--color-slate-800);
+    background: var(--color-slate-900);
+    box-shadow: 0 8px 28px -14px rgb(0 0 0 / 0.6);
+  }
+
+  .composer-float:focus-within {
+    border-color: var(--color-slate-300);
+    box-shadow:
+      0 0 0 3px rgb(146 134 214 / 0.12),
+      0 8px 24px -12px rgb(0 0 0 / 0.12);
+  }
+
+  .dark .composer-float:focus-within {
+    border-color: var(--color-slate-700);
+    box-shadow:
+      0 0 0 3px rgb(146 134 214 / 0.1),
+      0 8px 28px -14px rgb(0 0 0 / 0.6);
+  }
+
+  /* ---- Mention / slash popups ---- */
+  #mentionPopup,
+  #slashPopup {
+    box-shadow:
+      0 18px 45px -12px rgb(0 0 0 / 0.35),
+      0 0 0 1px rgb(0 0 0 / 0.06);
+  }
+
+  .dark #mentionPopup,
+  .dark #slashPopup {
+    background: var(--color-slate-900);
+    box-shadow:
+      0 18px 45px -12px rgb(0 0 0 / 0.6),
+      0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+
+  /* ---- Analytics glass ---- */
+  .glass-panel {
+    background: rgb(255 255 255 / 0.72);
+    border: 1px solid rgb(226 232 240 / 0.9);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .dark .glass-panel {
+    background: rgb(17 23 38 / 0.75);
+    border: 1px solid rgb(255 255 255 / 0.07);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .glass-panel:hover {
+    border-color: rgb(148 163 184 / 0.28);
+  }
+
+  .glow-blue {
+    box-shadow: 0 0 25px -5px rgb(59 130 246 / 0.25);
+  }
+
+  .glow-purple {
+    box-shadow: 0 0 25px -5px rgb(168 85 247 / 0.25);
+  }
+
+  .glow-emerald {
+    box-shadow: 0 0 25px -5px rgb(16 185 129 / 0.25);
+  }
+
+  .glow-amber {
+    box-shadow: 0 0 25px -5px rgb(245 158 11 / 0.22);
+  }
+
+  .heatmap-cell {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    transition: transform 0.15s ease;
+  }
+
+  .heatmap-cell:hover {
+    transform: scale(1.3);
+  }
+
+  /* ---- Toast spring + glass ---- */
+  #toast {
+    backdrop-filter: blur(12px) saturate(1.3);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    box-shadow:
+      0 16px 40px -12px rgb(0 0 0 / 0.35),
+      0 0 0 1px rgb(148 163 184 / 0.15);
+  }
+  #toast.toast-in {
+    animation: toast-in 260ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+  }
+
+  /* ---- Header pulse, softened ---- */
+  #headerPulse {
+    animation: soft-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  /* ---- Guest page on screen: freeze the app chrome ----
+     An embedded WebContentsView is composited next to this page. A
+     continuously animating layer or a live backdrop-filter keeps the
+     compositor producing frames for the app shell on every vsync,
+     stealing time from the page the user is scrolling. While a guest
+     page is visible the shell is made completely static: the pulse
+     stops and the blur layers (which re-read their backdrop) are
+     replaced with solid fills of the same colour. */
+  body.guest-visible #headerPulse {
+    animation: none;
+    opacity: 0.75;
+  }
+
+  body.guest-visible #sidebar,
+  body.guest-visible #titleBar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  body.guest-visible #sidebar {
+    transition: none;
+  }
+
+  body.guest-visible.dark #sidebar {
+    background: var(--color-slate-900);
+  }
+
+  body.guest-visible.dark #titleBar {
+    background: var(--color-slate-950);
+  }
+
+  /* No gradient mesh to overdraw behind the (now opaque) chrome. */
+  body.guest-visible::before {
+    display: none;
+  }
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes turn-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes soft-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  70%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* ============ Motion levels ============
+   <html data-motion> is set by ui/motion.ts from the user's choice (or
+   the OS reduce-motion setting under "System"). */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 80ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Spinners still turn under Reduced: they carry "this is running". */
+html[data-motion="reduced"] .tool-spin,
+html[data-motion="reduced"] .live-spinner {
+  animation-duration: 1.2s !important;
+  animation-iteration-count: infinite !important;
+}
+
+html[data-motion="reduced"] body::before,
+html[data-motion="off"] body::before {
+  display: none;
+}
+
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+/* Off also drops the GPU-heavy effects: blur and layered shadows. */
+html[data-motion="off"] .modal-overlay,
+html[data-motion="off"] .composer-float,
+html[data-motion="off"] #titleBar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-motion="off"] #mainCard,
+html[data-motion="off"] .modal-card,
+html[data-motion="off"] .composer-float,
+html[data-motion="off"] [role="menu"] {
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06) !important;
+}
+
+/* ============ Composer prominence ============
+   Unlayered on purpose: the composer input wins over text-xs. */
+#promptInput {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+}
+
+#messages .turn-row {
+  letter-spacing: -0.006em;
+}

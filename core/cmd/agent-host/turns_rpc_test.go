@@ -162,11 +162,11 @@ func setupLiveHost(t *testing.T) (*liveHost, func(), func() (string, string)) {
 	t.Helper()
 	srv, free := holdModel(t)
 	h := startLiveHost(t, buildHost(t), t.TempDir())
-	h.call("add_provider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
-	h.call("set_default_provider", map[string]string{"name": "mock"})
+	h.call("addProvider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
+	h.call("setDefaultProvider", map[string]string{"name": "mock"})
 	open := func() (string, string) {
 		cwd := t.TempDir()
-		res := h.call("open_session", map[string]string{"cwd": cwd})["result"].(map[string]any)
+		res := h.call("openSession", map[string]string{"cwd": cwd})["result"].(map[string]any)
 		return res["sessionId"].(string), cwd
 	}
 	return h, free, open
@@ -176,14 +176,14 @@ func TestStdioConcurrentSessionsQueueAndAttach(t *testing.T) {
 	h, free, open := setupLiveHost(t)
 	a, cwdA := open()
 	b, cwdB := open()
-	first := h.call("submit_chat", map[string]any{"sessionId": a, "message": "one", "cwd": cwdA, "display": "one!"})
+	first := h.call("submitChat", map[string]any{"sessionId": a, "message": "one", "cwd": cwdA, "display": "one!"})
 	if st := first["result"].(map[string]any)["state"]; st != "running" {
 		t.Fatalf("first turn should run: %v", first)
 	}
-	if st := h.call("submit_chat", map[string]any{"sessionId": b, "message": "two", "cwd": cwdB})["result"].(map[string]any)["state"]; st != "running" {
+	if st := h.call("submitChat", map[string]any{"sessionId": b, "message": "two", "cwd": cwdB})["result"].(map[string]any)["state"]; st != "running" {
 		t.Fatalf("other session should run concurrently, got %v", st)
 	}
-	if st := h.call("submit_chat", map[string]any{"sessionId": a, "message": "three", "cwd": cwdA})["result"].(map[string]any)["state"]; st != "queued" {
+	if st := h.call("submitChat", map[string]any{"sessionId": a, "message": "three", "cwd": cwdA})["result"].(map[string]any)["state"]; st != "queued" {
 		t.Fatalf("follow-up should queue, got %v", st)
 	}
 	h.event("chat/delta", a, nil)
@@ -207,7 +207,7 @@ func TestStdioConcurrentSessionsQueueAndAttach(t *testing.T) {
 	if turn := done["turn"].(map[string]any); turn["reply"] != "part done" || turn["error"] != nil {
 		t.Fatalf("done %v", done)
 	}
-	hist := h.call("session_history", map[string]any{"sessionId": a})["result"].([]any)
+	hist := h.call("sessionHistory", map[string]any{"sessionId": a})["result"].([]any)
 	if len(hist) != 4 {
 		t.Fatalf("history %v", hist)
 	}
@@ -217,18 +217,18 @@ func TestStdioCancelQueuedTurnAndStopDropsQueue(t *testing.T) {
 	h, free, open := setupLiveHost(t)
 	defer free()
 	a, cwd := open()
-	h.call("submit_chat", map[string]any{"sessionId": a, "message": "run", "cwd": cwd})
-	q := h.call("submit_chat", map[string]any{"sessionId": a, "message": "later", "cwd": cwd})["result"].(map[string]any)
-	h.call("submit_chat", map[string]any{"sessionId": a, "message": "much later", "cwd": cwd})
-	if ok := h.call("cancel_turn", map[string]any{"turnId": q["turnId"]})["result"]; ok != true {
-		t.Fatalf("cancel_turn %v", ok)
+	h.call("submitChat", map[string]any{"sessionId": a, "message": "run", "cwd": cwd})
+	q := h.call("submitChat", map[string]any{"sessionId": a, "message": "later", "cwd": cwd})["result"].(map[string]any)
+	h.call("submitChat", map[string]any{"sessionId": a, "message": "much later", "cwd": cwd})
+	if ok := h.call("cancelTurn", map[string]any{"turnId": q["turnId"]})["result"]; ok != true {
+		t.Fatalf("cancelTurn %v", ok)
 	}
 	h.event("turn/done", a, func(m map[string]any) bool {
 		turn := m["turn"].(map[string]any)
 		return turn["message"] == "later" && turn["cancelled"] == true
 	})
 	h.event("chat/delta", a, nil)
-	if ok := h.call("stop_chat", map[string]any{"sessionId": a})["result"]; ok != true {
+	if ok := h.call("stopChat", map[string]any{"sessionId": a})["result"]; ok != true {
 		t.Fatalf("stop %v", ok)
 	}
 	h.event("turn/done", a, func(m map[string]any) bool {
@@ -241,31 +241,16 @@ func TestStdioCancelQueuedTurnAndStopDropsQueue(t *testing.T) {
 	})
 }
 
-// The blocking chat method keeps its contract on top of the hub: events
-// carry the request id as streamId and the final line answers it.
-func TestStdioBlockingChatStillStreams(t *testing.T) {
-	h, free, open := setupLiveHost(t)
-	a, cwd := open()
-	id := h.send("chat", map[string]any{"sessionId": a, "message": "hi", "cwd": cwd})
-	h.event("chat/delta", a, func(m map[string]any) bool { return m["streamId"] == id })
-	free()
-	final := h.waitLine("chat response", func(m map[string]any) bool { return m["id"] == id })
-	res, _ := final["result"].(map[string]any)
-	if final["ok"] != true || res["reply"] != "part done" || res["sessionId"] != a {
-		t.Fatalf("final %v", final)
-	}
-}
-
 // Closing stdin stops running turns, persists them, and exits.
 func TestStdioShutdownPersistsRunningTurns(t *testing.T) {
 	srv, _ := holdModel(t)
 	dir := t.TempDir()
 	h := startLiveHost(t, buildHost(t), dir)
-	h.call("add_provider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
-	h.call("set_default_provider", map[string]string{"name": "mock"})
+	h.call("addProvider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
+	h.call("setDefaultProvider", map[string]string{"name": "mock"})
 	cwd := t.TempDir()
-	a := h.call("open_session", map[string]string{"cwd": cwd})["result"].(map[string]any)["sessionId"].(string)
-	h.call("submit_chat", map[string]any{"sessionId": a, "message": "keep me", "cwd": cwd})
+	a := h.call("openSession", map[string]string{"cwd": cwd})["result"].(map[string]any)["sessionId"].(string)
+	h.call("submitChat", map[string]any{"sessionId": a, "message": "keep me", "cwd": cwd})
 	h.event("chat/delta", a, nil)
 	_ = h.stdin.Close()
 	select {
@@ -274,7 +259,7 @@ func TestStdioShutdownPersistsRunningTurns(t *testing.T) {
 		t.Fatal("host did not exit after stdin closed")
 	}
 	h2 := startLiveHost(t, buildHost(t), dir)
-	hist := h2.call("session_history", map[string]any{"sessionId": a})["result"].([]any)
+	hist := h2.call("sessionHistory", map[string]any{"sessionId": a})["result"].([]any)
 	found := false
 	for _, row := range hist {
 		if m := row.(map[string]any); m["role"] == "user" && strings.Contains(fmt.Sprint(m["content"]), "keep me") {
@@ -291,11 +276,11 @@ func TestStdioSigtermPersistsRunningTurns(t *testing.T) {
 	srv, _ := holdModel(t)
 	dir := t.TempDir()
 	h := startLiveHost(t, buildHost(t), dir)
-	h.call("add_provider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
-	h.call("set_default_provider", map[string]string{"name": "mock"})
+	h.call("addProvider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
+	h.call("setDefaultProvider", map[string]string{"name": "mock"})
 	cwd := t.TempDir()
-	a := h.call("open_session", map[string]string{"cwd": cwd})["result"].(map[string]any)["sessionId"].(string)
-	h.call("submit_chat", map[string]any{"sessionId": a, "message": "signal me", "cwd": cwd})
+	a := h.call("openSession", map[string]string{"cwd": cwd})["result"].(map[string]any)["sessionId"].(string)
+	h.call("submitChat", map[string]any{"sessionId": a, "message": "signal me", "cwd": cwd})
 	h.event("chat/delta", a, nil)
 	if err := h.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
@@ -309,7 +294,7 @@ func TestStdioSigtermPersistsRunningTurns(t *testing.T) {
 		t.Fatalf("exit code %d, want a clean exit", code)
 	}
 	h2 := startLiveHost(t, buildHost(t), dir)
-	hist := h2.call("session_history", map[string]any{"sessionId": a})["result"].([]any)
+	hist := h2.call("sessionHistory", map[string]any{"sessionId": a})["result"].([]any)
 	if !strings.Contains(fmt.Sprint(hist), "signal me") {
 		t.Fatalf("turn not persisted on SIGTERM: %v", hist)
 	}

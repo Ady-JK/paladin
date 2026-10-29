@@ -75,16 +75,10 @@ func TestMustMarshalFallsBackToEmptyObject(t *testing.T) {
 	if got := string(MustMarshal(make(chan int))); got != "{}" {
 		t.Fatalf("got %q", got)
 	}
-	if got := string(MustMarshalIndent(make(chan int))); got != "{}" {
-		t.Fatalf("got %q", got)
-	}
 }
 
 func TestMustMarshalRoundTrips(t *testing.T) {
 	if got := string(MustMarshal(map[string]int{"n": 2})); got != `{"n":2}` {
-		t.Fatalf("got %q", got)
-	}
-	if got := string(MustMarshalIndent(map[string]int{"n": 2})); got != "{\n  \"n\": 2\n}\n" {
 		t.Fatalf("got %q", got)
 	}
 }

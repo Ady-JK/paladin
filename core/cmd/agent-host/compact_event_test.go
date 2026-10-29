@@ -32,25 +32,19 @@ func TestChatForwardsCompactionEvents(t *testing.T) {
 	defer server.Close()
 	dir := t.TempDir()
 	rt := runtime.WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore())
-	mustOK(t, callUnary(rt, "1", "add_provider", map[string]string{"name": "mock", "apiUrl": server.URL, "apiKey": "sk-live", "apiType": "openai"}))
-	openResp := callUnary(rt, "2", "open_session", map[string]string{"cwd": "/tmp/p4"})
+	mustOK(t, callUnary(rt, "1", "addProvider", map[string]string{"name": "mock", "apiUrl": server.URL, "apiKey": "sk-live", "apiType": "openai"}))
+	openResp := callUnary(rt, "2", "openSession", map[string]string{"cwd": "/tmp/p4"})
 	mustOK(t, openResp)
 	data, _ := json.Marshal(openResp.Result)
 	var sess struct {
 		SessionID string `json:"sessionId"`
 	}
 	_ = json.Unmarshal(data, &sess)
-	chat := func(id, msg string) string {
-		return captureStdout(t, func() {
-			runChat(rt, Request{
-				ID:     json.RawMessage(`"` + id + `"`),
-				Method: "chat",
-				Params: rawParams(t, ChatParams{SessionID: sess.SessionID, Message: msg, Cwd: "/tmp/p4"}),
-			})
-		})
+	chat := func(msg string) string {
+		return runTurnOut(t, rt, ChatParams{SessionID: sess.SessionID, Message: msg, Cwd: "/tmp/p4"})
 	}
-	chat("8", "zz-first-msg")
-	out := chat("9", "zz-second-msg")
+	chat("zz-first-msg")
+	out := chat("zz-second-msg")
 	var phases []string
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		var msg map[string]any

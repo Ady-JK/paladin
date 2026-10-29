@@ -1,5 +1,5 @@
 // analytics.ts owns the fleet-wide dashboard inside Settings >
-// Analytics: every session's usage.json rolled up via `overall_usage`.
+// Analytics: every session's usage.json rolled up via `overallUsage`.
 // Charts are hand-rolled SVG (no CDN deps) in the NexusHarness glass
 // style: hero KPIs, token banner, daily timeline, model donuts,
 // composition bars, heatmap and the top-sessions audit table.
@@ -249,7 +249,3 @@ export async function load(force = false): Promise<void> {
   render(cache);
 }
 
-// refreshAnalytics refetches on next open (e.g. after a billed turn).
-export function invalidateAnalytics(): void {
-  cache = null;
-}

@@ -332,7 +332,7 @@ func TestLoadProvidersRejectsDuplicateNames(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(store.ProvidersPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dup := `{"default_provider":"a","providers":[{"name":"a","api_url":"https://a/v1","api_type":"openai"},{"name":"a","api_url":"https://b/v1","api_type":"openai"}]}`
+	dup := `{"defaultProvider":"a","providers":[{"name":"a","apiUrl":"https://a/v1","apiType":"openai"},{"name":"a","apiUrl":"https://b/v1","apiType":"openai"}]}`
 	if err := os.WriteFile(store.ProvidersPath(), []byte(dup), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -584,16 +584,6 @@ func TestResolveFallsBackWhenDefaultMissing(t *testing.T) {
 	p, _, err := store.Resolve("")
 	if err != nil || p.Name != OpenrouterName {
 		t.Fatalf("got %v %v", p, err)
-	}
-}
-
-func TestSortedKeys(t *testing.T) {
-	keys := SortedKeys(map[string]int{"b": 1, "a": 2})
-	if len(keys) != 2 || keys[0] != "a" || keys[1] != "b" {
-		t.Fatalf("got %v", keys)
-	}
-	if got := SortedKeys(map[string]int{}); len(got) != 0 {
-		t.Fatalf("got %v", got)
 	}
 }
 

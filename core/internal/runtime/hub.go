@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 )
 
 // Turn states.
@@ -35,18 +35,25 @@ type TurnInfo struct {
 	// expansion); it rides along so a re-attaching UI can redraw it.
 	Display string `json:"display,omitempty"`
 	Skill   string `json:"skill,omitempty"`
+	Command string `json:"command,omitempty"`
+	Mode    string `json:"mode,omitempty"`
+	Compact bool   `json:"compact,omitempty"`
 	Resume  bool   `json:"resume,omitempty"`
-	State   string `json:"state"`
+	// Permissions is the turn's approval preset as submitted.
+	Permissions string `json:"permissions,omitempty"`
+	State       string `json:"state"`
 	// Persisted means the transcript already holds this turn.
 	Persisted     bool   `json:"persisted,omitempty"`
 	Reply         string `json:"reply,omitempty"`
 	Stopped       bool   `json:"stopped,omitempty"`
 	NeedsContinue bool   `json:"needsContinue,omitempty"`
 	Cancelled     bool   `json:"cancelled,omitempty"`
-	Error         string `json:"error,omitempty"`
-	QueuedAt      int64  `json:"queuedAt"`
-	StartedAt     int64  `json:"startedAt,omitempty"`
-	EndedAt       int64  `json:"endedAt,omitempty"`
+	// AwaitingApproval is set while a tool call waits on the user.
+	AwaitingApproval bool   `json:"awaitingApproval,omitempty"`
+	Error            string `json:"error,omitempty"`
+	QueuedAt         int64  `json:"queuedAt"`
+	StartedAt        int64  `json:"startedAt,omitempty"`
+	EndedAt          int64  `json:"endedAt,omitempty"`
 }
 
 // TurnEvent is one hub broadcast: a streamed chat/* chunk or a
@@ -57,18 +64,17 @@ type TurnEvent struct {
 	Seq        uint64                  `json:"seq"`
 	SessionID  string                  `json:"sessionId"`
 	TurnID     string                  `json:"turnId"`
-	StreamID   json.RawMessage         `json:"streamId,omitempty"`
 	Delta      string                  `json:"delta,omitempty"`
 	Tool       *agent.ToolActivity     `json:"tool,omitempty"`
 	Retry      *agent.RetryStatus      `json:"retry,omitempty"`
 	Compaction *agent.CompactionStatus `json:"compaction,omitempty"`
+	Approval   *permission.Approval    `json:"approval,omitempty"`
 	Turn       *TurnInfo               `json:"turn,omitempty"`
 }
 
 // SubmitOpts carries client-side extras that never reach the agent.
 type SubmitOpts struct {
-	Display  string
-	StreamID json.RawMessage
+	Display string
 }
 
 // Attachment is everything a client needs to show a session: its
@@ -84,10 +90,10 @@ type Attachment struct {
 type hubTurn struct {
 	info     TurnInfo
 	req      agent.Request
-	streamID json.RawMessage
 	cancel   context.CancelFunc
 	log      []TurnEvent
 	toolAt   map[string]int
+	waiting  map[string]bool
 	reply    strings.Builder
 	errMsg   string
 	result   chan TurnInfo
@@ -132,27 +138,34 @@ func (h *Hub) SetSink(sink func(TurnEvent)) {
 // and a slot is free. The channel receives the final TurnInfo.
 func (h *Hub) Submit(req agent.Request, opts SubmitOpts) (TurnInfo, <-chan TurnInfo, error) {
 	if strings.TrimSpace(req.SessionID) == "" {
-		return TurnInfo{}, nil, fmt.Errorf("sessionId is required: create one with open_session first")
+		return TurnInfo{}, nil, fmt.Errorf("sessionId is required: create one with openSession first")
 	}
-	if strings.TrimSpace(req.Message) == "" && !req.Resume {
+	if strings.TrimSpace(req.Message) == "" && !req.Resume && !req.Compact && derefString(req.Command) == "" {
 		return TurnInfo{}, nil, fmt.Errorf("message is required")
+	}
+	if _, err := permission.ParsePreset(req.Permissions); err != nil {
+		return TurnInfo{}, nil, err
 	}
 	t := &hubTurn{
 		req:      req,
-		streamID: opts.StreamID,
 		toolAt:   map[string]int{},
+		waiting:  map[string]bool{},
 		result:   make(chan TurnInfo, 1),
 		finished: make(chan struct{}),
 		info: TurnInfo{
-			TurnID:    fmt.Sprintf("t%d-%d", time.Now().UnixMilli(), h.nextID.Add(1)),
-			SessionID: req.SessionID,
-			Cwd:       req.Cwd,
-			Message:   req.Message,
-			Display:   opts.Display,
-			Skill:     derefString(req.Skill),
-			Resume:    req.Resume,
-			State:     TurnQueued,
-			QueuedAt:  time.Now().UnixMilli(),
+			TurnID:      fmt.Sprintf("t%d-%d", time.Now().UnixMilli(), h.nextID.Add(1)),
+			SessionID:   req.SessionID,
+			Cwd:         req.Cwd,
+			Message:     req.Message,
+			Display:     opts.Display,
+			Skill:       derefString(req.Skill),
+			Command:     derefString(req.Command),
+			Mode:        req.Mode,
+			Permissions: req.Permissions,
+			Compact:     req.Compact,
+			Resume:      req.Resume,
+			State:       TurnQueued,
+			QueuedAt:    time.Now().UnixMilli(),
 		},
 	}
 	h.mu.Lock()
@@ -268,6 +281,15 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	if chunk.Tool != nil {
 		h.publishLocked(t, TurnEvent{Event: "chat/tool", Tool: chunk.Tool})
 	}
+	if chunk.Approval != nil {
+		if chunk.Approval.State == permission.StatePending {
+			t.waiting[chunk.Approval.ID] = true
+		} else {
+			delete(t.waiting, chunk.Approval.ID)
+		}
+		t.info.AwaitingApproval = len(t.waiting) > 0
+		h.publishLocked(t, TurnEvent{Event: "chat/approval", Approval: chunk.Approval})
+	}
 }
 
 func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
@@ -303,7 +325,6 @@ func (h *Hub) publishLocked(t *hubTurn, e TurnEvent) {
 	e.Seq = h.seq
 	e.SessionID = t.info.SessionID
 	e.TurnID = t.info.TurnID
-	e.StreamID = t.streamID
 	if t.info.State == TurnRunning && strings.HasPrefix(e.Event, "chat/") {
 		t.record(e)
 	}
@@ -321,14 +342,25 @@ func (t *hubTurn) record(e TurnEvent) {
 			return
 		}
 	}
-	if e.Event == "chat/tool" && e.Tool.ID != "" {
-		if i, ok := t.toolAt[e.Tool.ID]; ok {
+	if key := replaceKey(e); key != "" {
+		if i, ok := t.toolAt[key]; ok {
 			t.log[i] = e
 			return
 		}
-		t.toolAt[e.Tool.ID] = len(t.log)
+		t.toolAt[key] = len(t.log)
 	}
 	t.log = append(t.log, e)
+}
+
+// replaceKey names events whose later updates replace the first one.
+func replaceKey(e TurnEvent) string {
+	switch {
+	case e.Event == "chat/tool" && e.Tool != nil && e.Tool.ID != "":
+		return e.Tool.ID
+	case e.Event == "chat/approval" && e.Approval != nil && e.Approval.ID != "":
+		return "approval:" + e.Approval.ID
+	}
+	return ""
 }
 
 // Attach snapshots a session atomically with history: events published
@@ -417,6 +449,17 @@ func (h *Hub) StopSession(sessionID, cwd string) bool {
 		}
 	}
 	return hit
+}
+
+// StopRunning stops the session's running turn, leaving its queue.
+func (h *Hub) StopRunning(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if t := h.active[sessionID]; t != nil {
+		t.cancel()
+		return true
+	}
+	return false
 }
 
 // Cancel drops a queued turn, or stops it when already running.

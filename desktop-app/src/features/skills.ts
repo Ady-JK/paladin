@@ -1,6 +1,6 @@
 // skills.ts owns `/skill` in the composer.
 //
-// Typing `/skill` opens a picker backed by the `list_skills` sidecar
+// Typing `/skill` opens a picker backed by the `listSkills` sidecar
 // method (global config/skills + workspace .paladin/skills, each a
 // `<name>/SKILL.md` directory). Picking a row (or typing
 // `/skill <name> <message>` by hand) attaches the skill to this turn:
@@ -232,6 +232,23 @@ export function takeAttached(): string | null {
   const name = attached;
   detach();
   return name;
+}
+
+// loadSkills returns the cached skill listing, fetching it once.
+export async function loadSkills(): Promise<SkillEntry[]> {
+  if (!all) {
+    try {
+      all = await api.listSkills(state.cwd || null);
+    } catch {
+      return [];
+    }
+  }
+  return all;
+}
+
+// skillsSnapshot is the cached listing without fetching.
+export function skillsSnapshot(): SkillEntry[] {
+  return all ?? [];
 }
 
 // refreshSkillsCache drops the cached listing so the next open

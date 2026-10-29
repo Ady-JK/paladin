@@ -1,10 +1,12 @@
-// Package tools: shell.go runs shell commands, sync or background.
+// shell.go runs shell commands, sync or background.
+
 package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
@@ -111,6 +115,8 @@ func NewShellTool() *ShellTool {
 	return &ShellTool{inner: &shellJobs{byID: map[string]*job{}, changed: newBroadcaster()}}
 }
 
+const maxShellTimeoutMs = int64(^uint64(0)>>1) / int64(time.Millisecond)
+
 func shellTimeoutMs(ms int64) (time.Duration, error) {
 	if ms == 0 {
 		return DefaultShellTimeoutMs * time.Millisecond, nil
@@ -118,17 +124,20 @@ func shellTimeoutMs(ms int64) (time.Duration, error) {
 	if ms < 0 {
 		return 0, fmt.Errorf("shell: timeout_ms cannot be negative")
 	}
+	if ms > maxShellTimeoutMs {
+		return 0, fmt.Errorf("shell: timeout_ms exceeds the maximum supported value of %d", maxShellTimeoutMs)
+	}
 	return time.Duration(ms) * time.Millisecond, nil
 }
 
-func (s *ShellTool) runSync(cmd, dir, owner string, limit time.Duration, cancel context.Context) (string, error) {
+func (s *ShellTool) runSync(cmd, dir, owner string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, error) {
 	type verdict struct {
 		out string
 		err *ToolError
 	}
 	ch := make(chan verdict, 1)
 	go func() {
-		out, terr := runSyncInner(cmd, dir, owner, limit, cancel)
+		out, terr := runSyncInner(cmd, dir, owner, limit, cancel, sb)
 		ch <- verdict{out: out, err: terr}
 	}()
 	v := <-ch
@@ -138,7 +147,7 @@ func (s *ShellTool) runSync(cmd, dir, owner string, limit time.Duration, cancel 
 	return v.out, nil
 }
 
-func (s *ShellTool) runBackground(cmd, dir, owner string, limit time.Duration, notify bool, sessionDir string) (string, error) {
+func (s *ShellTool) runBackground(cmd, dir, owner string, limit time.Duration, notify bool, sessionDir string, sb *sandbox.Policy) (string, error) {
 	if sessionDir == "" {
 		return "", ArgsError("shell: no session to keep the background job in")
 	}
@@ -153,7 +162,7 @@ func (s *ShellTool) runBackground(cmd, dir, owner string, limit time.Duration, n
 	if err != nil {
 		return "", ArgsError(fmt.Sprintf("shell: cannot write the job log: %s", syserr.Str(err)))
 	}
-	child, err := spawnToLog(cmd, dir, logFile)
+	child, err := spawnToLog(cmd, dir, logFile, sb)
 	logFile.Close()
 	if err != nil {
 		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
@@ -398,8 +407,8 @@ func (s *ShellTool) WaitPendingNotify(owner string, cancel context.Context) bool
 	}
 }
 
-func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context.Context) (string, *ToolError) {
-	child, outR, errR, err := spawnPiped(cmdStr, dir)
+func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, *ToolError) {
+	child, outR, errR, err := spawnPiped(cmdStr, dir, sb)
 	if err != nil {
 		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
 	}
@@ -408,13 +417,13 @@ func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context
 		pid = child.Process.Pid
 	}
 	defer procTracker.Track(owner, pid)()
-	ioDone := make(chan []byte, 1)
-	go func() {
-		var combined []byte
-		combined = append(combined, readAll(outR)...)
-		combined = append(combined, readAll(errR)...)
-		ioDone <- combined
-	}()
+	capture := newShellOutputCapture(MaxShellOutput)
+	var readers sync.WaitGroup
+	readers.Add(2)
+	go func() { defer readers.Done(); _, _ = io.Copy(capture, outR) }()
+	go func() { defer readers.Done(); _, _ = io.Copy(capture, errR) }()
+	ioDone := make(chan struct{})
+	go func() { readers.Wait(); close(ioDone) }()
 	waitDone := make(chan waitResult, 1)
 	go func() {
 		werr := child.Wait()
@@ -439,12 +448,12 @@ func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context
 				return "", ArgsError(fmt.Sprintf("shell: the command ran past its timeout of %dms", limit.Milliseconds()))
 			}
 		case w := <-waitDone:
-			var output []byte
 			select {
-			case output = <-ioDone:
+			case <-ioDone:
 			case <-time.After(10 * time.Second):
 			}
-			return finishSync(output, w)
+			output, truncated := capture.result()
+			return finishSync(output, truncated, w, sb != nil)
 		}
 	}
 }
@@ -454,37 +463,72 @@ type waitResult struct {
 	signaled bool
 }
 
-func readAll(r interface {
-	Read([]byte) (int, error)
-}) []byte {
-	if r == nil {
-		return nil
-	}
-	var buf []byte
-	tmp := make([]byte, 4096)
-	for {
-		n, err := r.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			break
-		}
-	}
-	return buf
+type shellOutputCapture struct {
+	mu       sync.Mutex
+	maxBytes int
+	head     []byte
+	tail     []byte
+	total    int64
 }
 
-func finishSync(output []byte, w waitResult) (string, *ToolError) {
+func newShellOutputCapture(maxBytes int) *shellOutputCapture {
+	half := maxBytes / 2
+	return &shellOutputCapture{maxBytes: maxBytes, head: make([]byte, 0, half), tail: make([]byte, 0, maxBytes-half)}
+}
+
+func (c *shellOutputCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := len(p)
+	c.total += int64(n)
+	headCap := c.maxBytes / 2
+	if len(c.head) < headCap {
+		add := headCap - len(c.head)
+		if add > len(p) {
+			add = len(p)
+		}
+		c.head = append(c.head, p[:add]...)
+		p = p[add:]
+	}
+	if len(p) > 0 {
+		tailCap := c.maxBytes - headCap
+		if len(p) >= tailCap {
+			c.tail = append(c.tail[:0], p[len(p)-tailCap:]...)
+		} else {
+			over := len(c.tail) + len(p) - tailCap
+			if over > 0 {
+				copy(c.tail, c.tail[over:])
+				c.tail = c.tail[:len(c.tail)-over]
+			}
+			c.tail = append(c.tail, p...)
+		}
+	}
+	return n, nil
+}
+
+func (c *shellOutputCapture) result() ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	truncated := c.total > int64(c.maxBytes)
+	if truncated {
+		// Each half is cleaned on its own so a rune split at either cut
+		// never corrupts the text; the marker sits at the seam.
+		head := strings.ToValidUTF8(string(c.head), "�")
+		tail := strings.ToValidUTF8(string(c.tail), "�")
+		return []byte(head + shellTruncatedMarker + tail), true
+	}
+	out := make([]byte, 0, len(c.head)+len(c.tail))
+	out = append(out, c.head...)
+	out = append(out, c.tail...)
+	return []byte(strings.ToValidUTF8(string(out), "�")), false
+}
+
+func finishSync(output []byte, truncated bool, w waitResult, sandboxed bool) (string, *ToolError) {
 	if w.signaled || w.code == nil {
 		return "", ArgsError("shell: the command exited with status 1")
 	}
 	code := *w.code
 	text := ToLF(StripANSI(string(output)))
-	truncated := false
-	if len(text) > MaxShellOutput {
-		text = text[:MaxShellOutput] + shellTruncatedMarker
-		truncated = true
-	}
 	var truncPtr *bool
 	if truncated {
 		truncPtr = &truncated
@@ -502,6 +546,9 @@ func finishSync(output []byte, w waitResult) (string, *ToolError) {
 	if err != nil {
 		return "", mustToolError(err)
 	}
+	if sandboxed && sandbox.LooksBlocked(text) {
+		content = markSandboxBlocked(content)
+	}
 	return "", WithContent(content, fmt.Sprintf("shell: the command exited with status %d", code))
 }
 
@@ -518,8 +565,7 @@ func ToLF(s string) string {
 }
 
 // StripANSI removes ESC [ ... final sequences (and a lone trailing
-// ESC), mirroring the Rust core. Bytes pass through untouched so
-// UTF-8 stays intact.
+// ESC). Other bytes pass through untouched so UTF-8 stays intact.
 func StripANSI(s string) string {
 	b := []byte(s)
 	var out []byte
@@ -581,6 +627,9 @@ func indexByte(b []byte, c byte) int {
 
 func (ShellTool) Name() string { return "shell" }
 
+// Mutates marks the tool for undo snapshots.
+func (ShellTool) Mutates() bool { return true }
+
 func (ShellTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "shell",
@@ -603,13 +652,19 @@ func (ShellTool) Definition() ToolDefinition {
 				"cmd":        map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
 				"notify":     map[string]any{"type": "boolean", "description": "With background true, remind the agent when the job finishes: its final state and output tail arrive on their own in a later round. Defaults to false; ignored without background."},
-				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000.", "minimum": 1},
+				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000.", "minimum": 1, "maximum": maxShellTimeoutMs},
 			},
 		},
 	}
 }
 
 func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
+	if ctx == nil {
+		ctx = &ToolCtx{}
+	}
+	if ctx.Cancel == nil {
+		ctx.Cancel = context.Background()
+	}
 	var args ShellArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", ArgsError(fmt.Sprintf("shell: the arguments are not valid JSON: %v", err))
@@ -639,9 +694,9 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(args.Cmd, dir, ctx.SessionID, limit, args.Notify, ctx.SessionDir)
+			return s.runBackground(args.Cmd, dir, ctx.SessionID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
 		}
-		return s.runSync(args.Cmd, dir, ctx.SessionID, limit, ctx.Cancel)
+		return s.runSync(args.Cmd, dir, ctx.SessionID, limit, ctx.Cancel, ctx.Sandbox)
 	case ShellStatus:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
@@ -655,4 +710,46 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	default:
 		return "", ArgsError(fmt.Sprintf("shell: action must be one of run, status or cancel, got %q", args.Action))
 	}
+}
+
+// sandboxBlockedHint tells the model why a write failed under the sandbox.
+const sandboxBlockedHint = "the OS sandbox blocked a write outside the workspace; the user was asked whether to rerun it unsandboxed"
+
+// markSandboxBlocked flags a failed result so the agent can offer to
+// rerun the command outside the sandbox.
+func markSandboxBlocked(content string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(content), &m) != nil {
+		return content
+	}
+	m["sandbox_blocked"] = true
+	m["hint"] = sandboxBlockedHint
+	b, err := json.Marshal(m)
+	if err != nil {
+		return content
+	}
+	return string(b)
+}
+
+// SandboxBlocked reports whether a shell result was flagged by
+// markSandboxBlocked.
+func SandboxBlocked(content string) bool {
+	var m struct {
+		Blocked bool `json:"sandbox_blocked"`
+	}
+	return json.Unmarshal([]byte(content), &m) == nil && m.Blocked
+}
+
+// confine rewrites cmd to run inside the sandbox policy (nil: as is).
+func confine(cmd *exec.Cmd, sb *sandbox.Policy) error {
+	if sb == nil || sb.Mode == sandbox.ModeNone {
+		return nil
+	}
+	inner := append([]string{cmd.Path}, cmd.Args[1:]...)
+	argv, err := sandbox.Wrap(*sb, inner)
+	if err != nil {
+		return err
+	}
+	cmd.Path, cmd.Args = argv[0], argv
+	return nil
 }

@@ -9,7 +9,7 @@ import {
   chatEntriesEl,
   chatListEl,
   chatTabEl,
-  daemonWrapEl,
+  statusWrapEl,
   externalFallbackEl,
   externalFallbackLink,
   externalHostEl,
@@ -33,13 +33,11 @@ import {
 } from "../core/dom";
 import { escapeAttr, escapeHtml } from "../core/format";
 import { state } from "../core/state";
-import { hasTauri } from "../core/tauri";
+import { hasBridge } from "../core/bridge";
 import type { ChatEntry, SideView } from "../core/types";
 import { toast } from "../ui/toast";
 import { icon } from "../icons";
 
-// VIEW_KEY is a const in this module.
-// It supports the desktop app frontend.
 const VIEW_KEY = "paladin.view";
 
 // DEFAULT_SITES seeds a fresh profile and an existing profile that has
@@ -52,8 +50,6 @@ const DEFAULT_SITES: { name: string; url: string }[] = [
   { name: "DeepSeek", url: "https://chat.deepseek.com" },
 ];
 
-// SITES_KEY is a const in this module.
-// It supports the desktop app frontend.
 const SITES_KEY = "paladin.sites";
 
 // SEEDED_KEY records that the defaults were offered once. Without it,
@@ -68,8 +64,6 @@ function normalizeSiteUrl(raw: string): string {
   }
 }
 
-// chatEntries is a function in this module.
-// It supports the desktop app frontend.
 function chatEntries(): ChatEntry[] {
   return state.customSites.map((s) => ({
     id: `site:${s.name}`,
@@ -78,8 +72,6 @@ function chatEntries(): ChatEntry[] {
   }));
 }
 
-// restoreSites is a function in this module.
-// It supports the desktop app frontend.
 function restoreSites(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(SITES_KEY) ?? "null") as {
@@ -129,8 +121,6 @@ function restoreSites(): void {
   }
 }
 
-// persistSites is a function in this module.
-// It supports the desktop app frontend.
 function persistSites(): void {
   try {
     localStorage.setItem(SITES_KEY, JSON.stringify(state.customSites));
@@ -138,8 +128,6 @@ function persistSites(): void {
   }
 }
 
-// paintSideTabs is a function in this module.
-// It supports the desktop app frontend.
 function paintSideTabs(): void {
   agentTabEl.classList.toggle("is-active", state.sideView === "agent");
   chatTabEl.classList.toggle("is-active", state.sideView === "chat");
@@ -147,8 +135,6 @@ function paintSideTabs(): void {
   chatTabEl.setAttribute("aria-selected", String(state.sideView === "chat"));
 }
 
-// paintChatList is a function in this module.
-// It supports the desktop app frontend.
 export function paintChatList(): void {
   let html = "";
   for (const entry of chatEntries()) {
@@ -193,8 +179,6 @@ export function paintChatList(): void {
   paintIcons(chatEntriesEl);
 }
 
-// hostOf is a function in this module.
-// It supports the desktop app frontend.
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -203,14 +187,10 @@ function hostOf(url: string): string {
   }
 }
 
-// currentChatPage is a function in this module.
-// It supports the desktop app frontend.
 export function currentChatPage(): ChatEntry | null {
   return chatEntries().find((e) => e.id === state.chatPage) ?? null;
 }
 
-// persistView is a function in this module.
-// It supports the desktop app frontend.
 function persistView(): void {
   try {
     localStorage.setItem(VIEW_KEY, JSON.stringify({ view: state.sideView, page: state.chatPage }));
@@ -225,8 +205,6 @@ const LEGACY_PAGE_IDS: Record<string, string> = {
   chatgpt: "site:ChatGPT",
 };
 
-// restoreView is a function in this module.
-// It supports the desktop app frontend.
 function restoreView(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as {
@@ -246,8 +224,6 @@ function restoreView(): void {
   }
 }
 
-// anyModalOpen is a function in this module.
-// It supports the desktop app frontend.
 function anyModalOpen(): boolean {
   return (
     !settingsModalEl.classList.contains("hidden") ||
@@ -257,14 +233,10 @@ function anyModalOpen(): boolean {
   );
 }
 
-// externalWanted is a function in this module.
-// It supports the desktop app frontend.
 function externalWanted(): boolean {
-  return state.sideView === "chat" && state.chatPage !== "" && hasTauri() && !anyModalOpen();
+  return state.sideView === "chat" && state.chatPage !== "" && hasBridge() && !anyModalOpen();
 }
 
-// externalRect is a function in this module.
-// It supports the desktop app frontend.
 function externalRect(): { x: number; y: number; width: number; height: number } {
   const rect = externalHostEl.getBoundingClientRect();
   return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
@@ -280,7 +252,7 @@ function setGuestVisible(on: boolean): void {
 export async function refreshExternalVisibility(): Promise<void> {
   const page = currentChatPage();
 
-  if (!hasTauri()) {
+  if (!hasBridge()) {
     const on = state.sideView === "chat" && page !== null;
     setGuestVisible(false);
     externalFallbackEl.classList.toggle("hidden", !on);
@@ -313,15 +285,13 @@ export async function refreshExternalVisibility(): Promise<void> {
   }
 }
 
-// paintSideVisibility is a function in this module.
-// It supports the desktop app frontend.
 export function paintSideVisibility(): void {
   const agent = state.sideView === "agent";
   workspaceWrapEl.classList.toggle("hidden", state.collapsed);
   searchWrapEl.classList.toggle("hidden", state.collapsed || !agent);
   sessionListEl.classList.toggle("hidden", state.collapsed || !agent);
   chatListEl.classList.toggle("hidden", state.collapsed || agent);
-  daemonWrapEl.classList.toggle("hidden", state.collapsed);
+  statusWrapEl.classList.toggle("hidden", state.collapsed);
 }
 
 // In chat mode the embedded page is positioned once and never
@@ -352,8 +322,6 @@ function unlockSidebarForAgent(): void {
   }
 }
 
-// setSideView is a function in this module.
-// It supports the desktop app frontend.
 export function setSideView(view: SideView): void {
   state.sideView = view;
   persistView();
@@ -368,7 +336,7 @@ export function setSideView(view: SideView): void {
   externalViewEl.classList.toggle("flex", !agent);
 
   headerTitleEl.textContent = agent ? "Agent Chat" : (currentChatPage()?.title ?? "Chat");
-  pageReloadBtnEl.classList.toggle("hidden", agent || !hasTauri());
+  pageReloadBtnEl.classList.toggle("hidden", agent || !hasBridge());
 
   newSessionBtnLabelEl.textContent = agent ? "New Session" : "New Site";
   $("#newSessionBtn").title = agent ? "Start a new session" : "Add another chat page";
@@ -410,8 +378,6 @@ function defusePageDrop(): void {
   window.clearTimeout(dropTimer);
 }
 
-// selectChatEntry is a function in this module.
-// It supports the desktop app frontend.
 export function selectChatEntry(id: string): void {
   const picked = chatEntries().find((e) => e.id === id);
   if (!picked) {
@@ -427,8 +393,6 @@ export function selectChatEntry(id: string): void {
   trackExternalFlight();
 }
 
-// openNewSite is a function in this module.
-// It supports the desktop app frontend.
 export function openNewSite(): void {
   siteNameEl.value = "";
   siteUrlEl.value = "";
@@ -437,15 +401,11 @@ export function openNewSite(): void {
   siteNameEl.focus();
 }
 
-// closeNewSite is a function in this module.
-// It supports the desktop app frontend.
 export function closeNewSite(): void {
   closeModal(siteModalEl);
   void refreshExternalVisibility();
 }
 
-// addSite is a function in this module.
-// It supports the desktop app frontend.
 export function addSite(): void {
   const name = siteNameEl.value.trim();
   let raw = siteUrlEl.value.trim();
@@ -492,8 +452,6 @@ export function addSite(): void {
   toast(`Added ${name}`);
 }
 
-// deleteSite is a function in this module.
-// It supports the desktop app frontend.
 export function deleteSite(id: string): void {
   const entry = chatEntries().find((e) => e.id === id);
   if (!entry) {
@@ -530,7 +488,7 @@ export function deleteSite(id: string): void {
 // frame. Layout changes are instant now (no sidebar animation), so a
 // 600ms/60fps IPC storm is pure waste: one move per settle is enough.
 export function trackExternalFlight(): void {
-  if (!hasTauri()) {
+  if (!hasBridge()) {
     return;
   }
   requestAnimationFrame(() => {
@@ -547,7 +505,6 @@ export function trackExternalFlight(): void {
 }
 
 // reloadCurrentPage reloads the embedded chat page.
-// It supports the desktop app frontend.
 export function reloadCurrentPage(): void {
   const page = currentChatPage();
   if (!page) {
@@ -559,7 +516,6 @@ export function reloadCurrentPage(): void {
 }
 
 // initSites restores the side view and wires its controls.
-// It supports the desktop app frontend.
 export function initSites(): void {
   restoreSites();
   restoreView();
@@ -592,7 +548,7 @@ export function initSites(): void {
     reloadCurrentPage();
   });
 
-  if (!hasTauri()) {
+  if (!hasBridge()) {
     pageReloadBtnEl.classList.add("hidden");
   }
 

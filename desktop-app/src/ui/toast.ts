@@ -1,15 +1,10 @@
 // toast.ts shows transient frontend notices.
-// It supports the desktop app frontend.
 
 import { toastEl, toastIconEl, toastTextEl } from "../core/dom";
 import { icon } from "../icons";
 
-// toastTimer is a let in this module.
-// It supports the desktop app frontend.
 let toastTimer = 0;
 
-// toast is a function in this module.
-// It supports the desktop app frontend.
 export function toast(message: string, kind: "ok" | "error" = "ok"): void {
   toastTextEl.textContent = message;
 

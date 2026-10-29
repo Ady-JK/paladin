@@ -19,7 +19,7 @@ async function setup(page: Page): Promise<void> {
     const w = window as any;
     const base = w.__paladinBaseInvoke;
     w.__paladinBaseInvoke = async (cmd: string, args: any) => {
-      if (cmd === "list_sessions") {
+      if (cmd === "listSessions") {
         return sessions.map((s: any) => ({
           sessionId: s.sessionId,
           cwd: s.cwd,
@@ -30,11 +30,11 @@ async function setup(page: Page): Promise<void> {
           title: s.title,
         }));
       }
-      if (cmd === "open_session") {
+      if (cmd === "openSession") {
         const s = sessions.find((x: any) => x.sessionId === args.sessionId);
         return { sessionId: args.sessionId, cwd: s ? s.cwd : "/work/api", provider: "Opencode Go", model: "openai/gpt-4o" };
       }
-      if (cmd === "session_history") return [];
+      if (cmd === "sessionHistory") return [];
       return base(cmd, args);
     };
   }, SESSIONS);

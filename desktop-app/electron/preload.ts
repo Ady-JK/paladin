@@ -1,37 +1,17 @@
 // Preload: the only bridge between renderer and Electron main.
 // Renderer gets window.paladin; nothing else leaks (sandbox + isolation on).
-// Chat stream demux lives here: one ipc listener pair, routed by streamId.
 
 import { contextBridge, ipcRenderer } from "electron";
 
-export interface ChatParams {
-  sessionId: string | null;
-  message: string;
-  resume: boolean;
-  cwd: string;
-  provider: string | null;
-  model: string | null;
-  systemPrompt: string | null;
-  skill: string | null;
-}
-
-export interface ChatHandlers {
-  onDelta: (delta: string) => void;
-  onTool: (tool: unknown) => void;
-  onRetry?: (retry: unknown) => void;
-  onCompact?: (compaction: unknown) => void;
-}
-
-const pending = new Map<string, { handlers: ChatHandlers; done: (v: unknown) => void; fail: (e: Error) => void }>();
 const listeners = new Set<(msg: unknown) => void>();
 let armed = false;
 
+// arm installs the single agent:event listener on first subscribe and
+// fans every turn event out to the onEvent subscribers.
 function arm(): void {
   if (armed) return;
   armed = true;
-  // One bus for every turn event: the blocking chat() demuxes its own
-  // stream by streamId; onEvent subscribers see everything.
-  ipcRenderer.on("agent:event", (_e, msg: any) => {
+  ipcRenderer.on("agent:event", (_e, msg: unknown) => {
     for (const cb of listeners) {
       try {
         cb(msg);
@@ -39,34 +19,11 @@ function arm(): void {
         console.error("agent event listener failed", err);
       }
     }
-    const p = msg?.streamId ? pending.get(msg.streamId) : undefined;
-    if (!p) return;
-    if (msg.event === "chat/delta" && typeof msg.delta === "string") p.handlers.onDelta(msg.delta);
-    else if (msg.event === "chat/tool") p.handlers.onTool(msg.tool);
-    else if (msg.event === "chat/retry") p.handlers.onRetry?.(msg.retry);
-    else if (msg.event === "chat/compact") p.handlers.onCompact?.(msg.compaction);
-  });
-  ipcRenderer.on("agent:chat-done", (_e, msg: any) => {
-    const p = pending.get(msg?.streamId);
-    if (!p) return;
-    pending.delete(msg.streamId);
-    if (msg.ok) p.done(msg.result);
-    else p.fail(new Error(typeof msg.error === "string" ? msg.error : "chat failed"));
   });
 }
 
 contextBridge.exposeInMainWorld("paladin", {
   invoke: (method: string, params: unknown = {}) => ipcRenderer.invoke("agent:invoke", method, params),
-
-  chat: (params: ChatParams, handlers: ChatHandlers): Promise<unknown> => {
-    arm();
-    return ipcRenderer.invoke("agent:chat", params).then(
-      (streamId) =>
-        new Promise<unknown>((done, fail) => {
-          pending.set(streamId as string, { handlers, done, fail });
-        }),
-    );
-  },
 
   // onEvent subscribes to every turn event (chat/*, turn/*) for every
   // session; returns an unsubscribe.

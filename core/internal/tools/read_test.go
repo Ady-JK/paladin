@@ -139,3 +139,16 @@ func TestReadRangesAndCaps(t *testing.T) {
 		t.Fatalf("got %q", resp.Content)
 	}
 }
+
+func TestReadRejectsNULBeyondBinaryProbe(t *testing.T) {
+	ctx, ws := testCtx(t)
+	path := filepath.Join(ws, "late-nul.bin")
+	data := append([]byte(strings.Repeat("a", 8*1024+16)), 0, 'x')
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+path+`"}`), ctx)
+	if err == nil || !strings.Contains(err.Error(), "binary") {
+		t.Fatalf("expected binary-file guidance, got %v", err)
+	}
+}

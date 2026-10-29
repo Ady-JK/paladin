@@ -1,5 +1,6 @@
-// Package inference: responses.go implements the OpenAI Responses dialect
+// responses.go implements the OpenAI Responses dialect
 // used by the OpenCode Go models that do not accept chat completions.
+
 package inference
 
 import (

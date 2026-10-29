@@ -9,10 +9,11 @@ desktop-app/
 │   └── preload.ts   # window.paladin bridge (stream demux, views, shell, windows)
 ├── src/             # renderer: the classic paladin UI (Tailwind, vanilla TS)
 │   ├── main.ts      # bootstrap (imports styles.css so dev picks up utilities)
-│   ├── core/        # api (bridge invoke), tauri (bridge probe+types), dom/format/state/types
+│   ├── core/        # api (bridge invoke), bridge (bridge probe+types), dom/format/state/types
 │   ├── features/    # chat, sessions, models, sites, settings, workspace, window, tools
 │   ├── ui/          # toast, status
-│   └── styles.css   # Tailwind v4 theme + components
+│   ├── styles.css   # stylesheet entry: imports the sheets below in cascade order
+│   └── styles/      # Tailwind v4 theme (base.css) + one sheet per feature
 ├── e2e/             # Playwright suite (paladin-stub.js fakes window.paladin)
 └── PROTOCOL.md      # JSONL wire spec (Electron main <-> agent-host)
 ```

@@ -1,12 +1,12 @@
 // paladin-stub.js: window.paladin test double for Playwright e2e.
-// Mirrors the old Tauri stub 1:1 (same fixtures, same __e2e* hooks).
+// Holds the shared fixtures and the __e2e* hooks.
 // Specs may wrap window.paladin.invoke to override cases per-test.
 
 async function __paladinBaseInvoke(cmd, args) {
     switch (cmd) {
-      case "resolve_workspace":
+      case "resolveWorkspace":
         return (args && args.cwd) || "/home/tester/project";
-      case "list_sessions":
+      case "listSessions":
         return [
           {
             sessionId: "sess-notify-1",
@@ -16,9 +16,10 @@ async function __paladinBaseInvoke(cmd, args) {
             model: "openai/gpt-4o",
             messageCount: 6,
             title: "notify demo",
+            ...(window.__e2eSessionExtra || {}),
           },
-        ];
-      case "list_skills":
+        ].concat(window.__e2eExtraSessions || []);
+      case "listSkills":
         return [
           {
             name: "reviewer",
@@ -33,17 +34,109 @@ async function __paladinBaseInvoke(cmd, args) {
             path: "/home/tester/project/.paladin/skills/deployer/SKILL.md",
           },
         ];
-      case "open_session":
+      case "listCommands":
+        return [
+          { name: "init", description: "Create or improve AGENTS.md for this project", source: "builtin" },
+          { name: "review", description: "Review the current changes", argumentHint: "[focus]", mode: "plan", source: "builtin" },
+          { name: "ship", description: "Release checklist", argumentHint: "<version>", source: "workspace" },
+        ];
+      case "memoryGet": {
+        window.__e2eMemory = window.__e2eMemory || {};
+        const key = args.target + ":" + (args.cwd || "");
+        const entries = window.__e2eMemory[key] || (args.target === "user" ? ["Prefers terse answers"] : []);
+        const limits = { user: 1500, global: 2500, project: 4000 };
+        return { target: args.target, cwd: args.cwd || undefined, path: `/data/memory/${args.target}.md`, entries, used: entries.join("\n§\n").length, limit: limits[args.target] || 2500 };
+      }
+      case "memorySet": {
+        window.__e2eMemory = window.__e2eMemory || {};
+        window.__e2eMemorySets = (window.__e2eMemorySets || []).concat([args]);
+        const key = args.target + ":" + (args.cwd || "");
+        window.__e2eMemory[key] = args.entries || [];
+        const limits = { user: 1500, global: 2500, project: 4000 };
+        return { target: args.target, cwd: args.cwd || undefined, path: `/data/memory/${args.target}.md`, entries: args.entries || [], used: (args.entries || []).join("\n§\n").length, limit: limits[args.target] || 2500 };
+      }
+      case "answerApproval": {
+        window.__e2eApprovalAnswers = (window.__e2eApprovalAnswers || []).concat([args]);
+        const waiter = (window.__e2eApprovalWaits || {})[args.callId];
+        if (!waiter) throw new Error("no pending approval " + args.callId);
+        delete window.__e2eApprovalWaits[args.callId];
+        waiter(args.decision);
+        return true;
+      }
+      case "permissionsGet":
+      case "permissionsSet": {
+        const p = (window.__e2ePerms = window.__e2ePerms || { global: [], folders: {}, kind: "seatbelt" });
+        if (cmd === "permissionsSet") {
+          window.__e2ePermSets = (window.__e2ePermSets || []).concat([JSON.parse(JSON.stringify(args))]);
+          if (args.scope === "global") p.global = args.rules || [];
+          else if (args.scope === "folder") {
+            if ((args.rules || []).length) p.folders[args.cwd] = args.rules;
+            else delete p.folders[args.cwd];
+          } else throw new Error("scope must be global or folder");
+        }
+        const cwd = (args && args.cwd) || "/home/tester/project";
+        return {
+          global: p.global,
+          folder: p.folders[cwd] || [],
+          session: [],
+          folders: Object.entries(p.folders).map(([c, rules]) => ({ cwd: c, rules })),
+          sandbox: { kind: p.kind },
+          presets: ["read-only", "auto", "full-access"],
+        };
+      }
+      case "memoryProjects":
+        return [{ cwd: "/home/tester/project", key: "project-1234", entries: 1, used: 20, limit: 4000 }];
+      case "memoryRefreshSnapshot":
+        window.__e2eSnapshotRefreshes = (window.__e2eSnapshotRefreshes || 0) + 1;
+        return true;
+      case "gitInfo":
+        return window.__e2eGit || { repo: false, hasCommits: false };
+      case "revertPreview":
+        window.__e2ePreviews = (window.__e2ePreviews || []).concat([args]);
+        return { index: args.index, turns: 1, files: [], conflicts: [], snapshots: true, ...(window.__e2ePreview || {}) };
+      case "revertSession": {
+        window.__e2eReverts = (window.__e2eReverts || []).concat([args]);
+        window.__e2eRevertedAt = args.index;
+        return { index: args.index, message: "run the slow job", restored: [], skipped: [], snapshots: true, ...(window.__e2eRevertResult || {}) };
+      }
+      case "unrevertSession":
+        window.__e2eUnreverts = (window.__e2eUnreverts || 0) + 1;
+        window.__e2eRevertedAt = undefined;
+        return true;
+      case "worktreeStatus":
+        return window.__e2eWorktreeStatus || { exists: true, changed: 0, ahead: 0, branch: "paladin/demo", into: "main", path: "/wt/demo", repoRoot: "/home/tester/project" };
+      case "worktreeMerge":
+        window.__e2eMerges = (window.__e2eMerges || []).concat([args]);
+        if (window.__e2eMergeError) throw new Error(window.__e2eMergeError);
+        return window.__e2eMergeResult || { merged: true, nothingToMerge: false, commit: "abc1234", conflicts: [], into: "main" };
+      case "deleteSession":
+        window.__e2eDeletes = (window.__e2eDeletes || []).concat([args]);
+        return true;
+      case "forkSession":
+        window.__e2eForks = (window.__e2eForks || []).concat([args]);
+        if (args && args.worktree) {
+          return { sessionId: "sess-wt-1", cwd: "/wt/demo", title: "notify demo (fork)", messageCount: 2, createdAt: Math.floor(Date.now() / 1000), worktree: { repoRoot: "/home/tester/project", path: "/wt/demo", branch: "paladin/demo", baseBranch: "main", origin: "/home/tester/project" } };
+        }
+        return { sessionId: "sess-fork-1", cwd: "/home/tester/project", title: "notify demo (fork)", messageCount: 2, createdAt: Math.floor(Date.now() / 1000) };
+      case "renameSession":
+        window.__e2eRenames = (window.__e2eRenames || []).concat([args]);
+        return true;
+      case "openSession":
+        window.__e2eOpens = (window.__e2eOpens || []).concat([args]);
         return {
           sessionId: (args && args.sessionId) || "sess-notify-1",
           cwd: "/home/tester/project",
           provider: "Opencode Go",
           model: "openai/gpt-4o",
+          ...((window.__e2eOpenExtra || {})[(args && args.sessionId) || ""] || {}),
         };
-      case "session_history": {
+      case "sessionHistory": {
         const at = Math.floor(Date.now() / 1000);
+        if (window.__e2eRevertedAt === 0) {
+          return [];
+        }
         return [
-          { role: "user", content: "run the slow job", createdAt: at },
+          { role: "user", content: "run the slow job", createdAt: at, index: 0 },
           { role: "assistant", content: "Starting the slow job.", createdAt: at },
           {
             role: "tool",
@@ -67,7 +160,7 @@ async function __paladinBaseInvoke(cmd, args) {
           { role: "assistant", content: "It printed hi.", createdAt: at },
         ];
       }
-      case "session_usage":
+      case "sessionUsage":
         return (
           window.__e2eUsage || {
             sessionId: "sess-notify-1",
@@ -151,7 +244,7 @@ async function __paladinBaseInvoke(cmd, args) {
             ],
           }
         );
-      case "session_todos":
+      case "sessionTodos":
         return (
           window.__e2eTodos || [
             { content: "Plan the work", status: "finished" },
@@ -159,7 +252,7 @@ async function __paladinBaseInvoke(cmd, args) {
             { content: "Run the checks", status: "not_started" },
           ]
         );
-      case "overall_usage":
+      case "overallUsage":
         return (
           window.__e2eOverall || {
             sessionCount: 2,
@@ -273,7 +366,7 @@ async function __paladinBaseInvoke(cmd, args) {
             ],
           }
         );
-      case "list_providers":
+      case "listProviders":
         window.__e2eLists = (window.__e2eLists || 0) + 1;
         if (!window.__e2eProviders) {
           window.__e2eProviders = [
@@ -315,12 +408,12 @@ async function __paladinBaseInvoke(cmd, args) {
               ]
             : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
         return window.__e2eProviders;
-      case "refresh_providers":
+      case "refreshProviders":
         if (args && args.name) {
           return { name: args.name, count: 3, models: [] };
         }
         return false;
-      case "chat": {
+      case "run_turn": {
         const inner = args && args.args ? args.args : args || {};
         window.__e2eChats = window.__e2eChats || [];
         window.__e2eChats.push({
@@ -328,7 +421,13 @@ async function __paladinBaseInvoke(cmd, args) {
           message: inner.message,
           resume: !!inner.resume,
           skill: inner.skill ?? null,
+          command: inner.command ?? null,
+          mode: inner.mode || "",
+          compact: !!inner.compact,
         });
+        if (inner.compact) {
+          return { sessionId: inner.sessionId || "sess-notify-1", reply: "", stopped: false, needsContinue: false };
+        }
         if (inner.resume) {
           return {
             sessionId: inner.sessionId || "sess-notify-1",
@@ -353,22 +452,22 @@ async function __paladinBaseInvoke(cmd, args) {
           needsContinue: false,
         };
       }
-      case "submit_chat":
+      case "submitChat":
         return __e2eHub.submit(args || {});
       case "turns":
         return __e2eHub.list();
       case "attach":
         return __e2eHub.attach(args || {});
-      case "cancel_turn":
+      case "cancelTurn":
         return __e2eHub.cancel(args && args.turnId);
-      case "stop_chat":
+      case "stopChat":
         return __e2eHub.stop(args && args.sessionId);
-      case "set_default_provider":
+      case "setDefaultProvider":
         for (const p of window.__e2eProviders || []) {
           p.default = p.name === args.name;
         }
         return window.__e2eProviders;
-      case "add_provider":
+      case "addProvider":
         if (!args.apiKey) throw new Error("api key is required");
         window.__e2eProviders.push({
           name: args.name,
@@ -380,7 +479,7 @@ async function __paladinBaseInvoke(cmd, args) {
           hasKey: true,
         });
         return window.__e2eProviders[window.__e2eProviders.length - 1];
-      case "update_provider":
+      case "updateProvider":
         for (const p of window.__e2eProviders || []) {
           if (p.name === args.name) {
             p.apiUrl = args.apiUrl;
@@ -390,22 +489,22 @@ async function __paladinBaseInvoke(cmd, args) {
           }
         }
         throw new Error("provider not found");
-      case "get_workspace":
+      case "getWorkspace":
         return window.localStorage.getItem("e2e-workspace") || "";
-      case "set_workspace":
+      case "setWorkspace":
         window.localStorage.setItem("e2e-workspace", args.path);
         return args.path;
-      case "get_prompt":
+      case "getPrompt":
         return window.__e2ePrompt || { systemPrompt: "stub system prompt" };
-      case "set_prompt":
+      case "setPrompt":
         window.__e2ePrompt = { systemPrompt: args.systemPrompt || "stub system prompt" };
         return window.__e2ePrompt;
-      case "reset_prompt":
+      case "resetPrompt":
         window.__e2ePrompt = { systemPrompt: "stub system prompt" };
         return window.__e2ePrompt;
-      case "fs_home":
+      case "fsHome":
         return "/home/tester";
-      case "file_complete": {
+      case "fileComplete": {
         const q = (args && args.query) || "";
         const all = [
           { path: "src/main.go", display: "main.go", resolvedPath: "/home/tester/project/src/main.go", outside: false, isDir: false },
@@ -418,7 +517,7 @@ async function __paladinBaseInvoke(cmd, args) {
         const want = norm(q).toLowerCase();
         return all.filter((e) => norm(e.path).toLowerCase().includes(want));
       }
-      case "fs_list": {
+      case "fsList": {
         const at = (args && args.path) || "/home/tester";
         return {
           currentPath: at,
@@ -448,8 +547,8 @@ window.__paladinBaseInvoke = __paladinBaseInvoke;
 
 // __e2eHub mirrors the sidecar's turn hub: FIFO per session, at most
 // __e2eTurnCap sessions at once, turn/* + chat/* events on the onEvent
-// bus. A turn runs through window.paladin.chat, so specs that wrap chat
-// (or set __e2eChatEvents) keep scripting what it streams.
+// bus. Each turn runs through window.__e2eRunTurn, so specs that replace
+// it (or set __e2eChatEvents) script what it streams.
 const __e2eHub = (() => {
   const listeners = new Set();
   let seq = 0;
@@ -486,9 +585,10 @@ const __e2eHub = (() => {
       onTool: (tool) => chat(turn, "chat/tool", { tool }),
       onRetry: (retry) => chat(turn, "chat/retry", { retry }),
       onCompact: (compaction) => chat(turn, "chat/compact", { compaction }),
+      onApproval: (approval) => chat(turn, "chat/approval", { approval }),
     };
     Promise.resolve()
-      .then(() => window.paladin.chat({ ...turn.params }, handlers))
+      .then(() => window.__e2eRunTurn({ ...turn.params }, handlers))
       .then((res) => finish(turn, { reply: res?.reply || "", stopped: !!res?.stopped, needsContinue: !!res?.needsContinue }))
       .catch((err) => finish(turn, { error: String((err && err.message) || err) }));
   };
@@ -529,8 +629,17 @@ const __e2eHub = (() => {
           model: args.model ?? null,
           systemPrompt: null,
           skill: args.skill ?? null,
+          command: args.command ?? null,
+          mode: args.mode || "",
+          compact: !!args.compact,
+          permissions: args.permissions || "",
         },
       };
+      window.__e2eSubmits = (window.__e2eSubmits || []).concat([JSON.parse(JSON.stringify(args))]);
+      if (args.command) turn.command = args.command;
+      if (args.mode) turn.mode = args.mode;
+      if (args.permissions) turn.permissions = args.permissions;
+      if (args.compact) turn.compact = true;
       if (args.display) turn.display = args.display;
       if (args.skill) turn.skill = args.skill;
       if (args.resume) turn.resume = true;
@@ -545,7 +654,7 @@ const __e2eHub = (() => {
       return turns.map(info);
     },
     async attach(args) {
-      const history = await window.paladin.invoke("session_history", { sessionId: args.sessionId, cwd: null });
+      const history = await window.paladin.invoke("sessionHistory", { sessionId: args.sessionId, cwd: null });
       const running = turns.find((t) => t.sessionId === args.sessionId && t.state === "running");
       return {
         history,
@@ -571,23 +680,37 @@ const __e2eHub = (() => {
 })();
 window.__e2eHub = __e2eHub;
 
+// __e2eRunTurn runs one stub turn for __e2eHub: it streams the scripted
+// __e2eChatEvents ({event, ..., waitMs?}) through the handlers, then
+// resolves with the "run_turn" fixture reply. Specs replace it to script a turn.
+window.__e2eRunTurn = async (params, handlers) => {
+  const events = window.__e2eChatEvents || [];
+  window.__e2eChatEvents = null;
+  for (const ev of events) {
+    if (ev.waitMs) await new Promise((r) => setTimeout(r, ev.waitMs));
+    if (ev.event === "chat/delta") handlers.onDelta(ev.delta);
+    else if (ev.event === "chat/tool") handlers.onTool(ev.tool);
+    else if (ev.event === "chat/retry" && handlers.onRetry) handlers.onRetry(ev.retry);
+    else if (ev.event === "chat/compact" && handlers.onCompact) handlers.onCompact(ev.compaction);
+    else if (ev.event === "chat/approval" && handlers.onApproval) {
+      // A pending approval blocks the stub turn until answerApproval,
+      // then reports the outcome like the real gate.
+      handlers.onApproval(ev.approval);
+      if (ev.approval.state === "pending" && ev.block !== false) {
+        const decision = await new Promise((resolve) => {
+          window.__e2eApprovalWaits = window.__e2eApprovalWaits || {};
+          window.__e2eApprovalWaits[ev.approval.id] = resolve;
+        });
+        handlers.onApproval({ ...ev.approval, state: decision === "deny" ? "denied" : "approved", decision });
+      }
+    }
+  }
+  return window.__paladinBaseInvoke("run_turn", params || {});
+};
+
 window.paladin = {
   metrics: async () => window.__e2eAppMetrics || null,
   invoke: (method, params) => window.__paladinBaseInvoke(method, params || {}),
-  // __e2eChatEvents scripts stream events ({event, ..., waitMs?}) that
-  // fire through the handlers before the stub reply resolves.
-  chat: async (params, handlers) => {
-    const events = window.__e2eChatEvents || [];
-    window.__e2eChatEvents = null;
-    for (const ev of events) {
-      if (ev.waitMs) await new Promise((r) => setTimeout(r, ev.waitMs));
-      if (ev.event === "chat/delta") handlers.onDelta(ev.delta);
-      else if (ev.event === "chat/tool") handlers.onTool(ev.tool);
-      else if (ev.event === "chat/retry" && handlers.onRetry) handlers.onRetry(ev.retry);
-      else if (ev.event === "chat/compact" && handlers.onCompact) handlers.onCompact(ev.compaction);
-    }
-    return window.__paladinBaseInvoke("chat", params || {});
-  },
   onEvent: (cb) => __e2eHub.on(cb),
   onOpenSession: (cb) => {
     window.__e2eOpenSession = cb;

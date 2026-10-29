@@ -1,4 +1,4 @@
-// Package agent: compact.go keeps long sessions inside the model's
+// compact.go keeps long sessions inside the model's
 // context window. When the prompt nears the window (proactive) or the
 // provider rejects it as too long (reactive), the older part of the
 // conversation is summarized by the model and replaced with that
@@ -6,6 +6,7 @@
 // append-only: a compaction marker carries the summary and the kept
 // tail is re-recorded after it as replay copies, so the model view can
 // be rebuilt from the last marker after a restart.
+
 package agent
 
 import (
@@ -312,4 +313,22 @@ func (a *Agent) compact(reason string, before int64) error {
 	a.promptTokens, a.promptLen = 0, 0
 	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: a.estimateContext()}})
 	return nil
+}
+
+// runCompact is a manual /compact turn: summarize everything except a
+// short tail and persist the marker, with no model round and no user
+// message. An empty or tiny session reports errNothingToCompact.
+func (a *Agent) runCompact() (ChatOutcome, error) {
+	a.currentResume = true
+	if err := a.compact("manual", a.estimateContext()); err != nil {
+		if errors.Is(err, errNothingToCompact) {
+			return ChatOutcome{}, turnFailed{"nothing to compact yet: the conversation is too short"}
+		}
+		return ChatOutcome{}, turnFailed{"compaction failed: " + err.Error()}
+	}
+	a.finish(phaseDone)
+	if err := a.save(); err != nil {
+		return ChatOutcome{}, err
+	}
+	return ChatOutcome{SessionID: a.session.Meta.SessionID, Usage: a.turnUsage}, nil
 }

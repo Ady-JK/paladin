@@ -1,5 +1,6 @@
-// settings.ts owns the settings modal: workspace, providers, connection,
-// analytics. It supports the desktop app frontend.
+// settings.ts owns the settings modal and its panes: workspace,
+// providers, prompt, connection, analytics, appearance, resources,
+// memory and permissions.
 
 import * as api from "../core/api";
 import {
@@ -18,6 +19,10 @@ import {
   settingsNavAnalyticsEl,
   settingsNavAppearanceEl,
   settingsNavResourcesEl,
+  settingsNavMemoryEl,
+  settingsPaneMemoryEl,
+  settingsNavPermissionsEl,
+  settingsPanePermissionsEl,
   settingsPaneAppearanceEl,
   settingsPaneResourcesEl,
   motionOptionsEl,
@@ -55,14 +60,12 @@ import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
 import { load as loadAnalytics } from "./analytics";
 import { refreshResources } from "./resources";
+import { loadMemory } from "./memory";
+import { initPermissionsPane, loadPermissions } from "./permissions";
 import { motionPref, setMotionPref, type MotionPref } from "../ui/motion";
 
-// SettingsNav is a type in this module.
-// It supports the desktop app frontend.
-export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics" | "appearance" | "resources";
+export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics" | "appearance" | "resources" | "memory" | "permissions";
 
-// paintSettingsNav is a const in this module.
-// It supports the desktop app frontend.
 const paintSettingsNav = (tab: SettingsNav): void => {
   const tabs: [SettingsNav, HTMLButtonElement, HTMLElement, string][] = [
     ["workspace", settingsNavWorkspaceEl, settingsPaneWorkspaceEl, "Workspace"],
@@ -72,6 +75,8 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     ["analytics", settingsNavAnalyticsEl, settingsPaneAnalyticsEl, "Analytics"],
     ["appearance", settingsNavAppearanceEl, settingsPaneAppearanceEl, "Appearance"],
     ["resources", settingsNavResourcesEl, settingsPaneResourcesEl, "Resources"],
+    ["memory", settingsNavMemoryEl, settingsPaneMemoryEl, "Memory"],
+    ["permissions", settingsNavPermissionsEl, settingsPanePermissionsEl, "Permissions"],
   ];
   for (const [name, btn, pane, title] of tabs) {
     const active = name === tab;
@@ -137,9 +142,6 @@ const resetPrompt = async (): Promise<void> => {
     toast(message, "error");
   }
 };
-// It supports the desktop app frontend.
-// renderProviderList is a const in this module.
-// It supports the desktop app frontend.
 const renderProviderList = (): void => {
   if (state.providers.length === 0) {
     settingsProviderListEl.innerHTML = `<p class="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-slate-400 dark:border-slate-700">no providers yet — add one above</p>`;
@@ -190,8 +192,6 @@ const refreshOneProvider = async (btn: HTMLButtonElement, name: string): Promise
   }
 };
 
-// reloadProviders is a const in this module.
-// It supports the desktop app frontend.
 const reloadProviders = async (): Promise<void> => {
   try {
     state.providers = await api.listProviders();
@@ -203,8 +203,6 @@ const reloadProviders = async (): Promise<void> => {
   syncModelSelects();
 };
 
-// paintSettingsConnection is a const in this module.
-// It supports the desktop app frontend.
 const paintSettingsConnection = (): void => {
   settingsConnLabelEl.textContent = statusLabelEl.textContent || "—";
   const dot = statusDotElClass();
@@ -228,16 +226,10 @@ function statusDotElClass(): string {
   return statusDotEl.className.split(" ").slice(-1)[0] ?? "bg-slate-300";
 }
 
-// providerCardMode is a let in this module.
-// It supports the desktop app frontend.
 let providerCardMode: "add" | "edit" = "add";
 
-// providerCardName is a let in this module.
-// It supports the desktop app frontend.
 let providerCardName = "";
 
-// openProviderCard is a const in this module.
-// It supports the desktop app frontend.
 const openProviderCard = (mode: "add" | "edit", info?: ProviderInfo): void => {
   providerCardMode = mode;
   providerCardName = info?.name ?? "";
@@ -255,15 +247,11 @@ const openProviderCard = (mode: "add" | "edit", info?: ProviderInfo): void => {
   (mode === "add" ? providerCardNameEl : providerCardUrlEl).focus();
 };
 
-// closeProviderCard is a const in this module.
-// It supports the desktop app frontend.
 const closeProviderCard = (): void => {
   closeModal(providerCardEl);
   providerCardKeyEl.value = "";
 };
 
-// saveProviderCard is a const in this module.
-// It supports the desktop app frontend.
 const saveProviderCard = async (): Promise<void> => {
   const url = providerCardUrlEl.value.trim();
   const key = providerCardKeyEl.value.trim();
@@ -298,11 +286,16 @@ const saveProviderCard = async (): Promise<void> => {
   }
 };
 
-// openSettings is a const in this module.
-// It supports the desktop app frontend.
 export const openSettings = (tab: SettingsNav = "workspace"): void => {
   openModal(settingsModalEl);
   paintSettingsNav(tab);
+  if (tab === "memory") {
+    void loadMemory();
+  } else if (tab === "permissions") {
+    void loadPermissions(state.cwd);
+  } else if (tab === "resources") {
+    refreshResources();
+  }
   renderProviderList();
   paintSettingsConnection();
   void (async () => {
@@ -314,8 +307,6 @@ export const openSettings = (tab: SettingsNav = "workspace"): void => {
   void refreshExternalVisibility();
 };
 
-// closeSettings is a const in this module.
-// It supports the desktop app frontend.
 export const closeSettings = (): void => {
   closeProviderCard();
   closeModal(settingsModalEl);
@@ -328,7 +319,6 @@ function clearWorkspaceError(): void {
 }
 
 // initSettings wires the settings modal. reconnect re-runs bootstrap connect().
-// It supports the desktop app frontend.
 export function initSettings(reconnect: () => Promise<void>): void {
   state.onProvidersChanged = () => {
     if (!settingsModalEl.classList.contains("hidden")) {
@@ -363,6 +353,15 @@ export function initSettings(reconnect: () => Promise<void>): void {
     if (input.name === "motion" && input.checked) {
       setMotionPref(input.value as MotionPref);
     }
+  });
+  initPermissionsPane();
+  settingsNavPermissionsEl.addEventListener("click", () => {
+    paintSettingsNav("permissions");
+    void loadPermissions(state.cwd);
+  });
+  settingsNavMemoryEl.addEventListener("click", () => {
+    paintSettingsNav("memory");
+    void loadMemory();
   });
   settingsNavResourcesEl.addEventListener("click", () => {
     paintSettingsNav("resources");
@@ -477,9 +476,4 @@ export function initSettings(reconnect: () => Promise<void>): void {
   $("#settingsBtn").addEventListener("click", () => openSettings());
   $("#settingsCloseBtn").addEventListener("click", closeSettings);
   $("#settingsCancelBtn").addEventListener("click", closeSettings);
-
-  $("#settingsSaveBtn").addEventListener("click", () => {
-    closeSettings();
-    void reconnect();
-  });
 }

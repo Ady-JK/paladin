@@ -1,0 +1,176 @@
+/* ============ Mode chip (plan mode) ============ */
+.mode-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px 2px 9px;
+  border-radius: 9999px;
+  border: 1px solid rgb(146 134 214 / 0.35);
+  background: rgb(146 134 214 / 0.1);
+  color: var(--color-accent-700);
+  font-size: 12px;
+  font-weight: 600;
+  animation: chip-in 160ms ease-out;
+}
+.dark .mode-chip {
+  color: var(--color-accent-400);
+  background: rgb(146 134 214 / 0.12);
+}
+.mode-chip.hidden {
+  display: none;
+}
+.mode-chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 4px;
+}
+.mode-chip-go {
+  border-radius: 9999px;
+  padding: 2px 9px;
+  background: var(--color-accent-600);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: background-color 120ms ease;
+}
+.mode-chip-go:hover {
+  background: var(--color-accent-700);
+}
+.mode-chip-x {
+  display: flex;
+  border-radius: 9999px;
+  padding: 4px;
+  opacity: 0.7;
+}
+.mode-chip-x:hover {
+  opacity: 1;
+  background: rgb(146 134 214 / 0.18);
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+body[data-mode="plan"] .composer-float {
+  border-color: rgb(146 134 214 / 0.45);
+}
+
+/* ============ Working bar ============
+   Sits just above the composer for the whole running turn. */
+.working-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-200);
+  background: rgb(255 255 255 / 0.9);
+  box-shadow: 0 6px 20px -12px rgb(15 15 30 / 0.25);
+  font-size: 12px;
+  color: var(--color-slate-600);
+  animation: working-in 200ms ease-out;
+  overflow: hidden;
+  position: relative;
+}
+.dark .working-bar {
+  border-color: rgb(255 255 255 / 0.07);
+  background: rgb(30 30 35 / 0.9);
+  color: var(--color-slate-300);
+  box-shadow: 0 8px 24px -14px rgb(0 0 0 / 0.7);
+}
+.working-bar.hidden {
+  display: none;
+}
+/* A slow sheen tells "alive" even when the text does not change. */
+.working-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgb(146 134 214 / 0.12) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: working-sheen 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes working-sheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes working-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.working-spin {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1.75px solid rgb(146 134 214 / 0.25);
+  border-top-color: var(--color-accent-500);
+  animation: live-spin 0.8s linear infinite;
+}
+.working-title {
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .working-title {
+  color: var(--color-slate-100);
+}
+.working-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-slate-400);
+}
+.working-sep {
+  color: var(--color-slate-300);
+}
+.dark .working-sep {
+  color: var(--color-slate-600);
+}
+.working-what {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.working-bar[data-phase="tool"] .working-what {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.working-more {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-accent-600);
+}
+.dark .working-more {
+  color: var(--color-accent-400);
+}
+.working-more:empty {
+  display: none;
+}
+.working-hint {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}
+@media (max-width: 640px) {
+  .working-hint {
+    display: none;
+  }
+}
+html[data-motion="reduced"] .working-spin {
+  animation-duration: 1.2s !important;
+  animation-iteration-count: infinite !important;
+}
+html[data-motion="reduced"] .working-bar::after,
+html[data-motion="off"] .working-bar::after {
+  display: none;
+}

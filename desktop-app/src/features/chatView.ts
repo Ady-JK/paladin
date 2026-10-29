@@ -1,15 +1,13 @@
 // chatView.ts renders the conversation turns.
-// It supports the desktop app frontend.
 
 import { chatViewEl, inputEl, messagesEl } from "../core/dom";
-import { compactTokens, escapeHtml, renderMarkdown, renderText, shortPath } from "../core/format";
+import { approxTokens, escapeHtml, renderMarkdown, renderText, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { CompactionInfo, RetryInfo, Turn } from "../core/types";
 import * as api from "../core/api";
 import { toast } from "../ui/toast";
+import { icon } from "../icons";
 
-// scrollToBottom is a function in this module.
-// It supports the desktop app frontend.
 export function scrollToBottom(): void {
   chatViewEl.scrollTop = chatViewEl.scrollHeight;
 }
@@ -70,8 +68,7 @@ export function renderGreeting(): void {
 }
 
 // initMessageLinks routes in-chat Markdown links to the system browser
-// instead of navigating the app window. It supports the desktop app
-// frontend.
+// instead of navigating the app window.
 export function initMessageLinks(): void {
   messagesEl.addEventListener("click", (event) => {
     const anchor = (event.target as HTMLElement).closest?.("a[data-ext]");
@@ -88,10 +85,12 @@ export function initMessageLinks(): void {
 // addTurn appends one message row. Codex-style split: user bubbles dock
 // right, agent text docks left, errors read left in red. No names or
 // avatars — the side alone says who is talking.
+export type TurnOpts = { skill?: string | null; index?: number; revertable?: boolean };
+
 export function addTurn(
   role: Turn["role"],
   text: string,
-  opts?: { skill?: string | null },
+  opts?: TurnOpts,
 ): { wrapper: HTMLElement; textEl: HTMLElement } {
   const turn = createTurn(role, text, opts);
   messagesEl.append(turn.wrapper);
@@ -104,7 +103,7 @@ export function addTurn(
 export function createTurn(
   role: Turn["role"],
   text: string,
-  opts?: { skill?: string | null },
+  opts?: TurnOpts,
 ): { wrapper: HTMLElement; textEl: HTMLElement } {
   const wrapper = document.createElement("div");
   // Block by default so agent text and tool cards stack vertically;
@@ -139,6 +138,18 @@ export function createTurn(
   textEl.append(body);
 
   wrapper.append(textEl);
+  if (isUser && opts?.revertable !== false) {
+    // "Revert to here": rewinds files and the conversation to before
+    // this message. Live rows learn their index lazily (see undo.ts).
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "revert-btn";
+    btn.dataset.revert = opts?.index === undefined ? "" : String(opts.index);
+    btn.title = "Revert to here";
+    btn.setAttribute("aria-label", "Revert to here");
+    btn.innerHTML = icon("tl-undo", "h-3.5 w-3.5");
+    wrapper.prepend(btn);
+  }
   return { wrapper, textEl };
 }
 
@@ -178,8 +189,8 @@ export function compactionText(info: CompactionInfo): string {
   if (info.phase === "failed") {
     return `Compaction failed: ${info.error || "unknown error"}`;
   }
-  const after = info.tokensAfter ? ` → ${compactTokens(info.tokensAfter)}` : "";
-  return `Context compacted · ${compactTokens(info.tokensBefore)}${after} tokens`;
+  const after = info.tokensAfter ? ` → ${approxTokens(info.tokensAfter)}` : "";
+  return `Context compacted · ${approxTokens(info.tokensBefore)}${after} tokens`;
 }
 
 // createCompactionDivider builds the full-width divider marking where

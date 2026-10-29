@@ -1,12 +1,13 @@
-// Package tools: ask.go asks the user questions mid-turn.
+// ask.go asks the user questions mid-turn.
 //
 // The model calls ask with an array of questions (each with up to three
 // options); the call blocks until the desktop UI resolves it through the
-// answer_ask sidecar method. The UI shows one question at a time with
+// answerAsk sidecar method. The UI shows one question at a time with
 // back/forward navigation and a final review screen, then every question
 // with its answer comes back as the tool result so the turn continues.
 // Cancelling the wizard stops the turn; stopping the turn interrupts the
 // blocked call like any other cancellation.
+
 package tools
 
 import (
@@ -24,19 +25,24 @@ const (
 	MaxAskQuestions = 10
 	// MaxAskOptions caps the options per question; a custom typed answer
 	// is always available in the UI on top of these.
-	MaxAskOptions = 3
+	MaxAskOptions = 6
 )
 
 // AskQuestion is one model-posed question with up to MaxAskOptions options.
 type AskQuestion struct {
 	Question string   `json:"question"`
 	Options  []string `json:"options,omitempty"`
+	// Multiple lets the user pick several options (checkboxes).
+	Multiple bool `json:"multiple,omitempty"`
 }
 
 // AskAnswer pairs a question with the user's answer.
 type AskAnswer struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
+	// Selected lists every chosen option for multiple-choice questions;
+	// Answer then joins them with ", ".
+	Selected []string `json:"selected,omitempty"`
 }
 
 type askOutcome struct {
@@ -74,7 +80,8 @@ func (*AskTool) Definition() ToolDefinition {
 		Name: "ask",
 		Description: "Ask the user questions when you are blocked on a decision " +
 			"only they can make. Pass an array of questions; each has a question " +
-			"and up to 3 options. The call waits while the user answers one " +
+			"and up to 6 options; set multiple=true when several options may apply " +
+			"(the user then picks any number). The call waits while the user answers one " +
 			"question at a time in the UI (a custom typed answer is always " +
 			"available besides the options) and returns every question with its " +
 			"answer so the turn can continue. Use sparingly: discover answers " +
@@ -94,10 +101,11 @@ func (*AskTool) Definition() ToolDefinition {
 							"question": map[string]any{"type": "string", "description": "The question to show the user."},
 							"options": map[string]any{
 								"type":        "array",
-								"description": "Up to 3 suggested answers; the user can always type their own instead.",
+								"description": "Up to 6 suggested answers; the user can always type their own instead.",
 								"items":       map[string]any{"type": "string"},
 								"maxItems":    MaxAskOptions,
 							},
+							"multiple": map[string]any{"type": "boolean", "description": "Allow selecting several options."},
 						},
 						"required": []string{"question"},
 					},
@@ -139,7 +147,7 @@ func parseAskQuestions(raw json.RawMessage) ([]AskQuestion, error) {
 			}
 			opts = append(opts, opt)
 		}
-		out = append(out, AskQuestion{Question: question, Options: opts})
+		out = append(out, AskQuestion{Question: question, Options: opts, Multiple: q.Multiple && len(opts) > 1})
 	}
 	return out, nil
 }
@@ -152,11 +160,26 @@ func summarizeAsk(questions []AskQuestion, answers []AskAnswer) (string, error) 
 	}
 	pairs := make([]AskAnswer, 0, len(questions))
 	for i, q := range questions {
+		var selected []string
+		for _, s := range answers[i].Selected {
+			if s = strings.TrimSpace(s); s != "" {
+				selected = append(selected, s)
+			}
+		}
+		if len(selected) > 1 && !q.Multiple {
+			return "", ArgsError(fmt.Sprintf("ask: question %d allows one answer, got %d", i+1, len(selected)))
+		}
 		answer := strings.TrimSpace(answers[i].Answer)
+		if answer == "" && len(selected) > 0 {
+			answer = strings.Join(selected, ", ")
+		}
 		if answer == "" {
 			return "", ArgsError(fmt.Sprintf("ask: answer %d is empty", i+1))
 		}
-		pairs = append(pairs, AskAnswer{Question: q.Question, Answer: answer})
+		if !q.Multiple {
+			selected = nil
+		}
+		pairs = append(pairs, AskAnswer{Question: q.Question, Answer: answer, Selected: selected})
 	}
 	data, err := jsonx.Marshal(map[string]any{"answers": pairs})
 	if err != nil {

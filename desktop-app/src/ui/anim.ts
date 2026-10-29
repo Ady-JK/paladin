@@ -18,7 +18,6 @@ function clearTimer(el: HTMLElement): void {
 }
 
 // openModal shows a fixed overlay (settings, session, site, confirm).
-// It supports the desktop app frontend.
 export function openModal(el: HTMLElement): void {
   clearTimer(el);
   el.classList.remove("hidden");
@@ -31,7 +30,6 @@ export function openModal(el: HTMLElement): void {
 }
 
 // closeModal plays the fade/scale-out then hides the overlay.
-// It supports the desktop app frontend.
 export function closeModal(el: HTMLElement): void {
   if (el.classList.contains("hidden")) {
     return;
@@ -56,13 +54,11 @@ export function closeModal(el: HTMLElement): void {
 }
 
 // isModalOpen reports visibility including the close fade-out.
-// It supports the desktop app frontend.
 export function isModalOpen(el: HTMLElement): boolean {
   return !el.classList.contains("hidden");
 }
 
 // openMenu pops a dropdown/picker into view.
-// It supports the desktop app frontend.
 export function openMenu(el: HTMLElement): void {
   clearTimer(el);
   el.classList.remove("hidden");
@@ -72,7 +68,6 @@ export function openMenu(el: HTMLElement): void {
 }
 
 // closeMenu plays the pop-out then hides the dropdown.
-// It supports the desktop app frontend.
 export function closeMenu(el: HTMLElement): void {
   if (el.classList.contains("hidden")) {
     return;
@@ -94,7 +89,6 @@ export function closeMenu(el: HTMLElement): void {
 }
 
 // toggleMenu flips a dropdown and reports the new visibility.
-// It supports the desktop app frontend.
 export function toggleMenu(el: HTMLElement): boolean {
   if (el.classList.contains("hidden")) {
     openMenu(el);
@@ -105,7 +99,6 @@ export function toggleMenu(el: HTMLElement): boolean {
 }
 
 // isMenuOpen reports dropdown visibility.
-// It supports the desktop app frontend.
 export function isMenuOpen(el: HTMLElement): boolean {
   return !el.classList.contains("hidden");
 }

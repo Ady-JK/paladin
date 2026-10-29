@@ -3,16 +3,19 @@
 // screen keeps building its transcript and shows it intact on return.
 
 import { renderMarkdown } from "../core/format";
-import type { CompactionInfo, RetryInfo, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
+import type { Approval, CompactionInfo, RetryInfo, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
 import { setStatus } from "../ui/status";
 import { compactionText, createCompactionDivider, createRetryNotice, createTurn, followTail, retryText, setDividerLabel } from "./chatView";
 import { ToolRun } from "./toolRun";
+import { createApprovalCard, focusApproval, paintApproval } from "./approvals";
 
 export interface TurnViewHooks {
   // visible reports whether this turn's session is on screen.
   visible(): boolean;
   // tool sees every tool event (ask/todo routing lives with the caller).
   tool(tool: ToolInfo): void;
+  // sessionId answers this turn's approval cards.
+  sessionId: string;
 }
 
 const SEGMENT_CLASS = "md agent-text";
@@ -32,6 +35,8 @@ export class TurnView {
   private retryNotice: HTMLElement | null = null;
   private divider: HTMLElement | null = null;
   private paintQueued = false;
+  private readonly approvals = new Map<string, HTMLElement>();
+  private readonly approvalState = new Map<string, Approval>();
 
   constructor(private readonly hooks: TurnViewHooks) {
     const { wrapper, textEl } = createTurn("agent", "");
@@ -61,6 +66,9 @@ export class TurnView {
         break;
       case "chat/compact":
         if (ev.compaction) this.compact(ev.compaction);
+        break;
+      case "chat/approval":
+        if (ev.approval) this.approval(ev.approval);
         break;
       default:
         return false;
@@ -160,6 +168,34 @@ export class TurnView {
     this.tail();
   }
 
+  // approval places the card right under the call it gates (or at the
+  // end of the text so far) and later updates it in place.
+  private approval(ap: Approval): void {
+    this.clearRetry();
+    this.approvalState.set(ap.id, ap);
+    let card = this.approvals.get(ap.id);
+    if (card) {
+      paintApproval(card, ap);
+    } else {
+      card = createApprovalCard(this.hooks.sessionId, ap);
+      this.approvals.set(ap.id, card);
+      const owner = this.tools.get(ap.id);
+      if (owner) {
+        this.container.insertBefore(card, owner.el.nextSibling);
+      } else {
+        this.flushSegment();
+        this.container.insertBefore(card, this.segEl.nextSibling);
+        this.segment = "";
+        this.segEl = this.newSegment(card);
+        this.run = null;
+      }
+    }
+    if (ap.state === "pending" && this.hooks.visible() && this.wrapper.isConnected) {
+      focusApproval(card);
+    }
+    this.tail();
+  }
+
   private retry(info: RetryInfo): void {
     if (!this.retryNotice) {
       this.retryNotice = createRetryNotice();
@@ -196,11 +232,16 @@ export class TurnView {
   // caller can place an error row after it.
   finish(turn: TurnInfo): string | null {
     this.dropRetry();
+    // A finished turn cannot still be waiting on the user.
+    for (const [id, ap] of this.approvalState) {
+      const card = this.approvals.get(id);
+      if (card && ap.state === "pending") paintApproval(card, { ...ap, state: "denied", decision: "interrupted" });
+    }
     if (this.paintQueued) {
       this.flushSegment();
     }
     if (turn.error) {
-      if (!this.reply.trim() && this.tools.size === 0) {
+      if (!this.reply.trim() && this.tools.size === 0 && this.approvals.size === 0) {
         this.wrapper.remove();
       } else if (!this.reply.trim()) {
         this.segEl.innerHTML = `<span class="turn-muted">interrupted — the tool calls above already ran</span>`;

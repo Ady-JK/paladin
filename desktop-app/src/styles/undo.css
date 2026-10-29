@@ -1,0 +1,237 @@
+/* ============ Undo: revert to here ============ */
+.turn-row .revert-btn {
+  align-self: center;
+  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  color: var(--color-slate-400);
+  opacity: 0;
+  transform: translateX(4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.turn-row:hover .revert-btn,
+.turn-row .revert-btn:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.turn-row .revert-btn:hover {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .turn-row .revert-btn:hover {
+  border-color: rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--color-slate-200);
+}
+.turn-queued .revert-btn {
+  display: none;
+}
+.revert-pop {
+  position: fixed;
+  z-index: 70;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--color-slate-200);
+  background: rgb(255 255 255 / 0.98);
+  font-size: 12px;
+  color: var(--color-slate-600);
+  box-shadow:
+    0 18px 44px -14px rgb(15 15 30 / 0.35),
+    0 4px 10px -6px rgb(15 15 30 / 0.15);
+  animation: palette-in 140ms ease-out;
+}
+.dark .revert-pop {
+  border-color: rgb(255 255 255 / 0.08);
+  background: rgb(30 30 35 / 0.98);
+  color: var(--color-slate-300);
+  box-shadow: 0 20px 48px -14px rgb(0 0 0 / 0.8);
+}
+.revert-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--color-slate-900);
+}
+.dark .revert-head {
+  color: var(--color-slate-100);
+}
+.revert-sub,
+.revert-note {
+  margin-top: 6px;
+  line-height: 1.45;
+}
+.revert-note {
+  color: var(--color-slate-500);
+}
+.revert-label {
+  margin-top: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+}
+.revert-label.is-warn {
+  color: #b7791f;
+}
+.revert-files,
+.revert-conflicts {
+  margin-top: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.revert-files li,
+.revert-conflicts li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 0;
+}
+.revert-conflicts li {
+  color: #b7791f;
+}
+.revert-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+}
+.revert-cancel,
+.revert-confirm,
+.revert-redo,
+.wt-merge {
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+.revert-cancel {
+  color: var(--color-slate-500);
+}
+.revert-cancel:hover {
+  background: var(--color-slate-100);
+}
+.dark .revert-cancel:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.revert-confirm,
+.wt-merge {
+  background: var(--color-slate-900);
+  color: #fff;
+  box-shadow: 0 4px 14px -6px rgb(110 96 200 / 0.6);
+}
+.dark .revert-confirm,
+.dark .wt-merge {
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+}
+.revert-confirm:hover,
+.wt-merge:hover:not(:disabled) {
+  opacity: 0.88;
+}
+.wt-merge:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.revert-banner,
+.wt-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-200);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 6px 20px -12px rgb(15 15 30 / 0.25);
+  font-size: 12px;
+  color: var(--color-slate-600);
+  animation: working-in 200ms ease-out;
+  min-width: 0;
+}
+.dark .revert-banner,
+.dark .wt-bar {
+  border-color: rgb(255 255 255 / 0.07);
+  background: rgb(30 30 35 / 0.92);
+  color: var(--color-slate-300);
+  box-shadow: 0 8px 24px -14px rgb(0 0 0 / 0.7);
+}
+.revert-banner.hidden,
+.wt-bar.hidden {
+  display: none;
+}
+.revert-banner {
+  border-color: rgb(146 134 214 / 0.35);
+}
+.revert-ico,
+.wt-ico {
+  display: inline-flex;
+  color: rgb(124 110 210);
+}
+.revert-title,
+.wt-branch {
+  font-weight: 600;
+  color: var(--color-slate-800);
+  white-space: nowrap;
+}
+.dark .revert-title,
+.dark .wt-branch {
+  color: var(--color-slate-100);
+}
+.wt-branch {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.revert-detail,
+.wt-into,
+.wt-stats {
+  white-space: nowrap;
+  color: var(--color-slate-500);
+}
+.revert-skipped {
+  color: #b7791f;
+  cursor: help;
+}
+.revert-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-slate-400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.revert-redo {
+  border: 1px solid var(--color-slate-200);
+  color: var(--color-slate-700);
+}
+.revert-redo:hover {
+  background: var(--color-slate-100);
+}
+.dark .revert-redo {
+  border-color: rgb(255 255 255 / 0.1);
+  color: var(--color-slate-200);
+}
+.dark .revert-redo:hover {
+  background: rgb(255 255 255 / 0.06);
+}

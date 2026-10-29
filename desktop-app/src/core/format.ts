@@ -3,14 +3,10 @@
 
 import type { ProviderInfo } from "./types";
 
-// escapeHtml is a function in this module.
-// It supports the desktop app frontend.
 export function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// escapeAttr is a function in this module.
-// It supports the desktop app frontend.
 export function escapeAttr(text: string): string {
   return escapeHtml(text).replace(/"/g, "&quot;");
 }
@@ -192,13 +188,13 @@ function renderList(taken: string[]): string {
   return html;
 }
 
-// isTableRow is a function in this module. Any line holding a pipe can
+// isTableRow: any line holding a pipe can
 // open or extend a table; the delimiter line below confirms it.
 function isTableRow(line: string): boolean {
   return line.includes("|");
 }
 
-// isTableDelim is a function in this module. It matches the GFM
+// isTableDelim matches the GFM
 // separator row (| --- | :---: | ---: |) under a table header.
 function isTableDelim(line: string): boolean {
   const cells = splitRow(line);
@@ -208,7 +204,7 @@ function isTableDelim(line: string): boolean {
   return cells.every((c) => /^:?-{1,}:?$/.test(c.trim()));
 }
 
-// splitRow is a function in this module. It cuts a table row on pipes,
+// splitRow cuts a table row on pipes,
 // dropping the empty edges from leading/trailing pipes.
 function splitRow(line: string): string[] {
   let cells = line.split("|").map((c) => c.trim());
@@ -221,7 +217,7 @@ function splitRow(line: string): string[] {
   return cells;
 }
 
-// alignOf is a function in this module. It reads a delimiter cell.
+// alignOf reads a delimiter cell.
 function alignOf(cell: string): "left" | "center" | "right" | "" {
   const c = (cell || "").trim();
   if (c.startsWith(":") && c.endsWith(":") && c.length > 2) {
@@ -236,13 +232,13 @@ function alignOf(cell: string): "left" | "center" | "right" | "" {
   return "";
 }
 
-// alignAttr is a function in this module. It renders a delimiter cell
+// alignAttr renders a delimiter cell
 // as a style attribute, or nothing for default alignment.
 function alignAttr(align: string | undefined): string {
   return align ? ` style="text-align:${align}"` : "";
 }
 
-// mdLink is a function in this module. Only http(s) and mailto targets
+// mdLink: only http(s) and mailto targets
 // become anchors; anything else renders as plain text, never as href.
 // Anchors carry data-ext and are opened in the system browser by the
 // chat view's delegated click handler.
@@ -303,7 +299,7 @@ function mdInline(src: string): string {
   return s.replace(/(\d+)/g, (_m, n: string) => chunks[Number(n)] ?? "");
 }
 
-// renderText is a function in this module. It is the plain-text
+// renderText is the plain-text
 // renderer for user bubbles and error rows: HTML-escaped with fenced
 // code blocks highlighted, and no other Markdown interpretation.
 export function renderText(text: string): string {
@@ -325,16 +321,6 @@ export function renderText(text: string): string {
   return out;
 }
 
-// prettyJson is a function in this module.
-// It supports the desktop app frontend.
-export function prettyJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
-
 // tryParseJson parses a JSON string into a record.
 // It returns null when the text is not a JSON object.
 export function tryParseJson(raw: string): Record<string, unknown> | null {
@@ -348,51 +334,11 @@ export function tryParseJson(raw: string): Record<string, unknown> | null {
   return null;
 }
 
-// dayCache avoids rebuilding "Today"/date strings per row per render.
-const dayCache = new Map<number, string>();
-
-// dayOf is a function in this module.
-// It supports the desktop app frontend.
-export function dayOf(timestamp: number): string {
-  const key = Math.floor(timestamp / 86400);
-  const cached = dayCache.get(key);
-  if (cached !== undefined) {
-    return cached;
-  }
-  if (dayCache.size > 400) {
-    dayCache.clear();
-  }
-  const date = new Date(timestamp * 1000);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
-  let out: string;
-  if (sameDay(date, today)) {
-    out = "Today";
-  } else if (sameDay(date, yesterday)) {
-    out = "Yesterday";
-  } else {
-    out = date.toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-  dayCache.set(key, out);
-  return out;
-}
-
-// shortPath is a function in this module.
-// It supports the desktop app frontend.
 export function shortPath(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : path || "workspace";
 }
 
-// fuzzyMatch is a function in this module.
-// It supports the desktop app frontend.
 export function fuzzyMatch(query: string, text: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) {
@@ -411,14 +357,10 @@ export function fuzzyMatch(query: string, text: string): boolean {
   return true;
 }
 
-// bare is a function in this module.
-// It supports the desktop app frontend.
 export function bare(text: string): string {
   return text.replace(/^~+/, "");
 }
 
-// splitModel is a function in this module.
-// It supports the desktop app frontend.
 export function splitModel(id: string): { lab: string; short: string } {
   const at = id.indexOf("/");
   if (at === -1) {
@@ -427,8 +369,6 @@ export function splitModel(id: string): { lab: string; short: string } {
   return { lab: id.slice(0, at) || "other", short: id.slice(at + 1) };
 }
 
-// modelsOf is a function in this module.
-// It supports the desktop app frontend.
 export function modelsOf(provider: ProviderInfo | undefined): string[] {
   if (!provider) {
     return [];
@@ -439,8 +379,6 @@ export function modelsOf(provider: ProviderInfo | undefined): string[] {
   return provider.model ? [provider.model] : [];
 }
 
-// modelsInLab is a function in this module.
-// It supports the desktop app frontend.
 export function modelsInLab(provider: ProviderInfo | undefined, lab: string): string[] {
   if (!provider) {
     return [];
@@ -450,8 +388,6 @@ export function modelsInLab(provider: ProviderInfo | undefined, lab: string): st
     .sort((a, b) => a.localeCompare(b));
 }
 
-// labKey is a function in this module.
-// It supports the desktop app frontend.
 export function labKey(provider: string, lab: string): string {
   return `${provider}	${lab}`;
 }
@@ -488,8 +424,9 @@ export function ordinal(n: number): string {
   }
 }
 
-// compactTokens renders a token count as 950, 31k or 1.2M.
-export function compactTokens(n: number): string {
+// approxTokens renders a token count in whole thousands: 950, 31k
+// or 1.2M. usage.ts compactTokens keeps one decimal for dashboards.
+export function approxTokens(n: number): string {
   if (n >= 1_000_000) {
     return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   }

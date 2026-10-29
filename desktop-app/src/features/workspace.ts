@@ -1,5 +1,4 @@
 // workspace.ts browses daemon-side folders for the workspace picker.
-// It supports the desktop app frontend.
 
 import * as api from "../core/api";
 import {
@@ -26,8 +25,6 @@ export async function browseWorkspace(path?: string): Promise<void> {
   }
 }
 
-// renderBrowser is a function in this module.
-// It supports the desktop app frontend.
 function renderBrowser(list: FsList): void {
   workspaceBrowserPath.textContent = list.currentPath;
   workspaceBrowserList.innerHTML = folderRows(list);
@@ -41,8 +38,6 @@ function renderBrowser(list: FsList): void {
   });
 }
 
-// folderRows is a function in this module.
-// It supports the desktop app frontend.
 export function folderRows(list: FsList): string {
   const rows: string[] = [];
 
@@ -87,8 +82,6 @@ export function folderRows(list: FsList): string {
   return rows.join("");
 }
 
-// wireFolderList is a function in this module.
-// It supports the desktop app frontend.
 export function wireFolderList(
   listEl: HTMLElement,
   onBrowse: (path: string) => void,

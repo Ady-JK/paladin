@@ -1,10 +1,9 @@
 // window.ts owns the desktop shell chrome: theme, sidebar, window buttons.
-// It supports the desktop app frontend.
 
 import { $, paintIcons, sidebarEl } from "../core/dom";
 import * as api from "../core/api";
 import { state } from "../core/state";
-import { bridge, hasTauri } from "../core/tauri";
+import { bridge, hasBridge } from "../core/bridge";
 import { icon } from "../icons";
 import { paintSideVisibility, trackExternalFlight } from "./sites";
 
@@ -13,21 +12,17 @@ import { paintSideVisibility, trackExternalFlight } from "./sites";
 // background is what the user sees, so it must follow the shell.
 function applyShellTheme(): void {
   document.documentElement.classList.toggle("dark", state.dark);
-  if (hasTauri()) {
+  if (hasBridge()) {
     api.setExternalTheme(state.dark).catch(() => undefined);
   }
 }
 
-// toggleTheme is a function in this module.
-// It supports the desktop app frontend.
 function toggleTheme(): void {
   state.dark = !state.dark;
   applyShellTheme();
   paintIcons();
 }
 
-// toggleSidebar is a function in this module.
-// It supports the desktop app frontend.
 function toggleSidebar(): void {
   // Locked in chat mode: the embedded page is fixed, so the sidebar
   // must not move. The button is disabled there as well.
@@ -50,7 +45,7 @@ function toggleSidebar(): void {
 }
 
 async function setupWindow(): Promise<void> {
-  if (!hasTauri()) {
+  if (!hasBridge()) {
     return;
   }
 
@@ -106,7 +101,6 @@ async function setupWindow(): Promise<void> {
 }
 
 // initWindow wires the shell controls and sets up the native window.
-// It supports the desktop app frontend.
 export function initWindow(): void {
   applyShellTheme();
   $("#themeToggleBtn").addEventListener("click", toggleTheme);

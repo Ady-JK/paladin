@@ -15,7 +15,7 @@ func TestStrNilIsEmpty(t *testing.T) {
 	}
 }
 
-func TestStrFormatsCommonErrnosLikeRust(t *testing.T) {
+func TestStrFormatsCommonErrnosWithCode(t *testing.T) {
 	cases := []struct {
 		err  error
 		want string

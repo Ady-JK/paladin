@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
     w.__e2eRefreshCalls = [];
     const prev = w.paladin.invoke;
     w.paladin.invoke = async (cmd: string, args: any) => {
-      if (cmd === "refresh_providers") {
+      if (cmd === "refreshProviders") {
         w.__e2eRefreshCalls.push(args ?? {});
         if (args && args.name) {
           return { name: args.name, count: 3, models: ["a", "b", "c"] };

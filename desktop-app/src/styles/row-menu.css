@@ -1,0 +1,109 @@
+/* ============ Sidebar row menu + inline rename ============ */
+.row-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 150px;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--color-slate-200);
+  background: rgb(255 255 255 / 0.98);
+  box-shadow:
+    0 14px 36px -12px rgb(15 15 30 / 0.3),
+    0 4px 10px -6px rgb(15 15 30 / 0.15);
+  animation: palette-in 140ms ease-out;
+}
+.dark .row-menu {
+  border-color: rgb(255 255 255 / 0.08);
+  background: rgb(30 30 35 / 0.98);
+  box-shadow: 0 18px 44px -14px rgb(0 0 0 / 0.75);
+}
+.row-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--color-slate-700);
+  text-align: left;
+}
+.dark .row-menu-item {
+  color: var(--color-slate-200);
+}
+.row-menu-item:hover,
+.row-menu-item:focus-visible {
+  outline: none;
+  background: var(--color-slate-100);
+}
+.dark .row-menu-item:hover,
+.dark .row-menu-item:focus-visible {
+  background: rgb(255 255 255 / 0.07);
+}
+.row-menu-item.is-danger {
+  color: var(--color-agent-rose);
+}
+.row-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-slate-200);
+}
+.dark .row-menu-sep {
+  background: rgb(255 255 255 / 0.07);
+}
+.session-more:hover {
+  color: var(--color-slate-700) !important;
+  background: var(--color-slate-200) !important;
+}
+.dark .session-more:hover {
+  color: var(--color-slate-100) !important;
+  background: rgb(255 255 255 / 0.08) !important;
+}
+.session-rename {
+  min-width: 0;
+  flex: 1;
+  border-radius: 6px;
+  border: 1px solid var(--color-accent-500);
+  background: transparent;
+  padding: 1px 6px;
+  font-size: inherit;
+  color: inherit;
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(146 134 214 / 0.15);
+}
+
+/* ---- Tool runs fold with a height transition, not a jump. ---- */
+.tool-run-list {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms ease,
+    visibility 0s;
+}
+
+.tool-run-list.is-folded {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 140ms ease,
+    visibility 0s linear 200ms;
+}
+
+.tool-run-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tool-run-inner > .tool-row {
+  animation: tool-row-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes tool-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}

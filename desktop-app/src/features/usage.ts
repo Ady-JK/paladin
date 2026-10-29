@@ -1,6 +1,6 @@
 // usage.ts owns the header usage pill and the session analytics
 // dashboard: per-session context fill and spend from the
-// `session_usage` sidecar method. It refreshes on session open and
+// `sessionUsage` sidecar method. It refreshes on session open and
 // after every turn (tokens bill even on failed turns), and clears
 // when there is no active session. Charts are hand-rolled SVG so the
 // packaged app never needs a CDN dependency.

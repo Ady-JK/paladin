@@ -19,17 +19,17 @@ async function setup(page: Page, snap: unknown, app: unknown = { cpu: 4, rss: 20
           w.__resCalls++;
           return w.__res;
         }
-        if (cmd === "list_sessions") {
+        if (cmd === "listSessions") {
           const at = Math.floor(Date.now() / 1000);
           return [
             { sessionId: "sess-busy", cwd: "/home/tester/project", createdAt: at, provider: "p", model: "m", messageCount: 2, title: "busy one" },
             { sessionId: "sess-idle", cwd: "/home/tester/project", createdAt: at - 5, provider: "p", model: "m", messageCount: 2, title: "idle one" },
           ];
         }
-        if (cmd === "open_session") {
+        if (cmd === "openSession") {
           return { sessionId: args.sessionId, cwd: "/home/tester/project", provider: "p", model: "m" };
         }
-        if (cmd === "session_history") return [];
+        if (cmd === "sessionHistory") return [];
         return base(cmd, args);
       };
       w.paladin.metrics = async () => w.__app;

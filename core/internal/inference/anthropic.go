@@ -1,5 +1,6 @@
-// Package inference: anthropic.go implements the Anthropic Messages
+// anthropic.go implements the Anthropic Messages
 // dialect used by OpenCode Go for Claude models.
+
 package inference
 
 import (

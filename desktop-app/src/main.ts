@@ -1,5 +1,5 @@
 // main.ts bootstraps the desktop app frontend.
-// In-process only: no daemon connect, no subscribe — direct runtime calls.
+// Every backend call goes through api.ts to the agent-host sidecar.
 
 import "./styles.css";
 import { version as appVersion } from "../package.json";
@@ -24,6 +24,7 @@ import { initChat } from "./features/chat";
 import { initTodos } from "./features/todos";
 import { renderGreeting } from "./features/chatView";
 import { initModelPicker, loadProviders } from "./features/models";
+import { syncPermChip } from "./features/permissions";
 import {
   closeConfirm,
   initSessions,
@@ -44,6 +45,7 @@ import {
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { clearTodos } from "./features/todos";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
+import { initMemory } from "./features/memory";
 import { initFilePicker, closeFilePicker } from "./features/filePicker";
 import { initMentions } from "./features/mentions";
 import { initSlash } from "./features/slash";
@@ -51,29 +53,30 @@ import { initSkills } from "./features/skills";
 import { initWindow } from "./features/window";
 import { initResources } from "./features/resources";
 import { initMotion } from "./ui/motion";
+import { initUndo } from "./features/undo";
 import { bootLive, initLive, openPendingSession, syncComposer } from "./features/live";
 
 async function connect(): Promise<void> {
   setStatus("connecting…", "busy");
 
   try {
-    let daemonWorkspace = "";
+    let savedWorkspace = "";
     try {
-      daemonWorkspace = await api.getWorkspace();
+      savedWorkspace = await api.getWorkspace();
     } catch {
-      daemonWorkspace = "";
+      savedWorkspace = "";
     }
-    workspaceInputEl.value = daemonWorkspace;
+    workspaceInputEl.value = savedWorkspace;
     if (!state.cwd) {
-      state.cwd = daemonWorkspace || (await api.resolveWorkspace(null));
+      state.cwd = savedWorkspace || (await api.resolveWorkspace(null));
     } else {
       state.cwd = await api.resolveWorkspace(state.cwd);
     }
     workspaceLabelEl.textContent = shortPath(state.cwd);
 
     state.sessionId = "";
+    syncPermChip();
     sessionLabelEl.textContent = "—";
-    state.shownMessages = 0;
     clearUsage();
     clearTodos();
 
@@ -114,7 +117,9 @@ window.addEventListener("DOMContentLoaded", () => {
   initSites();
   initSessionDialog();
   initSettings(connect);
+  initMemory();
   initSessions();
+  initUndo();
   initLive((id) => void openSession(id));
   initUsage();
   initResources();

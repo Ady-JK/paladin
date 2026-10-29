@@ -1,9 +1,10 @@
-// Package inference: usage.go owns per-call token and spend accounting.
+// usage.go owns per-call token and spend accounting.
 // Every dialect reports usage in its own shape; each one maps onto Usage
 // so turns, sessions and the wire API share one vocabulary. Token counts
 // come from the provider's typed response; dollar costs come from the
 // OpenCode gateway extras (cost/list_cost), which only OpenCode sends.
 // Plain providers leave HasCost false and costs at zero.
+
 package inference
 
 import "encoding/json"

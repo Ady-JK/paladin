@@ -32,9 +32,10 @@ const (
 	genericSchema = "org.freedesktop.Secret.Generic"
 )
 
-// createdAttributes are stored with a new item. keyring-rs v3 uses the
-// same four keys (with application=rust-keyring); the extra schema
-// attribute is what libsecret-backed tools write.
+// createdAttributes are stored with a new item. Items written by older
+// builds (keyring-rs v3, application=rust-keyring) use the same four
+// keys, so they still resolve; the extra schema attribute is what
+// libsecret-backed tools write.
 func createdAttributes(provider string) map[string]string {
 	return map[string]string{
 		"service":     KeyringService,

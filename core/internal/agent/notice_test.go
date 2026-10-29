@@ -93,7 +93,7 @@ func TestNoticedCallThatRunsIsNotDoubleSettled(t *testing.T) {
 	if statuses[len(statuses)-1] == string(session.ToolRunning) || len(statuses) > 3 {
 		t.Fatalf("statuses %v", statuses)
 	}
-	if a.noticed != nil && len(a.noticed) != 0 {
+	if len(a.noticed) != 0 {
 		t.Fatalf("leftover notices %v", a.noticed)
 	}
 }

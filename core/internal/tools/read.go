@@ -1,4 +1,5 @@
-// Package tools: read.go reads a text file with line ranges and caps.
+// read.go reads a text file with line ranges and caps.
+
 package tools
 
 import (
@@ -21,7 +22,6 @@ const (
 	maxLineRunes    = 2000
 	maxLineBytes    = maxLineRunes * 4
 	truncatedMarker = " … [truncated]"
-	headBytes       = 8 * 1024
 )
 
 type ReadResponse struct {
@@ -156,33 +156,13 @@ func capRunes(line string) (string, bool) {
 }
 
 func readRange(path string, offset, limit int) (string, int, int, bool, string, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", 0, 0, false, "", fmt.Errorf("read: %s", syserr.Str(err))
 	}
-	defer f.Close()
-	head := make([]byte, headBytes)
-	n := 0
-	for n < headBytes {
-		k, err := f.Read(head[n:])
-		if k > 0 {
-			n += k
-		}
-		if err != nil {
-			break
-		}
+	if hasNul(data) {
+		return "", 0, 0, false, "", fmt.Errorf("read: the file contains NUL bytes and is binary, not text; use a binary-aware tool or convert it before reading")
 	}
-	head = head[:n]
-	if hasNul(head) {
-		return "", 0, 0, false, "", fmt.Errorf("read: the file is binary, not text")
-	}
-	rest, err := os.ReadFile(path)
-	if err != nil {
-		return "", 0, 0, false, "", fmt.Errorf("read: %s", syserr.Str(err))
-	}
-	// Rust chains the 8KB head back with the rest; reading the whole
-	// file at once is equivalent (head + rest == full content).
-	data := rest
 	var content strings.Builder
 	lineNo := 0
 	start, end := 0, 0
@@ -194,8 +174,7 @@ func readRange(path string, offset, limit int) (string, int, int, bool, string, 
 		} else if raw == "" {
 			continue
 		} else {
-			// Last line without trailing newline: Rust split(b'\n')
-			// yields it as a final item too.
+			// The last line has no trailing newline but still counts.
 		}
 		lineNo++
 		if lineNo < offset {
@@ -227,6 +206,5 @@ func readRange(path string, offset, limit int) (string, int, int, bool, string, 
 		content.WriteByte('\n')
 		end = lineNo
 	}
-	_ = f
 	return content.String(), start, end, hasMore, reason, nil
 }

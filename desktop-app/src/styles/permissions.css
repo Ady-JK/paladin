@@ -1,0 +1,302 @@
+/* ============ Permission preset chip ============ */
+.perm-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.perm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.perm-chip:hover,
+.perm-chip[aria-expanded="true"] {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .perm-chip {
+  color: var(--color-slate-400);
+}
+.dark .perm-chip:hover,
+.dark .perm-chip[aria-expanded="true"] {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.perm-chip[data-preset="full-access"] {
+  color: var(--color-agent-rose);
+}
+.perm-chip[data-preset="read-only"] {
+  color: var(--color-accent-600);
+}
+.dark .perm-chip[data-preset="read-only"] {
+  color: var(--color-accent-400);
+}
+.perm-chip-warn {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: #e0a800;
+}
+.perm-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 300px;
+  max-width: 92vw;
+  border-radius: 12px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  padding: 4px;
+  box-shadow:
+    0 12px 32px -8px rgb(15 23 42 / 0.25),
+    0 2px 6px rgb(15 23 42 / 0.06);
+  animation: chip-in 140ms ease-out;
+}
+.dark .perm-menu {
+  border-color: rgb(51 65 85 / 0.7);
+  background: var(--color-slate-900);
+  box-shadow: 0 16px 40px -8px rgb(0 0 0 / 0.6);
+}
+.perm-menu.hidden {
+  display: none;
+}
+.perm-menu-head {
+  padding: 6px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+}
+.perm-item {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 7px 8px;
+  text-align: left;
+  outline: none;
+}
+.perm-item:hover,
+.perm-item:focus-visible {
+  background: var(--color-slate-100);
+}
+.dark .perm-item:hover,
+.dark .perm-item:focus-visible {
+  background: var(--color-slate-800);
+}
+.perm-item-ico {
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--color-slate-500);
+}
+.perm-item.is-risky .perm-item-ico {
+  color: var(--color-agent-rose);
+}
+.perm-item-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.perm-item-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .perm-item-label {
+  color: var(--color-slate-100);
+}
+.perm-item-blurb {
+  font-size: 11.5px;
+  color: var(--color-slate-500);
+}
+.perm-item-check {
+  display: inline-flex;
+  width: 14px;
+  margin-top: 2px;
+  color: var(--color-accent-600);
+}
+
+/* ============ Settings → Permissions ============ */
+.perm-sandbox {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.perm-sandbox.is-on {
+  color: var(--color-agent-emerald, #059669);
+  background: rgb(16 185 129 / 0.1);
+}
+.perm-sandbox.is-off {
+  color: #b58900;
+  background: rgb(224 168 0 / 0.12);
+}
+.perm-segs {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 2px;
+}
+.dark .perm-segs {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+}
+.perm-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.perm-seg.is-on {
+  background: #fff;
+  color: var(--color-slate-800);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.12);
+}
+.dark .perm-seg.is-on {
+  background: var(--color-slate-700);
+  color: var(--color-slate-100);
+}
+.perm-rule {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.perm-rule:hover {
+  background: rgb(148 163 184 / 0.1);
+}
+.perm-rule-tool {
+  flex-shrink: 0;
+  width: 58px;
+  font-size: 11px;
+  color: var(--color-slate-400);
+}
+.perm-rule-pattern {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.perm-rule-action {
+  flex-shrink: 0;
+  border-radius: 9999px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.perm-rule-action.is-allow {
+  color: var(--color-agent-emerald, #059669);
+  background: rgb(16 185 129 / 0.1);
+}
+.perm-rule-action.is-deny {
+  color: var(--color-agent-rose);
+  background: rgb(225 86 104 / 0.1);
+}
+.perm-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.perm-add select,
+.perm-add input {
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--color-slate-800);
+  outline: none;
+}
+.perm-add input {
+  min-width: 0;
+  flex: 1;
+  font-family: var(--font-mono);
+}
+.dark .perm-add select,
+.dark .perm-add input {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+.perm-add select:focus,
+.perm-add input:focus {
+  border-color: var(--color-accent-500);
+}
+.perm-add-btn {
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--color-accent-600);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.perm-add-btn:hover {
+  background: var(--color-accent-700);
+}
+.perm-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.perm-folder {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 4px 6px;
+  text-align: left;
+  color: var(--color-slate-600);
+}
+.dark .perm-folder {
+  color: var(--color-slate-300);
+}
+.perm-folder:hover {
+  background: rgb(148 163 184 / 0.12);
+}
+.perm-folder span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.perm-count {
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}

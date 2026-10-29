@@ -98,7 +98,7 @@ test.beforeEach(async ({ page }) => {
     const paladin = (window as any).paladin;
     const prev = paladin.invoke.bind(paladin);
     paladin.invoke = async (cmd: string, args: any) => {
-      if (cmd === "list_sessions") {
+      if (cmd === "listSessions") {
         return [
           {
             sessionId: "sess-filetools-1",
@@ -111,10 +111,10 @@ test.beforeEach(async ({ page }) => {
           },
         ];
       }
-      if (cmd === "open_session") {
+      if (cmd === "openSession") {
         return { sessionId: "sess-filetools-1", cwd: "/home/tester/project", provider: "Opencode Go", model: "openai/gpt-4o" };
       }
-      if (cmd === "session_history") {
+      if (cmd === "sessionHistory") {
         return history;
       }
       return prev(cmd, args);

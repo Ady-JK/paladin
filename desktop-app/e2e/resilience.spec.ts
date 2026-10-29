@@ -56,7 +56,7 @@ test("history renders a compaction divider with an expandable summary", async ({
     const w = window as any;
     const base = w.paladin.invoke;
     w.paladin.invoke = async (method: string, params: any) => {
-      if (method === "session_history") {
+      if (method === "sessionHistory") {
         const at = Math.floor(Date.now() / 1000);
         return [
           { role: "user", content: "first task", createdAt: at },

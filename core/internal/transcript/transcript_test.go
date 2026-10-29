@@ -205,7 +205,7 @@ func TestReadMetaVersions(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	// Schema 0 upgrades to 1.
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"session_id":"a","cwd":"/tmp","created_at":"2020-01-01T00:00:00Z"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"sessionId":"a","cwd":"/tmp","createdAt":"2020-01-01T00:00:00Z"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	meta, err := readMeta(dir)
@@ -213,7 +213,7 @@ func TestReadMetaVersions(t *testing.T) {
 		t.Fatalf("got %+v %v", meta, err)
 	}
 	// Future schema rejected.
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"schema_version":99,"session_id":"a","cwd":"/tmp","created_at":"2020-01-01T00:00:00Z"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"schemaVersion":99,"sessionId":"a","cwd":"/tmp","createdAt":"2020-01-01T00:00:00Z"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readMeta(dir); err == nil || !strings.Contains(err.Error(), "version too new") {
@@ -316,8 +316,8 @@ func TestStoreListLimitAndOrder(t *testing.T) {
 		t.Fatalf("got %v %v", infos, err)
 	}
 	// Newest first.
-	if infos[0].Meta.CreatedAt.Before(infos[1].Meta.CreatedAt) {
-		t.Fatal("wrong order")
+	if infos[0].Meta.SessionID != ids[2] || infos[1].Meta.SessionID != ids[1] {
+		t.Fatalf("wrong order: %s %s, want %s %s", infos[0].Meta.SessionID, infos[1].Meta.SessionID, ids[2], ids[1])
 	}
 	all, err := store.List("/tmp/p", 0)
 	if err != nil || len(all) != 3 {

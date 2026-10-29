@@ -171,14 +171,11 @@ export async function openFilePicker(): Promise<void> {
   void browseFilePicker();
 }
 
-// closeFilePicker is a function in this module.
-// It supports the desktop app frontend.
 export function closeFilePicker(): void {
   closeModal(fileModalEl);
 }
 
 // initFilePicker wires the picker dialog controls.
-// It supports the desktop app frontend.
 export function initFilePicker(): void {
   document.querySelector("#fileCloseBtn")?.addEventListener("click", closeFilePicker);
   document.querySelector("#fileCancelBtn")?.addEventListener("click", closeFilePicker);

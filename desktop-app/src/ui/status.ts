@@ -1,10 +1,7 @@
-// status.ts paints the daemon connection pill in the sidebar.
-// It supports the desktop app frontend.
+// status.ts paints the sidecar connection pill in the sidebar.
 
 import { statusDotEl, statusLabelEl } from "../core/dom";
 
-// setStatus is a function in this module.
-// It supports the desktop app frontend.
 export function setStatus(text: string, kind: "ok" | "error" | "busy"): void {
   statusLabelEl.textContent = text;
 

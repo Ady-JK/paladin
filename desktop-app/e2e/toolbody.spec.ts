@@ -17,7 +17,7 @@ async function setup(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     const w = window as any;
-    w.paladin.chat = (_params: any, handlers: any) =>
+    w.__e2eRunTurn = (_params: any, handlers: any) =>
       new Promise((resolve) => {
         w.__h = handlers;
         w.__done = () => resolve({ sessionId: "", reply: "", stopped: false, needsContinue: false });

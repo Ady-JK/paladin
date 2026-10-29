@@ -1,4 +1,4 @@
-// Package tools: todo.go tracks a goal-based activity list per session.
+// todo.go tracks a goal-based activity list per session.
 //
 // The model plans multi-step work first (one todo call with the whole
 // list), keeps exactly one step in_progress at a time, and updates
@@ -7,6 +7,7 @@
 // fsync like the transcript, so the list survives across turns and
 // across registry instances: the tool itself is stateless and every
 // call loads from (or writes to) disk.
+
 package tools
 
 import (

@@ -435,10 +435,22 @@ Tools:
   verbatim, and when it matches more than once, retry with more
   surrounding lines so it matches exactly once, or pass replace_all true.
 - Use the ask tool only when blocked on a decision only the user can
-  make: pass an array of questions with up to 3 options each. The UI
-  walks the user through them one at a time and returns every question
-  with its answer, then the turn continues. Discover answers with read
-  and shell first, and batch related questions into one call.
+  make: pass an array of questions with up to 6 options each, and set
+  multiple true when several options can apply together. The UI walks
+  the user through them one at a time and returns every question with
+  its answer, then the turn continues. Discover answers with read and
+  shell first, and batch related questions into one call.
+- Use the memory tool to keep durable facts across sessions: user
+  (who the user is and how they like to work), global (environment
+  facts and lessons that hold everywhere) or project (facts about this
+  folder shared by its sessions). Save corrections, preferences and
+  hard-won discoveries the moment you learn them; never save secrets,
+  task progress or things already in the repo. Keep entries short and
+  patch or remove stale ones instead of piling up near-duplicates.
+- When the system prompt lists skills and one matches the task, load
+  it with the skill tool before starting and follow it.
+- Use session_search to recall earlier conversations ("like last
+  time", a past fix or decision) instead of asking the user to repeat it.
 - Use the shell tool for builds, tests and exploration: run synchronously
   and wait by default, raising timeout_ms for slow commands. Use background
   true only when the command will likely take over 60 seconds AND you have
@@ -477,7 +489,7 @@ const toolGuidanceUnix = `
 
 Shell (Unix sh):
 - The shell is sh: your login shell runs each command, so your PATH,
-// aliases and settings apply. Use Unix-style commands (ls, cat, grep) with
+  aliases and settings apply. Use Unix-style commands (ls, cat, grep) with
   Unix-style absolute paths.`
 
 // ToolGuidance returns the tool mechanics for the running OS: the
@@ -678,3 +690,15 @@ func OSName() string {
 		return "Linux (sh shell: Linux-style commands like ls, cat, grep)"
 	}
 }
+
+// PlanMode is appended to the system prompt for plan-mode turns.
+const PlanMode = `# PLAN MODE (read-only)
+You are in plan mode: investigate and plan, do not change anything.
+- The write and edit tools are unavailable and the shell only runs
+  read-only inspection commands (ls, cat, rg, git diff/log, …). Do not
+  try to work around this with other commands.
+- Read the relevant code first, then reply with a concrete plan: the
+  goal, the files and functions to change, the steps in order, risks,
+  and how to verify. Use the ask tool for decisions only the user can make.
+- End by telling the user they can switch to build mode (or press
+  "Implement plan") to carry the plan out.`

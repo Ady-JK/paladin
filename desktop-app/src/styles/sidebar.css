@@ -1,0 +1,80 @@
+/* ---- Sidebar: flat, Codex-style ---- */
+#sidebar,
+#sidebar > div {
+  border-color: transparent;
+}
+
+.dark #sidebar {
+  border-right-color: rgb(255 255 255 / 0.05);
+}
+
+#sidebar {
+  border-right-color: var(--color-slate-200);
+}
+
+#titleBar {
+  border-bottom-color: transparent;
+  background: var(--color-slate-50);
+}
+
+.dark #titleBar {
+  border-bottom-color: rgb(255 255 255 / 0.04);
+  background: var(--color-slate-950);
+}
+
+.brand-mark {
+  background: var(--color-slate-900);
+  color: #fff;
+}
+
+.dark .brand-mark {
+  background: var(--color-slate-100);
+  color: var(--color-slate-950);
+}
+
+#newSessionBtn {
+  justify-content: flex-start;
+  background: transparent;
+  color: var(--color-slate-700);
+  padding: 6px 10px;
+  font-size: 0.875rem;
+  box-shadow: none;
+}
+
+#newSessionBtn:hover {
+  background: var(--color-slate-100);
+}
+
+.dark #newSessionBtn {
+  color: var(--color-slate-200);
+}
+
+.dark #newSessionBtn:hover {
+  background: var(--color-slate-800);
+}
+
+#sessionList .session-row {
+  border-color: transparent;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+}
+
+#sessionList .session-row.is-active {
+  background: var(--color-slate-200);
+  color: var(--color-slate-900);
+}
+
+.dark #sessionList .session-row.is-active {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+
+#sessionList .session-count {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+#sessionList .session-row:hover .session-count,
+#sessionList .session-row.is-active .session-count {
+  opacity: 1;
+}
