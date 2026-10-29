@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
+	"github.com/Ady-JK/paladin/core/internal/sandbox/sandboxtest"
 )
 
 func sandboxCtx(t *testing.T) (*ToolCtx, string, string) {
@@ -14,6 +15,7 @@ func sandboxCtx(t *testing.T) (*ToolCtx, string, string) {
 	if sandbox.Kind() == "" {
 		t.Skip("no OS sandbox")
 	}
+	sandboxtest.Helper(t)
 	ctx, ws := testCtx(t)
 	outside := t.TempDir()
 	ctx.Sandbox = &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Writable: []string{ws}, NoTemp: true}

@@ -18,6 +18,13 @@ import (
 // restricts itself and then execs the real command (see RunHelper).
 const HelperArg = "__paladin_sandbox"
 
+// HelperEnv overrides the executable that applies the confinement.
+// Production leaves it empty and re-execs the running binary
+// (agent-host). Tests must set it to a compiled agent-host: a test
+// binary has no helper entry point, so re-execing it would re-run the
+// whole suite inside itself, recursively.
+const HelperEnv = "PALADIN_SANDBOX_HELPER"
+
 // Mode is how much a sandboxed command may write.
 type Mode string
 

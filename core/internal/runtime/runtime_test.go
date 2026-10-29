@@ -16,12 +16,20 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
+	"github.com/Ady-JK/paladin/core/internal/sandbox/sandboxtest"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 func testRuntime(t *testing.T) (*AgentRuntime, string) {
 	t.Helper()
+	// Shell calls run through the permission gate, which sandboxes them
+	// when the OS supports it; point that at a real helper so the test
+	// binary never re-execs itself.
+	if sandbox.Kind() != "" {
+		sandboxtest.Helper(t)
+	}
 	dir := t.TempDir()
 	return WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore()), dir
 }

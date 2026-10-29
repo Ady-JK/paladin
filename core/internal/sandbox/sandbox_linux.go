@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -60,9 +61,13 @@ func kind() string {
 }
 
 func wrap(roots []string, argv []string) ([]string, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: cannot find agent-host: %w", err)
+	self := strings.TrimSpace(os.Getenv(HelperEnv))
+	if self == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("sandbox: cannot find agent-host: %w", err)
+		}
+		self = exe
 	}
 	args := []string{self, HelperArg}
 	for _, r := range roots {

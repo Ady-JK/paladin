@@ -4,8 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/Ady-JK/paladin/core/internal/sandbox/sandboxtest"
 )
 
 func TestNoneLeavesArgvAlone(t *testing.T) {
@@ -46,8 +47,9 @@ func TestBlockedOutputDetection(t *testing.T) {
 func requireSandbox(t *testing.T) {
 	t.Helper()
 	if Kind() == "" {
-		t.Skipf("no OS sandbox on %s", runtime.GOOS)
+		t.Skip("no OS sandbox on this platform")
 	}
+	sandboxtest.Helper(t)
 }
 
 func run(t *testing.T, p Policy, script string) (string, error) {
