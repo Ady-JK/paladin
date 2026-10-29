@@ -37,6 +37,9 @@ type EditResult struct {
 	MatchStartLine int         `json:"match_start_line"`
 	MatchEndLine   int         `json:"match_end_line"`
 	Matches        []MatchSpan `json:"matches"`
+	// Strategy is how old_string matched (exact, line_endings,
+	// whitespace, indentation); non-exact tells the model it drifted.
+	Strategy string `json:"match_strategy"`
 }
 
 type MatchSpan struct {
@@ -125,6 +128,9 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 	if oldText == "" {
 		return EditResult{}, &EngineError{Kind: "message", Message: "edit: old_string is required and cannot be empty"}
 	}
+	if oldText == newText {
+		return EditResult{}, &EngineError{Kind: "message", Message: "edit: old_string and new_string are identical; nothing to change"}
+	}
 	resolved, scope, err := ResolveScopedPath("edit", "path", requestedPath, workspace)
 	if err != nil {
 		return EditResult{}, &EngineError{Kind: "message", Message: err.Error()}
@@ -153,8 +159,12 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 		return EditResult{}, &EngineError{Kind: "message", Message: "edit: the file is binary, not text"}
 	}
 	content := lossyString(raw)
-	count := strings.Count(content, oldText)
-	if count == 0 {
+	strategy := MatchExact
+	spans := exactSpans(content, oldText, newText)
+	if len(spans) == 0 {
+		strategy, spans = fuzzyMatch(content, oldText, newText)
+	}
+	if len(spans) == 0 {
 		return EditResult{}, &EngineError{
 			Kind:          "notfound",
 			Message:       "edit: old text not found in file; read the file and copy the exact text",
@@ -163,7 +173,12 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 			Scope:         scope,
 		}
 	}
+	count := len(spans)
 	if count > 1 && !replaceAll {
+		occ := spanOccurrences(content, spans)
+		if strategy == MatchExact {
+			occ = FindOccurrences(content, oldText)
+		}
 		return EditResult{}, &EngineError{
 			Kind:          "ambiguous",
 			Message:       fmt.Sprintf("edit: old text occurs %d times; retry with more context around the one you want, or replace all", count),
@@ -171,14 +186,15 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 			ResolvedPath:  resolved,
 			Scope:         scope,
 			Count:         count,
-			Occurrences:   FindOccurrences(content, oldText),
+			Occurrences:   occ,
 		}
 	}
-	var updated string
-	if replaceAll {
-		updated = strings.ReplaceAll(content, oldText, newText)
-	} else {
-		updated = strings.Replace(content, oldText, newText, 1)
+	if !replaceAll {
+		spans = spans[:1]
+	}
+	updated := applySpans(content, spans)
+	if updated == content {
+		return EditResult{}, &EngineError{Kind: "message", Message: "edit: old_string and new_string are identical (after matching); the file already has this text, nothing to change"}
 	}
 	perm := os.FileMode(0o644)
 	if info.Mode().Perm() != 0 {
@@ -187,15 +203,7 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 	if err := atomicWriteMode(resolved, []byte(updated), perm); err != nil {
 		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: %s", syserr.Str(err))}
 	}
-	occurrences := FindOccurrences(content, oldText)
-	shown := occurrences
-	if !replaceAll {
-		shown = occurrences[:1]
-	}
-	replacements := count
-	if !replaceAll {
-		replacements = 1
-	}
+	shown := spanOccurrences(content, spans)
 	matches := make([]MatchSpan, 0, len(shown))
 	for _, o := range shown {
 		matches = append(matches, MatchSpan{StartLine: o.StartLine, EndLine: o.EndLine})
@@ -204,13 +212,27 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 		RequestedPath:  requestedPath,
 		ResolvedPath:   resolved,
 		Scope:          scope,
-		Replacements:   replacements,
+		Replacements:   len(spans),
 		Bytes:          len(updated),
 		Lines:          CountLines(updated),
 		MatchStartLine: shown[0].StartLine,
 		MatchEndLine:   shown[0].EndLine,
 		Matches:        matches,
+		Strategy:       strategy,
 	}, nil
+}
+
+func exactSpans(content, oldText, newText string) []editSpan {
+	var spans []editSpan
+	for from := 0; ; {
+		i := strings.Index(content[from:], oldText)
+		if i < 0 {
+			return spans
+		}
+		start := from + i
+		spans = append(spans, editSpan{start: start, end: start + len(oldText), repl: newText})
+		from = start + len(oldText)
+	}
 }
 
 func FindOccurrences(content, needle string) []Occurrence {

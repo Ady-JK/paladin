@@ -49,9 +49,12 @@ test("the picked model survives a catalog refresh", async ({ page }) => {
   await menu.locator("[data-mpick]").filter({ hasText: "claude-fable" }).click();
   await expect(page.locator("#modelSelectLabel")).toHaveText("Opencode Go/claude-fable");
 
+  // Catalogs only refresh on demand: the provider row's refresh button.
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavProviders");
+  await page.locator('[data-refresh="Opencode Go"]').click();
   await expect(page.locator("#modelSelectLabel")).toHaveText(
     "Opencode Go/claude-fable-20990101",
-    { timeout: 20000 },
   );
 });
 

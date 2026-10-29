@@ -5,7 +5,6 @@ package inference
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -193,9 +192,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, mes
 
 func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}, allowRetry bool) error {
 	parent := ctx
-	tctx, cancel := context.WithTimeout(ctx, streamTimeout)
+	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	stream := p.client.Responses.NewStreaming(tctx, p.newResponsesParams(system, messages, tools, sessionID), p.headers(sessionID)...)
+	stream := p.client.Responses.NewStreaming(tctx, p.newResponsesParams(system, messages, tools, sessionID), p.streamOptions(sessionID)...)
 	defer stream.Close()
 
 	send := func(c Chunk) error {
@@ -210,6 +209,7 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 	}
 	st := &respStreamState{accs: map[string]*respCallAcc{}, announced: map[string]bool{}}
 	for stream.Next() {
+		idle.touch()
 		ev := stream.Current()
 		switch ev.Type {
 		case "response.output_text.delta":
@@ -322,8 +322,8 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 		if parent.Err() != nil {
 			return CancelledError()
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return RequestError(fmt.Sprintf("%s: responses: model response timed out after %s — the model was still working; try again", p.name, streamTimeout))
+		if idle.Fired() {
+			return idleError(p.name, "responses")
 		}
 		// Transport died before any data arrived: retry once with a
 		// fresh stream instead of failing the turn on a gateway blip.

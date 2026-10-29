@@ -3,16 +3,25 @@
 // (or e2e with a stub) it is whatever the host injected. The name stays
 // so every call site keeps working unchanged.
 
-import type { ToolInfo } from "./types";
+import type { CompactionInfo, RetryInfo, ToolInfo } from "./types";
 
 export interface ChatStreamHandlers {
   onDelta: (delta: string) => void;
   onTool: (tool: ToolInfo) => void;
+  onRetry?: (retry: RetryInfo) => void;
+  onCompact?: (compaction: CompactionInfo) => void;
 }
 
 export interface PaladinBridge {
   invoke: (method: string, params?: unknown) => Promise<unknown>;
   chat: (params: Record<string, unknown>, handlers: ChatStreamHandlers) => Promise<unknown>;
+  // onEvent subscribes to every turn event of every session.
+  onEvent?: (cb: (msg: unknown) => void) => () => void;
+  // A native notification was clicked: open that session.
+  onOpenSession?: (cb: (sessionId: string) => void) => () => void;
+  takePendingOpen?: () => Promise<string | null>;
+  // metrics sums Electron's own processes (main, renderer, GPU, ...).
+  metrics?: () => Promise<{ cpu: number; rss: number; procs: number } | null>;
   views: {
     ensure: (name: string, url: string, partition: string) => Promise<boolean>;
     show: (name: string) => Promise<boolean>;

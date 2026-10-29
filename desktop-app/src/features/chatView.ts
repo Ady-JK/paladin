@@ -2,9 +2,9 @@
 // It supports the desktop app frontend.
 
 import { chatViewEl, inputEl, messagesEl } from "../core/dom";
-import { escapeHtml, renderMarkdown, renderText, shortPath } from "../core/format";
+import { compactTokens, escapeHtml, renderMarkdown, renderText, shortPath } from "../core/format";
 import { state } from "../core/state";
-import type { Turn } from "../core/types";
+import type { CompactionInfo, RetryInfo, Turn } from "../core/types";
 import * as api from "../core/api";
 import { toast } from "../ui/toast";
 
@@ -46,7 +46,7 @@ export function renderGreeting(): void {
   }
 
   const wrapper = document.createElement("div");
-  wrapper.className = "greet-hero mx-auto w-full max-w-4xl text-xs";
+  wrapper.className = "greet-hero mx-auto w-full max-w-3xl text-xs";
 
   wrapper.innerHTML = `
     <div class="greet-orb"></div>
@@ -93,10 +93,23 @@ export function addTurn(
   text: string,
   opts?: { skill?: string | null },
 ): { wrapper: HTMLElement; textEl: HTMLElement } {
+  const turn = createTurn(role, text, opts);
+  messagesEl.append(turn.wrapper);
+  scrollToBottom();
+  return turn;
+}
+
+// createTurn builds a turn row without mounting it: live turns of a
+// session that is not on screen render into detached nodes.
+export function createTurn(
+  role: Turn["role"],
+  text: string,
+  opts?: { skill?: string | null },
+): { wrapper: HTMLElement; textEl: HTMLElement } {
   const wrapper = document.createElement("div");
   // Block by default so agent text and tool cards stack vertically;
   // the user row becomes a flex row to dock its bubble right.
-  wrapper.className = "turn-row mx-auto w-full max-w-4xl text-xs";
+  wrapper.className = "turn-row mx-auto w-full max-w-3xl text-xs";
 
   const isUser = role === "user";
   const isError = role === "error";
@@ -104,14 +117,13 @@ export function addTurn(
   const textEl = document.createElement("div");
   if (isUser) {
     wrapper.classList.add("flex", "justify-end");
-    textEl.className = "bubble-user max-w-[80%] whitespace-pre-wrap break-words";
+    textEl.className = "bubble-user whitespace-pre-wrap break-words";
   } else if (isError) {
     wrapper.classList.add("justify-start");
     textEl.className =
-      "max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-red-600 dark:text-red-400";
+      "whitespace-pre-wrap break-words text-red-600 dark:text-red-400";
   } else {
-    textEl.className =
-      "md max-w-[85%] whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+    textEl.className = "md agent-text";
   }
   // Agent turns render full Markdown (headings, bold, lists, code);
   // user and error rows stay plain text. A skill turn prefixes a
@@ -127,8 +139,97 @@ export function addTurn(
   textEl.append(body);
 
   wrapper.append(textEl);
-  messagesEl.append(wrapper);
-
-  scrollToBottom();
   return { wrapper, textEl };
+}
+
+// Stick-to-bottom: live output only drags the view down while the user
+// is already reading the tail.
+let stick = true;
+let stickWired = false;
+let scrollQueued = false;
+
+export function followTail(): void {
+  if (!stickWired) {
+    stickWired = true;
+    chatViewEl.addEventListener("scroll", () => {
+      const gap = chatViewEl.scrollHeight - chatViewEl.scrollTop - chatViewEl.clientHeight;
+      stick = gap < 96;
+    });
+  }
+  if (!stick || scrollQueued) {
+    return;
+  }
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    if (stick) {
+      scrollToBottom();
+    }
+  });
+}
+
+// compactionText is the divider label for a compaction event.
+export function compactionText(info: CompactionInfo): string {
+  if (info.phase === "start") {
+    return info.reason === "overflow"
+      ? "Context window exceeded — compacting context…"
+      : "Compacting context…";
+  }
+  if (info.phase === "failed") {
+    return `Compaction failed: ${info.error || "unknown error"}`;
+  }
+  const after = info.tokensAfter ? ` → ${compactTokens(info.tokensAfter)}` : "";
+  return `Context compacted · ${compactTokens(info.tokensBefore)}${after} tokens`;
+}
+
+// createCompactionDivider builds the full-width divider marking where
+// older conversation was replaced by a summary. A summary (history
+// view) sits in a collapsed <details>.
+export function createCompactionDivider(label: string, summary?: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "chat-divider";
+  el.dataset.notice = "compaction";
+  el.setAttribute("role", "status");
+  const text = document.createElement("span");
+  text.className = "chat-divider-label";
+  text.textContent = label;
+  if (summary) {
+    const details = document.createElement("details");
+    details.className = "chat-divider-details";
+    const sum = document.createElement("summary");
+    sum.append(text);
+    const body = document.createElement("div");
+    body.className = "md chat-divider-summary";
+    body.innerHTML = renderMarkdown(summary);
+    details.append(sum, body);
+    el.append(details);
+  } else {
+    el.append(text);
+  }
+  return el;
+}
+
+// setDividerLabel updates a live divider's text.
+export function setDividerLabel(el: HTMLElement, label: string): void {
+  const text = el.querySelector(".chat-divider-label");
+  if (text) {
+    text.textContent = label;
+  }
+}
+
+// createRetryNotice builds the inline "retrying" note shown while a
+// failed provider round waits to run again.
+export function createRetryNotice(): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "chat-notice";
+  el.dataset.notice = "retry";
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
+  return el;
+}
+
+// retryText is the retry notice label.
+export function retryText(info: RetryInfo): string {
+  const secs = Math.max(1, Math.round(info.delayMs / 1000));
+  return `Retrying in ${secs}s (attempt ${info.attempt}/${info.max}): ${info.reason}`;
 }

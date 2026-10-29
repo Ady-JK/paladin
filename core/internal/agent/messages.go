@@ -21,37 +21,73 @@ func (a *Agent) modelMessages(message string, resume bool) []inference.LlmMessag
 	return messages
 }
 
+// AbortedToolContent is the model-facing result for a tool call that
+// never produced one (stop mid-tools, crash, interrupted persist).
+// Providers reject an assistant tool call without a matching result,
+// so history repair answers it with this instead of failing the turn.
+const AbortedToolContent = `{"error":"aborted: this tool call did not complete (the turn was stopped or interrupted); its result is unknown"}`
+
 // LlmMessages builds the LLM view of the stored history. Tool traffic
-// only travels with tool-capable providers; anything that cannot link
-// (reminders, orphans, empty ids) becomes plain user context instead of
-// breaking the turn.
+// only travels with tool-capable providers. Every assistant tool call is
+// answered by exactly one tool message directly after it: missing
+// answers are synthesized as aborted, duplicates and stray results
+// (reminders, orphans, empty or unknown ids) become plain user context
+// after the block instead of breaking the provider contract. Only the
+// part after the last compaction marker is replayed, behind its summary.
 func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMessage {
-	known := map[string]bool{}
-	for _, msg := range history {
-		if msg.Role != transcript.RoleAssistant {
-			continue
+	out := []inference.LlmMessage{}
+	var (
+		open     bool
+		order    []inference.ToolCall
+		answered map[string]bool
+		deferred []inference.LlmMessage
+	)
+	closeBlock := func() {
+		if !open {
+			return
 		}
-		if msg.ToolCalls != nil {
-			for _, call := range *msg.ToolCalls {
-				if call.ID != "" {
-					known[call.ID] = true
-				}
+		for _, call := range order {
+			if answered[call.ID] {
+				continue
 			}
+			id, name := call.ID, call.Name
+			out = append(out, inference.LlmMessage{Role: "tool", Content: AbortedToolContent, ToolCallID: &id, Name: &name})
+		}
+		out = append(out, deferred...)
+		open, order, answered, deferred = false, nil, nil, nil
+	}
+	demote := func(content string) {
+		msg := inference.LlmMessage{Role: "user", Content: content}
+		if open {
+			deferred = append(deferred, msg)
+			return
+		}
+		out = append(out, msg)
+	}
+	// The model view restarts at the newest compaction marker: its
+	// summary stands in for everything before it.
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].IsCompaction() {
+			out = append(out, inference.LlmMessage{Role: "user", Content: compactionUserContent(history[i].Content)})
+			history = history[i+1:]
+			break
 		}
 	}
-	var out []inference.LlmMessage
 	for _, msg := range history {
-		msg := msg
 		switch msg.Role {
 		case transcript.RoleUser:
+			closeBlock()
 			out = append(out, inference.LlmMessage{Role: "user", Content: msg.Content})
 		case transcript.RoleAssistant:
+			closeBlock()
 			var calls []inference.ToolCall
+			seen := map[string]bool{}
 			if withTools && msg.ToolCalls != nil {
 				for _, call := range *msg.ToolCalls {
-					if call.ID == "" {
+					if call.ID == "" || seen[call.ID] {
 						continue
 					}
+					seen[call.ID] = true
 					calls = append(calls, inference.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments, Signature: call.Signature})
 				}
 			}
@@ -59,33 +95,41 @@ func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMe
 				continue
 			}
 			out = append(out, inference.LlmMessage{Role: "assistant", Content: msg.Content, ToolCalls: calls})
+			if len(calls) > 0 {
+				open, order, answered = true, calls, map[string]bool{}
+			}
 		case transcript.RoleTool:
 			if !withTools {
 				continue
-			}
-			linked := false
-			if msg.ToolCallID != nil && *msg.ToolCallID != "" {
-				linked = known[*msg.ToolCallID]
 			}
 			id := ""
 			if msg.ToolCallID != nil {
 				id = *msg.ToolCallID
 			}
-			if id == "" || session.IsNotifyMessage(msg) || !linked {
-				out = append(out, inference.LlmMessage{Role: "user", Content: msg.Content})
+			if !open || id == "" || session.IsNotifyMessage(msg) || answered[id] || !blockHas(order, id) {
+				demote(msg.Content)
 				continue
 			}
+			answered[id] = true
+			callID := id
 			out = append(out, inference.LlmMessage{
 				Role: "tool", Content: msg.Content,
-				ToolCallID: msg.ToolCallID, Name: msg.Name,
+				ToolCallID: &callID, Name: msg.Name,
 			})
 		case transcript.RoleSystem:
 		}
 	}
-	if out == nil {
-		out = []inference.LlmMessage{}
-	}
+	closeBlock()
 	return out
+}
+
+func blockHas(calls []inference.ToolCall, id string) bool {
+	for _, c := range calls {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // notifyContent renders a finished background job as the model-facing

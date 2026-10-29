@@ -1,0 +1,37 @@
+import { test, expect } from "@playwright/test";
+import { noteFor } from "../electron/turnNotify";
+
+// Pure decision logic for native notifications (no browser needed).
+const turn = (over: Record<string, unknown> = {}) => ({
+  event: "turn/done",
+  sessionId: "s1",
+  turn: { message: "fix the flaky test please", state: "done", ...over },
+});
+
+test("finished turn notifies with the message", () => {
+  const n = noteFor(turn());
+  expect(n).toEqual({ sessionId: "s1", title: "Paladin · turn finished", body: "fix the flaky test please" });
+});
+
+test("display text wins and long bodies are clipped", () => {
+  const n = noteFor(turn({ display: "x".repeat(300) }))!;
+  expect(n.body.length).toBeLessThanOrEqual(120);
+  expect(n.body.endsWith("…")).toBe(true);
+});
+
+test("failed and stopped turns say so; dropped ones are silent", () => {
+  expect(noteFor(turn({ error: "boom" }))!.title).toBe("Paladin · turn failed");
+  expect(noteFor(turn({ error: "boom" }))!.body).toContain("boom");
+  expect(noteFor(turn({ stopped: true }))).toBeNull();
+  expect(noteFor(turn({ cancelled: true }))).toBeNull();
+  expect(noteFor(turn({ needsContinue: true }))!.title).toBe("Paladin · paused at the round cap");
+});
+
+test("a running ask asks for input; other events are ignored", () => {
+  const ask = { event: "chat/tool", sessionId: "s2", tool: { name: "ask", status: "running", arguments: "{}" } };
+  expect(noteFor(ask)).toEqual({ sessionId: "s2", title: "Paladin · needs your input", body: "The agent asked a question." });
+  expect(noteFor({ ...ask, tool: { name: "ask", status: "ok" } })).toBeNull();
+  expect(noteFor({ event: "chat/delta", sessionId: "s1", delta: "x" })).toBeNull();
+  expect(noteFor({ event: "turn/start", sessionId: "s1", turn: {} })).toBeNull();
+  expect(noteFor(null)).toBeNull();
+});

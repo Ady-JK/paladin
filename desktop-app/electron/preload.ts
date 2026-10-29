@@ -18,19 +18,33 @@ export interface ChatParams {
 export interface ChatHandlers {
   onDelta: (delta: string) => void;
   onTool: (tool: unknown) => void;
+  onRetry?: (retry: unknown) => void;
+  onCompact?: (compaction: unknown) => void;
 }
 
 const pending = new Map<string, { handlers: ChatHandlers; done: (v: unknown) => void; fail: (e: Error) => void }>();
+const listeners = new Set<(msg: unknown) => void>();
 let armed = false;
 
 function arm(): void {
   if (armed) return;
   armed = true;
-  ipcRenderer.on("agent:chat-event", (_e, msg: any) => {
-    const p = pending.get(msg?.streamId);
+  // One bus for every turn event: the blocking chat() demuxes its own
+  // stream by streamId; onEvent subscribers see everything.
+  ipcRenderer.on("agent:event", (_e, msg: any) => {
+    for (const cb of listeners) {
+      try {
+        cb(msg);
+      } catch (err) {
+        console.error("agent event listener failed", err);
+      }
+    }
+    const p = msg?.streamId ? pending.get(msg.streamId) : undefined;
     if (!p) return;
     if (msg.event === "chat/delta" && typeof msg.delta === "string") p.handlers.onDelta(msg.delta);
     else if (msg.event === "chat/tool") p.handlers.onTool(msg.tool);
+    else if (msg.event === "chat/retry") p.handlers.onRetry?.(msg.retry);
+    else if (msg.event === "chat/compact") p.handlers.onCompact?.(msg.compaction);
   });
   ipcRenderer.on("agent:chat-done", (_e, msg: any) => {
     const p = pending.get(msg?.streamId);
@@ -53,6 +67,23 @@ contextBridge.exposeInMainWorld("paladin", {
         }),
     );
   },
+
+  // onEvent subscribes to every turn event (chat/*, turn/*) for every
+  // session; returns an unsubscribe.
+  onEvent: (cb: (msg: unknown) => void): (() => void) => {
+    arm();
+    listeners.add(cb);
+    return () => listeners.delete(cb);
+  },
+
+  // onOpenSession fires when a native notification is clicked.
+  onOpenSession: (cb: (sessionId: string) => void): (() => void) => {
+    const fn = (_e: unknown, id: string): void => cb(id);
+    ipcRenderer.on("app:open-session", fn);
+    return () => ipcRenderer.removeListener("app:open-session", fn);
+  },
+  takePendingOpen: (): Promise<string | null> => ipcRenderer.invoke("app:takePendingOpen"),
+  metrics: (): Promise<{ cpu: number; rss: number; procs: number }> => ipcRenderer.invoke("app:metrics"),
 
   views: {
     ensure: (name: string, url: string, partition: string) =>

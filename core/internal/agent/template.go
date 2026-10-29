@@ -79,6 +79,8 @@ type Deps struct {
 	Cancel    context.CancelFunc
 	Tx        chan<- ChatChunk
 	Done      <-chan struct{}
+	// PersistGate, when set, wraps the end-of-turn transcript write.
+	PersistGate func(persist func())
 }
 
 // Build resolves a Template into an Agent. Everything the loop needs
@@ -149,20 +151,21 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	}
 
 	return newAgent(runConfig{
-		session:   sess,
-		provider:  provider,
-		tools:     registry,
-		shell:     shell,
-		toolDefs:  toolDefinitions(registry),
-		history:   history,
-		system:    system,
-		maxRounds: maxRounds,
-		ctx:       d.Context,
-		cancel:    d.Cancel,
-		tx:        d.Tx,
-		done:      d.Done,
-		message:   message,
-		resume:    req.Resume,
+		session:     sess,
+		provider:    provider,
+		tools:       registry,
+		shell:       shell,
+		toolDefs:    toolDefinitions(registry),
+		history:     history,
+		system:      system,
+		maxRounds:   maxRounds,
+		ctx:         d.Context,
+		cancel:      d.Cancel,
+		tx:          d.Tx,
+		done:        d.Done,
+		persistGate: d.PersistGate,
+		message:     message,
+		resume:      req.Resume,
 	}), nil
 }
 

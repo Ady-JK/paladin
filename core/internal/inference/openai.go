@@ -31,8 +31,7 @@ const (
 	// take several minutes on a first turn: tool planning + long output.
 	// A 90s cap turned those slow-but-healthy turns into
 	// "provider unavailable" errors, so stream generously.
-	streamTimeout = 300 * time.Second
-	listTimeout   = 30 * time.Second
+	listTimeout = 30 * time.Second
 )
 
 func init() {
@@ -102,6 +101,13 @@ func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
 		out = append(out, option.WithHeader(config.OpencodeSessionHeader, id))
 	}
 	return out
+}
+
+// streamOptions disables the SDK's hidden retries for streams: the agent
+// loop owns retrying so it can honor Retry-After, back off visibly and
+// never replay a partially streamed round.
+func (p *OpenAIProvider) streamOptions(sessionID string) []option.RequestOption {
+	return append(p.headers(sessionID), option.WithMaxRetries(0))
 }
 
 func (p *OpenAIProvider) chatURL() string { return p.baseURL + "/chat/completions" }
@@ -288,9 +294,9 @@ type callAcc struct {
 
 func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
 	parent := ctx
-	tctx, cancel := context.WithTimeout(ctx, streamTimeout)
+	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID), p.headers(sessionID)...)
+	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID), p.streamOptions(sessionID)...)
 	defer stream.Close()
 	var usage Usage
 	accs := map[int64]*callAcc{}
@@ -306,6 +312,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 		}
 	}
 	for stream.Next() {
+		idle.touch()
 		chunk := stream.Current()
 		if u := chatUsage(chunk.Usage, chunk.RawJSON()); u != nil {
 			usage.Add(*u)
@@ -357,8 +364,8 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 		if parent.Err() != nil {
 			return CancelledError()
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return RequestError(fmt.Sprintf("%s: stream: model response timed out after %s — the model was still working; try again", p.name, streamTimeout))
+		if idle.Fired() {
+			return idleError(p.name, "stream")
 		}
 		return p.mapError("stream", err)
 	}
@@ -435,7 +442,8 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 		return CancelledError()
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return RequestError(fmt.Sprintf("%s: %s: model response timed out after %s — the model was still working; try again", p.name, op, defaultTimeout))
+		return &ProviderError{Kind: "request", Timeout: true,
+			Message: fmt.Sprintf("%s: %s: model response timed out after %s — the model was still working; try again", p.name, op, defaultTimeout)}
 	}
 	if isTransientTransport(err) {
 		return RequestError(fmt.Sprintf("%s: %s: transient connection (%v) — try again", p.name, op, err))
@@ -447,10 +455,15 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 		if len([]rune(body)) > 300 {
 			short = string([]rune(body)[:300])
 		}
+		msg := fmt.Sprintf("%s: %s: status %d", p.name, op, apiErr.StatusCode)
 		if short != "" {
-			return RequestError(fmt.Sprintf("%s: %s: status %d: %s", p.name, op, apiErr.StatusCode, short))
+			msg += ": " + short
 		}
-		return RequestError(fmt.Sprintf("%s: %s: status %d", p.name, op, apiErr.StatusCode))
+		var retryAfter time.Duration
+		if apiErr.Response != nil {
+			retryAfter = parseRetryAfter(apiErr.Response.Header, time.Now())
+		}
+		return &ProviderError{Kind: "request", Message: msg, Status: apiErr.StatusCode, RetryAfter: retryAfter}
 	}
 	return RequestError(fmt.Sprintf("%s: %s: %v", p.name, op, err))
 }

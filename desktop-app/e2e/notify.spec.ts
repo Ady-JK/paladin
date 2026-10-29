@@ -8,8 +8,9 @@ test.beforeEach(async ({ page }) => {
 
 test("a notify reminder renders in turn order", async ({ page }) => {
   await page.click('[data-session="sess-notify-1"]');
+  await expect(page.locator("#messages")).toContainText("It printed hi.");
 
-  const text = await page.locator("#messages").innerText();
+  const text = (await page.locator("#messages").textContent()) ?? "";
 
   const order = [
     "Starting the slow job.",

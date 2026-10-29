@@ -151,6 +151,28 @@ export type MessageInfo = {
   name?: string;
   arguments?: string;
   status?: string;
+  // kind tags special rows: "compaction" is a context-compaction
+  // divider whose content is the summary.
+  kind?: string;
+};
+
+// RetryInfo is a chat/retry event: a failed round runs again after
+// delayMs (attempt of max).
+export type RetryInfo = {
+  attempt: number;
+  max: number;
+  delayMs: number;
+  reason: string;
+};
+
+// CompactionInfo is a chat/compact event. reason is "auto" (near the
+// context window) or "overflow" (provider rejected the prompt).
+export type CompactionInfo = {
+  phase: "start" | "done" | "failed";
+  reason: string;
+  tokensBefore: number;
+  tokensAfter?: number;
+  error?: string;
 };
 
 // ToolInfo is a type in this module.
@@ -173,6 +195,14 @@ export type SessionEvent = {
   // Events dropped for a slow client before this one; nonzero means the
   // stream gapped and the view should refetch.
   missed?: number;
+};
+
+// RefreshResult is one provider's catalog refresh outcome.
+export type RefreshResult = {
+  name: string;
+  count: number;
+  models: string[] | null;
+  error?: string;
 };
 
 // ProviderInfo is a type in this module.
@@ -282,4 +312,65 @@ export type ChatEntry = {
   id: string;
   title: string;
   url: string;
+};
+
+// TurnState is where a turn sits in the sidecar's turn hub.
+export type TurnState = "queued" | "running" | "done";
+
+// TurnInfo describes one submitted message (see PROTOCOL.md).
+export type TurnInfo = {
+  turnId: string;
+  sessionId: string;
+  cwd: string;
+  message: string;
+  display?: string;
+  skill?: string;
+  resume?: boolean;
+  state: TurnState;
+  persisted?: boolean;
+  reply?: string;
+  stopped?: boolean;
+  needsContinue?: boolean;
+  cancelled?: boolean;
+  error?: string;
+  queuedAt?: string;
+  startedAt?: string;
+  endedAt?: string;
+};
+
+// TurnEvent is any chat/* or turn/* line, for any session.
+export type TurnEvent = {
+  event: string;
+  seq: number;
+  sessionId: string;
+  turnId: string;
+  streamId?: string;
+  delta?: string;
+  tool?: ToolInfo;
+  retry?: RetryInfo;
+  compaction?: CompactionInfo;
+  turn?: TurnInfo;
+};
+
+// AttachSnapshot is a session's persisted history plus whatever is
+// live: the running turn (if not yet persisted) with its events so
+// far, and the turns queued behind it. Events with seq > seq follow.
+export type AttachSnapshot = {
+  history: MessageInfo[];
+  turn?: TurnInfo | null;
+  events?: TurnEvent[] | null;
+  queued?: TurnInfo[] | null;
+  seq: number;
+};
+
+// ResourceUsage is CPU (% of one core), resident memory in bytes and
+// the number of processes summed.
+export type ResourceUsage = { cpu: number; rss: number; procs: number };
+
+// ResourceSnapshot is the core's `resources` reply.
+export type ResourceSnapshot = {
+  at: number;
+  supported: boolean;
+  self: ResourceUsage;
+  sessions: Record<string, ResourceUsage>;
 };

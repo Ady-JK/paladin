@@ -4,8 +4,9 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, shell, WebContentsView } from "electron";
 import readline from "node:readline";
+import { noteFor } from "./turnNotify";
 
 type Json = any;
 
@@ -29,6 +30,10 @@ type ViewEntry = {
 const views = new Map<string, ViewEntry>();
 let visibleView: string | null = null;
 let lastBounds: { x: number; y: number; width: number; height: number } | null = null;
+// A notification click while the window was closed: the fresh renderer
+// asks for it once it has booted.
+let pendingOpenSession: string | null = null;
+let quitting = false;
 
 // The shell is frameless, so the renderer owns the title bar and the
 // window buttons. Renderer dark/light is mirrored here because guest
@@ -114,8 +119,11 @@ function startAgent(): void {
       console.error("[agent-host] non-JSON line:", line.slice(0, 200));
       return;
     }
-    if (msg.event === "chat/delta" || msg.event === "chat/tool") {
-      win?.webContents.send("agent:chat-event", msg);
+    // Every turn event (chat/* and turn/*) goes to the renderer, which
+    // routes it by sessionId. Turns keep running with no window at all;
+    // the renderer re-attaches when it comes back.
+    if (typeof msg.event === "string") {
+      forwardEvent(msg);
       return;
     }
     if (msg.id !== undefined) {
@@ -127,6 +135,40 @@ function startAgent(): void {
       else p.reject(new Error(typeof msg.error === "string" ? msg.error : "agent error"));
     }
   });
+}
+
+function liveWindow(): BrowserWindow | null {
+  return win && !win.isDestroyed() ? win : null;
+}
+
+function forwardEvent(msg: Json): void {
+  const w = liveWindow();
+  if (w) {
+    try {
+      w.webContents.send("agent:event", msg);
+    } catch {
+      // Renderer is reloading; it re-attaches on boot.
+    }
+  }
+  if (w && w.isFocused()) return;
+  const note = noteFor(msg);
+  if (!note || !Notification.isSupported()) return;
+  const n = new Notification({ title: note.title, body: note.body, silent: false });
+  n.on("click", () => openSessionFromNotification(note.sessionId));
+  n.show();
+}
+
+function openSessionFromNotification(sessionId: string): void {
+  let w = liveWindow();
+  if (!w) {
+    pendingOpenSession = sessionId;
+    createWindow();
+    return;
+  }
+  if (w.isMinimized()) w.restore();
+  w.show();
+  w.focus();
+  w.webContents.send("app:open-session", sessionId);
 }
 
 // Guest pages get a plain Chrome UA (no Electron token): heavy sites
@@ -361,6 +403,13 @@ function createWindow(): void {
 
   win.on("resized", layoutVisible);
   win.on("moved", layoutVisible);
+  // Closing the window keeps the app (and every running turn) alive on
+  // macOS; guest views die with the window, so forget them.
+  win.on("closed", () => {
+    win = null;
+    views.clear();
+    visibleView = null;
+  });
   // GPU status is only meaningful once a window (and thus Viz) exists:
   // logged a moment after the first load. If this says software, the
   // guest pages are rasterising on the CPU and will feel sluggish no
@@ -388,6 +437,21 @@ app.whenReady().then(() => {
   startAgent();
 
   ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
+  ipcMain.handle("app:metrics", () => {
+    let cpu = 0;
+    let rss = 0;
+    const procs = app.getAppMetrics();
+    for (const m of procs) {
+      cpu += m.cpu?.percentCPUUsage ?? 0;
+      rss += (m.memory?.workingSetSize ?? 0) * 1024;
+    }
+    return { cpu, rss, procs: procs.length };
+  });
+  ipcMain.handle("app:takePendingOpen", () => {
+    const id = pendingOpenSession;
+    pendingOpenSession = null;
+    return id;
+  });
 
   // Native OS pickers: files for attach, a directory for workspace
   // selection. Null means the user cancelled (or no window yet).
@@ -539,10 +603,27 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+// Quit closes the sidecar's stdin: it stops every turn, persists what
+// they did, and exits. A sidecar that hangs is killed after a grace.
+app.on("before-quit", (event) => {
+  if (quitting || !agent || agent.exitCode !== null) return;
+  quitting = true;
+  event.preventDefault();
+  const child = agent;
+  const hard = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Ignore.
+    }
+  }, 8000);
+  child.once("exit", () => {
+    clearTimeout(hard);
+    app.quit();
+  });
   try {
-    agent?.kill();
+    child.stdin?.end();
   } catch {
-    // Ignore.
+    child.kill();
   }
 });

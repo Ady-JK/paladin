@@ -22,8 +22,10 @@ func (EditTool) Definition() ToolDefinition {
 		Name: "edit",
 		Description: "Replace text verbatim in an existing file. Pass the path as a full " +
 			"absolute path; bare relative paths are rejected. " +
-			"old_string must match " +
-			"exactly as it appears in the file, so read the file first. When " +
+			"old_string should match " +
+			"exactly as it appears in the file, so read the file first; small drift " +
+			"(line endings, trailing whitespace, typographic quotes/dashes, " +
+			"indentation level) is tolerated and reported as match_strategy. When " +
 			"old_string occurs more than once the call fails and lists every " +
 			"occurrence with its line numbers and the nearest non-blank lines " +
 			"above and below: retry with more surrounding lines in old_string so " +
@@ -33,7 +35,7 @@ func (EditTool) Definition() ToolDefinition {
 			"type": "object",
 			"properties": map[string]any{
 				"path":        map[string]any{"type": "string", "description": "The file to edit as a full absolute path."},
-				"old_string":  map[string]any{"type": "string", "description": "The exact text to find in the file. Must match verbatim, including line endings."},
+				"old_string":  map[string]any{"type": "string", "description": "The exact text to find in the file. Copy it verbatim from the file."},
 				"new_string":  map[string]any{"type": "string", "description": "The replacement text. May be empty to delete old_string."},
 				"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence of old_string. Defaults to false, which requires exactly one match."},
 			},
@@ -123,6 +125,10 @@ func (e *EditTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		"match_start_line": res.MatchStartLine,
 		"match_end_line":   res.MatchEndLine,
 		"matches":          res.Matches,
+		"match_strategy":   res.Strategy,
+	}
+	if res.Strategy != "" && res.Strategy != MatchExact {
+		out["note"] = "old_string did not match verbatim; matched after normalizing " + strings.ReplaceAll(res.Strategy, "_", " ") + ". Re-read the file before further edits to copy its exact text."
 	}
 	// Matches serialize as [{start_line,end_line}]; an empty list must
 	// still be present (serde emits []).

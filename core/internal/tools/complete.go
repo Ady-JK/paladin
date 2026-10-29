@@ -324,7 +324,7 @@ func listCandidateFiles(root string) ([]string, error) {
 // rgFiles runs `rg --files --hidden` (gitignore still applies) and
 // joins the slash-separated rows onto root.
 func rgFiles(rg, root string) ([]string, bool) {
-	cmd := exec.Command(rg, "--files", "--hidden", "--glob", "!.git/", "--", root)
+	cmd := exec.Command(rg, "--files", "--hidden", "--no-require-git", "--glob", "!.git/", "--", root)
 	cmd.Env = shellEnv()
 	out, err := cmd.Output()
 	if err != nil {

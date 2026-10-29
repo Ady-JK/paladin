@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
@@ -49,6 +50,9 @@ type FsFile struct {
 
 type Settings struct {
 	MaxToolRounds uint32 `json:"max_tool_rounds"`
+	// MaxConcurrentTurns caps turns running at once across sessions;
+	// extra turns wait in the hub queue. 0 means the default.
+	MaxConcurrentTurns uint32 `json:"max_concurrent_turns,omitempty"`
 }
 
 // Prompts is the user-editable agent prompt: the system prompt file
@@ -125,8 +129,12 @@ type AgentRuntime struct {
 	ask           *tools.AskTool
 	agents        *agent.Registry
 	tracker       *tracker
+	hub           *Hub
 	providersMu   sync.Mutex
 	refreshing    atomic.Bool
+	refreshWG     sync.WaitGroup
+	fetchMu       sync.RWMutex
+	fetchModels   ModelFetcher
 	providerCache map[string]inference.Provider
 	cacheMu       sync.Mutex
 }
@@ -151,7 +159,7 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	askTool, _ := ask.(*tools.AskTool)
 	agents := agent.NewRegistry()
 	_ = agents.Register(agent.DefaultTemplate())
-	return &AgentRuntime{
+	r := &AgentRuntime{
 		dataDir:       dataDir,
 		config:        cfg,
 		store:         store,
@@ -163,7 +171,10 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		agents:        agents,
 		tracker:       newTracker(),
 		providerCache: map[string]inference.Provider{},
+		fetchModels:   networkModelFetcher,
 	}
+	r.hub = NewHub(r.runTurn, r.maxConcurrentTurns)
+	return r
 }
 
 // runtimeSessions adapts the transcript store to agent.SessionSource.
@@ -320,13 +331,18 @@ func (r *AgentRuntime) maxRounds() uint32 {
 // before the loop starts; Chat only owns lifecycle and tracking.
 func (r *AgentRuntime) Chat(req agent.Request, tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
 	defer close(tx)
+	return r.runTurn(context.Background(), req, nil, tx, done)
+}
+
+// runTurn is the hub's RunFunc: one turn under parent, never closing tx.
+func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
 	if strings.TrimSpace(req.SessionID) == "" {
 		return agent.ChatOutcome{}, fmt.Errorf("sessionId is required: create one with open_session first")
 	}
 	if strings.TrimSpace(req.Message) == "" && !req.Resume {
 		return agent.ChatOutcome{}, fmt.Errorf("message is required")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	if !r.tracker.track(req.SessionID, req.Cwd, cancel) {
 		return agent.ChatOutcome{}, fmt.Errorf("a turn is already running for session %q", req.SessionID)
@@ -355,6 +371,8 @@ func (r *AgentRuntime) Chat(req agent.Request, tx chan<- agent.ChatChunk, done <
 		Cancel:    cancel,
 		Tx:        tx,
 		Done:      done,
+
+		PersistGate: gate,
 	}, req)
 	if err != nil {
 		return agent.ChatOutcome{}, err
@@ -375,12 +393,15 @@ func (r *AgentRuntime) emitDone(tx chan<- agent.ChatChunk, sessionID string, sto
 	}
 }
 
+// Stop stops the session's running turn and drops its queued ones.
 func (r *AgentRuntime) Stop(sessionID string) bool {
-	return r.tracker.stop(sessionID, "")
+	return r.StopIn(sessionID, "")
 }
 
 func (r *AgentRuntime) StopIn(sessionID, cwd string) bool {
-	return r.tracker.stop(sessionID, cwd)
+	hub := r.hub.StopSession(sessionID, cwd)
+	direct := r.tracker.stop(sessionID, cwd)
+	return hub || direct
 }
 
 // AnswerAsk delivers the user's answers to a blocked ask call. Unknown
@@ -716,6 +737,14 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("session id is required")
 	}
+	// A running turn would re-create the transcript when it persists:
+	// stop it (and its queue) and let it land before deleting.
+	if r.hub.Busy(sessionID) {
+		r.hub.StopSession(sessionID, "")
+		if !r.hub.WaitIdle(sessionID, 15*time.Second) {
+			return false, fmt.Errorf("session %q is still stopping; try again", sessionID)
+		}
+	}
 	if err := r.transcripts.Delete(cwd, sessionID); err != nil {
 		return false, err
 	}
@@ -724,19 +753,6 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 
 func (r *AgentRuntime) ListProviders() []config.ProviderInfo {
 	return r.store.ProviderInfos()
-}
-
-func (r *AgentRuntime) RefreshProviders() bool {
-	if !r.refreshing.CompareAndSwap(false, true) {
-		return false
-	}
-	// Detach: the catalog fetch can take a while; the UI refetches.
-	go func() {
-		defer r.refreshing.Store(false)
-		store := config.NewStore(r.dataDir, r.store.Keys)
-		_ = refreshCatalog(store)
-	}()
-	return true
 }
 
 func (r *AgentRuntime) SetDefaultProvider(name string) ([]config.ProviderInfo, error) {
@@ -806,7 +822,6 @@ func (r *AgentRuntime) addProviderLocked(name, url, apiType, key string, req con
 		return config.ProviderInfo{}, err
 	}
 	r.evictProviderCache()
-	r.RefreshProviders()
 	return r.findProviderInfo(name)
 }
 
@@ -855,7 +870,6 @@ func (r *AgentRuntime) UpdateProvider(req config.ProviderInput) (config.Provider
 		return config.ProviderInfo{}, err
 	}
 	r.evictProviderCache()
-	r.RefreshProviders()
 	return r.findProviderInfo(validName)
 }
 
@@ -1046,44 +1060,4 @@ func (r *AgentRuntime) ListSkills(cwd string) []SkillEntry {
 		out = append(out, SkillEntry{Name: s.Name, Description: s.Description, Source: s.Source, Path: s.Path})
 	}
 	return out
-}
-
-func refreshCatalog(store *config.Store) error {
-	file, err := store.LoadProviders()
-	if err != nil {
-		return err
-	}
-	catalog, err := store.LoadModels()
-	if err != nil {
-		return err
-	}
-	for _, p := range file.Providers {
-		key, _, err := store.Keys.Get(p.Name)
-		if err != nil {
-			return err
-		}
-		listKey := key
-		if config.IsPlaceholderKey(key) {
-			listKey = "public-listing"
-		}
-		provider, err := inference.BuildProvider(p.ApiType, p.Name, p.Model, p.ApiURL, listKey)
-		if err != nil {
-			continue
-		}
-		models, err := provider.ListModels(context.Background())
-		if err != nil {
-			continue
-		}
-		sort.Strings(models)
-		entry := catalog.Providers[p.Name]
-		entry.AllModels = models
-		if len(entry.EnabledModels) == 0 {
-			entry.EnabledModels = append([]string(nil), models...)
-		}
-		if catalog.Providers == nil {
-			catalog.Providers = map[string]config.ProviderModels{}
-		}
-		catalog.Providers[p.Name] = entry
-	}
-	return store.SaveModels(catalog)
 }

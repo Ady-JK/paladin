@@ -39,6 +39,8 @@ type ReadTool struct{}
 
 func (ReadTool) Name() string { return "read" }
 
+func (ReadTool) ParallelSafe() bool { return true }
+
 func (ReadTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "read",

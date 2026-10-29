@@ -49,7 +49,7 @@ export function folderRows(list: FsList): string {
   rows.push(`
     <button
       data-pick="${escapeHtml(list.currentPath)}"
-      class="flex w-full items-center gap-2 rounded-md bg-indigo-50 px-2 py-1.5 text-left text-xs font-medium text-indigo-900 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-950/70"
+      class="flex w-full items-center gap-2 rounded-md bg-slate-100 px-2 py-1.5 text-left text-xs font-medium text-slate-900 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
       title="Use this folder as the workspace"
     >
       <span data-icon="check" class="flex-shrink-0"></span>

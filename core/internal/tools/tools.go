@@ -7,7 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"sort"
+	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 )
@@ -156,20 +159,47 @@ func (r *Registry) Definitions() []ToolDefinition {
 	return out
 }
 
-func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) ToolResult {
-	result := ToolResult{CallID: call.ID, Name: call.Name}
-	tool, ok := r.tools[call.Name]
+// ParallelSafe is implemented by tools without side effects that may
+// run concurrently with other parallel-safe calls in the same round.
+// Tools that don't implement it are exclusive.
+type ParallelSafe interface {
+	ParallelSafe() bool
+}
+
+// ParallelSafe reports whether the named tool may run concurrently.
+func (r *Registry) ParallelSafe(name string) bool {
+	resolved, ok := r.resolveName(name)
 	if !ok {
-		return errorResult(result, fmt.Sprintf("unknown tool %q", call.Name))
+		return false
 	}
+	p, ok := r.tools[resolved].(ParallelSafe)
+	return ok && p.ParallelSafe()
+}
+
+func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
+	result = ToolResult{CallID: call.ID, Name: call.Name}
+	name, ok := r.resolveName(call.Name)
+	if !ok {
+		return errorResult(result, fmt.Sprintf("unknown tool %q; available tools: %s", call.Name, strings.Join(r.Names(), ", ")))
+	}
+	result.Name = name
+	tool := r.tools[name]
 	var args json.RawMessage
 	if len(call.Arguments) == 0 || isBlank(call.Arguments) {
 		args = json.RawMessage("null")
-	} else if !json.Valid([]byte(call.Arguments)) {
-		return errorResult(result, "the arguments are not valid JSON")
+	} else if fixed, ok := repairArgs(call.Arguments); !ok {
+		return errorResult(result, "the arguments are not valid JSON (possibly truncated); resend the complete JSON object")
 	} else {
-		args = json.RawMessage(call.Arguments)
+		args = json.RawMessage(fixed)
 	}
+	// A tool bug must never take down the sidecar: the panic becomes a
+	// model-visible failure and the turn carries on.
+	defer func() {
+		if p := recover(); p != nil {
+			fmt.Fprintf(os.Stderr, "tool %s panicked: %v\n%s", name, p, debug.Stack())
+			result = errorResult(ToolResult{CallID: call.ID, Name: name}, fmt.Sprintf("tool %s crashed: %v", name, p))
+		}
+	}()
 	content, err := tool.Call(args, ctxWithCall(ctx, call.ID))
 	if err != nil {
 		if terr, ok := err.(*ToolError); ok {

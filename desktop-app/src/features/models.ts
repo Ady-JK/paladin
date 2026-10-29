@@ -52,18 +52,6 @@ export async function loadProviders(): Promise<void> {
   state.onProvidersChanged();
 }
 
-export async function refreshProviders(): Promise<void> {
-  try {
-    await api.refreshProviders();
-  } catch {
-    return;
-  }
-
-  window.setTimeout(() => {
-    void loadProviders();
-  }, 8000);
-}
-
 // restoreModel is a function in this module.
 // It supports the desktop app frontend.
 function restoreModel(): void {

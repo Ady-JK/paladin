@@ -38,9 +38,9 @@ function toggleSidebar(): void {
 
   if (state.collapsed) {
     sidebarEl.classList.remove("w-72");
-    sidebarEl.classList.add("w-16");
+    sidebarEl.classList.add("w-0");
   } else {
-    sidebarEl.classList.remove("w-16");
+    sidebarEl.classList.remove("w-0");
     sidebarEl.classList.add("w-72");
   }
 

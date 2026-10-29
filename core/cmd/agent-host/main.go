@@ -24,14 +24,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/procstat"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
@@ -58,6 +61,18 @@ type ChatParams struct {
 	SystemPrompt *string `json:"systemPrompt"`
 	Resume       bool    `json:"resume"`
 	Skill        *string `json:"skill"`
+	// Display is how the client rendered the message; echoed in turn
+	// info so a re-attaching UI can redraw the bubble.
+	Display string `json:"display"`
+}
+
+func (p ChatParams) request() agent.Request {
+	return agent.Request{
+		SessionID: p.SessionID, Message: p.Message, Cwd: p.Cwd,
+		Provider: p.Provider, Model: p.Model,
+		SystemPrompt: p.SystemPrompt, Resume: p.Resume,
+		Skill: p.Skill,
+	}
 }
 
 type StrField struct {
@@ -92,6 +107,10 @@ func (l *logWriter) Write(p []byte) (int, error) {
 }
 
 func logf(format string, args ...any) {
+	if logger == nil {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+		return
+	}
 	fmt.Fprintf(logger, format+"\n", args...)
 }
 
@@ -118,6 +137,10 @@ func main() {
 	dataDir := config.DataDir()
 	initLogging(dataDir)
 	rt := runtime.New(dataDir, config.NewConfig(dataDir))
+	installTurnSink(rt)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+	go handleSignals(rt, sigs, os.Exit)
 
 	fmt.Fprintf(os.Stderr, "agent-host ready dir=%s\n", rt.GetWorkspace())
 
@@ -142,14 +165,32 @@ func main() {
 				runChat(rt, req)
 			}()
 		} else {
-			emit(runUnary(rt, &req))
+			var resp Response
+			if err := guard("request "+req.Method, func() { resp = runUnary(rt, &req) }); err != nil {
+				resp = errResponse(req.ID, err.Error())
+			}
+			emit(resp)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		logf("WARN read stdin: %v", err)
 	}
-	// Reap chat tasks so their final response lines always flush.
+	// The client is gone: stop every turn, let them persist, then reap
+	// blocking chat requests so their final lines flush.
+	rt.ShutdownTurns(20 * time.Second)
 	wg.Wait()
+}
+
+// handleSignals treats SIGTERM/SIGINT like the client hanging up: stop
+// every turn so it persists what it did, then exit cleanly.
+func handleSignals(rt *runtime.AgentRuntime, sigs <-chan os.Signal, exit func(int)) {
+	sig, ok := <-sigs
+	if !ok {
+		return
+	}
+	logf("agent-host: %v, stopping turns", sig)
+	rt.ShutdownTurns(10 * time.Second)
+	exit(0)
 }
 
 func initLogging(dataDir string) {
@@ -217,6 +258,15 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 	case "list_providers":
 		return ok(rt.ListProviders())
 	case "refresh_providers":
+		// {name} refreshes one provider synchronously; no name starts
+		// the background refresh-all. Both are user-initiated only.
+		if name := strings.TrimSpace(strFieldParams(req.Params).Name); name != "" {
+			res, err := rt.RefreshProvider(name)
+			if err != nil {
+				return failed(err)
+			}
+			return ok(res)
+		}
 		return ok(rt.RefreshProviders())
 	case "set_default_provider":
 		p := strFieldParams(req.Params)
@@ -339,6 +389,30 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 			return failed(err)
 		}
 		return ok(v)
+	case "submit_chat":
+		installTurnSink(rt)
+		p, err := chatParams(req.Params)
+		if err != nil {
+			return failed(err)
+		}
+		info, _, err := rt.SubmitTurn(p.request(), runtime.SubmitOpts{Display: p.Display})
+		if err != nil {
+			return failed(err)
+		}
+		return ok(info)
+	case "turns":
+		return ok(rt.Turns())
+	case "resources":
+		// CPU/RSS of the core plus each session's shell process trees.
+		return ok(procstat.Default.Snapshot())
+	case "attach":
+		att, err := rt.Attach(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd"))
+		if err != nil {
+			return failed(err)
+		}
+		return ok(att)
+	case "cancel_turn":
+		return ok(rt.CancelTurn(stringParam(req.Params, "turnId")))
 	case "stop_chat":
 		return ok(rt.StopIn(stringParam(req.Params, "sessionId"), stringParam(req.Params, "cwd")))
 	case "answer_ask":
@@ -362,83 +436,48 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 	}
 }
 
-func runChat(rt *runtime.AgentRuntime, req Request) {
-	streamID := append(json.RawMessage(nil), req.ID...)
+// installTurnSink streams every hub event (chat/* and turn/*) to the
+// client. Idempotent: tests call runChat without main.
+func installTurnSink(rt *runtime.AgentRuntime) {
+	rt.SetTurnSink(func(e runtime.TurnEvent) { emit(e) })
+}
+
+func chatParams(raw json.RawMessage) (ChatParams, error) {
 	var p ChatParams
-	if len(req.Params) > 0 {
-		_ = json.Unmarshal(req.Params, &p)
-	}
-	chatReq := agent.Request{
-		SessionID: p.SessionID, Message: p.Message, Cwd: p.Cwd,
-		Provider: p.Provider, Model: p.Model,
-		SystemPrompt: p.SystemPrompt, Resume: p.Resume,
-		Skill: p.Skill,
-	}
-	tx := make(chan agent.ChatChunk, 128)
-	done := make(chan struct{})
-	var doneOnce sync.Once
-	closeDone := func() { doneOnce.Do(func() { close(done) }) }
-	defer closeDone()
-	type outcome struct {
-		out agent.ChatOutcome
-		err error
-	}
-	resultCh := make(chan outcome, 1)
-	go func() {
-		out, err := rt.Chat(chatReq, tx, done)
-		resultCh <- outcome{out: out, err: err}
-	}()
-	sessionID := p.SessionID
-	var reply strings.Builder
-	stopped := false
-	needsContinue := false
-	emitEvent := func(event string, payload map[string]any) {
-		payload["event"] = event
-		payload["streamId"] = json.RawMessage(streamID)
-		emit(payload)
-	}
-	for chunk := range tx {
-		if chunk.Error != nil {
-			errResponse := errResponse(streamID, chunk.Error.Message)
-			emit(errResponse)
-			<-resultCh
-			return
-		}
-		if sessionID == "" {
-			sessionID = chunk.SessionID
-		}
-		if chunk.Delta != "" {
-			reply.WriteString(chunk.Delta)
-			emitEvent("chat/delta", map[string]any{
-				"sessionId": sessionID,
-				"delta":     chunk.Delta,
-			})
-		}
-		if chunk.Tool != nil {
-			emitEvent("chat/tool", map[string]any{
-				"sessionId": sessionID,
-				"tool":      chunk.Tool,
-			})
-		}
-		if chunk.Stopped {
-			stopped = true
-		}
-		if chunk.NeedsContinue {
-			needsContinue = true
-		}
-		if chunk.Done {
-			break
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return p, fmt.Errorf("invalid chat params: %w", err)
 		}
 	}
-	res := <-resultCh
-	if res.err != nil {
-		emit(errResponse(streamID, res.err.Error()))
+	return p, nil
+}
+
+// runChat is the blocking chat method: it submits through the hub
+// (queueing behind a running turn in the same session) and answers the
+// request once the turn ends. Events carry the request id as streamId.
+func runChat(rt *runtime.AgentRuntime, req Request) {
+	installTurnSink(rt)
+	streamID := append(json.RawMessage(nil), req.ID...)
+	p, err := chatParams(req.Params)
+	if err != nil {
+		emit(errResponse(streamID, err.Error()))
+		return
+	}
+	_, done, err := rt.SubmitTurn(p.request(), runtime.SubmitOpts{Display: p.Display, StreamID: streamID})
+	if err != nil {
+		emit(errResponse(streamID, err.Error()))
+		return
+	}
+	final := <-done
+	if final.Error != "" {
+		emit(errResponse(streamID, final.Error))
 		return
 	}
 	emit(okResponse(streamID, map[string]any{
-		"sessionId":     res.out.SessionID,
-		"reply":         reply.String(),
-		"stopped":       stopped,
-		"needsContinue": needsContinue,
+		"sessionId":     final.SessionID,
+		"reply":         final.Reply,
+		"stopped":       final.Stopped || final.Cancelled,
+		"cancelled":     final.Cancelled,
+		"needsContinue": final.NeedsContinue,
 	}))
 }

@@ -846,12 +846,19 @@ func TestFsListAndHome(t *testing.T) {
 
 func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 	rt, _ := testRuntime(t)
+	gate := make(chan struct{})
+	rt.SetModelFetcher(func(context.Context, config.Provider, string) ([]string, error) {
+		<-gate
+		return nil, nil
+	})
 	if !rt.RefreshProviders() {
 		t.Fatal("first refresh should start")
 	}
 	if rt.RefreshProviders() {
 		t.Fatal("second refresh should dedup")
 	}
+	close(gate)
+	rt.WaitRefresh()
 	// refreshCatalog against unreachable hosts leaves models empty.
 	// (127.0.0.1:1 refuses connections; the seed URLs would hit the net.)
 	store := config.NewStore(t.TempDir(), config.NewMemoryKeyStore())
@@ -865,7 +872,7 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 	if err := store.SaveProviders(seeded); err != nil {
 		t.Fatal(err)
 	}
-	if err := refreshCatalog(store); err != nil {
+	if err := refreshCatalog(store, nil, networkModelFetcher); err != nil {
 		t.Fatal(err)
 	}
 	models, err := store.LoadModels()
@@ -898,7 +905,7 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := refreshCatalog(store2); err != nil {
+	if err := refreshCatalog(store2, nil, networkModelFetcher); err != nil {
 		t.Fatal(err)
 	}
 	m2, err := store2.LoadModels()

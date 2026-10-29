@@ -14,18 +14,21 @@ import {
   workspaceInputEl,
   workspaceLabelEl,
 } from "../core/dom";
-import { dayOf, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
+import { escapeAttr, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
-import type { SessionEvent, ToolInfo } from "../core/types";
+import type { SessionEvent, SessionInfo, ToolInfo } from "../core/types";
+import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
-import { addTurn, renderGreeting, scrollToBottom } from "./chatView";
-import { createToolActivity } from "./tools";
+import { addTurn, createCompactionDivider, renderGreeting, scrollToBottom } from "./chatView";
+import { ToolRun } from "./toolRun";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { syncModelSelects } from "./models";
+import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
+import type { MessageInfo } from "../core/types";
 import { refreshExternalVisibility } from "./sites";
 
 export async function onSessionEvent(event: SessionEvent): Promise<void> {
@@ -76,8 +79,52 @@ export async function refreshSessions(): Promise<void> {
   renderSessions();
 }
 
-// renderSessions is a function in this module.
-// It supports the desktop app frontend.
+const FOLD_KEY = "paladin.foldedProjects";
+const RECENT_COUNT = 5;
+
+function loadFolded(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FOLD_KEY) ?? "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const folded = loadFolded();
+
+function toggleFold(cwd: string): void {
+  if (!folded.delete(cwd)) {
+    folded.add(cwd);
+  }
+  try {
+    localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
+  } catch {
+  }
+}
+
+function sessionRow(session: SessionInfo): string {
+  const active = session.sessionId === state.sessionId;
+  const title = session.title || "untitled session";
+  const live = liveBadge(session.sessionId);
+  return `
+    <div${live ? ` data-live="${live}"` : ""} class="session-row group${active ? " is-active" : ""}">
+      <button data-session="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)}">
+        <span class="truncate">${escapeHtml(title)}</span>
+      </button>
+      ${liveIndicator(session.sessionId, live)}
+      ${resBadge(session.sessionId)}
+      <span class="session-count">${session.messageCount}</span>
+      <button data-delete="${escapeAttr(session.sessionId)}" class="session-del" title="Delete the session">
+        ${icon("trash", "h-3 w-3")}
+      </button>
+    </div>`;
+}
+
+// renderSessions draws the sidebar like Codex: sessions nested under
+// their project folder (newest project first, foldable), then a short
+// Recents list across projects. Search narrows projects and hides
+// Recents.
 export function renderSessions(): void {
   const filter = searchInputEl.value.trim().toLowerCase();
 
@@ -92,51 +139,69 @@ export function renderSessions(): void {
     return;
   }
 
-  const groups = new Map<string, typeof state.sessions>();
+  const projects = new Map<string, SessionInfo[]>();
   for (const session of visible) {
-    const day = dayOf(session.createdAt);
-    const group = groups.get(day) ?? [];
+    const group = projects.get(session.cwd) ?? [];
     group.push(session);
-    groups.set(day, group);
+    projects.set(session.cwd, group);
   }
 
-  let html = "";
-  for (const [day, group] of groups) {
-    html += `<div class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">${day}</div><div class="mt-1 space-y-0.5">`;
+  let html = `<div class="side-label">Projects</div>`;
+  for (const [cwd, group] of projects) {
+    const open = filter !== "" || !folded.has(cwd);
+    const current = cwd === state.cwd;
+    html += `
+      <div class="project${open ? " is-open" : ""}${current ? " is-current" : ""}" data-cwd="${escapeAttr(cwd)}">
+        <button class="project-head" data-fold="${escapeAttr(cwd)}" title="${escapeAttr(cwd)}" aria-expanded="${open}">
+          <span class="project-ico">${icon("rl-folder", "h-4 w-4")}</span>
+          <span class="project-name">${escapeHtml(shortPath(cwd))}</span>
+          <span class="project-caret">${icon("rl-chevron", "h-3 w-3")}</span>
+        </button>
+        <div class="project-list"${open ? "" : " hidden"}>${group.map(sessionRow).join("")}</div>
+      </div>`;
+  }
 
-    for (const session of group) {
-      const active = session.sessionId === state.sessionId;
+  if (!filter) {
+    const recents = state.sessions.slice(0, RECENT_COUNT);
+    html += `<div id="recentWrap"><div class="side-label">Recents</div><div id="recentList">`;
+    for (const session of recents) {
       const title = session.title || "untitled session";
-
+      const active = session.sessionId === state.sessionId;
+      const live = liveBadge(session.sessionId);
       html += `
-        <div class="session-row group flex items-center gap-1 rounded-md border p-1 ${
-          active
-            ? "border-indigo-200 bg-indigo-50/80 text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200"
-            : "border-transparent text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/60"
-        }">
-          <button
-            data-session="${session.sessionId}"
-            class="flex min-w-0 flex-1 items-center gap-2 px-1 py-0.5 text-left"
-            title="${escapeHtml(title)}"
-          >
-            ${icon("terminal", "h-3 w-3 flex-shrink-0 text-accent-500")}
-            <span class="truncate font-medium">${escapeHtml(title)}</span>
+        <div${live ? ` data-live="${live}"` : ""} class="recent-row${active ? " is-active" : ""}">
+          <button data-recent="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)} · ${escapeAttr(shortPath(session.cwd))}">
+            <span class="truncate">${escapeHtml(title)}</span>
           </button>
-          <span class="flex-shrink-0 rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] text-slate-400 dark:border-slate-700/60 dark:bg-slate-800">${session.messageCount}</span>
-          <button
-            data-delete="${session.sessionId}"
-            class="flex-shrink-0 rounded p-1 text-slate-400 opacity-40 hover:bg-agent-rose/10 hover:text-agent-rose hover:opacity-100 focus:opacity-100"
-            title="Delete the session"
-          >
-            ${icon("trash", "h-3 w-3")}
-          </button>
+          ${liveIndicator(session.sessionId, live)}
         </div>`;
     }
-
-    html += "</div>";
+    html += `</div></div>`;
   }
 
   sessionListEl.innerHTML = html;
+}
+
+const LIVE_LABELS: Record<string, string> = {
+  running: "Working",
+  queued: "Queued",
+  done: "Finished in the background",
+  error: "Failed in the background",
+  input: "Waiting for your answer",
+  paused: "Paused at the round cap",
+};
+
+// liveIndicator is the per-row turn state: a spinner while working
+// (plus queued count), a dot for an outcome the user has not seen.
+function liveIndicator(sessionId: string, live: string): string {
+  if (!live) {
+    return "";
+  }
+  const label = LIVE_LABELS[live] ?? live;
+  const n = queuedCount(sessionId);
+  const extra = n > 0 && live === "running" ? `<span class="live-count">+${n}</span>` : "";
+  const mark = live === "running" ? `<span class="live-spinner"></span>` : `<span class="live-dot"></span>`;
+  return `<span class="live-ind live-${live}" title="${escapeHtml(label)}" role="status" aria-label="${escapeHtml(label)}">${mark}${extra}</span>`;
 }
 
 // askDelete is a function in this module.
@@ -190,6 +255,7 @@ export async function deleteSession(id: string): Promise<void> {
   }
 
   toast(`Deleted ${title}`);
+  forgetSession(id);
 
   if (id === state.sessionId) {
     newSession();
@@ -206,6 +272,7 @@ export async function openSession(id: string): Promise<void> {
     state.cwd = session.cwd;
 
     sessionLabelEl.textContent = state.sessionId.slice(0, 8);
+    paintResources();
 
     // The session brings its own workspace: adopt it so the header,
     // the composer, and the next turn all agree on the folder.
@@ -221,14 +288,33 @@ export async function openSession(id: string): Promise<void> {
       modelSelectLabelEl.textContent = session.model || "default";
     }
 
-    await loadHistory(session.sessionId);
+    // Attach is atomic: persisted history plus the live turn (if it has
+    // not landed yet) and the queue, so nothing shows twice or not at
+    // all. Events arriving meanwhile are buffered and replayed.
+    beginAttach(session.sessionId);
+    let snap;
+    try {
+      snap = await api.attachSession(session.sessionId);
+    } catch (error) {
+      abortAttach(session.sessionId);
+      throw error;
+    }
+    if (state.sessionId !== session.sessionId) {
+      // The user moved on while this loaded; keep the buffer flowing.
+      abortAttach(session.sessionId);
+      return;
+    }
+    renderHistory(snap.history ?? []);
+    finishAttach(session.sessionId, snap);
 
     renderSessions();
     // The ledger persists across restarts, so opening a session shows
     // its last-known totals immediately. The todo hat shows its plan.
     void refreshUsage();
     void refreshTodos();
-    setStatus("ready", "ok");
+    if (!state.busy) {
+      setStatus("ready", "ok");
+    }
   } catch (error) {
     setStatus(String(error), "error");
   }
@@ -236,14 +322,19 @@ export async function openSession(id: string): Promise<void> {
 
 export async function loadHistory(id: string): Promise<void> {
   // Null cwd searches every workspace namespace, matching openSession.
-  const history = await api.sessionHistory(id, null);
+  renderHistory(await api.sessionHistory(id, null));
+}
 
+// renderHistory paints a persisted transcript.
+function renderHistory(history: MessageInfo[]): void {
   messagesEl.innerHTML = "";
   // One layout for the whole transcript: keep the container display:none
   // while rows are appended, then paint once.
   messagesEl.style.display = "none";
 
   let agentBody: HTMLElement | null = null;
+  // run is the open group of consecutive calls; any text closes it.
+  let run: ToolRun | null = null;
 
   const openAgent = (text: string): void => {
     const { textEl } = addTurn("agent", text);
@@ -251,13 +342,15 @@ export async function loadHistory(id: string): Promise<void> {
   };
 
   const pushAgentText = (text: string): void => {
+    if (text.trim()) {
+      run = null;
+    }
     if (!agentBody) {
       openAgent(text);
       return;
     }
     const el = document.createElement("div");
-    el.className =
-      "md whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
+    el.className = "md agent-text";
     el.innerHTML = renderMarkdown(text);
     agentBody.append(el);
   };
@@ -273,21 +366,31 @@ export async function loadHistory(id: string): Promise<void> {
         result: `${tool.result.slice(0, 8000)}\n…(truncated, kept in history)`,
       };
     }
-    const row = document.createElement("div");
-    row.className = "py-0.5";
-    row.append(createToolActivity(tool).el);
-    agentBody!.append(row);
+    if (!run) {
+      run = new ToolRun();
+      agentBody!.append(run.el);
+    }
+    run.upsert(tool);
   };
 
-  for (const message of history) {
+  for (const [index, message] of history.entries()) {
     if (message.role === "user") {
       agentBody = null;
+      run = null;
       addTurn("user", message.content);
     } else if (message.role === "assistant") {
       pushAgentText(message.content);
+    } else if (message.role === "system" && message.kind === "compaction") {
+      // Divider where older context was summarized; later agent text
+      // and tools append below it.
+      if (!agentBody) {
+        openAgent("");
+      }
+      run = null;
+      agentBody!.append(createCompactionDivider("Context compacted", message.content));
     } else if (message.role === "tool") {
       pushAgentTool({
-        id: "",
+        id: `h${index}`,
         name: message.name || "tool",
         arguments: message.arguments || "{}",
         result: message.content,
@@ -315,6 +418,7 @@ export function newSession(): void {
   state.sessionId = "";
   clearUsage();
   clearTodos();
+  paintResources();
   sessionLabelEl.textContent = "—";
   state.shownMessages = 0;
 
@@ -322,6 +426,7 @@ export function newSession(): void {
   renderGreeting();
 
   renderSessions();
+  syncComposer();
   inputEl.focus();
 }
 
@@ -342,9 +447,16 @@ export function initSessions(): void {
       askDelete(del.dataset.delete);
       return;
     }
-    const pick = target.closest<HTMLElement>("[data-session]");
-    if (pick?.dataset.session) {
-      void openSession(pick.dataset.session);
+    const fold = target.closest<HTMLElement>("[data-fold]");
+    if (fold?.dataset.fold !== undefined) {
+      toggleFold(fold.dataset.fold);
+      renderSessions();
+      return;
+    }
+    const pick = target.closest<HTMLElement>("[data-session],[data-recent]");
+    const id = pick?.dataset.session ?? pick?.dataset.recent;
+    if (id) {
+      void openSession(id);
     }
   });
 

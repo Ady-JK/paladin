@@ -27,7 +27,6 @@ import {
   siteModalEl,
   siteNameEl,
   siteUrlEl,
-  tabsWrapEl,
   workspaceWrapEl,
   paintIcons,
   $,
@@ -142,12 +141,8 @@ function persistSites(): void {
 // paintSideTabs is a function in this module.
 // It supports the desktop app frontend.
 function paintSideTabs(): void {
-  const active =
-    "flex items-center justify-center gap-1.5 rounded bg-white px-2 py-1.5 text-xs font-medium text-slate-900 dark:bg-slate-800 dark:text-slate-100";
-  const idle =
-    "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200";
-  agentTabEl.className = state.sideView === "agent" ? active : idle;
-  chatTabEl.className = state.sideView === "chat" ? active : idle;
+  agentTabEl.classList.toggle("is-active", state.sideView === "agent");
+  chatTabEl.classList.toggle("is-active", state.sideView === "chat");
   agentTabEl.setAttribute("aria-selected", String(state.sideView === "agent"));
   chatTabEl.setAttribute("aria-selected", String(state.sideView === "chat"));
 }
@@ -162,11 +157,7 @@ export function paintChatList(): void {
       <div class="pick-row flex items-center gap-1">
         <button
           data-pick="${escapeAttr(entry.id)}"
-          class="min-w-0 flex-1 rounded-md border p-1.5 text-left ${
-            picked
-              ? "border-indigo-200 bg-indigo-50/80 dark:border-indigo-800 dark:bg-indigo-950/40"
-              : "border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60"
-          }"
+          class="pick-btn min-w-0 flex-1 rounded-md p-1.5 text-left${picked ? " is-active" : ""}"
           title="${escapeAttr(entry.url)}"
         >
           <span class="flex items-center gap-2">
@@ -327,7 +318,6 @@ export async function refreshExternalVisibility(): Promise<void> {
 export function paintSideVisibility(): void {
   const agent = state.sideView === "agent";
   workspaceWrapEl.classList.toggle("hidden", state.collapsed);
-  tabsWrapEl.classList.toggle("hidden", state.collapsed);
   searchWrapEl.classList.toggle("hidden", state.collapsed || !agent);
   sessionListEl.classList.toggle("hidden", state.collapsed || !agent);
   chatListEl.classList.toggle("hidden", state.collapsed || agent);
@@ -340,7 +330,7 @@ export function paintSideVisibility(): void {
 function lockSidebarForChat(): void {
   if (state.collapsed) {
     state.collapsed = false;
-    sidebarEl.classList.remove("w-16");
+    sidebarEl.classList.remove("w-0");
     sidebarEl.classList.add("w-72");
   }
   const btn = $("#sidebarToggleBtn") as HTMLButtonElement | null;

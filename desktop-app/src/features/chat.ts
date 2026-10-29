@@ -2,30 +2,22 @@
 // It supports the desktop app frontend.
 
 import * as api from "../core/api";
-import { attachBtnEl, chatViewEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, statusDetailEl } from "../core/dom";
-import { renderMarkdown } from "../core/format";
+import { attachBtnEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl } from "../core/dom";
 import { state } from "../core/state";
-import type { ToolView } from "../core/types";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
-import { icon } from "../icons";
-import { addTurn, dismissGreeting, initMessageLinks, scrollToBottom } from "./chatView";
+import { addTurn, dismissGreeting, initMessageLinks } from "./chatView";
 import { handleMentionKey, expandMentions } from "./mentions";
 import { openFilePicker } from "./filePicker";
-import { refreshSessions } from "./sessions";
+import { renderSessions } from "./sessions";
 import { handleSlashKey, tryHandleSlash } from "./slash";
-import { refreshUsage } from "./usage";
-import { createToolActivity } from "./tools";
-import { handleAskToolEvent } from "./ask";
-import { dropFinishedPanel, handleTodoToolEvent, refreshTodos } from "./todos";
+import { dropFinishedPanel } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
+import { isBusy, noteSubmitted, syncComposer } from "./live";
 
 export async function send(resume = false): Promise<void> {
   const message = resume ? "" : inputEl.value.trim();
   if (!message && !resume) {
-    return;
-  }
-  if (state.busy) {
     return;
   }
 
@@ -59,205 +51,59 @@ export async function send(resume = false): Promise<void> {
     }
   }
 
+  // Hand-typed @paths resolve to OS-specific absolute paths here;
+  // popup-accepted rows are already absolute. The bubble keeps the
+  // original text (display) so the chat shows what was typed.
+  let outgoing = "";
   if (!resume) {
-    // Hand-typed @paths resolve to OS-specific absolute paths here;
-    // popup-accepted rows are already absolute. The user turn keeps
-    // the original text so the chat shows what was typed — except a
-    // skill turn, which shows a chip plus the message after `/skill`.
-    state.busy = true;
-    sendBtn.disabled = true;
-    sendBtn.classList.add("hidden");
-    pauseBtn.classList.remove("hidden");
-    setStatus("thinking…", "busy");
-    let outgoing: string;
+    inputEl.value = "";
+    autosizeComposer();
     try {
       outgoing = await expandMentions(display);
     } catch (error) {
       console.warn(`expandMentions failed: ${String(error)}`);
       outgoing = display;
     }
-    inputEl.value = "";
-    autosizeComposer();
-    dismissGreeting();
-    addTurn("user", display, { skill });
-    state.shownMessages++;
-    return sendExpanded(outgoing, false, skill);
+  } else {
+    continueBtn.classList.add("hidden");
   }
-  continueBtn.classList.add("hidden");
-
-  state.busy = true;
-  sendBtn.disabled = true;
-  sendBtn.classList.add("hidden");
-  pauseBtn.classList.remove("hidden");
-  setStatus("thinking…", "busy");
-  return sendExpanded("", true, null);
-}
-
-// sendExpanded runs the streaming turn for already-prepared text.
-async function sendExpanded(outgoing: string, resume: boolean, skill: string | null): Promise<void> {
-
-  const { wrapper, textEl: body } = addTurn("agent", "");
-  body.innerHTML = `<span class="text-slate-400">${icon("bolt", "h-3 w-3 inline")} thinking…</span>`;
-
-  let reply = "";
-
-  let segment = "";
-  let segEl = body;
-  const container = body.parentElement!;
-
-  const newSegment = (after: Node): HTMLElement => {
-    const el = document.createElement("div");
-    el.className =
-      "md whitespace-pre-wrap break-words leading-relaxed text-slate-700 dark:text-slate-300";
-    container.insertBefore(el, after.nextSibling);
-    return el;
-  };
-
-  // Deltas arrive in bursts (dozens per frame). Painting full innerHTML
-  // per event is O(n^2) over a reply; coalesce to one paint per frame and
-  // only force-scroll while the user is already pinned to the bottom.
-  let paintQueued = false;
-  let scrollQueued = false;
-  let stickToBottom = true;
-  const onScroll = (): void => {
-    const gap = chatViewEl.scrollHeight - chatViewEl.scrollTop - chatViewEl.clientHeight;
-    stickToBottom = gap < 96;
-  };
-  chatViewEl.addEventListener("scroll", onScroll);
-  const gatedScroll = (): void => {
-    if (!stickToBottom || scrollQueued) {
-      return;
-    }
-    scrollQueued = true;
-    requestAnimationFrame(() => {
-      scrollQueued = false;
-      if (stickToBottom) {
-        scrollToBottom();
-      }
-    });
-  };
-
-  const unlisten = api.onChatDelta((delta) => {
-    reply += delta;
-    segment += delta;
-    if (paintQueued) {
-      return;
-    }
-    paintQueued = true;
-    requestAnimationFrame(() => {
-      paintQueued = false;
-      segEl.innerHTML = renderMarkdown(segment);
-      gatedScroll();
-    });
-  });
-
-  const toolViews = new Map<string, ToolView>();
-
-  const unlistenTool = api.onChatTool((tool) => {
-    const existing = toolViews.get(tool.id);
-
-    if (tool.name === "ask") {
-      handleAskToolEvent(state.sessionId || "", tool);
-    }
-    if (tool.name === "todo") {
-      handleTodoToolEvent(tool);
-    }
-    if (existing) {
-      existing.update(tool);
-    } else {
-      const row = document.createElement("div");
-      row.className = "py-0.5";
-
-      const view = createToolActivity(tool);
-      row.append(view.el);
-      container.insertBefore(row, segEl.nextSibling);
-      toolViews.set(tool.id, view);
-
-      segment = "";
-      segEl = newSegment(row);
-    }
-
-    gatedScroll();
-  });
 
   try {
-    // The client owns the session: /chat only loads it, so open one
-    // before the first message of a conversation.
+    // The client owns the session: open one before the first message.
     if (!state.sessionId) {
       const opened = await api.openSession(null, state.cwd);
       state.sessionId = opened.sessionId;
       sessionLabelEl.textContent = state.sessionId.slice(0, 8);
+      renderSessions();
     }
-
-    const result = await api.chatStream({
-      sessionId: state.sessionId || null,
+    dismissGreeting();
+    // Fire and forget: the turn runs (or queues) in the sidecar and its
+    // progress arrives as events for this session, even if the user
+    // switches away or reloads.
+    const info = await api.submitChat({
+      sessionId: state.sessionId,
       message: outgoing,
       resume,
       cwd: state.cwd,
       provider: state.selectedProvider || null,
       model: state.selectedModel || null,
-      systemPrompt: null,
       skill,
+      display: resume ? "" : display,
     });
-
-    if (!state.sessionId && result.sessionId) {
-      state.sessionId = result.sessionId;
-      sessionLabelEl.textContent = state.sessionId.slice(0, 8);
-    }
-
-    if (!reply) {
-      reply = result.reply;
-      segment = result.reply;
-      segEl.innerHTML = renderMarkdown(segment);
-    }
-
+    noteSubmitted(info);
     state.shownMessages++;
-
-    if (result.stopped) {
-      setStatus("stopped", "ok");
-      statusDetailEl.textContent = "STOPPED";
-    } else if (result.needsContinue) {
-      continueBtn.classList.remove("hidden");
-      toast("Paused at the round cap — continue?");
-      setStatus("paused", "ok");
-      statusDetailEl.textContent = "PAUSED";
-    } else {
-      setStatus("ready", "ok");
-      statusDetailEl.textContent = "READY";
-    }
-
-    await refreshSessions();
-    // Tokens bill even on failed turns, so the pill refreshes on both
-    // paths; refreshUsage keeps the last reading on fetch errors. The
-    // hat already updated live per tool call; the refresh covers any
-    // call that settled after the listener detached.
-    void refreshUsage();
-    void refreshTodos();
   } catch (error) {
-    state.shownMessages--;
-
-    if (!reply.trim() && toolViews.size === 0) {
-      wrapper.remove();
-    } else if (!reply.trim()) {
-      segEl.innerHTML = `<span class="text-slate-400">interrupted — the tool calls above already ran</span>`;
+    if (!resume && !inputEl.value) {
+      inputEl.value = message;
+      autosizeComposer();
     }
-
-    // A failed skill turn still names the unknown skill so the user
-    // knows the content never reached the model.
     if (skill && /not found: skill/i.test(String(error))) {
       refreshSkillsCache();
     }
     addTurn("error", String(error));
     setStatus(String(error), "error");
-    void refreshUsage();
+    syncComposer();
   } finally {
-    unlisten();
-    unlistenTool();
-    chatViewEl.removeEventListener("scroll", onScroll);
-    state.busy = false;
-    sendBtn.disabled = false;
-    sendBtn.classList.remove("hidden");
-    pauseBtn.classList.add("hidden");
     inputEl.focus();
   }
 }
@@ -265,8 +111,14 @@ async function sendExpanded(outgoing: string, resume: boolean, skill: string | n
 // requestStop asks the running turn to stop after what already streamed.
 // It supports the desktop app frontend.
 export function requestStop(): void {
+  if (!state.sessionId) {
+    return;
+  }
   toast("Agent Stopped");
-  void api.stopChat(state.sessionId || null, state.cwd || null);
+  // Stops the running turn and drops the turns queued behind it.
+  void api.stopChat(state.sessionId, state.cwd || null).catch((error) => {
+    setStatus(String(error), "error");
+  });
 }
 
 // initChat wires the composer and the stop affordances.
@@ -305,7 +157,7 @@ export function initChat(): void {
   continueBtn.addEventListener("click", () => void send(true));
 
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !state.busy) {
+    if (event.key !== "Escape" || !isBusy(state.sessionId)) {
       return;
     }
     const now = Date.now();

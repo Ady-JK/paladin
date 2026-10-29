@@ -23,10 +23,11 @@ import { closeMenu } from "./ui/anim";
 import { initChat } from "./features/chat";
 import { initTodos } from "./features/todos";
 import { renderGreeting } from "./features/chatView";
-import { initModelPicker, loadProviders, refreshProviders } from "./features/models";
+import { initModelPicker, loadProviders } from "./features/models";
 import {
   closeConfirm,
   initSessions,
+  openSession,
   refreshSessions,
 } from "./features/sessions";
 import {
@@ -48,6 +49,9 @@ import { initMentions } from "./features/mentions";
 import { initSlash } from "./features/slash";
 import { initSkills } from "./features/skills";
 import { initWindow } from "./features/window";
+import { initResources } from "./features/resources";
+import { initMotion } from "./ui/motion";
+import { bootLive, initLive, openPendingSession, syncComposer } from "./features/live";
 
 async function connect(): Promise<void> {
   setStatus("connecting…", "busy");
@@ -77,12 +81,17 @@ async function connect(): Promise<void> {
     renderGreeting();
 
     await refreshSessions();
+    syncComposer();
+    // Turns outlive the window: learn what is still running, then honor
+    // a notification click that launched this window.
+    await bootLive();
+    void openPendingSession((id) => void openSession(id));
 
     setStatus("local", "ok");
     statusDetailEl.textContent = "in-process";
 
+    // Catalogs are only fetched on an explicit user refresh.
     await loadProviders();
-    void refreshProviders();
   } catch (error) {
     setStatus(String(error), "error");
     statusDetailEl.textContent = "—";
@@ -90,6 +99,7 @@ async function connect(): Promise<void> {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  initMotion();
   paintIcons();
   $("#brandVersion").textContent = `v${appVersion}`;
 
@@ -105,11 +115,22 @@ window.addEventListener("DOMContentLoaded", () => {
   initSessionDialog();
   initSettings(connect);
   initSessions();
+  initLive((id) => void openSession(id));
   initUsage();
+  initResources();
 
   modelAdvancedBtn.addEventListener("click", () => {
     closeMenu(modelMenu);
     openSettings();
+  });
+
+  $("#resPill").addEventListener("click", () => {
+    openSettings();
+    $("#settingsNavResources").click();
+  });
+  $("#resTotal").addEventListener("click", () => {
+    openSettings();
+    $("#settingsNavResources").click();
   });
 
   $("#newSessionBtn").addEventListener("click", () => {

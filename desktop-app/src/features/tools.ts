@@ -1,9 +1,11 @@
 // tools.ts renders tool-call activity cards and file diffs.
 // It is pure DOM building: no backend calls and no shared state.
 
-import { escapeHtml, ordinal, prettyJson, splitLines, tryParseJson } from "../core/format";
+import { escapeHtml, ordinal, splitLines, tryParseJson } from "../core/format";
 import type { DiffRow, MatchSpan, ToolInfo, ToolView } from "../core/types";
-import { icon } from "../icons";
+import { icon, type IconName } from "../icons";
+import { state } from "../core/state";
+import { toolBodyHtml } from "./toolBodies";
 
 // toolSummary is a function in this module.
 // It supports the desktop app frontend.
@@ -302,6 +304,11 @@ function richEditHtml(tool: ToolInfo): string | null {
   if (args.replace_all === true) {
     chips.push("replace all");
   }
+  // A non-exact match (CRLF, whitespace or indentation drift) still
+  // applied; say how, so the diff isn't taken as byte-exact.
+  if (result && typeof result.match_strategy === "string" && result.match_strategy !== "exact") {
+    chips.push(`matched ignoring ${String(result.match_strategy).replace(/_/g, " ")}`);
+  }
   if (tool.status === "failed") {
     chips.push("failed");
   } else if (tool.status === "running") {
@@ -372,177 +379,171 @@ function richEditHtml(tool: ToolInfo): string | null {
   );
 }
 
-// paintToolStatus is a function in this module.
-// It supports the desktop app frontend.
-export function paintToolStatus(statusEl: HTMLElement, status: string): void {
-  if (status === "running") {
-    statusEl.className =
-      "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400";
-    statusEl.innerHTML =
-      '<span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>running';
-    return;
-  }
+// ToolLabel is the one-line reading of a call: a verb, a muted detail,
+// and an optional inline code chip (the command for shell).
+export type ToolLabel = { verb: string; detail: string; chip: string };
 
-  if (status === "failed") {
-    statusEl.className =
-      "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-red-600 dark:text-red-400";
-    statusEl.innerHTML =
-      '<span class="h-1.5 w-1.5 rounded-full bg-red-500"></span>failed';
-    return;
-  }
+type ToolKind = {
+  icon: IconName;
+  past: string;
+  now: string;
+  noun: (n: number) => string;
+};
 
-  statusEl.className =
-    "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400";
-  statusEl.innerHTML =
-    '<span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>done';
+const plural = (one: string, many: string) => (n: number) => `${n} ${n === 1 ? one : many}`;
+
+const KINDS: Record<string, ToolKind> = {
+  shell: { icon: "tl-term", past: "Ran", now: "Running", noun: plural("command", "commands") },
+  read: { icon: "tl-file", past: "Read", now: "Reading", noun: plural("file", "files") },
+  write: { icon: "tl-file-plus", past: "Wrote", now: "Writing", noun: plural("file", "files") },
+  edit: { icon: "tl-pencil", past: "Edited", now: "Editing", noun: plural("file", "files") },
+  ask: { icon: "tl-ask", past: "Asked", now: "Asking", noun: plural("question", "questions") },
+  todo: { icon: "tl-list", past: "Updated", now: "Updating", noun: (n) => (n === 1 ? "the plan" : `the plan ${n} times`) },
+};
+
+const OTHER: ToolKind = { icon: "tl-tools", past: "Called", now: "Calling", noun: plural("tool", "tools") };
+
+function kindOf(name: string): ToolKind {
+  return KINDS[name] ?? OTHER;
 }
 
-// createToolActivity is a function in this module.
-// It supports the desktop app frontend.
+// relPath shows workspace files relative to the workspace root.
+function relPath(path: string): string {
+  const root = state.cwd.replace(/[\\/]+$/, "");
+  if (root && path.startsWith(root) && /[\\/]/.test(path.charAt(root.length))) {
+    return path.slice(root.length + 1);
+  }
+  return path;
+}
+
+function parseArgs(raw: string): Record<string, unknown> {
+  const parsed = tryParseJson(raw);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+}
+
+// toolLabel reads one call the way a person would narrate it.
+export function toolLabel(tool: ToolInfo): ToolLabel {
+  const kind = kindOf(tool.name);
+  const verb = tool.status === "running" ? kind.now : kind.past;
+  const args = parseArgs(tool.arguments);
+  const summary = toolSummary(tool.name, tool.arguments);
+  switch (tool.name) {
+    case "shell":
+      return { verb, detail: "", chip: summary };
+    case "read":
+    case "edit":
+      return { verb, detail: relPath(summary), chip: "" };
+    case "write": {
+      const result = parseArgs(tool.result);
+      const created = tool.status === "ok" && result.created === true;
+      return { verb: created ? "Created" : verb, detail: relPath(summary), chip: "" };
+    }
+    case "ask":
+      return { verb, detail: summary, chip: "" };
+    case "todo": {
+      const todos = Array.isArray(args.todos) ? args.todos.length : 0;
+      return { verb, detail: todos ? `the plan · ${todos} ${todos === 1 ? "item" : "items"}` : "the plan", chip: "" };
+    }
+    default:
+      return { verb, detail: tool.name, chip: summary && summary !== tool.name ? summary : "" };
+  }
+}
+
+// runLabel summarizes a run of calls: "Ran 2 commands, read 1 file".
+// A kind with a call still in flight reads in the present tense.
+export function runLabel(tools: ToolInfo[]): string {
+  const order: string[] = [];
+  const groups = new Map<string, { kind: ToolKind; n: number; running: boolean }>();
+  for (const tool of tools) {
+    const kind = kindOf(tool.name);
+    const key = KINDS[tool.name] ? tool.name : "*";
+    let g = groups.get(key);
+    if (!g) {
+      g = { kind, n: 0, running: false };
+      groups.set(key, g);
+      order.push(key);
+    }
+    g.n += 1;
+    g.running ||= tool.status === "running";
+  }
+  return order
+    .map((key, i) => {
+      const g = groups.get(key)!;
+      const verb = g.running ? g.kind.now : g.kind.past;
+      return `${i === 0 ? verb : verb.toLowerCase()} ${g.kind.noun(g.n)}`;
+    })
+    .join(", ");
+}
+
+// toolIcon is the glyph for a kind of call.
+export function toolIcon(name: string): IconName {
+  return kindOf(name).icon;
+}
+
+// paintToolHead redraws the one-line head of a call row in place.
+function paintToolHead(row: HTMLElement, head: HTMLElement, tool: ToolInfo): void {
+  const label = toolLabel(tool);
+  row.dataset.status = tool.status;
+  const ico = head.querySelector<HTMLElement>(".tool-ico")!;
+  ico.innerHTML = tool.status === "running" ? '<span class="tool-spin"></span>' : icon(toolIcon(tool.name), "h-4 w-4");
+  head.querySelector(".tool-verb")!.textContent = label.verb;
+  const detail = head.querySelector<HTMLElement>(".tool-detail")!;
+  detail.textContent = label.detail;
+  detail.hidden = !label.detail;
+  detail.title = label.detail ? toolSummary(tool.name, tool.arguments) : "";
+  const chip = head.querySelector<HTMLElement>(".tool-chip")!;
+  chip.textContent = label.chip;
+  chip.hidden = !label.chip;
+  chip.title = label.chip;
+  const fail = head.querySelector<HTMLElement>(".tool-fail")!;
+  fail.textContent = tool.status === "failed" ? "failed" : "";
+  fail.hidden = tool.status !== "failed";
+}
+
+// createToolActivity builds one call row: icon, verb, detail and chip on
+// a single line; clicking it reveals the input/output or the file view.
 export function createToolActivity(tool: ToolInfo): ToolView {
   let current = tool;
 
   const box = document.createElement("div");
-  box.className =
-    "tool-card overflow-hidden rounded-lg border border-slate-200/70 bg-slate-50/70 text-[11px] dark:border-slate-700/70 dark:bg-slate-800/40";
+  box.className = "tool-row";
   box.setAttribute("data-tool", current.name);
 
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.className =
-    "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50";
+  toggle.className = "tool-row-head";
   toggle.setAttribute("aria-expanded", "false");
-
-  const chevron = document.createElement("span");
-  chevron.className = "shrink-0";
-  chevron.innerHTML = icon("chevron-right", "h-3 w-3");
-
-  const name = document.createElement("span");
-  name.className = "shrink-0 font-semibold text-slate-600 dark:text-slate-300";
-  name.textContent = current.name;
-
-  const separator = document.createElement("span");
-  separator.className = "shrink-0 text-slate-300 dark:text-slate-600";
-  separator.textContent = "›";
-
-  const summary = document.createElement("span");
-  summary.className = "min-w-0 flex-1 truncate font-mono text-slate-400 dark:text-slate-500";
-  summary.textContent = toolSummary(current.name, current.arguments);
-
-  const statusEl = document.createElement("span");
-  paintToolStatus(statusEl, current.status);
-
-  toggle.append(chevron, name, separator, summary, statusEl);
+  toggle.innerHTML =
+    '<span class="tool-ico"></span><span class="tool-verb"></span><span class="tool-detail"></span>' +
+    '<code class="tool-chip"></code><span class="tool-fail"></span>';
+  paintToolHead(box, toggle, current);
 
   const details = document.createElement("div");
-  details.className = "hidden border-t border-slate-200/70 px-2.5 py-2 dark:border-slate-700/70";
+  details.className = "tool-body hidden";
 
-  let filled = false;
-  let richWrap: HTMLElement | null = null;
-  // renderRich rebuilds the file view or diff from the latest tool state.
-  // It runs on first expand and on settled updates only: while the card is
-  // collapsed there is nothing to paint, and while running only the status
-  // line moves (recomputing a diff per tick is pure waste).
-  const renderRich = () => {
-    if (!richWrap || details.classList.contains("hidden")) {
+  // render rebuilds the body from the latest state, only while open:
+  // a collapsed row has nothing to paint.
+  const render = () => {
+    if (details.classList.contains("hidden")) {
       return;
     }
-    const html =
-      current.name === "write"
-        ? richWriteHtml(current)
-        : current.name === "edit"
-          ? richEditHtml(current)
-          : null;
-    richWrap.innerHTML = html ?? "";
-    richWrap.classList.toggle("hidden", html === null);
-  };
-  let inputPre: HTMLPreElement | null = null;
-  let outputPre: HTMLPreElement | null = null;
-
-  const outputText = () =>
-    current.status === "running" ? "running…" : prettyJson(current.result) || "(empty)";
-
-  // capText keeps multi-KB tool dumps out of the live DOM; the full text
-  // stays in the session transcript on disk.
-  const capText = (text: string): string =>
-    text.length > 8000
-      ? `${text.slice(0, 8000)}\n…(truncated, ${text.length - 8000} chars kept in history)`
-      : text;
-
-  const fill = () => {
-    if (filled) {
-      return;
-    }
-    filled = true;
-
-    const section = (label: string) => {
-      const wrapper = document.createElement("div");
-
-      const heading = document.createElement("div");
-      heading.className =
-        "mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400";
-      heading.textContent = label;
-
-      const pre = document.createElement("pre");
-      pre.className =
-        "overflow-auto rounded bg-white p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300";
-
-      wrapper.append(heading, pre);
-      return { wrapper, pre };
-    };
-
-    const input = section("Input");
-    input.wrapper.classList.add("mb-2");
-    input.pre.classList.add("max-h-56");
-    input.pre.textContent = capText(prettyJson(current.arguments) || "(none)");
-    inputPre = input.pre;
-
-    const output = section("Output");
-    output.pre.classList.add("max-h-72");
-    output.pre.textContent = capText(outputText());
-    outputPre = output.pre;
-
-    details.append(input.wrapper, output.wrapper);
-    if (current.name === "write" || current.name === "edit") {
-      input.wrapper.remove();
-      output.wrapper.remove();
-    }
-    richWrap = document.createElement("div");
-    richWrap.className = "mb-2";
-    details.prepend(richWrap);
-    renderRich();
+    const rich =
+      current.name === "write" ? richWriteHtml(current) : current.name === "edit" ? richEditHtml(current) : null;
+    details.innerHTML = toolBodyHtml(current, rich);
   };
 
   toggle.addEventListener("click", () => {
-    fill();
     const open = !details.classList.toggle("hidden");
     toggle.setAttribute("aria-expanded", String(open));
-    chevron.classList.toggle("rotate-90", open);
-    if (open) {
-      renderRich();
-    }
+    render();
   });
 
   box.append(toggle, details);
 
-  // update refreshes the card in place. Heavy text is capped (see capText).
   const update = (next: ToolInfo) => {
     current = next;
-
-    name.textContent = current.name;
-    const short = toolSummary(current.name, current.arguments);
-    if (short) {
-      summary.textContent = short;
-    }
-    paintToolStatus(statusEl, current.status);
-
-    if (inputPre) {
-      inputPre.textContent = capText(prettyJson(current.arguments) || "(none)");
-    }
-    if (outputPre) {
-      outputPre.textContent = capText(outputText());
-    }
-    renderRich();
+    paintToolHead(box, toggle, current);
+    render();
   };
 
   return { el: box, update };

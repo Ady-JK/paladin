@@ -243,6 +243,12 @@ export const settingsPaneAnalyticsEl = $("#settingsPaneAnalytics");
 // analyticsBodyEl is a const in this module.
 // It hosts the rendered fleet-wide dashboard.
 export const analyticsBodyEl = $("#analyticsBody");
+// Appearance (motion level) and Resources (CPU/RAM) settings panes.
+export const settingsNavAppearanceEl = $<HTMLButtonElement>("#settingsNavAppearance");
+export const settingsPaneAppearanceEl = $("#settingsPaneAppearance");
+export const settingsNavResourcesEl = $<HTMLButtonElement>("#settingsNavResources");
+export const settingsPaneResourcesEl = $("#settingsPaneResources");
+export const motionOptionsEl = $("#motionOptions");
 // settingsProviderListEl is a const in this module.
 // It supports the desktop app frontend.
 export const settingsProviderListEl = $("#settingsProviderList");

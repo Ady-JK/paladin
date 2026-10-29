@@ -76,9 +76,12 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 // HistoryMessage is the client-facing history row: tool rows link back
 // to their call; reminders keep their job link instead.
 type HistoryMessage struct {
-	Arguments  *string `json:"arguments,omitempty"`
-	Content    string  `json:"content"`
-	CreatedAt  int64   `json:"createdAt"`
+	Arguments *string `json:"arguments,omitempty"`
+	Content   string  `json:"content"`
+	CreatedAt int64   `json:"createdAt"`
+	// Kind tags special rows; "compaction" is a context-compaction
+	// divider whose Content is the summary.
+	Kind       *string `json:"kind,omitempty"`
 	Name       *string `json:"name,omitempty"`
 	Role       string  `json:"role"`
 	Status     *string `json:"status,omitempty"`
@@ -105,6 +108,17 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 	}
 	var out []HistoryMessage
 	for _, msg := range msgs {
+		if msg.Replay {
+			continue
+		}
+		if msg.IsCompaction() {
+			kind := "compaction"
+			out = append(out, HistoryMessage{
+				Role: "system", Content: msg.Content,
+				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind,
+			})
+			continue
+		}
 		if msg.Role == transcript.RoleTool {
 			args := ""
 			if msg.ToolCallID != nil {

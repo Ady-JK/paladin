@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/procstat"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
@@ -98,6 +99,10 @@ type shellJobs struct {
 	changed *broadcaster
 }
 
+// procTracker attributes shell children to their session for the
+// resources RPC; tests swap it.
+var procTracker = procstat.Default
+
 type ShellTool struct {
 	inner *shellJobs
 }
@@ -116,14 +121,14 @@ func shellTimeoutMs(ms int64) (time.Duration, error) {
 	return time.Duration(ms) * time.Millisecond, nil
 }
 
-func (s *ShellTool) runSync(cmd, dir string, limit time.Duration, cancel context.Context) (string, error) {
+func (s *ShellTool) runSync(cmd, dir, owner string, limit time.Duration, cancel context.Context) (string, error) {
 	type verdict struct {
 		out string
 		err *ToolError
 	}
 	ch := make(chan verdict, 1)
 	go func() {
-		out, terr := runSyncInner(cmd, dir, limit, cancel)
+		out, terr := runSyncInner(cmd, dir, owner, limit, cancel)
 		ch <- verdict{out: out, err: terr}
 	}()
 	v := <-ch
@@ -133,7 +138,7 @@ func (s *ShellTool) runSync(cmd, dir string, limit time.Duration, cancel context
 	return v.out, nil
 }
 
-func (s *ShellTool) runBackground(cmd, dir string, limit time.Duration, notify bool, sessionDir string) (string, error) {
+func (s *ShellTool) runBackground(cmd, dir, owner string, limit time.Duration, notify bool, sessionDir string) (string, error) {
 	if sessionDir == "" {
 		return "", ArgsError("shell: no session to keep the background job in")
 	}
@@ -157,6 +162,7 @@ func (s *ShellTool) runBackground(cmd, dir string, limit time.Duration, notify b
 	if child.Process != nil {
 		childPID = child.Process.Pid
 	}
+	untrack := procTracker.Track(owner, childPID)
 	s.inner.mu.Lock()
 	s.inner.byID[id] = &job{
 		id: id, log: logPath, status: JobRunning,
@@ -197,6 +203,7 @@ func (s *ShellTool) runBackground(cmd, dir string, limit time.Duration, notify b
 	idClone := id
 	go func() {
 		err := child.Wait()
+		untrack()
 		var code *int
 		if err == nil {
 			z := 0
@@ -391,7 +398,7 @@ func (s *ShellTool) WaitPendingNotify(owner string, cancel context.Context) bool
 	}
 }
 
-func runSyncInner(cmdStr, dir string, limit time.Duration, cancel context.Context) (string, *ToolError) {
+func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context.Context) (string, *ToolError) {
 	child, outR, errR, err := spawnPiped(cmdStr, dir)
 	if err != nil {
 		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
@@ -400,6 +407,7 @@ func runSyncInner(cmdStr, dir string, limit time.Duration, cancel context.Contex
 	if child.Process != nil {
 		pid = child.Process.Pid
 	}
+	defer procTracker.Track(owner, pid)()
 	ioDone := make(chan []byte, 1)
 	go func() {
 		var combined []byte
@@ -631,9 +639,9 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(args.Cmd, dir, limit, args.Notify, ctx.SessionDir)
+			return s.runBackground(args.Cmd, dir, ctx.SessionID, limit, args.Notify, ctx.SessionDir)
 		}
-		return s.runSync(args.Cmd, dir, limit, ctx.Cancel)
+		return s.runSync(args.Cmd, dir, ctx.SessionID, limit, ctx.Cancel)
 	case ShellStatus:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")

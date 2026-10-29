@@ -158,7 +158,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return ToolResponse{}, p.statusError("anthropic", resp.StatusCode, string(data))
+		return ToolResponse{}, statusErrorFrom(p.name, "anthropic", resp, string(data))
 	}
 	var wire struct {
 		Content []struct {
@@ -238,7 +238,7 @@ type anthropicCallAcc struct {
 
 func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
 	parent := ctx
-	tctx, cancel := context.WithTimeout(ctx, streamTimeout)
+	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
 	body := toAnthropicRequest(system, messages, tools)
 	body.Model = p.model
@@ -257,12 +257,15 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 		if parent.Err() != nil {
 			return CancelledError()
 		}
+		if idle.Fired() {
+			return idleError(p.name, "anthropic")
+		}
 		return RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(resp.Body)
-		return p.statusError("anthropic", resp.StatusCode, string(data))
+		return statusErrorFrom(p.name, "anthropic", resp, string(data))
 	}
 
 	send := func(c Chunk) error {
@@ -280,6 +283,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
+		idle.touch()
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {
 			continue
@@ -379,6 +383,9 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 			return CancelledError()
 		default:
 		}
+	}
+	if parent.Err() == nil && idle.Fired() {
+		return idleError(p.name, "anthropic")
 	}
 	if err := scanner.Err(); err != nil {
 		if parent.Err() != nil {

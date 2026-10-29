@@ -5,6 +5,8 @@
 const CLOSE_MS = 160;
 const MENU_CLOSE_MS = 130;
 
+import { motionMs } from "./motion";
+
 const timers = new WeakMap<HTMLElement, number>();
 
 function clearTimer(el: HTMLElement): void {
@@ -36,6 +38,12 @@ export function closeModal(el: HTMLElement): void {
   }
   clearTimer(el);
   el.classList.remove("is-open");
+  const ms = motionMs(CLOSE_MS);
+  if (ms === 0) {
+    el.classList.add("hidden");
+    el.classList.remove("flex", "is-closing");
+    return;
+  }
   el.classList.add("is-closing");
   timers.set(
     el,
@@ -43,7 +51,7 @@ export function closeModal(el: HTMLElement): void {
       el.classList.add("hidden");
       el.classList.remove("flex", "is-closing");
       timers.delete(el);
-    }, CLOSE_MS),
+    }, ms),
   );
 }
 
@@ -71,12 +79,17 @@ export function closeMenu(el: HTMLElement): void {
   }
   clearTimer(el);
   el.classList.remove("is-open");
+  const ms = motionMs(MENU_CLOSE_MS);
+  if (ms === 0) {
+    el.classList.add("hidden");
+    return;
+  }
   timers.set(
     el,
     window.setTimeout(() => {
       el.classList.add("hidden");
       timers.delete(el);
-    }, MENU_CLOSE_MS),
+    }, ms),
   );
 }
 

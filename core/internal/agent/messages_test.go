@@ -79,7 +79,8 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 	msgs = LlmMessages([]transcript.Message{
 		{Role: transcript.RoleAssistant, Content: "", CreatedAt: now, ToolCalls: &stored},
 	}, true)
-	if len(msgs) != 1 || len(msgs[0].ToolCalls) != 1 {
+	// The unanswered call is settled with a synthetic aborted result.
+	if len(msgs) != 2 || len(msgs[0].ToolCalls) != 1 || msgs[1].Role != "tool" || msgs[1].Content != AbortedToolContent {
 		t.Fatalf("got %+v", msgs)
 	}
 	if msgs[0].ToolCalls[0].Signature != "sig-1" {
@@ -99,7 +100,7 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 		{Role: transcript.RoleAssistant, CreatedAt: now, ToolCalls: &[]transcript.ToolCall{{ID: "c1", Name: "shell", Arguments: "{}"}}},
 		{Role: transcript.RoleTool, Content: "bg done", CreatedAt: now, ToolCallID: &nid, Name: &nname},
 	}, true)
-	if len(msgs) != 2 || msgs[1].Role != "user" {
+	if len(msgs) != 3 || msgs[1].Role != "tool" || msgs[2].Role != "user" {
 		t.Fatalf("got %+v", msgs)
 	}
 	// System rows are not forwarded to the model.

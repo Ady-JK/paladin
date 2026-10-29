@@ -76,14 +76,33 @@ func cleanPath(path string) string {
 	return result
 }
 
+// escapes reports whether cleaned lies outside the workspace. Both the
+// lexical root and its symlink-resolved form count as the workspace:
+// on macOS /tmp and /var resolve to /private/..., and a path spelled
+// either way must land inside.
 func escapes(cleaned, workspace string) bool {
-	root := realPath(workspace)
 	target := cleanPath(cleaned)
+	lexical := workspace
+	if filepath.IsAbs(lexical) {
+		lexical = cleanPath(lexical)
+	}
+	for _, root := range []string{lexical, realPath(workspace)} {
+		if within(target, root) {
+			return false
+		}
+	}
+	return true
+}
+
+func within(target, root string) bool {
+	if root == "" {
+		return false
+	}
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
-		return true
+		return false
 	}
-	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func resolveExisting(cleaned string) (string, bool) {
@@ -119,6 +138,9 @@ func realPath(path string) string {
 		if cwd, err := os.Getwd(); err == nil {
 			abs = filepath.Join(cwd, abs)
 		}
+	}
+	if real, ok := resolveExisting(cleanPath(abs)); ok {
+		return real
 	}
 	return cleanPath(abs)
 }

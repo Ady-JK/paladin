@@ -107,29 +107,6 @@ func TestRunNonRetryableErrorFailsFast(t *testing.T) {
 	}
 }
 
-func TestRunRetryBudgetExhausts(t *testing.T) {
-	old := retryUnit
-	retryUnit = time.Millisecond
-	defer func() { retryUnit = old }()
-	prov := &mockProvider{
-		streams: []streamScript{
-			{err: inference.RequestError("boom: stream: status 503")},
-			{err: inference.RequestError("boom: stream: status 503")},
-			{err: inference.RequestError("boom: stream: status 503")},
-			{err: inference.RequestError("boom: stream: status 503")},
-			{err: inference.RequestError("boom: stream: status 503")},
-		},
-	}
-	a, _, _, done := testAgent(t, prov, 10)
-	defer close(done)
-	if _, err := a.Run(); err == nil {
-		t.Fatal("persistent 503 ended the turn silently")
-	}
-	if prov.calls != 4 {
-		t.Fatalf("expected 1 + 3 retries, got %d stream calls", prov.calls)
-	}
-}
-
 func TestRunToolRound(t *testing.T) {
 	dir := t.TempDir()
 	wsFile := dir + "/note.txt"

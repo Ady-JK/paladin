@@ -20,7 +20,7 @@ Electron main spawns it with piped stdio:
 |---|---|---|
 | `ping` | `{}` | `{"ok":true}` |
 | `list_providers` | `{}` | `ProviderInfo[]` |
-| `refresh_providers` | `{}` | `bool` |
+| `refresh_providers` | `{name?}` | no name: `bool` (background refresh-all started); `{name}`: `RefreshResult` (`name,count,models,error?`) for that provider only. Catalogs are never fetched on startup or on add/update — only on this explicit call |
 | `set_default_provider` | `{name}` | `ProviderInfo[]` |
 | `add_provider` | `{name,apiUrl,apiKey,apiType}` | `ProviderInfo` |
 | `update_provider` | `{name,apiUrl,apiKey,apiType}` | `ProviderInfo` |
@@ -43,7 +43,36 @@ Electron main spawns it with piped stdio:
 | `list_skills` | `{cwd?}` | `SkillEntry[]` (name, description, source, path; content only at turn time) |
 | `answer_ask` | `{sessionId,callId,answers:[{question,answer}]}` | `bool` (false: nothing waiting) |
 | `cancel_ask` | `{sessionId,callId}` | `bool` |
-| `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?}` | streaming (below) |
+| `chat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?}` | streaming (below); answered when the turn ends |
+| `submit_chat` | same as `chat` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events |
+| `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
+| `resources` | `{}` | `{at, supported, self:{cpu,rss,procs}, sessions:{[id]:{cpu,rss,procs}}}`: the core process plus each session's running shell process trees (one `ps` sample, cached 1.5s; `cpu` is % of one core, `rss` bytes). `supported:false` off unix |
+| `attach` | `{sessionId,cwd?}` | `{history: HistoryMessage[], turn: TurnInfo\|null, events: Event[], queued: TurnInfo[], seq}` |
+| `cancel_turn` | `{turnId}` | `bool`: drops a queued turn (or stops it if already running) |
+
+### Turns run in the background
+
+Every turn runs in the sidecar's turn hub, independent of any client
+request: different sessions run concurrently (at most
+`max_concurrent_turns` from `config/settings.json`, default 4, max 16),
+and a message sent to a session that is already busy queues behind it
+(FIFO). Extra turns beyond the cap wait in the same queue. `stop_chat`
+stops the running turn **and** drops the session's queued turns;
+`delete_session` on a busy session stops it and waits for it to land
+first. Closing stdin — or SIGTERM/SIGINT — stops every turn, persists
+it, then exits.
+
+`TurnInfo` is `{turnId, sessionId, cwd, message, display?, skill?,
+resume?, state: queued|running|done, persisted?, reply?, stopped?,
+needsContinue?, cancelled?, error?, queuedAt, startedAt?, endedAt?}`.
+
+`attach` lets a client (re)join a session at any time — after a
+renderer reload, or when switching to a session that is working in the
+background. It returns the persisted history and the live turn's
+events so far (consecutive deltas merged, each tool reduced to its
+latest state), snapshotted atomically with `seq`. Apply the snapshot,
+then apply live events whose `seq` is greater. `turn.persisted: true`
+means the transcript already holds the turn, so `events` is empty.
 
 The prompt file is authoritative: every turn uses it unless the
 `chat` call carries an explicit `systemPrompt` override. Tool
@@ -62,6 +91,19 @@ Unary:
 {"id": 1, "ok": false, "error": "..."}
 ```
 
+Events are broadcast for every turn, whoever submitted it. Each carries
+`event`, a global strictly increasing `seq`, `sessionId`, `turnId`, and
+`streamId` (the `chat` request id; absent for `submit_chat`):
+
+```json
+{"event": "turn/queued", "seq": 4, "sessionId": "...", "turnId": "t1-3", "turn": {...TurnInfo}}
+{"event": "turn/start",  "seq": 9, "sessionId": "...", "turnId": "t1-3", "turn": {...TurnInfo}}
+{"event": "turn/done",   "seq": 31, "sessionId": "...", "turnId": "t1-3", "turn": {...TurnInfo, "state": "done"}}
+```
+
+`turn/done` fires for finished, stopped, failed (`error`) and dropped
+(`cancelled`) turns; the transcript is already written when it arrives.
+
 Streaming (`chat` with `id = streamId`):
 
 ```json
@@ -69,6 +111,28 @@ Streaming (`chat` with `id = streamId`):
 {"event": "chat/tool", "streamId": "s2", "sessionId": "...", "tool": {...}}
 {"id": "s2", "ok": true, "result": {"sessionId": "...", "reply": "...", "stopped": false, "needsContinue": false}}
 ```
+
+More streaming events:
+
+```json
+{"event": "chat/retry", "streamId": "s2", "sessionId": "...", "retry": {"attempt": 1, "max": 6, "delayMs": 2000, "reason": "status 503: overloaded"}}
+{"event": "chat/compact", "streamId": "s2", "sessionId": "...", "compaction": {"phase": "start", "reason": "auto", "tokensBefore": 170000}}
+{"event": "chat/compact", "streamId": "s2", "sessionId": "...", "compaction": {"phase": "done", "reason": "auto", "tokensBefore": 170000, "tokensAfter": 30000}}
+```
+
+- `chat/retry`: a round failed with a transient provider error (429,
+  5xx, timeout, stalled stream) before producing output and runs again
+  after `delayMs` (exponential backoff, or the server's Retry-After).
+  Retries don't consume rounds; any progress resets the budget.
+- `chat/compact`: context compaction. `reason` is `auto` (the next
+  request would fill 85% of a known context window) or `overflow` (the
+  provider rejected the prompt as too long). `phase` is `start`, then
+  `done` or `failed` (with `error`). The older conversation is replaced
+  by a model-written summary; the transcript keeps everything, and
+  `session_history` shows a `{"role": "system", "kind": "compaction",
+  "content": "<summary>"}` divider where it happened.
+- Tool calls cut short by stop or a crash settle as `failed` `chat/tool`
+  events with an `aborted` result, so no row is left spinning.
 
 Blocking tools: `ask` registers a pending call and blocks the turn
 until the UI resolves it. A running `ask` tool event opens the
@@ -91,8 +155,19 @@ never returns content.
 
 - `main.ts` keeps a `pending` map `id -> {resolve, reject}`.
 - Unary `agent:invoke` resolves on the matching `{id}` line.
-- `agent:chat` returns the `streamId` immediately; deltas forward via
-  `agent:chat-event`, completion via `agent:chat-done` to the sender.
+- Every `chat/*` and `turn/*` event is forwarded to the renderer on
+  `agent:event`; the renderer routes it by `sessionId`, so any number
+  of sessions stream at once and a session keeps updating while it is
+  not shown. The renderer submits with `submit_chat` and re-joins
+  sessions with `attach`.
+- The sidecar outlives the window: on macOS closing the window keeps
+  the app (and running turns) alive in the dock, and reopening
+  re-attaches. When the window is unfocused or closed, `turn/done` and
+  a running `ask` raise a native notification; clicking it opens that
+  session (`app:open-session`, or `app:takePendingOpen` after a fresh
+  window boots).
+- Quitting closes the sidecar's stdin and waits up to 8s for it to
+  persist and exit before killing it.
 - WebContentsViews (`views:*` IPC) are independent of the agent: one
   shared persistent partition (`persist:paladin-sites`) across chat
   pages so Google SSO cookies carry over, a single live guest (showing

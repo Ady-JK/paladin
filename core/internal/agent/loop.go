@@ -6,41 +6,19 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
-
-// retryUnit is the backoff quantum (2s, 4s, 8s across the 3 attempts).
-// Tests shrink it so retry coverage stays fast.
-var retryUnit = time.Second
-
-// retryRound sleeps with backoff and reports whether the failed round
-// should run again: only for retryable provider errors (rate limits,
-// 5xx, transport blips) with zero round progress, bounded to 3 attempts
-// per turn. Any round progress resets the budget. A partially streamed
-// round never retries — re-issuing it would duplicate visible output.
-func (a *Agent) retryRound(err error, noProgress bool) bool {
-	if !noProgress || !inference.IsRetryable(err) || a.retries >= 3 {
-		return false
-	}
-	wait := time.Duration(2<<a.retries) * retryUnit
-	a.retries++
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return true
-	case <-a.ctx.Done():
-		return false
-	case <-a.done:
-		return false
-	}
-}
 
 func (a *Agent) runLoop() error {
 	if len(a.toolDefs) == 0 {
@@ -54,11 +32,19 @@ func (a *Agent) runLoop() error {
 		if err := a.drainNotifications(); err != nil {
 			return err
 		}
+		a.settleNotices(nil)
+		a.maybeCompact()
+		if a.stopRequested() {
+			return turnStop{}
+		}
+		a.sentLen = len(a.messages)
 		prx := make(chan inference.Chunk, 64)
 		providerErr := make(chan error, 1)
 		go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
 			defer close(prx)
-			providerErr <- a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
+			providerErr <- guardProvider(func() error {
+				return a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
+			})
 		}(append([]inference.LlmMessage(nil), a.messages...), append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
 		var roundText strings.Builder
 		var calls []inference.ToolCall
@@ -83,6 +69,7 @@ func (a *Agent) runLoop() error {
 					if name == "" {
 						name = "tool"
 					}
+					a.noteNotice(notice.ID, name)
 					if err := a.emit(ChatChunk{Tool: &ToolActivity{
 						ID: notice.ID, Name: name, Arguments: "{}",
 						Status: session.ToolRunning,
@@ -123,19 +110,19 @@ func (a *Agent) runLoop() error {
 			if inference.IsCancelled(taskErr) || a.stopRequested() {
 				return a.stopWithPartial(roundText.String())
 			}
-			if a.retryRound(taskErr, roundText.Len() == 0 && len(calls) == 0) {
+			if a.recoverRound(taskErr, roundText.Len() == 0 && len(calls) == 0) {
 				continue
 			}
-			return turnFailed{"provider unavailable: " + taskErr.Error()}
+			return roundFailure(taskErr)
 		}
 		if streamErr != nil {
 			if *streamErr == "client went away" {
 				return a.stopWithPartial(roundText.String())
 			}
-			if a.retryRound(errors.New(*streamErr), roundText.Len() == 0 && len(calls) == 0) {
+			if a.recoverRound(errors.New(*streamErr), roundText.Len() == 0 && len(calls) == 0) {
 				continue
 			}
-			return turnFailed{"provider unavailable: " + *streamErr}
+			return roundFailure(errors.New(*streamErr))
 		}
 		if a.stopRequested() {
 			return a.stopWithPartial(roundText.String())
@@ -160,10 +147,10 @@ func (a *Agent) runLoop() error {
 				if a.stopRequested() {
 					return a.stopWithPartial(roundText.String())
 				}
-				if a.retryRound(err, true) {
+				if a.recoverRound(err, true) {
 					continue
 				}
-				return turnFailed{"provider unavailable: " + err.Error()}
+				return roundFailure(err)
 			}
 			roundText.WriteString(resp.Content)
 			a.appendDelta(resp.Content)
@@ -186,7 +173,7 @@ func (a *Agent) runLoop() error {
 		if len(calls) == 0 {
 			if roundText.Len() > 0 {
 				a.emptyRounds = 0
-				a.retries = 0
+				a.retries, a.timeoutRetries = 0, 0
 				a.records = append(a.records, transcript.Message{
 					Role: transcript.RoleAssistant, Content: roundText.String(),
 					CreatedAt: time.Now().UTC(),
@@ -214,7 +201,7 @@ func (a *Agent) runLoop() error {
 			return nil
 		}
 		a.emptyRounds = 0
-		a.retries = 0
+		a.retries, a.timeoutRetries = 0, 0
 		text := roundText.String()
 		a.appendAssistant(text, calls)
 		if err := a.runToolsStreaming(calls); err != nil {
@@ -236,40 +223,158 @@ func (a *Agent) stopWithPartial(roundText string) error {
 }
 
 func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
-	for _, call := range calls {
-		call := call
+	a.settleNotices(calls)
+	for i, call := range calls {
 		if err := a.emit(ChatChunk{Tool: &ToolActivity{
 			ID: call.ID, Name: call.Name, Arguments: call.Arguments,
 			Status: session.ToolRunning,
 		}}); err != nil {
+			a.settleAborted(calls[i:])
 			return turnStop{}
 		}
 	}
-	for _, call := range calls {
-		call := call
+	for i := 0; i < len(calls); {
 		if a.stopRequested() {
+			a.settleAborted(calls[i:])
 			return turnStop{}
 		}
-		result := a.tools.Call(&tools.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments}, a.toolCtx)
-		a.armNotify(&call, &result)
-		status := session.ToolOK
-		if result.IsError {
-			status = session.ToolFailed
+		j := a.batchEnd(calls, i)
+		results := a.execBatch(calls[i:j])
+		for k := i; k < j; k++ {
+			call, result := calls[k], results[k-i]
+			a.armNotify(&call, &result)
+			a.appendToolResult(&call, &result)
+			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
+				a.settleAborted(calls[k+1:])
+				return turnStop{}
+			}
 		}
-		if err := a.emit(ChatChunk{Tool: &ToolActivity{
-			ID: result.CallID, Name: result.Name, Arguments: call.Arguments,
-			Result: result.Content, Status: status,
-		}}); err != nil {
-			return turnStop{}
-		}
-		inCall := inference.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments}
-		a.appendToolResult(&inCall, &result)
+		i = j
 	}
 	return nil
 }
 
+// maxParallelTools caps one concurrent batch.
+const maxParallelTools = 8
+
+// batchEnd returns the end of the batch starting at i: a run of
+// consecutive parallel-safe calls, or the single exclusive call at i.
+// Exclusive calls are barriers, so the model's call order is preserved
+// for anything with side effects.
+func (a *Agent) batchEnd(calls []inference.ToolCall, i int) int {
+	j := i + 1
+	if !a.tools.ParallelSafe(calls[i].Name) {
+		return j
+	}
+	for j < len(calls) && j-i < maxParallelTools && a.tools.ParallelSafe(calls[j].Name) {
+		j++
+	}
+	return j
+}
+
+// execBatch runs one batch and returns results in call order. Doom
+// checks stay sequential so their counting matches the call order.
+func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
+	results := make([]tools.ToolResult, len(batch))
+	run := make([]bool, len(batch))
+	for i, call := range batch {
+		if refusal := a.doom.check(call.Name, call.Arguments); refusal != "" {
+			results[i] = tools.ToolResult{CallID: call.ID, Name: call.Name, IsError: true,
+				Content: string(jsonx.MustMarshal(map[string]string{"error": refusal}))}
+			continue
+		}
+		run[i] = true
+	}
+	exec := func(i int) {
+		c := batch[i]
+		results[i] = a.tools.Call(&tools.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments}, a.toolCtx)
+	}
+	if len(batch) == 1 {
+		if run[0] {
+			exec(0)
+		}
+		return results
+	}
+	var wg sync.WaitGroup
+	for i := range batch {
+		if run[i] {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				exec(i)
+			}(i)
+		}
+	}
+	wg.Wait()
+	return results
+}
+
+// settleAborted answers calls that will never run so the transcript
+// keeps every assistant tool call paired with a result. The UI rows are
+// settled best-effort; the persisted records are what matter.
+func (a *Agent) settleAborted(calls []inference.ToolCall) {
+	for _, call := range calls {
+		call := call
+		result := tools.ToolResult{CallID: call.ID, Name: call.Name, Content: AbortedToolContent, IsError: true}
+		a.appendToolResult(&call, &result)
+		select {
+		case <-a.done:
+		default:
+			_ = a.emit(ChatChunk{Tool: toolActivity(&call, &result)})
+		}
+	}
+}
+
+// NoticeInterruptedContent is the row result for a tool call the model
+// announced but never finished sending (stop, failure or retry).
+const NoticeInterruptedContent = `{"error":"interrupted: the model's tool call never completed, so it did not run"}`
+
+func (a *Agent) noteNotice(id, name string) {
+	if id == "" {
+		return
+	}
+	for _, n := range a.noticed {
+		if n.ID == id {
+			return
+		}
+	}
+	a.noticed = append(a.noticed, inference.ToolCall{ID: id, Name: name})
+}
+
+// settleNotices fails every announced row not among calls (the round's
+// final tool calls, which settle on their own) and clears the list.
+func (a *Agent) settleNotices(calls []inference.ToolCall) {
+	pending := a.noticed
+	a.noticed = nil
+	for _, n := range pending {
+		if blockHas(calls, n.ID) {
+			continue
+		}
+		select {
+		case <-a.done:
+			return
+		default:
+		}
+		_ = a.emit(ChatChunk{Tool: &ToolActivity{
+			ID: n.ID, Name: n.Name, Arguments: "{}",
+			Result: NoticeInterruptedContent, Status: session.ToolFailed,
+		}})
+	}
+}
+
+func toolActivity(call *inference.ToolCall, result *tools.ToolResult) *ToolActivity {
+	status := session.ToolOK
+	if result.IsError {
+		status = session.ToolFailed
+	}
+	return &ToolActivity{
+		ID: call.ID, Name: call.Name, Arguments: call.Arguments,
+		Result: result.Content, Status: status,
+	}
+}
+
 func (a *Agent) armNotify(call *inference.ToolCall, result *tools.ToolResult) {
-	if a.shell == nil || call.Name != "shell" || result.IsError {
+	if a.shell == nil || result.Name != "shell" || result.IsError {
 		return
 	}
 	var args struct {
@@ -325,7 +430,10 @@ func (a *Agent) runPlain() error {
 	providerErr := make(chan error, 1)
 	go func() {
 		defer close(prx)
-		providerErr <- a.provider.StreamTools(a.ctx, a.system, append([]inference.LlmMessage(nil), a.messages...), nil, a.session.Meta.SessionID, prx, a.done)
+		msgs := append([]inference.LlmMessage(nil), a.messages...)
+		providerErr <- guardProvider(func() error {
+			return a.provider.StreamTools(a.ctx, a.system, msgs, nil, a.session.Meta.SessionID, prx, a.done)
+		})
 	}()
 	streamed := false
 loop:
@@ -401,4 +509,17 @@ loop:
 	}
 	a.finish(phaseDone)
 	return nil
+}
+
+// guardProvider runs a provider call on its own goroutine's behalf: a
+// panic there would bypass every recover and kill the sidecar, so it
+// becomes a non-retryable provider error instead.
+func guardProvider(call func() error) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			fmt.Fprintf(os.Stderr, "provider panicked: %v\n%s", p, debug.Stack())
+			err = fmt.Errorf("provider crashed: %v", p)
+		}
+	}()
+	return call()
 }

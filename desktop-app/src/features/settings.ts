@@ -16,6 +16,11 @@ import {
   settingsConnLabelEl,
   settingsModalEl,
   settingsNavAnalyticsEl,
+  settingsNavAppearanceEl,
+  settingsNavResourcesEl,
+  settingsPaneAppearanceEl,
+  settingsPaneResourcesEl,
+  motionOptionsEl,
   settingsNavConnectionEl,
   settingsNavPromptEl,
   settingsNavProvidersEl,
@@ -27,7 +32,6 @@ import {
   settingsPaneTitleEl,
   settingsPaneWorkspaceEl,
   settingsPromptErrorEl,
-  settingsProviderHintEl,
   settingsProviderListEl,
   settingsSystemPromptEl,
   settingsWorkspaceBrowseBtn,
@@ -45,15 +49,17 @@ import type { ProviderInfo } from "../core/types";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { icon } from "../icons";
-import { refreshProviders, syncModelSelects } from "./models";
+import { loadProviders, syncModelSelects } from "./models";
 import { refreshExternalVisibility } from "./sites";
 import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
 import { load as loadAnalytics } from "./analytics";
+import { refreshResources } from "./resources";
+import { motionPref, setMotionPref, type MotionPref } from "../ui/motion";
 
 // SettingsNav is a type in this module.
 // It supports the desktop app frontend.
-export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics";
+export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics" | "appearance" | "resources";
 
 // paintSettingsNav is a const in this module.
 // It supports the desktop app frontend.
@@ -64,6 +70,8 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     ["prompt", settingsNavPromptEl, settingsPanePromptEl, "Prompt"],
     ["connection", settingsNavConnectionEl, settingsPaneConnectionEl, "Connection"],
     ["analytics", settingsNavAnalyticsEl, settingsPaneAnalyticsEl, "Analytics"],
+    ["appearance", settingsNavAppearanceEl, settingsPaneAppearanceEl, "Appearance"],
+    ["resources", settingsNavResourcesEl, settingsPaneResourcesEl, "Resources"],
   ];
   for (const [name, btn, pane, title] of tabs) {
     const active = name === tab;
@@ -153,11 +161,33 @@ const renderProviderList = (): void => {
         `<div class="truncate font-mono text-[10px] text-slate-400">${escapeHtml(p.apiType)} · ${escapeHtml(p.apiUrl || "no url")} · ${escapeHtml(key)} · ${escapeHtml(models)}</div>` +
         `</div>` +
         badge +
+        `<button data-refresh="${escapeAttr(p.name)}" title="Fetch ${escapeAttr(p.name)}'s model list" class="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">refresh</button>` +
         `<button data-connect="${escapeAttr(p.name)}" class="shrink-0 rounded-md bg-accent-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-accent-700">connect</button>` +
         `</div>`
       );
     })
     .join("");
+};
+
+// refreshOneProvider fetches a single provider's catalog on demand.
+const refreshOneProvider = async (btn: HTMLButtonElement, name: string): Promise<void> => {
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const res = await api.refreshProvider(name);
+    if (res.error) {
+      toast(`${name}: ${res.error}`, "error");
+    } else {
+      toast(`${name}: ${res.count} models`);
+    }
+    // loadProviders remaps the saved pick onto the fresh catalog.
+    await loadProviders();
+  } catch (error) {
+    toast(String(error), "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "refresh";
+  }
 };
 
 // reloadProviders is a const in this module.
@@ -262,7 +292,6 @@ const saveProviderCard = async (): Promise<void> => {
     }
     closeProviderCard();
     await reloadProviders();
-    void refreshProviders();
   } catch (error) {
     providerCardErrorEl.textContent = String(error);
     providerCardErrorEl.classList.remove("hidden");
@@ -322,6 +351,23 @@ export function initSettings(reconnect: () => Promise<void>): void {
     paintSettingsNav("analytics");
     void loadAnalytics(true);
   });
+  settingsNavAppearanceEl.addEventListener("click", () => {
+    const pref = motionPref();
+    for (const input of Array.from(motionOptionsEl.querySelectorAll<HTMLInputElement>("input[name=motion]"))) {
+      input.checked = input.value === pref;
+    }
+    paintSettingsNav("appearance");
+  });
+  motionOptionsEl.addEventListener("change", (event) => {
+    const input = event.target as HTMLInputElement;
+    if (input.name === "motion" && input.checked) {
+      setMotionPref(input.value as MotionPref);
+    }
+  });
+  settingsNavResourcesEl.addEventListener("click", () => {
+    paintSettingsNav("resources");
+    refreshResources();
+  });
 
   settingsProviderListEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
@@ -338,6 +384,11 @@ export function initSettings(reconnect: () => Promise<void>): void {
           toast(String(error), "error");
         }
       })();
+      return;
+    }
+    const refreshBtn = target.closest<HTMLButtonElement>("[data-refresh]");
+    if (refreshBtn?.dataset.refresh) {
+      void refreshOneProvider(refreshBtn, refreshBtn.dataset.refresh);
       return;
     }
     const connectBtn = target.closest<HTMLButtonElement>("[data-connect]");
@@ -358,11 +409,6 @@ export function initSettings(reconnect: () => Promise<void>): void {
     if (event.target === providerCardEl) {
       closeProviderCard();
     }
-  });
-
-  $("#settingsRefreshModelsBtn").addEventListener("click", () => {
-    void refreshProviders();
-    settingsProviderHintEl.textContent = "Fetching models in the background…";
   });
 
   $("#settingsPromptSaveBtn").addEventListener("click", () => {

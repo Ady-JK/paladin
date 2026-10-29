@@ -44,7 +44,25 @@ type Message struct {
 	Name       *string     `json:"name,omitempty"`
 	IsError    bool        `json:"is_error,omitempty"`
 	IsNotify   bool        `json:"is_notify,omitempty"`
+	// Compaction marks a summary checkpoint: the model view restarts
+	// here, with Content as the summary of everything before it.
+	Compaction *Compaction `json:"compaction,omitempty"`
+	// Replay marks a copy of a kept message re-recorded after a
+	// compaction marker. It feeds the model view only; the original
+	// already shows in history.
+	Replay bool `json:"replay,omitempty"`
 }
+
+// Compaction describes one context compaction checkpoint.
+type Compaction struct {
+	// TokensBefore is the estimated context size that triggered it.
+	TokensBefore int64 `json:"tokens_before"`
+	// Reason is "auto" (threshold) or "overflow" (provider rejected).
+	Reason string `json:"reason"`
+}
+
+// IsCompaction reports whether m is a compaction checkpoint marker.
+func (m Message) IsCompaction() bool { return m.Role == RoleSystem && m.Compaction != nil }
 
 type Meta struct {
 	SchemaVersion uint32    `json:"schema_version"`
@@ -67,6 +85,9 @@ func AssistantMessage(content string) Message {
 
 // Visible in history: users always, assistants only when non-blank.
 func (m Message) Visible() bool {
+	if m.Replay {
+		return false
+	}
 	switch m.Role {
 	case RoleUser:
 		return true

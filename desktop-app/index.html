@@ -9,105 +9,62 @@
 
   <body class="h-screen">
     <div class="flex h-screen overflow-hidden">
-      <!-- ==================== SIDEBAR ==================== -->
-      <aside
-        id="sidebar"
-        class="flex w-72 flex-shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-      >
-        <!-- Brand -->
-        <div
-          id="brandBar"
-          class="flex items-center justify-between border-b border-slate-200 p-3.5 dark:border-slate-800"
-        >
-          <div class="flex min-w-0 items-center gap-3">
-            <div
-              class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-blue-600 via-indigo-500 to-purple-600 font-mono text-xs font-bold text-white shadow-indigo-500/20"
-            >
-              CA
-            </div>
-            <div class="sidebar-text min-w-0 overflow-hidden">
-              <h1 class="flex items-center gap-1 text-sm font-semibold leading-none text-slate-900 dark:text-slate-100">
-                paladin
-                <span
-                  class="rounded border border-indigo-200 bg-indigo-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-indigo-600 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-400"
-                  id="brandVersion"
-                  >v0.2.16</span
-                >
-              </h1>
-              <span class="text-[11px] text-slate-400">Agent Harness</span>
-            </div>
-          </div>
-          <button
-            id="sidebarToggleBtn"
-            class="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-            title="Collapse the sidebar"
-          >
-            <span data-icon="angles-left"></span>
+      <!-- ==================== RAIL ==================== -->
+      <nav id="rail" class="flex w-14 flex-shrink-0 flex-col items-center gap-1 pb-3 pt-3" aria-label="Views">
+        <div class="brand-mark rail-brand mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-[13px] font-semibold">P</div>
+        <button id="sidebarToggleBtn" class="rail-btn" title="Collapse the sidebar" aria-label="Toggle the sidebar">
+          <span data-icon="rl-sidebar" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+        </button>
+        <div id="tabsWrap" role="tablist" aria-orientation="vertical" class="mt-1 flex flex-col items-center gap-1">
+          <button id="agentTab" role="tab" class="rail-btn" title="Agent: the coding harness">
+            <span data-icon="rl-agent" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+            <span class="sr-only">Agent</span>
+          </button>
+          <button id="chatTab" role="tab" class="rail-btn" title="Chat: the external chat pages">
+            <span data-icon="rl-chat" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+            <span class="sr-only">Chat</span>
           </button>
         </div>
+        <div class="rail-drag flex-1 self-stretch"></div>
+        <button id="settingsBtn" class="rail-btn" title="Settings" aria-label="Settings">
+          <span data-icon="rl-gear" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+        </button>
+      </nav>
 
-        <!-- Workspace -->
-        <div id="workspaceWrap" class="sidebar-text border-b border-slate-200 p-3 dark:border-slate-800/60">
-          <div
-            class="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-100/80 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200/60 dark:border-slate-700/60 dark:bg-slate-800/50 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            <div class="flex min-w-0 items-center gap-2">
-              <span data-icon="folder-tree" class="text-agent-amber"></span>
+      <!-- ==================== SIDEBAR ==================== -->
+      <aside id="sidebar" class="flex w-72 flex-shrink-0 flex-col overflow-hidden">
+        <!-- Brand -->
+        <div id="brandBar" class="sidebar-text flex items-end justify-between gap-2 px-4 pb-3 pt-4">
+          <div class="min-w-0">
+            <h1 class="flex items-baseline gap-1.5 text-[17px] font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100">
+              paladin
+              <span id="brandVersion" class="font-mono text-[10px] font-normal text-slate-400 dark:text-slate-500">v0.2.21</span>
+            </h1>
+            <div class="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500" title="Current workspace">
+              <span data-icon="rl-folder" class="[&>svg]:h-3 [&>svg]:w-3"></span>
               <span id="workspaceLabel" class="truncate">workspace</span>
             </div>
           </div>
+        </div>
 
-          <button
-            id="newSessionBtn"
-            class="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-accent-600 px-3 py-1.5 text-xs font-medium text-white shadow-accent-600/20 hover:bg-accent-700"
-          >
-            <span data-icon="plus"></span>
+        <!-- Primary action -->
+        <div id="workspaceWrap" class="sidebar-text px-2">
+          <button id="newSessionBtn" class="nav-item w-full">
+            <span data-icon="rl-compose" class="[&>svg]:h-4 [&>svg]:w-4"></span>
             <span id="newSessionBtnLabel">New Session</span>
           </button>
         </div>
 
-        <!-- View tabs -->
-        <div id="tabsWrap" class="sidebar-text border-b border-slate-200 px-3 py-2 dark:border-slate-800/60">
-          <div
-            class="grid grid-cols-2 gap-1 rounded-md bg-slate-100 p-1 dark:bg-slate-950"
-            role="tablist"
-          >
-            <button
-              id="agentTab"
-              role="tab"
-              class="flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium"
-              title="The coding harness"
-            >
-              <span data-icon="terminal"></span>
-              <span>Agent</span>
-            </button>
-            <button
-              id="chatTab"
-              role="tab"
-              class="flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium"
-              title="The external chat pages"
-            >
-              <span data-icon="comments"></span>
-              <span>Chat</span>
-            </button>
-          </div>
-        </div>
-
         <!-- Search -->
-        <div id="searchWrap" class="sidebar-text px-3 pb-1 pt-3">
-          <div class="relative">
-            <span data-icon="search" class="pointer-events-none absolute left-2.5 top-2.5 text-slate-400"></span>
-            <input
-              id="searchInput"
-              type="text"
-              placeholder="Search sessions..."
-              class="w-full rounded-md border border-slate-200 bg-slate-100 py-1.5 pl-8 pr-3 text-xs text-slate-700 placeholder-slate-400 focus:border-accent-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 dark:placeholder-slate-500"
-            />
+        <div id="searchWrap" class="sidebar-text px-2 pb-1 pt-1">
+          <div class="side-search relative">
+            <span data-icon="search" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></span>
+            <input id="searchInput" type="text" placeholder="Search sessions" class="w-full rounded-lg py-1.5 pl-8 pr-3 text-[13px]" />
           </div>
         </div>
 
-        <!-- The sessions -->
-        <div id="sessionList" class="sidebar-text flex-1 space-y-4 overflow-y-auto p-2 text-xs">
+        <!-- The sessions: projects (by folder) and recents -->
+        <div id="sessionList" class="sidebar-text flex-1 overflow-y-auto px-2 pb-3 text-[13px]">
           <p class="px-2 py-1 text-slate-400">no sessions yet</p>
         </div>
 
@@ -116,35 +73,24 @@
           <div id="chatEntries" class="space-y-1"></div>
         </div>
 
-        <!-- The daemon -->
-        <div id="daemonWrap" class="sidebar-text border-t border-slate-200 p-3 dark:border-slate-800">
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex min-w-0 items-center gap-2">
-              <span
-                id="daemonDot"
-                class="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300 dark:bg-slate-700"
-              ></span>
-              <span data-icon="microchip" class="text-accent-500"></span>
-              <div class="min-w-0">
-                <div id="daemonLabel" class="truncate text-xs font-medium text-slate-800 dark:text-slate-200">
-                  connecting…
-                </div>
-                <div id="daemonDetail" class="truncate font-mono text-[10px] text-slate-400">—</div>
-              </div>
+        <!-- The daemon and app resources -->
+        <div id="daemonWrap" class="sidebar-text px-3 pb-3 pt-2">
+          <div class="side-foot flex items-center gap-2 rounded-xl px-2.5 py-2">
+            <span id="daemonDot" class="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+            <div class="min-w-0 flex-1">
+              <div id="daemonLabel" class="truncate text-xs font-medium text-slate-700 dark:text-slate-200">connecting…</div>
+              <div id="daemonDetail" class="truncate font-mono text-[10px] text-slate-400">—</div>
             </div>
-            <button
-              id="settingsBtn"
-              class="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-              title="Settings"
-            >
-              <span data-icon="gear"></span>
+            <button id="resTotal" class="res-total hidden" title="App CPU and memory">
+              <span data-icon="rl-pulse" class="[&>svg]:h-3 [&>svg]:w-3"></span>
+              <span id="resTotalLabel">—</span>
             </button>
           </div>
         </div>
       </aside>
 
       <!-- ==================== MAIN ==================== -->
-      <main class="relative flex h-full flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
+      <main id="mainCard" class="relative flex h-full flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
         <!-- Header -->
         <header
           id="titleBar"
@@ -165,7 +111,7 @@
             <div
               class="hidden items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300"
             >
-              <span data-icon="code-branch" class="text-agent-amber"></span>
+              <span data-icon="code-branch" class="text-slate-400"></span>
               <span id="sessionLabel">—</span>
             </div>
             <button
@@ -175,6 +121,14 @@
             >
               <span data-icon="microchip" class="text-accent-500"></span>
               <span id="usageLabel">—</span>
+            </button>
+            <button
+              id="resPill"
+              class="res-pill hidden cursor-pointer items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 hover:bg-slate-200 dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700/60"
+              title="This session's processes"
+            >
+              <span data-icon="rl-pulse" class="res-pill-ico"></span>
+              <span id="resPillLabel">idle</span>
             </button>
             <button
               id="themeToggleBtn"
@@ -222,43 +176,42 @@
         <div id="agentView" class="flex min-h-0 flex-1 flex-col">
           <!-- The conversation -->
           <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
-            <div id="messages" class="mx-auto max-w-4xl space-y-6"></div>
+            <div id="messages" class="mx-auto max-w-3xl"></div>
           </div>
 
           <!-- The composer -->
           <footer
             class="border-0 bg-transparent px-4 pb-4 pt-2"
           >
-          <div class="w-full">
+          <div class="mx-auto w-full max-w-3xl">
             <div
-              class="composer-float relative rounded-3xl border border-slate-300/80 bg-white/95 focus-within:border-accent-500 dark:border-slate-700/70 dark:bg-slate-900/90"
+              class="composer-float relative rounded-3xl"
             >
               <div id="skillChipSlot" class="px-4 pt-2"></div>
               <textarea
                 id="promptInput"
                 rows="3"
-                placeholder="Ask the agent to code, run commands, refactor files… (enter to send, shift+enter for a new line)"
+                placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
                 class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
                 spellcheck="false"
               ></textarea>
 
               <div
-                class="flex flex-nowrap items-center gap-2 border-t border-slate-200/50 px-2 pb-1.5 pt-1.5 dark:border-slate-800/50"
+                class="flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1"
               >
                 <button
                   id="attachBtn"
                   class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
                   title="Attach a file or folder"
                 >
-                  <span data-icon="paperclip" class="flex-shrink-0 [&>svg]:h-5 [&>svg]:w-5"></span>
+                  <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
                 </button>
                 <div class="relative min-w-0 flex-1">
                   <button
                     id="modelSelectBtn"
-                    class="flex max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 font-mono text-[11px] text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                    class="flex max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
                     title="Pick the provider and the model"
                   >
-                    <span data-icon="microchip" class="flex-shrink-0 text-accent-500"></span>
                     <span id="modelSelectLabel" class="truncate">—</span>
                     <span data-icon="chevron-down" class="flex-shrink-0"></span>
                   </button>
@@ -368,13 +321,12 @@
                   </div>
                 </div>
                 <div class="ml-auto flex flex-shrink-0 items-center gap-2">
-                  <span class="hidden whitespace-nowrap font-mono text-[10px] text-slate-400 sm:inline">enter to send</span>
                   <button
                     id="sendBtn"
                     class="flex items-center justify-center rounded-lg bg-accent-600 p-2 text-xs font-semibold text-white shadow-accent-600/20 hover:bg-accent-700 disabled:opacity-40"
                     title="Send"
                   >
-                    <span data-icon="paperplane"></span>
+                    <span data-icon="arrow-up" class="[&>svg]:h-4 [&>svg]:w-4"></span>
                   </button>
                   <button
                     id="pauseBtn"
@@ -472,6 +424,22 @@
           >
             <span data-icon="chart"></span>
             <span>Analytics</span>
+          </button>
+          <button
+            id="settingsNavAppearance"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
+          >
+            <span data-icon="rl-compose"></span>
+            <span>Appearance</span>
+          </button>
+          <button
+            id="settingsNavResources"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
+          >
+            <span data-icon="rl-pulse"></span>
+            <span>Resources</span>
           </button>
         </div>
 
@@ -646,17 +614,29 @@
                 </div>
                 <div id="settingsConnDetail" class="space-y-1.5 px-3 py-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400"></div>
               </div>
-              <button
-                id="settingsRefreshModelsBtn"
-                class="rounded border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                title="Fetch the model list in the background"
-              >
-                Refresh models
-              </button>
             </div>
 
             <div id="settingsPaneAnalytics" class="hidden">
               <div id="analyticsBody" class="space-y-5"></div>
+            </div>
+
+            <div id="settingsPaneAppearance" class="hidden space-y-3">
+              <div>
+                <div class="text-xs font-semibold text-slate-800 dark:text-slate-100">Animations</div>
+                <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Turn motion down on slower machines. Off also drops blur and shadows that cost GPU time.
+                </p>
+              </div>
+              <div id="motionOptions" role="radiogroup" class="motion-options">
+                <label class="motion-opt"><input type="radio" name="motion" value="system" /><span><b>System</b><small>Follow the OS reduce-motion setting</small></span></label>
+                <label class="motion-opt"><input type="radio" name="motion" value="full" /><span><b>Full</b><small>Smooth transitions and effects</small></span></label>
+                <label class="motion-opt"><input type="radio" name="motion" value="reduced" /><span><b>Reduced</b><small>Short fades only, no movement</small></span></label>
+                <label class="motion-opt"><input type="radio" name="motion" value="off" /><span><b>Off</b><small>No animation, blur or heavy shadows</small></span></label>
+              </div>
+            </div>
+
+            <div id="settingsPaneResources" class="hidden">
+              <div id="resourcesBody" class="text-xs"></div>
             </div>
           </div>
 

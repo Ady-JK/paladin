@@ -124,6 +124,11 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
   await page.click(`[data-session="${SESSION}"]`);
   await expect(page.locator("#messages")).toContainText("Port bumped");
+  // Consecutive calls fold into summary groups; open them all.
+  const heads = page.locator(".tool-run-head");
+  for (let i = 0; i < (await heads.count()); i++) {
+    await heads.nth(i).click();
+  }
 });
 
 // Verifies write and edit rows render with path summaries.
@@ -131,7 +136,9 @@ test.beforeEach(async ({ page }) => {
 test("write and edit rows render with summaries", async ({ page }) => {
   await expect(page.locator('[data-tool="write"]')).toHaveCount(3);
   await expect(page.locator('[data-tool="edit"]')).toHaveCount(3);
-  await expect(page.locator('[data-tool="write"]').first()).toContainText("/home/tester/project/app.conf");
+  const detail = page.locator('[data-tool="write"]').first().locator(".tool-detail");
+  await expect(detail).toHaveText("app.conf");
+  await expect(detail).toHaveAttribute("title", "/home/tester/project/app.conf");
 });
 
 // Verifies an expanded write row shows the created file.

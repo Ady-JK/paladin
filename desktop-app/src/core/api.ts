@@ -4,7 +4,7 @@
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 // No daemon, no addr, no subscribe.
 
-import type { FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, SessionInfo, SessionUsage, SkillEntry, TodoEntry, ToolInfo } from "./types";
+import type { AttachSnapshot, TurnEvent, TurnInfo, FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, ResourceSnapshot, RefreshResult, SessionInfo, SessionUsage, SkillEntry, TodoEntry } from "./types";
 import { bridge } from "./tauri";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -85,6 +85,11 @@ export function listProviders(): Promise<ProviderInfo[]> {
 
 export function refreshProviders(): Promise<boolean> {
   return invoke<boolean>("refresh_providers");
+}
+
+// refreshProvider fetches one provider's model list and contacts no other.
+export function refreshProvider(name: string): Promise<RefreshResult> {
+  return invoke<RefreshResult>("refresh_providers", { name });
 }
 
 export function setDefaultProvider(
@@ -179,65 +184,57 @@ export function deleteSession(
   return invoke<boolean>("delete_session", { sessionId, cwd });
 }
 
-export function chatStream(args: {
-  sessionId: string | null;
+export type SubmitArgs = {
+  sessionId: string;
   message: string;
   resume: boolean;
   cwd: string;
   provider: string | null;
   model: string | null;
-  systemPrompt: string | null;
   skill: string | null;
-}): Promise<{ sessionId: string; reply: string; stopped: boolean; needsContinue: boolean }> {
-  // The bridge fans deltas/tools out to whoever subscribed via
-  // onChatDelta/onChatTool (chat.ts), mirroring the old Tauri events.
-  return bridge().chat(
-    {
-      sessionId: args.sessionId,
-      message: args.message,
-      resume: args.resume,
-      cwd: args.cwd,
-      provider: args.provider,
-      model: args.model,
-      systemPrompt: args.systemPrompt,
-      skill: args.skill,
-    },
-    {
-      onDelta: (delta) => {
-        for (const cb of deltaListeners) {
-          cb(delta);
-        }
-      },
-      onTool: (tool) => {
-        for (const cb of toolListeners) {
-          cb(tool);
-        }
-      },
-    },
-  ) as Promise<{ sessionId: string; reply: string; stopped: boolean; needsContinue: boolean }>;
+  display: string;
+};
+
+// submitChat queues a turn and returns at once: it runs now, or after
+// the session's running turn (and within the concurrency cap). Its
+// progress arrives on onAgentEvent.
+export function submitChat(args: SubmitArgs): Promise<TurnInfo> {
+  return invoke<TurnInfo>("submit_chat", { ...args, systemPrompt: null });
 }
 
-// onChatDelta registers a streaming-text listener (sync subscribe, the
-// returned function unsubscribes). chat.ts uses it like the old
-// chat://delta event.
-type DeltaCb = (delta: string) => void;
-type ToolCb = (tool: ToolInfo) => void;
-
-const deltaListeners = new Set<DeltaCb>();
-const toolListeners = new Set<ToolCb>();
-
-export function onChatDelta(cb: DeltaCb): () => void {
-  deltaListeners.add(cb);
-  return () => {
-    deltaListeners.delete(cb);
-  };
+// listTurns returns every queued and running turn, oldest first.
+export function listTurns(): Promise<TurnInfo[]> {
+  return invoke<TurnInfo[]>("turns");
 }
 
-export function onChatTool(cb: ToolCb): () => void {
-  toolListeners.add(cb);
-  return () => {
-    toolListeners.delete(cb);
-  };
+// attachSession is the atomic history + live snapshot of a session.
+export function attachSession(sessionId: string): Promise<AttachSnapshot> {
+  return invoke<AttachSnapshot>("attach", { sessionId });
+}
+
+// cancelTurn drops a queued turn, or stops it if it already runs.
+export function cancelTurn(turnId: string): Promise<boolean> {
+  return invoke<boolean>("cancel_turn", { turnId });
+}
+
+// onAgentEvent subscribes to every turn event of every session.
+export function onAgentEvent(cb: (event: TurnEvent) => void): () => void {
+  const b = bridge();
+  if (!b.onEvent) {
+    return () => {};
+  }
+  return b.onEvent((msg) => cb(msg as TurnEvent));
+}
+
+// onOpenSessionRequest fires when a native notification is clicked.
+export function onOpenSessionRequest(cb: (sessionId: string) => void): () => void {
+  const b = bridge();
+  return b.onOpenSession ? b.onOpenSession(cb) : () => {};
+}
+
+export async function takePendingOpen(): Promise<string | null> {
+  const b = bridge();
+  return b.takePendingOpen ? b.takePendingOpen() : null;
 }
 
 export function openExternalPage(url: string): Promise<void> {
@@ -334,4 +331,9 @@ function partitionFor(id: string): string {
   }
   const safe = id.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
   return `persist:paladin-${safe || "page"}`;
+}
+
+// resources samples per-session process usage (cached ~1.5s in the core).
+export function resources(): Promise<ResourceSnapshot> {
+  return invoke<ResourceSnapshot>("resources");
 }

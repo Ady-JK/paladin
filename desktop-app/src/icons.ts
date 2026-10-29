@@ -4,6 +4,7 @@
 type Icon = {
   d: string;
   line?: boolean;
+  thin?: boolean;
 };
 
 // ICONS is a const in this module.
@@ -114,6 +115,24 @@ const ICONS: Record<string, Icon> = {
     d: "M14 4h6v6m0-6L10 14M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3",
     line: true,
   },
+  "arrow-up": { d: "M12 19V5m0 0-6 6m6-6 6 6", line: true },
+  // Thin outline glyphs for the tool-call rows.
+  "tl-term": { d: "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm3 5 3 3-3 3m5 0h5", line: true, thin: true },
+  "tl-file": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6m-6 4h4", line: true, thin: true },
+  "tl-file-plus": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5m-7 4v6m-3-3h6", line: true, thin: true },
+  "tl-pencil": { d: "M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Zm9.5-13.5 4 4", line: true, thin: true },
+  "tl-list": { d: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01", line: true, thin: true },
+  "tl-ask": { d: "M21 12a8.5 8.5 0 0 1-12.4 7.6L3 21l1.4-5.1A8.5 8.5 0 1 1 21 12ZM9.8 9.5a2.3 2.3 0 0 1 4.4.8c0 1.5-2.2 2-2.2 3.2m0 2.6h.01", line: true, thin: true },
+  "tl-tools": { d: "M7 3v7m0 4v7m-3-11h6M17 3v4m0 4v10m-3-14h6M7 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10-3a2 2 0 1 0 0-4", line: true, thin: true },
+  // Thin outline glyphs for the rail and sidebar.
+  "rl-agent": { d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2.5 5.5L10 12l-2.5 2.5M12.5 15h4", line: true, thin: true },
+  "rl-chat": { d: "M7.5 18.5 4 21v-4.2A8 8 0 1 1 7.5 18.5ZM8.5 10.5h7m-7 3.5h4.5", line: true, thin: true },
+  "rl-gear": { d: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.2-1.3L14.4 3h-4l-.4 2.4A7.4 7.4 0 0 0 7.8 6.7l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.2 1.3l.4 2.4h4l.4-2.4a7.4 7.4 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3Z", line: true, thin: true },
+  "rl-sidebar": { d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm4 0v16", line: true, thin: true },
+  "rl-compose": { d: "M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8 8 16l1.2-4 9.2-9.4Z", line: true, thin: true },
+  "rl-folder": { d: "M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9.5Z", line: true, thin: true },
+  "rl-pulse": { d: "M3 12h4l2.5-6 5 12 2.5-6h4", line: true, thin: true },
+  "rl-chevron": { d: "m9 6 6 6-6 6", line: true, thin: true },
 };
 
 // IconName is a type in this module.
@@ -133,7 +152,7 @@ export function icon(name: IconName, className = "h-3 w-3"): string {
   if (entry.line) {
     return (
       `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
-      `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `stroke-width="${entry.thin ? 1.6 : 2}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
       `<path d="${entry.d}"/></svg>`
     );
   }

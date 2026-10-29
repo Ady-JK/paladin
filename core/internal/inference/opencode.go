@@ -5,7 +5,6 @@ package inference
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,17 +32,6 @@ func (p *OpenAIProvider) setSessionHeaders(req *http.Request, sessionID string) 
 }
 
 // statusError keeps the status and a short body, never the key.
-func (p *OpenAIProvider) statusError(op string, status int, body string) *ProviderError {
-	short := string([]rune(strings.TrimSpace(body)))
-	if len([]rune(short)) > 300 {
-		short = string([]rune(short)[:300])
-	}
-	if short == "" {
-		return RequestError(fmt.Sprintf("%s: %s: status %d", p.name, op, status))
-	}
-	return RequestError(fmt.Sprintf("%s: %s: status %d: %s", p.name, op, status, short))
-}
-
 // gatewayRoot strips the OpenAI protocol suffix from an OpenCode Go base,
 // leaving the shared gateway prefix. The default base
 // https://opencode.ai/inference/go/openai/v1 becomes

@@ -35,7 +35,7 @@ async function __paladinBaseInvoke(cmd, args) {
         ];
       case "open_session":
         return {
-          sessionId: "sess-notify-1",
+          sessionId: (args && args.sessionId) || "sess-notify-1",
           cwd: "/home/tester/project",
           provider: "Opencode Go",
           model: "openai/gpt-4o",
@@ -316,6 +316,9 @@ async function __paladinBaseInvoke(cmd, args) {
             : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
         return window.__e2eProviders;
       case "refresh_providers":
+        if (args && args.name) {
+          return { name: args.name, count: 3, models: [] };
+        }
         return false;
       case "chat": {
         const inner = args && args.args ? args.args : args || {};
@@ -350,6 +353,16 @@ async function __paladinBaseInvoke(cmd, args) {
           needsContinue: false,
         };
       }
+      case "submit_chat":
+        return __e2eHub.submit(args || {});
+      case "turns":
+        return __e2eHub.list();
+      case "attach":
+        return __e2eHub.attach(args || {});
+      case "cancel_turn":
+        return __e2eHub.cancel(args && args.turnId);
+      case "stop_chat":
+        return __e2eHub.stop(args && args.sessionId);
       case "set_default_provider":
         for (const p of window.__e2eProviders || []) {
           p.default = p.name === args.name;
@@ -420,6 +433,8 @@ async function __paladinBaseInvoke(cmd, args) {
           ],
         };
       }
+      case "resources":
+        return window.__e2eRes || { at: 0, supported: false, self: { cpu: 0, rss: 0, procs: 0 }, sessions: {} };
       default:
         if (String(cmd).startsWith("plugin:")) {
           return 1;
@@ -431,9 +446,158 @@ async function __paladinBaseInvoke(cmd, args) {
 
 window.__paladinBaseInvoke = __paladinBaseInvoke;
 
+// __e2eHub mirrors the sidecar's turn hub: FIFO per session, at most
+// __e2eTurnCap sessions at once, turn/* + chat/* events on the onEvent
+// bus. A turn runs through window.paladin.chat, so specs that wrap chat
+// (or set __e2eChatEvents) keep scripting what it streams.
+const __e2eHub = (() => {
+  const listeners = new Set();
+  let seq = 0;
+  let next = 0;
+  const turns = [];
+  const logs = new Map();
+  const copy = (t) => JSON.parse(JSON.stringify(t));
+  const emit = (ev) => {
+    // Specs may pin a seq (re-attach tests); the counter never goes back.
+    seq = ev.seq ? Math.max(seq, ev.seq) : seq + 1;
+    if (!ev.seq) ev.seq = seq;
+    if (ev.event.startsWith("chat/") && logs.has(ev.turnId)) logs.get(ev.turnId).push(copy(ev));
+    for (const cb of [...listeners]) cb(copy(ev));
+  };
+  const chat = (turn, event, extra) => {
+    if (turn.state !== "running") return;
+    emit({ event, sessionId: turn.sessionId, turnId: turn.turnId, ...extra });
+  };
+  const finish = (turn, res) => {
+    if (turn.state === "done") return;
+    Object.assign(turn, res, { state: "done", persisted: !res.cancelled, endedAt: new Date().toISOString() });
+    turns.splice(turns.indexOf(turn), 1);
+    logs.delete(turn.turnId);
+    emit({ event: "turn/done", sessionId: turn.sessionId, turnId: turn.turnId, turn: copy(turn) });
+    pump();
+  };
+  const start = (turn) => {
+    turn.state = "running";
+    turn.startedAt = new Date().toISOString();
+    logs.set(turn.turnId, []);
+    emit({ event: "turn/start", sessionId: turn.sessionId, turnId: turn.turnId, turn: copy(turn) });
+    const handlers = {
+      onDelta: (delta) => chat(turn, "chat/delta", { delta }),
+      onTool: (tool) => chat(turn, "chat/tool", { tool }),
+      onRetry: (retry) => chat(turn, "chat/retry", { retry }),
+      onCompact: (compaction) => chat(turn, "chat/compact", { compaction }),
+    };
+    Promise.resolve()
+      .then(() => window.paladin.chat({ ...turn.params }, handlers))
+      .then((res) => finish(turn, { reply: res?.reply || "", stopped: !!res?.stopped, needsContinue: !!res?.needsContinue }))
+      .catch((err) => finish(turn, { error: String((err && err.message) || err) }));
+  };
+  const pump = () => {
+    const cap = window.__e2eTurnCap || 4;
+    for (const t of turns) {
+      if (t.state !== "queued") continue;
+      const active = turns.filter((x) => x.state === "running");
+      if (active.length >= cap) break;
+      if (active.some((x) => x.sessionId === t.sessionId)) continue;
+      start(t);
+    }
+  };
+  const info = (t) => {
+    const { params, ...rest } = t;
+    return copy(rest);
+  };
+  return {
+    on(cb) {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    emit,
+    submit(args) {
+      const turn = {
+        turnId: `turn-${++next}`,
+        sessionId: args.sessionId,
+        cwd: args.cwd || "/home/tester/project",
+        message: args.message || "",
+        state: "queued",
+        queuedAt: new Date().toISOString(),
+        params: {
+          sessionId: args.sessionId,
+          message: args.message || "",
+          resume: !!args.resume,
+          cwd: args.cwd,
+          provider: args.provider ?? null,
+          model: args.model ?? null,
+          systemPrompt: null,
+          skill: args.skill ?? null,
+        },
+      };
+      if (args.display) turn.display = args.display;
+      if (args.skill) turn.skill = args.skill;
+      if (args.resume) turn.resume = true;
+      turns.push(turn);
+      pump();
+      if (turn.state === "queued") {
+        emit({ event: "turn/queued", sessionId: turn.sessionId, turnId: turn.turnId, turn: info(turn) });
+      }
+      return info(turn);
+    },
+    list() {
+      return turns.map(info);
+    },
+    async attach(args) {
+      const history = await window.paladin.invoke("session_history", { sessionId: args.sessionId, cwd: null });
+      const running = turns.find((t) => t.sessionId === args.sessionId && t.state === "running");
+      return {
+        history,
+        turn: running ? info(running) : null,
+        events: running ? copy(logs.get(running.turnId) || []) : [],
+        queued: turns.filter((t) => t.sessionId === args.sessionId && t.state === "queued").map(info),
+        seq,
+      };
+    },
+    cancel(turnId) {
+      const t = turns.find((x) => x.turnId === turnId);
+      if (!t) return false;
+      finish(t, t.state === "queued" ? { cancelled: true } : { stopped: true, reply: "" });
+      return true;
+    },
+    stop(sessionId) {
+      const mine = turns.filter((t) => !sessionId || t.sessionId === sessionId);
+      for (const t of mine.filter((x) => x.state === "queued")) finish(t, { cancelled: true });
+      for (const t of mine.filter((x) => x.state === "running")) finish(t, { stopped: true, reply: "" });
+      return true;
+    },
+  };
+})();
+window.__e2eHub = __e2eHub;
+
 window.paladin = {
+  metrics: async () => window.__e2eAppMetrics || null,
   invoke: (method, params) => window.__paladinBaseInvoke(method, params || {}),
-  chat: (params, handlers) => window.__paladinBaseInvoke("chat", params || {}),
+  // __e2eChatEvents scripts stream events ({event, ..., waitMs?}) that
+  // fire through the handlers before the stub reply resolves.
+  chat: async (params, handlers) => {
+    const events = window.__e2eChatEvents || [];
+    window.__e2eChatEvents = null;
+    for (const ev of events) {
+      if (ev.waitMs) await new Promise((r) => setTimeout(r, ev.waitMs));
+      if (ev.event === "chat/delta") handlers.onDelta(ev.delta);
+      else if (ev.event === "chat/tool") handlers.onTool(ev.tool);
+      else if (ev.event === "chat/retry" && handlers.onRetry) handlers.onRetry(ev.retry);
+      else if (ev.event === "chat/compact" && handlers.onCompact) handlers.onCompact(ev.compaction);
+    }
+    return window.__paladinBaseInvoke("chat", params || {});
+  },
+  onEvent: (cb) => __e2eHub.on(cb),
+  onOpenSession: (cb) => {
+    window.__e2eOpenSession = cb;
+    return () => {};
+  },
+  takePendingOpen: async () => {
+    const id = window.__e2ePendingOpen || null;
+    window.__e2ePendingOpen = null;
+    return id;
+  },
   views: {
     ensure: async () => true,
     show: async () => true,

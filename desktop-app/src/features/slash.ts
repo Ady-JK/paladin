@@ -6,6 +6,7 @@
 // Esc dismisses.
 
 import { inputEl, messagesEl, modelSelectBtn } from "../core/dom";
+import { clearLanded } from "./live";
 import { escapeHtml } from "../core/format";
 import { state } from "../core/state";
 import { toast } from "../ui/toast";
@@ -215,6 +216,7 @@ export function tryHandleSlash(message: string): boolean {
     case "/clear":
       inputEl.value = "";
       messagesEl.innerHTML = "";
+      clearLanded(state.sessionId);
       state.shownMessages = 0;
       renderGreeting();
       break;

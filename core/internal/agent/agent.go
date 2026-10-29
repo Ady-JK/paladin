@@ -6,7 +6,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -61,6 +63,9 @@ type ChatChunk struct {
 	SessionID     string        `json:"sessionId"`
 	Stopped       bool          `json:"stopped"`
 	Tool          *ToolActivity `json:"tool,omitempty"`
+	Retry         *RetryStatus  `json:"retry,omitempty"`
+	// Compaction reports context compaction progress.
+	Compaction *CompactionStatus `json:"compaction,omitempty"`
 }
 
 // ChatOutcome is the summary returned when a turn finishes.
@@ -94,20 +99,21 @@ func (e turnFailed) Error() string { return e.msg }
 
 // runConfig is everything a template resolves before the loop starts.
 type runConfig struct {
-	session   transcript.Session
-	provider  inference.Provider
-	tools     *tools.Registry
-	shell     *tools.ShellTool
-	toolDefs  []inference.ToolDefinition
-	history   []transcript.Message
-	system    string
-	maxRounds uint32
-	ctx       context.Context
-	cancel    context.CancelFunc
-	tx        chan<- ChatChunk
-	done      <-chan struct{}
-	message   string
-	resume    bool
+	persistGate func(persist func())
+	session     transcript.Session
+	provider    inference.Provider
+	tools       *tools.Registry
+	shell       *tools.ShellTool
+	toolDefs    []inference.ToolDefinition
+	history     []transcript.Message
+	system      string
+	maxRounds   uint32
+	ctx         context.Context
+	cancel      context.CancelFunc
+	tx          chan<- ChatChunk
+	done        <-chan struct{}
+	message     string
+	resume      bool
 }
 
 // Agent runs one turn. Built by Template.Build and dropped at exit;
@@ -117,6 +123,7 @@ type Agent struct {
 	provider  inference.Provider
 	tools     *tools.Registry
 	shell     *tools.ShellTool
+	doom      doomGuard
 	cancel    context.CancelFunc
 	ctx       context.Context
 	toolCtx   *tools.ToolCtx
@@ -133,10 +140,28 @@ type Agent struct {
 	// retries counts retried rounds after retryable provider errors
 	// (rate limits, 5xx, transport blips); three per turn, then the
 	// turn fails. Any round progress resets it alongside emptyRounds.
-	retries int
-	messages    []inference.LlmMessage
-	records     []transcript.Message
-	reply       strings.Builder
+	retries        int
+	timeoutRetries int
+	// window is the model's context window in tokens; 0 when unknown,
+	// which disables proactive compaction (overflow still compacts).
+	window int64
+	// noticed holds tool rows announced while the model was still
+	// streaming the call; any that never execute are settled as failed
+	// so the UI never keeps a spinner for a call that won't run.
+	noticed []inference.ToolCall
+	// persistGate, when set, wraps the transcript write (see save).
+	persistGate func(persist func())
+	// compactions counts compaction attempts this turn.
+	compactions int
+	// promptTokens is the last reported prompt size, covering the first
+	// promptLen entries of messages; sentLen is len(messages) at the
+	// latest request.
+	promptTokens int64
+	promptLen    int
+	sentLen      int
+	messages     []inference.LlmMessage
+	records      []transcript.Message
+	reply        strings.Builder
 	// turnUsage accumulates every LLM call's Usage for the turn, across
 	// all rounds and both streaming and fallback paths.
 	turnUsage inference.Usage
@@ -150,7 +175,14 @@ type Agent struct {
 }
 
 func newAgent(c runConfig) *Agent {
+	var window int64
+	if c.provider != nil {
+		if w, known := inference.ContextWindow(c.provider.Model()); known {
+			window = w
+		}
+	}
 	return &Agent{
+		window:   window,
 		session:  c.session,
 		provider: c.provider,
 		tools:    c.tools,
@@ -171,6 +203,8 @@ func newAgent(c runConfig) *Agent {
 		tx:        c.tx,
 		done:      c.done,
 
+		persistGate: c.persistGate,
+
 		currentMessage: c.message,
 		currentResume:  c.resume,
 	}
@@ -181,24 +215,25 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	sessionID := a.session.Meta.SessionID
 	a.phase = phaseRunning
 	a.emptyRounds = 0
-	a.retries = 0
+	a.retries, a.timeoutRetries = 0, 0
 	a.messages = a.modelMessages(a.currentMessage, a.currentResume)
 
-	err := a.runLoop()
+	err := a.safeLoop()
+	a.settleNotices(nil)
 	stopped := false
 	switch e := err.(type) {
 	case nil:
 	case turnStop:
 		stopped = true
 	case turnFailed:
-		_ = a.persist(a.currentMessage, a.currentResume)
+		_ = a.save()
 		return ChatOutcome{}, e
 	default:
-		_ = a.persist(a.currentMessage, a.currentResume)
+		_ = a.save()
 		return ChatOutcome{}, e
 	}
 	a.finalize(stopped)
-	if perr := a.persist(a.currentMessage, a.currentResume); perr != nil {
+	if perr := a.save(); perr != nil {
 		return ChatOutcome{}, perr
 	}
 	needsContinue := a.phase == phaseNeedsContinue
@@ -209,6 +244,24 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		NeedsContinue: needsContinue,
 		Usage:         a.turnUsage,
 	}, nil
+}
+
+// safeLoop turns a panic anywhere in the loop into a failed turn; the
+// records gathered so far are still persisted by Run.
+func (a *Agent) safeLoop() (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			fmt.Fprintf(os.Stderr, "agent loop panicked: %v\n%s", p, debug.Stack())
+			err = turnFailed{msg: fmt.Sprintf("internal error: %v", p)}
+		}
+	}()
+	err = a.runLoop()
+	// A failure observed after the user pressed stop (e.g. a backoff
+	// cut short) is a stop, not an error.
+	if _, failed := err.(turnFailed); failed && a.stopRequested() {
+		return turnStop{}
+	}
+	return err
 }
 
 func (a *Agent) stopRequested() bool {
@@ -233,6 +286,17 @@ func (a *Agent) finalize(stopped bool) {
 	} else {
 		a.finish(phaseDone)
 	}
+}
+
+// save persists the turn, inside persistGate when one is set so the
+// turn hub can order "now in the transcript" against attach snapshots.
+func (a *Agent) save() error {
+	if a.persistGate == nil {
+		return a.persist(a.currentMessage, a.currentResume)
+	}
+	var err error
+	a.persistGate(func() { err = a.persist(a.currentMessage, a.currentResume) })
+	return err
 }
 
 func (a *Agent) persist(message string, resume bool) error {
@@ -263,6 +327,9 @@ func (a *Agent) persist(message string, resume bool) error {
 // ledger restarts fresh rather than blocking.
 func (a *Agent) noteCallUsage(u inference.Usage) {
 	a.turnUsage.Add(u)
+	if n := contextTokens(u, a.provider.ApiType()); n > 0 {
+		a.promptTokens, a.promptLen = n, a.sentLen
+	}
 	var totals session.UsageTotals
 	if data, err := os.ReadFile(a.session.UsagePath()); err == nil {
 		_ = json.Unmarshal(data, &totals)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +22,12 @@ import (
 func testRuntime(t *testing.T) *runtime.AgentRuntime {
 	t.Helper()
 	dir := t.TempDir()
-	return runtime.WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore())
+	rt := runtime.WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore())
+	// Never contact real providers from tests.
+	rt.SetModelFetcher(func(context.Context, config.Provider, string) ([]string, error) {
+		return []string{"m1"}, nil
+	})
+	return rt
 }
 
 func rawParams(t *testing.T, v any) json.RawMessage {
@@ -103,8 +109,21 @@ func TestListProvidersSeedsHermetic(t *testing.T) {
 }
 
 func TestRefreshProvidersStarts(t *testing.T) {
-	resp := callUnary(testRuntime(t), "1", "refresh_providers", nil)
+	rt := testRuntime(t)
+	resp := callUnary(rt, "1", "refresh_providers", nil)
 	mustOK(t, resp)
+	rt.WaitRefresh()
+}
+
+func TestRefreshOneProvider(t *testing.T) {
+	rt := testRuntime(t)
+	resp := callUnary(rt, "1", "refresh_providers", map[string]string{"name": "openrouter"})
+	mustOK(t, resp)
+	res, ok := resp.Result.(runtime.RefreshResult)
+	if !ok || res.Name != "openrouter" || res.Count != 1 {
+		t.Fatalf("unexpected result %#v", resp.Result)
+	}
+	mustFail(t, callUnary(rt, "2", "refresh_providers", map[string]string{"name": "missing"}), "not found")
 }
 
 func TestSetDefaultProviderValidation(t *testing.T) {

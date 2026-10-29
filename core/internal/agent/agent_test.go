@@ -21,6 +21,12 @@ type mockProvider struct {
 	streamsErr  error
 	calls       int
 	sessionIDs  []string
+	// streamMsgs / completeMsgs record what each call was sent.
+	streamMsgs   [][]inference.LlmMessage
+	completeMsgs [][]inference.LlmMessage
+	completeSys  []string
+	// afterChunks runs once a stream's scripted chunks are delivered.
+	afterChunks func(idx int)
 }
 
 type streamScript struct {
@@ -35,11 +41,14 @@ func (m *mockProvider) ListModels(context.Context) ([]string, error) { return ni
 
 func (m *mockProvider) CompleteTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string) (inference.ToolResponse, error) {
 	m.sessionIDs = append(m.sessionIDs, sessionID)
+	m.completeMsgs = append(m.completeMsgs, append([]inference.LlmMessage(nil), messages...))
+	m.completeSys = append(m.completeSys, system)
 	return m.complete, m.completeErr
 }
 
 func (m *mockProvider) StreamTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string, tx chan<- inference.Chunk, done <-chan struct{}) error {
 	m.sessionIDs = append(m.sessionIDs, sessionID)
+	m.streamMsgs = append(m.streamMsgs, append([]inference.LlmMessage(nil), messages...))
 	idx := m.calls
 	m.calls++
 	if m.streamsErr != nil {
@@ -54,6 +63,9 @@ func (m *mockProvider) StreamTools(ctx context.Context, system string, messages 
 			case <-ctx.Done():
 				return inference.CancelledError()
 			}
+		}
+		if m.afterChunks != nil {
+			m.afterChunks(idx)
 		}
 		return m.streams[idx].err
 	}

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
 )
@@ -124,6 +125,12 @@ func providerTemplate(apiType config.ApiType) (ProviderTemplate, bool) {
 type ProviderError struct {
 	Kind    string
 	Message string
+	// Status is the HTTP status when the provider answered with one.
+	Status int
+	// RetryAfter is the server-requested wait (Retry-After headers).
+	RetryAfter time.Duration
+	// Timeout marks deadline/idle-stall failures.
+	Timeout bool
 }
 
 func (e *ProviderError) Error() string {
