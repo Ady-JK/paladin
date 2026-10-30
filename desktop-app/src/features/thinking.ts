@@ -66,6 +66,9 @@ function ensureChip(): HTMLButtonElement {
     event.stopPropagation();
     const target = event.target as HTMLElement;
     if (target.closest(".think-reset")) {
+      // Reset disables itself, which drops its focus. Move focus to the
+      // slider first so Escape still reaches the card.
+      card!.querySelector<HTMLInputElement>('input[type="range"]')?.focus();
       void save("");
     } else if (target.closest(".think-model")) {
       closeCard();
@@ -86,6 +89,12 @@ function ensureChip(): HTMLButtonElement {
       closeCard();
       chip?.focus();
     }
+  });
+  // Escape still closes the card when focus has fallen out of it: the
+  // reset button disables itself, and the card's own keydown handler
+  // only sees keys typed while focus is inside the card.
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && card && !card.classList.contains("hidden")) closeCard();
   });
   document.addEventListener("click", (event) => {
     if (card && !card.classList.contains("hidden") && !wrap.contains(event.target as Node)) closeCard();
