@@ -1,0 +1,150 @@
+/* ============ Steering + spend budget ============ */
+.steer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--color-accent-500);
+  color: var(--color-accent-600);
+  padding: 7px;
+  transition: background-color 120ms ease;
+}
+.steer-btn:hover {
+  background: rgb(146 134 214 / 0.12);
+}
+.dark .steer-btn {
+  color: var(--color-accent-400);
+}
+.steer-btn.hidden {
+  display: none;
+}
+
+/* A steer is the user's message joining the running turn. */
+.steer-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin: 10px 0 10px auto;
+  max-width: 80%;
+}
+.steer-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-accent-600);
+}
+.dark .steer-label {
+  color: var(--color-accent-400);
+}
+.steer-text {
+  border-radius: 14px;
+  border-top-right-radius: 4px;
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+  padding: 7px 13px;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.dark .steer-text {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+
+.budget-notice[data-state="reached"] {
+  border-color: rgb(224 168 0 / 0.45);
+  background: rgb(224 168 0 / 0.08);
+}
+.budget-notice[data-state="unknownCost"] {
+  color: var(--color-slate-500);
+}
+
+/* Composer chip: spend against the limit. */
+.budget-chip {
+  font-variant-numeric: tabular-nums;
+}
+.budget-chip[data-level="warn"] {
+  color: #b7791f;
+}
+.budget-chip[data-level="over"] {
+  color: var(--color-agent-rose);
+}
+.budget-menu {
+  width: 280px;
+}
+.budget-spent {
+  padding: 0 8px 6px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+}
+.budget-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 4px 6px;
+  border-radius: 8px;
+  background: rgb(224 168 0 / 0.1);
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--color-slate-600);
+}
+.dark .budget-warn {
+  color: var(--color-slate-300);
+}
+.budget-warn .perm-chip-warn {
+  flex-shrink: 0;
+}
+.budget-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 6px;
+}
+.budget-dollar {
+  font-size: 12px;
+  color: var(--color-slate-500);
+}
+.budget-form input {
+  min-width: 0;
+  flex: 1;
+  border-radius: 6px;
+  border: 1px solid var(--color-slate-200);
+  background: transparent;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+}
+.budget-form input:focus {
+  border-color: var(--color-accent-500);
+}
+.budget-form input[aria-invalid="true"] {
+  border-color: var(--color-agent-rose);
+}
+.dark .budget-form input {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-100);
+}
+.budget-save {
+  border-radius: 6px;
+  background: var(--color-accent-600);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.budget-save:hover {
+  background: var(--color-accent-700);
+}
+.budget-foot {
+  margin-top: 4px;
+  border-top: 1px solid var(--color-slate-200);
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-slate-400);
+}
+.dark .budget-foot {
+  border-color: var(--color-slate-800);
+}

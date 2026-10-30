@@ -3,6 +3,7 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -114,14 +115,14 @@ func TestReactiveCompactionRecoversOverflow(t *testing.T) {
 		},
 		complete: inference.ToolResponse{Content: "SUM"},
 	}
-	a, sess, tx, done := testAgent(t, prov, 1)
+	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)
 	seedHistory(t, a, sess, 3, 200)
 	outcome, err := a.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.Reply != "ok" || outcome.NeedsContinue {
+	if outcome.Reply != "ok" {
 		t.Fatalf("outcome %+v", outcome)
 	}
 	if len(prov.completeMsgs) != 1 || len(prov.completeMsgs[0]) != 1 {
@@ -163,7 +164,7 @@ func TestProactiveCompactionAtThreshold(t *testing.T) {
 		streams:  []streamScript{{chunks: []inference.Chunk{inference.TextChunk("ok")}}},
 		complete: inference.ToolResponse{Content: "SUM"},
 	}
-	a, sess, tx, done := testAgent(t, prov, 5)
+	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)
 	a.window = 400
 	seedHistory(t, a, sess, 3, 400)
@@ -185,7 +186,7 @@ func TestProactiveCompactionAtThreshold(t *testing.T) {
 func TestProactiveCompactionSkippedBelowThresholdOrUnknownWindow(t *testing.T) {
 	for _, window := range []int64{0, 1 << 30} {
 		prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{inference.TextChunk("ok")}}}}
-		a, sess, _, done := testAgent(t, prov, 5)
+		a, sess, _, done := testAgent(t, prov)
 		a.window = window
 		seedHistory(t, a, sess, 3, 400)
 		if _, err := a.Run(); err != nil {
@@ -203,7 +204,7 @@ func TestProactiveCompactionFailureContinues(t *testing.T) {
 		streams:     []streamScript{{chunks: []inference.Chunk{inference.TextChunk("ok")}}},
 		completeErr: errors.New("summary boom"),
 	}
-	a, sess, tx, done := testAgent(t, prov, 5)
+	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)
 	a.window = 400
 	seedHistory(t, a, sess, 3, 400)
@@ -228,7 +229,7 @@ func TestReactiveCompactionFailureReportsOverflow(t *testing.T) {
 		streams:     []streamScript{{err: overflowErr()}},
 		completeErr: errors.New("summary boom"),
 	}
-	a, sess, _, done := testAgent(t, prov, 5)
+	a, sess, _, done := testAgent(t, prov)
 	defer close(done)
 	seedHistory(t, a, sess, 3, 200)
 	_, err := a.Run()
@@ -237,23 +238,73 @@ func TestReactiveCompactionFailureReportsOverflow(t *testing.T) {
 	}
 }
 
-func TestCompactionCappedPerTurn(t *testing.T) {
+func TestOverflowGivesUpAfterUnproductiveCompactions(t *testing.T) {
 	prov := &mockProvider{streamsErr: overflowErr(), complete: inference.ToolResponse{Content: "SUM"}}
-	a, sess, _, done := testAgent(t, prov, 5)
+	a, sess, _, done := testAgent(t, prov)
 	defer close(done)
 	seedHistory(t, a, sess, 6, 200)
 	_, err := a.Run()
 	if err == nil || !strings.Contains(err.Error(), "prompt is too long") {
 		t.Fatalf("err %v", err)
 	}
-	if n := len(prov.completeMsgs); n == 0 || n > maxCompactionsPerTurn {
+	if n := len(prov.completeMsgs); n == 0 || n > maxUnproductiveCompactions {
 		t.Fatalf("compactions %d", n)
+	}
+}
+
+// bigReadRounds scripts n tool rounds, each reading its own large file,
+// then a final text reply.
+func bigReadRounds(t *testing.T, cwd string, n int) []streamScript {
+	t.Helper()
+	var streams []streamScript
+	for i := 0; i < n; i++ {
+		name := filepath.Join(cwd, fmt.Sprintf("big%d.txt", i))
+		if err := writeTestFile(name, strings.Repeat("y", 2000)); err != nil {
+			t.Fatal(err)
+		}
+		streams = append(streams, callRound(fmt.Sprintf("c%d", i), "read", fmt.Sprintf(`{"path":%q}`, name)))
+	}
+	return append(streams, streamScript{chunks: []inference.Chunk{inference.TextChunk("ok")}})
+}
+
+func TestLongTurnCompactsAsOftenAsNeeded(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000071")
+	prov := &mockProvider{streams: bigReadRounds(t, sess.Meta.Cwd, 6), complete: inference.ToolResponse{Content: "SUM"}}
+	a, tx, done := newAgentForTest(t, prov, sess, "go", false, true)
+	defer close(done)
+	a.window = 1000
+	outcome, err := a.Run()
+	if err != nil || outcome.Reply != "ok" {
+		t.Fatalf("outcome %+v err %v", outcome, err)
+	}
+	if n := len(prov.completeMsgs); n < 3 {
+		t.Fatalf("an uncapped turn must keep compacting, got %d summaries", n)
+	}
+	for _, st := range compactionChunks(drainChunks(tx)) {
+		if st.Phase == "failed" {
+			t.Fatalf("unexpected failure %+v", st)
+		}
+	}
+}
+
+func TestProactiveCompactionStopsAfterRepeatedFailures(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000072")
+	prov := &mockProvider{streams: bigReadRounds(t, sess.Meta.Cwd, 6), completeErr: errors.New("summary boom")}
+	a, _, done := newAgentForTest(t, prov, sess, "go", false, true)
+	defer close(done)
+	a.window = 1000
+	outcome, err := a.Run()
+	if err != nil || outcome.Reply != "ok" {
+		t.Fatalf("outcome %+v err %v", outcome, err)
+	}
+	if n := len(prov.completeMsgs); n != maxUnproductiveCompactions {
+		t.Fatalf("summary attempts %d, want %d", n, maxUnproductiveCompactions)
 	}
 }
 
 func TestOverflowWithNothingToCompactFails(t *testing.T) {
 	prov := &mockProvider{streamsErr: overflowErr(), complete: inference.ToolResponse{Content: "SUM"}}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	_, err := a.Run()
 	if err == nil || !strings.Contains(err.Error(), "prompt is too long") {
@@ -272,7 +323,7 @@ func TestReactiveCompactionWithLargeSystemPrompt(t *testing.T) {
 		},
 		complete: inference.ToolResponse{Content: "SUM"},
 	}
-	a, sess, _, done := testAgent(t, prov, 5)
+	a, sess, _, done := testAgent(t, prov)
 	defer close(done)
 	a.system = strings.Repeat("s", 40000)
 	seedHistory(t, a, sess, 1, 10)

@@ -30,7 +30,6 @@ async function stubAskTurn(page: import("@playwright/test").Page, questions: unk
           sessionId: "sess-notify-1",
           reply: "Deploying to staging.",
           stopped: false,
-          needsContinue: false,
         });
         return true;
       }
@@ -40,7 +39,6 @@ async function stubAskTurn(page: import("@playwright/test").Page, questions: unk
           sessionId: "sess-notify-1",
           reply: "",
           stopped: true,
-          needsContinue: false,
         });
         return true;
       }

@@ -31,6 +31,12 @@ export function noteFor(msg: any): TurnNote | null {
     const what = ap.command ? String(ap.command) : ap.path ? `Write ${ap.path}` : "A tool call";
     return { sessionId, title: "Paladin · needs approval", body: clip(what) };
   }
+  if (msg.event === "chat/budget") {
+    const b = msg.budget;
+    if (b?.state !== "reached") return null;
+    const usd = (n: unknown) => `$${Number(n || 0).toFixed(2)}`;
+    return { sessionId, title: "Paladin · budget reached", body: `Spent ${usd(b.spent)} of ${usd(b.limit)} — the agent is wrapping up with a summary.` };
+  }
   if (msg.event !== "turn/done" || !msg.turn) return null;
   const turn = msg.turn;
   // The user stopped or dropped it themselves: nothing to tell them.
@@ -38,9 +44,6 @@ export function noteFor(msg: any): TurnNote | null {
   const what = clip(String(turn.display || turn.message || "")) || "(continue)";
   if (turn.error) {
     return { sessionId, title: "Paladin · turn failed", body: clip(`${what} — ${turn.error}`) };
-  }
-  if (turn.needsContinue) {
-    return { sessionId, title: "Paladin · paused at the round cap", body: what };
   }
   return { sessionId, title: "Paladin · turn finished", body: what };
 }

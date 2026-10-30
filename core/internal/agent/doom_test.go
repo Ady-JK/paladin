@@ -1,11 +1,16 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 )
+
+func textRound(s string) streamScript {
+	return streamScript{chunks: []inference.Chunk{inference.TextChunk(s)}}
+}
 
 func callRound(id, name, args string) streamScript {
 	return streamScript{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: id, Name: name, Arguments: args}}}}}
@@ -29,7 +34,7 @@ func TestDoomLoopBlocksThirdIdenticalCall(t *testing.T) {
 		callRound("c3", "read", `{"path":"x.txt"}`),
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
-	a, _, _, done := testAgent(t, prov, 10)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
 		t.Fatal(err)
@@ -51,7 +56,7 @@ func TestDoomLoopResetsWhenArgsChange(t *testing.T) {
 		callRound("c4", "read", `{"path":"x.txt"}`),
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
-	a, _, _, done := testAgent(t, prov, 10)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
 		t.Fatal(err)
@@ -71,12 +76,72 @@ func TestDoomLoopAllowsJobPolling(t *testing.T) {
 		callRound("c3", "shell", poll),
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
-	a, _, _, done := testAgent(t, prov, 10)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(toolResultsByID(t, a)["c3"], "repeated") {
 		t.Fatal("status polling must not trip the doom-loop guard")
+	}
+}
+
+func TestDoomGuardRefusesRepeatingCycle(t *testing.T) {
+	var g doomGuard
+	seq := []struct{ name, args string }{
+		{"read", `{"path":"a"}`}, {"grep", `{"pattern":"x"}`},
+		{"read", `{"path":"a"}`}, {"grep", `{"pattern":"x"}`},
+		{"read", `{"path":"a"}`},
+	}
+	for i, c := range seq {
+		if r := g.check(c.name, c.args); r != "" {
+			t.Fatalf("call %d refused too early: %s", i, r)
+		}
+	}
+	r := g.check("grep", `{"pattern":"x"}`)
+	if !strings.Contains(r, "cycle") || !strings.Contains(r, "read → grep") {
+		t.Fatalf("third lap of an A,B cycle must be refused, got %q", r)
+	}
+	// Continuing the cycle stays refused.
+	if r := g.check("read", `{"path":"a"}`); r == "" {
+		t.Fatal("cycle continued without refusal")
+	}
+}
+
+func TestDoomGuardCyclePeriodThree(t *testing.T) {
+	var g doomGuard
+	block := []string{"read", "grep", "glob"}
+	refused := -1
+	for i := 0; i < 9; i++ {
+		if r := g.check(block[i%3], `{}`); r != "" && refused < 0 {
+			refused = i
+		}
+	}
+	if refused != 8 {
+		t.Fatalf("period-3 cycle refused at call %d, want 8", refused)
+	}
+}
+
+func TestDoomGuardIgnoresProgress(t *testing.T) {
+	var g doomGuard
+	// Edit/test loops with changing arguments are progress, not a cycle.
+	for i := 0; i < 20; i++ {
+		if r := g.check("edit", fmt.Sprintf(`{"path":"a","new":"v%d"}`, i)); r != "" {
+			t.Fatalf("edit %d refused: %s", i, r)
+		}
+		if r := g.check("shell", `{"command":"go test ./..."}`); r != "" {
+			t.Fatalf("test run %d refused: %s", i, r)
+		}
+	}
+}
+
+func TestDoomGuardPollingResetsCycle(t *testing.T) {
+	var g doomGuard
+	for i := 0; i < 5; i++ {
+		g.check([]string{"read", "grep"}[i%2], `{}`)
+	}
+	g.check("shell", `{"action":"status","id":"j1"}`)
+	if r := g.check("grep", `{}`); r != "" {
+		t.Fatalf("polling should reset the cycle window: %s", r)
 	}
 }

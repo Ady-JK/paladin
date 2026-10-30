@@ -36,6 +36,7 @@ import {
   setShowHidden,
   type PickerSelection,
 } from "./picker";
+import { syncMcp } from "./mcp";
 
 let currentList: FsList | null = null;
 let selection: PickerSelection | null = null;
@@ -139,6 +140,7 @@ function startNewSession(): void {
     state.cwd = state.pendingWorkspace.trim();
     workspaceLabelEl.textContent = shortPath(state.cwd);
     workspaceInputEl.value = state.cwd;
+    syncMcp();
   }
 
   pickModel(state.selectedProvider, state.selectedModel);

@@ -17,7 +17,7 @@ func (p *panicProvider) StreamTools(context.Context, string, []inference.LlmMess
 func TestProviderPanicFailsTurnInsteadOfCrashing(t *testing.T) {
 	for _, withTools := range []bool{true, false} {
 		sess := testSession(t, "00000000-0000-4000-8000-000000000009")
-		a, _, done := newAgentForTest(t, &panicProvider{}, sess, 5, "hi", false, withTools)
+		a, _, done := newAgentForTest(t, &panicProvider{}, sess, "hi", false, withTools)
 		_, err := a.Run()
 		close(done)
 		if err == nil || !strings.Contains(err.Error(), "provider bug") {

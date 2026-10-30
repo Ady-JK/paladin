@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
@@ -55,6 +56,21 @@ type Request struct {
 	// Permissions is the approval preset: "read-only", "auto"
 	// (default) or "full-access".
 	Permissions string `json:"permissions,omitempty"`
+	// Steer, when set, returns (and clears) messages the user sent while
+	// the turn runs; they join before the next model call. The turn hub
+	// sets it; it never travels over the wire.
+	Steer func() []SteerMessage `json:"-"`
+	// Budget, when set, returns the session's spend limit in USD (0
+	// means none). It is read before every round, so a limit changed
+	// mid-turn applies at once. The runtime sets it; never on the wire.
+	Budget func() float64 `json:"-"`
+}
+
+// SteerMessage is a user message sent into a running turn.
+type SteerMessage struct {
+	Message string `json:"message"`
+	// Display is the user's short form, as for Request.Display.
+	Display string `json:"display,omitempty"`
 }
 
 const (
@@ -74,25 +90,31 @@ type ToolActivity struct {
 // ChatChunk is one streamed piece of a turn: text, a tool update, or the
 // final done marker.
 type ChatChunk struct {
-	Delta         string        `json:"delta"`
-	Done          bool          `json:"done"`
-	Error         *ApiError     `json:"error,omitempty"`
-	NeedsContinue bool          `json:"needsContinue"`
-	SessionID     string        `json:"sessionId"`
-	Stopped       bool          `json:"stopped"`
-	Tool          *ToolActivity `json:"tool,omitempty"`
-	Retry         *RetryStatus  `json:"retry,omitempty"`
+	Delta     string        `json:"delta"`
+	Done      bool          `json:"done"`
+	Error     *ApiError     `json:"error,omitempty"`
+	SessionID string        `json:"sessionId"`
+	Stopped   bool          `json:"stopped"`
+	Tool      *ToolActivity `json:"tool,omitempty"`
+	Retry     *RetryStatus  `json:"retry,omitempty"`
 	// Compaction reports context compaction progress.
 	Compaction *CompactionStatus `json:"compaction,omitempty"`
 	// Approval reports a permission prompt and its resolution.
 	Approval *permission.Approval `json:"approval,omitempty"`
+	// Steer echoes a mid-turn user message as it joins the conversation.
+	Steer *SteerMessage `json:"steer,omitempty"`
+	// Budget reports the session's spend limit being hit, or that it
+	// cannot be enforced because the provider reports no cost.
+	Budget *BudgetNotice `json:"budget,omitempty"`
+	// Hook reports a hook that blocked, added context, failed or stopped.
+	Hook *hooks.Note `json:"hook,omitempty"`
 }
 
 // ToolGate decides whether a tool call may run, and under which
 // sandbox. A nil gate runs everything unconfined.
 type ToolGate interface {
 	Authorize(ctx context.Context, callID, name string, args json.RawMessage, notify func(permission.Approval)) permission.Auth
-	Escalate(ctx context.Context, callID, name string, args json.RawMessage, notify func(permission.Approval)) bool
+	Escalate(ctx context.Context, callID, name string, args json.RawMessage, b permission.Blocked, notify func(permission.Approval)) permission.Escalation
 }
 
 // StepRecorder brackets each run of a file-changing tool, e.g. with
@@ -104,10 +126,9 @@ type StepRecorder interface {
 
 // ChatOutcome is the summary returned when a turn finishes.
 type ChatOutcome struct {
-	SessionID     string `json:"sessionId"`
-	Reply         string `json:"reply"`
-	Stopped       bool   `json:"stopped"`
-	NeedsContinue bool   `json:"needsContinue"`
+	SessionID string `json:"sessionId"`
+	Reply     string `json:"reply"`
+	Stopped   bool   `json:"stopped"`
 	// Usage is the turn's billed footprint: every LLM call's tokens
 	// and gateway-reported spend folded together.
 	Usage inference.Usage `json:"-"`
@@ -120,7 +141,6 @@ const (
 	phaseRunning
 	phaseDone
 	phaseStopped
-	phaseNeedsContinue
 )
 
 type turnStop struct{}
@@ -136,6 +156,8 @@ type runConfig struct {
 	persistGate func(persist func())
 	gate        ToolGate
 	steps       StepRecorder
+	steer       func() []SteerMessage
+	budget      func() float64
 	session     transcript.Session
 	provider    inference.Provider
 	tools       *tools.Registry
@@ -143,7 +165,6 @@ type runConfig struct {
 	toolDefs    []inference.ToolDefinition
 	history     []transcript.Message
 	system      string
-	maxRounds   uint32
 	ctx         context.Context
 	cancel      context.CancelFunc
 	tx          chan<- ChatChunk
@@ -152,27 +173,40 @@ type runConfig struct {
 	display     string
 	resume      bool
 	compactOnly bool
+	// hooks runs the user's hook scripts; sessionStart is the
+	// SessionStart source ("startup"/"resume") when this turn opens the
+	// session, "" otherwise.
+	hooks          *hooks.Engine
+	sessionStart   string
+	permissionMode string
+	live           func([]inference.LlmMessage)
 }
 
 // Agent runs one turn. Built by Template.Build and dropped at exit;
 // nothing survives between turns except the on-disk transcript.
 type Agent struct {
-	session   transcript.Session
-	provider  inference.Provider
-	tools     *tools.Registry
-	shell     *tools.ShellTool
-	doom      doomGuard
-	cancel    context.CancelFunc
-	ctx       context.Context
-	toolCtx   *tools.ToolCtx
-	gate      ToolGate
-	steps     StepRecorder
-	system    string
-	maxRounds uint32
-	history   []transcript.Message
-	toolDefs  []inference.ToolDefinition
-	phase     phase
-	round     uint32
+	session  transcript.Session
+	provider inference.Provider
+	tools    *tools.Registry
+	shell    *tools.ShellTool
+	doom     doomGuard
+	cancel   context.CancelFunc
+	ctx      context.Context
+	toolCtx  *tools.ToolCtx
+	gate     ToolGate
+	steps    StepRecorder
+	// steer, when set, hands over messages the user sent mid-turn.
+	steer  func() []SteerMessage
+	budget func() float64
+	// budgetChecked: the turn's first budget check ran; budgetWrapUp:
+	// the limit was hit and the final no-tools summary round is running;
+	// costWarned: the unknown-cost warning went out.
+	budgetChecked, budgetWrapUp, costWarned bool
+	system                                  string
+	history                                 []transcript.Message
+	toolDefs                                []inference.ToolDefinition
+	phase                                   phase
+	round                                   uint32
 	// emptyRounds counts consecutive rounds that produced neither text
 	// nor tool calls; three in a row ends the turn (done with progress,
 	// failed without) instead of spinning on a dead gateway.
@@ -191,8 +225,9 @@ type Agent struct {
 	noticed []inference.ToolCall
 	// persistGate, when set, wraps the transcript write (see save).
 	persistGate func(persist func())
-	// compactions counts compaction attempts this turn.
-	compactions int
+	// compactStreak counts compactions since a round last succeeded
+	// with the context under the threshold.
+	compactStreak int
 	// promptTokens is the last reported prompt size, covering the first
 	// promptLen entries of messages; sentLen is len(messages) at the
 	// latest request.
@@ -215,6 +250,17 @@ type Agent struct {
 	currentResume  bool
 	// compactOnly runs a manual /compact instead of a model turn.
 	compactOnly bool
+
+	hooks          *hooks.Engine
+	sessionStart   string
+	permissionMode string
+	// live receives a copy of the conversation before each model round,
+	// so side questions can see a turn that is still running.
+	live func([]inference.LlmMessage)
+	// stopContinuations counts Stop-hook blocks this turn; halt is a
+	// hook's continue:false.
+	stopContinuations int
+	halt              hookHalt
 }
 
 func newAgent(c runConfig) *Agent {
@@ -239,22 +285,28 @@ func newAgent(c runConfig) *Agent {
 			Cancel:     c.ctx,
 			SessionID:  c.session.Meta.SessionID,
 		},
-		system:    c.system,
-		maxRounds: c.maxRounds,
-		history:   c.history,
-		toolDefs:  c.toolDefs,
-		phase:     phaseCreated,
-		tx:        c.tx,
-		done:      c.done,
+		system:   c.system,
+		history:  c.history,
+		toolDefs: c.toolDefs,
+		phase:    phaseCreated,
+		tx:       c.tx,
+		done:     c.done,
 
 		persistGate: c.persistGate,
 		gate:        c.gate,
 		steps:       c.steps,
+		steer:       c.steer,
+		budget:      c.budget,
 
 		currentMessage: c.message,
 		currentDisplay: c.display,
 		currentResume:  c.resume,
 		compactOnly:    c.compactOnly,
+
+		hooks:          c.hooks,
+		sessionStart:   c.sessionStart,
+		live:           c.live,
+		permissionMode: c.permissionMode,
 	}
 }
 
@@ -264,6 +316,11 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	a.phase = phaseRunning
 	a.emptyRounds = 0
 	a.retries, a.timeoutRetries = 0, 0
+	if !a.compactOnly && !a.currentResume {
+		if err := a.runPromptHooks(); err != nil {
+			return ChatOutcome{}, err
+		}
+	}
 	a.messages = a.modelMessages(a.currentMessage, a.currentResume)
 	if a.compactOnly {
 		return a.runCompact()
@@ -287,13 +344,11 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	if perr := a.save(); perr != nil {
 		return ChatOutcome{}, perr
 	}
-	needsContinue := a.phase == phaseNeedsContinue
 	return ChatOutcome{
-		SessionID:     sessionID,
-		Reply:         a.reply.String(),
-		Stopped:       stopped,
-		NeedsContinue: needsContinue,
-		Usage:         a.turnUsage,
+		SessionID: sessionID,
+		Reply:     a.reply.String(),
+		Stopped:   stopped,
+		Usage:     a.turnUsage,
 	}, nil
 }
 
@@ -324,14 +379,9 @@ func (a *Agent) stopRequested() bool {
 	}
 }
 
-func (a *Agent) needsContinue() bool { return a.round >= a.maxRounds }
-
 func (a *Agent) finish(p phase) { a.phase = p }
 
 func (a *Agent) finalize(stopped bool) {
-	if a.phase == phaseNeedsContinue {
-		return
-	}
 	if stopped {
 		a.finish(phaseStopped)
 	} else {
@@ -382,15 +432,16 @@ func (a *Agent) persist(message string, resume bool) error {
 // ledger restarts fresh rather than blocking.
 func (a *Agent) noteCallUsage(u inference.Usage) {
 	a.turnUsage.Add(u)
+	defer a.noteCallCost(u)
 	if n := contextTokens(u, a.provider.ApiType()); n > 0 {
 		a.promptTokens, a.promptLen = n, a.sentLen
 	}
-	var totals session.UsageTotals
-	if data, err := os.ReadFile(a.session.UsagePath()); err == nil {
-		_ = json.Unmarshal(data, &totals)
-	}
-	totals.SessionID = a.session.Meta.SessionID
-	totals.AddCall(a.provider.Model(), session.Counters{
+	session.RecordCall(a.session.UsagePath(), a.session.Meta.SessionID, a.provider.Model(), UsageCounters(u))
+}
+
+// UsageCounters is one LLM call's usage in ledger form.
+func UsageCounters(u inference.Usage) session.Counters {
+	return session.Counters{
 		PromptTokens:     u.PromptTokens,
 		CompletionTokens: u.CompletionTokens,
 		ReasoningTokens:  u.ReasoningTokens,
@@ -400,9 +451,6 @@ func (a *Agent) noteCallUsage(u inference.Usage) {
 		Cost:             u.Cost,
 		ListCost:         u.ListCost,
 		HasCost:          u.HasCost,
-	}, time.Now().UTC().Unix())
-	if data, err := json.MarshalIndent(totals, "", "  "); err == nil {
-		_ = os.WriteFile(a.session.UsagePath(), data, 0o644)
 	}
 }
 
@@ -418,12 +466,23 @@ func (a *Agent) emit(chunk ChatChunk) error {
 
 func (a *Agent) appendDelta(text string) { a.reply.WriteString(text) }
 
+// publishLive hands a copy of the conversation to the live observer
+// (/btw): before each model round, and as tool calls start and finish.
+func (a *Agent) publishLive() {
+	if a.live != nil {
+		a.live(append([]inference.LlmMessage(nil), a.messages...))
+	}
+}
+
 func (a *Agent) appendAssistant(content string, calls []inference.ToolCall) {
 	a.messages = append(a.messages, inference.LlmMessage{
 		Role:      "assistant",
 		Content:   content,
 		ToolCalls: append([]inference.ToolCall(nil), calls...),
 	})
+	if len(calls) > 0 {
+		a.publishLive()
+	}
 	stored := make([]transcript.ToolCall, 0, len(calls))
 	for _, c := range calls {
 		stored = append(stored, transcript.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments, Signature: c.Signature})
@@ -447,6 +506,7 @@ func (a *Agent) appendToolResult(call *inference.ToolCall, result *tools.ToolRes
 		Role: "tool", Content: content,
 		ToolCallID: &callID, Name: &name,
 	})
+	a.publishLive()
 	resCallID, resName := "", ""
 	isErr := false
 	if result != nil {

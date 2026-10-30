@@ -235,7 +235,9 @@ func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools [
 func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID), p.headers(sessionID)...)
+	var httpRes *http.Response
+	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
+	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID), opts...)
 	if err != nil {
 		return ToolResponse{}, p.mapError("chat completion", err)
 	}
@@ -251,7 +253,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 			Arguments: call.Function.Arguments,
 		})
 	}
-	out.Usage = chatUsage(res.Usage, res.RawJSON())
+	out.Usage = withHeaderCost(chatUsage(res.Usage, res.RawJSON()), httpRes)
 	return out, nil
 }
 

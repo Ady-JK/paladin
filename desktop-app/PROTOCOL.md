@@ -35,6 +35,8 @@ Electron main spawns it with piped stdio:
 | `sessionHistory` | `{sessionId,cwd?}` | `HistoryMessage[]` |
 | `sessionTodos` | `{sessionId,cwd?}` | `TodoEntry[]` (`content,status`): the agent's todo list for the panel above the composer; empty before it plans |
 | `sessionUsage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,lastInputTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` is the last call's input tokens over the window, omitted when the model's window is unknown) |
+| `budgetGet` | `{sessionId?,cwd?}` | `BudgetView` (`defaultUsd,sessionUsd,effectiveUsd,spentUsd,hasCost,calls`); `calls` counts model calls that reported usage, so `hasCost:false` with `calls>0` means the provider sends no cost; `sessionUsd` is `null` when the session inherits the default; `effectiveUsd` `0` means no limit. Without `sessionId` only the default is reported |
+| `budgetSet` | `{scope,sessionId?,cwd?,budgetUsd}` | `BudgetView`; `scope` `global` (default in `config/settings.json` as `defaultBudgetUsd`) or `session` (session meta); `budgetUsd` a non-negative USD amount, `0` for a session turns the limit off, `null` clears it (inherit) |
 | `overallUsage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
 | `deleteSession` | `{sessionId,cwd?,discardWorktree?}` | `bool`; a worktree session's worktree is removed with its last session if clean, or always with `discardWorktree:true` |
 | `getPrompt` | `{}` | `Prompt` (`systemPrompt` = `config/SYSTEM_PROMPT.md`; a missing/blank file seeds from the built-in default) |
@@ -57,16 +59,72 @@ Electron main spawns it with piped stdio:
 | `renameSession` | `{sessionId,cwd?,title}` | `bool`; blank title restores the derived one (max 120 chars) |
 | `answerAsk` | `{sessionId,callId,answers:[{question,answer,selected?}]}` | `bool` (false: nothing waiting) |
 | `cancelAsk` | `{sessionId,callId}` | `bool` |
-| `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder` or `deny` (must be one of the card's `choices`); unknown calls fail |
+| `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder`, `global` or `deny` (must be one of the card's `choices`); unknown calls fail |
 | `permissionsGet` | `{cwd?,sessionId?}` | `{global: Rule[], folder: Rule[], session: Rule[], folders: [{cwd,rules}], sandbox: {kind}, presets}`; `sandbox.kind` is `seatbelt`, `landlock` or `""` (approvals only) |
-| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write patterns absolute directories, `*` matches all |
+| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|mcp, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write patterns absolute directories, mcp patterns `server`, `server/*` or `server/tool`; `*` matches all |
+| `mcpList` | `{cwd?}` | `MCPOverview`: `{servers: ServerStatus[], globalPath, folderPath?, hasFolderConfig, trusted, errors?: {global?, folder?}}` — global servers plus `cwd`'s own (see MCP servers) |
+| `mcpConfig` | `{scope,cwd?}` | `{path, text, exists}`: one `mcp.json` for editing (`scope` `global` or `folder`; a missing file returns a starter `text`) |
+| `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
+| `mcpSetEnabled` | `{scope,cwd?,name,enabled}` | `MCPOverview`; sets the server's `enabled` flag in its file (a trusted folder file stays trusted) |
+| `mcpRestart` | `{scope,cwd?,name}` | `MCPOverview`; stops the server, clears its failure and starts it |
+| `mcpTrust` | `{cwd,trust}` | `MCPOverview`; approves (or revokes) the folder's current `mcp.json` |
+| `mcpParse` | `{text}` | `{servers: {name, config}[]}`: servers read from pasted text — launch commands (`npx`/`uvx`/`docker run`/…, `KEY=value` prefixes, one per line), a Streamable HTTP URL, `claude`/`codex mcp add …` lines or `mcp.json` JSON. Nothing is saved |
+| `mcpAdd` | `{scope,cwd?,servers,replace?}` | `MCPOverview`; adds `{name, config}[]` to one `mcp.json` (existing names fail unless `replace`) and starts them. A new or trusted folder file is trusted afterwards; an untrusted one stays untrusted |
+| `sideQuestion` | `{sessionId,cwd?,question,provider?,model?}` | `{answer, model}`: a `/btw` answer about the session — the running turn's conversation as of its latest model call when one is live, else the saved history — with no tools. Nothing is added to the transcript; the call is billed to the session's usage (and budget). Answered off the request loop, so its response can arrive after later requests' |
+| `hooksList` | `{cwd?}` | `HooksOverview`: `{sources: Source[], events}` — the global `config/hooks.json` plus, with `cwd`, the folder's `.paladin/hooks.json`, `.codex/hooks.json` and `.claude/settings.json` (see Hooks). `Source` is `{path, scope, format: paladin\|codex\|claude, exists, editable, trusted, error?, warnings?, text?, handlers: [{key, event, matcher?, command, timeout?, statusMessage?, enabled}]}` |
+| `hooksSetConfig` | `{scope,cwd?,text}` | `HooksOverview`; validates and writes the global or folder `hooks.json` (blank `text` deletes it). A folder file saved here is trusted |
+| `hooksTrust` | `{cwd,path,trust}` | `HooksOverview`; approves (or revokes) one of the folder's hooks files at its current content |
+| `hooksToggle` | `{cwd?,key,enabled}` | `HooksOverview`; turns one handler on or off |
+| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[]}` (see Tool switches) |
+| `toolsSet` | `{scope,cwd?,sessionId?,names,enabled}` | `ToolsOverview`; `scope` `global` or `session`; `enabled` `true`/`false`, or `null` to clear the switch |
+| `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
 | `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only`, `auto` (default) or `full-access` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
+| `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
 | `resources` | `{}` | `{at, supported, self:{cpu,rss,procs}, sessions:{[id]:{cpu,rss,procs}}}`: the core process plus each session's running shell process trees (one `ps` sample, cached 1.5s; `cpu` is % of one core, `rss` bytes). `supported:false` off unix |
 | `attach` | `{sessionId,cwd?}` | `{history: HistoryMessage[], turn: TurnInfo\|null, events: Event[], queued: TurnInfo[], seq}` |
 | `cancelTurn` | `{turnId}` | `bool`: drops a queued turn (or stops it if already running) |
 
 ### Turns run in the background
+
+A turn has **no round cap**: it runs until the model replies without
+calling a tool, the user stops it, or an error ends it. Guards keep it
+from spinning: a call repeated three times in a row — or a 2–4 call
+cycle repeated three times — is refused with guidance (the turn goes
+on), and compaction gives up after three unproductive attempts.
+
+**Steering:** `steerChat` sends a message into the running turn. It is
+added as a user message before the next model call — after the current
+tool batch finishes, or right after a final answer, which then keeps the
+turn going — and echoed as `chat/steer`. A steer the turn never picked
+up (it was already ending) becomes the session's next turn, ahead of
+anything queued later; stopping the turn drops it.
+
+**Budget:** an optional spend limit (`budgetSet`) is checked before every
+model call against the session's gateway-reported spend. Once spent ≥
+limit, the turn emits `chat/budget` `reached`, the tools are taken away
+and the model is asked for a final done/remaining summary, which ends the
+turn (steers wait for a later turn). A turn that starts already over the
+limit ends at once without a model call. When a budget is set but the
+provider reports no cost, `chat/budget` `unknownCost` warns once per turn
+and the limit is not enforced.
+
+**Hooks:** user commands run (outside the sandbox, via `sh -c`) at
+`SessionStart` (first turn of a session in this process: `startup`,
+`resume`, or `compact` after a summary), `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `Stop`, `PreCompact` and `PostCompact`.
+Each gets a snake_case JSON object on stdin (`session_id`,
+`transcript_path`, `cwd`, `hook_event_name`, `permission_mode`, plus
+`prompt`, `tool_name`/`tool_input`/`tool_response`, `stop_hook_active`,
+`trigger`, `source` as fitting) — the same contract as Codex and Claude
+Code. Exit 2 blocks (stderr is the reason) for events that can block;
+stdout JSON may set `continue: false`, `systemMessage`,
+`decision: "block"` + `reason`, or `hookSpecificOutput` with
+`additionalContext`, `permissionDecision` (`allow` skips the approval
+prompt but never the sandbox or deny rules; `ask` forces one; `deny`
+refuses) and `updatedInput`. A blocking `Stop` hook continues the turn
+with its reason (at most 8 times per turn). Folder files only run once
+trusted; every run emits `chat/hook`.
 
 Every turn runs in the sidecar's turn hub, independent of any client
 request: different sessions run concurrently (at most
@@ -80,7 +138,7 @@ it, then exits.
 
 `TurnInfo` is `{turnId, sessionId, cwd, message, display?, skill?,
 resume?, permissions?, state: queued|running|done, persisted?, reply?,
-stopped?, needsContinue?, cancelled?, awaitingApproval?, error?,
+stopped?, cancelled?, awaitingApproval?, error?,
 queuedAt, startedAt?, endedAt?}`. `awaitingApproval` is true while a
 tool call waits on an approval card.
 
@@ -139,14 +197,26 @@ More streaming events:
 - `chat/retry`: a round failed with a transient provider error (429,
   5xx, timeout, stalled stream) before producing output and runs again
   after `delayMs` (exponential backoff, or the server's Retry-After).
-  Retries don't consume rounds; any progress resets the budget.
+  Any progress resets the retry budget.
 - `chat/compact`: context compaction. `reason` is `auto` (the next
   request would fill 85% of a known context window) or `overflow` (the
   provider rejected the prompt as too long). `phase` is `start`, then
   `done` or `failed` (with `error`). The older conversation is replaced
   by a model-written summary; the transcript keeps everything, and
   `sessionHistory` shows a `{"role": "system", "kind": "compaction",
-  "content": "<summary>"}` divider where it happened.
+  "content": "<summary>"}` divider where it happened. A turn may
+  compact any number of times; three compactions in a row that fail or
+  leave the context over 85% stop compaction for the turn, and a later
+  overflow then fails it.
+- `chat/steer`: `{"steer": {"message", "display?"}}` — a message sent
+  with `steerChat` joined the conversation here, as a user message.
+- `chat/budget`: `{"budget": {"state", "spent", "limit", "ended?"}}` —
+  `state` `reached` (the turn is wrapping up with a summary; with
+  `ended: true` it was over the limit before any model call and ends at
+  once) or `unknownCost` (the provider reports no cost, so the limit
+  cannot be enforced).
+- `chat/hook`: `{"hook": {"event", "command", "outcome", "message?"}}` — a hook ran and did something worth showing:
+  `outcome` is `blocked`, `context`, `error`, `stopped` or `message`.
 - Tool calls cut short by stop or a crash settle as `failed` `chat/tool`
   events with an `aborted` result, so no row is left spinning.
 
@@ -162,7 +232,7 @@ with ", ").
 
 ### Approvals and sandbox
 
-Every `shell`, `write` and `edit` call passes the permission gate
+Every `shell`, `write` and `edit` call (and MCP tool call) passes the permission gate
 before it runs. Presets:
 
 - `read-only`: safe read commands run in a read-only OS sandbox; any
@@ -185,14 +255,95 @@ folder (`permissions/folders/<key>.json`), then global
 ```
 
 The turn blocks until `answerApproval`; `state` then becomes
-`approved` or `denied` (`decision: "interrupted"` if the turn stopped). `session`
-and `folder` save `remember`. A denied call returns an error result
-telling the model not to retry. If a sandboxed command fails because
-the sandbox blocked it, the gate sends a `kind: "escalate"` card
-(`once`/`deny`): approving reruns the command unsandboxed. `attach`
+`approved` or `denied` (`decision: "interrupted"` if the turn stopped). `session`,
+`folder` and `global` save `remember` in that scope; write cards (a
+write outside the workspace) also offer `global`. A denied call returns
+an error result telling the model not to retry.
+
+Allow-write rules double as **sandbox grants**: every absolute folder
+in an effective `write` allow rule is writable by sandboxed shell
+commands too, in every preset (read-only included). `*` never lifts the
+sandbox, and a grant overlapping a `write` deny rule is dropped.
+
+If a sandboxed command fails because the sandbox blocked it, the gate
+sends a `kind: "escalate"` card. When the output names the denied path
+(and the command is not destructive) the card carries `path` (the
+folder to grant: the path's parent, or the path itself when the parent
+is `/`, a top-level folder, home or home's parent), a `write` rule in
+`remember`, and choices `session`, `folder`, `global`, `once`, `deny`:
+a scope saves the grant and reruns the command still sandboxed, `once`
+reruns it unsandboxed. Without a path the choices are `once`/`deny`.
+A rerun that hits the next folder asks again, up to 3 times per call.
+
+```json
+{"event": "chat/approval", "sessionId": "...", "approval": {"id": "c1", "tool": "shell", "kind": "escalate", "command": "npm i -g pnpm", "path": "/Users/me/.nvm/versions/node/v24/lib/node_modules", "reasons": ["blocked by the sandbox"], "choices": ["session", "folder", "global", "once", "deny"], "remember": [{"tool": "write", "pattern": "/Users/me/.nvm/versions/node/v24/lib/node_modules", "action": "allow"}], "state": "pending"}}
+```
+
+`attach`
 replays each approval at its latest state. The sandbox is Seatbelt
 (`sandbox-exec`) on macOS and Landlock on Linux; on Windows
 `sandbox.kind` is `""` and only approvals apply.
+
+### MCP servers
+
+Servers come from `config/mcp.json` in the data dir (global) and
+`<folder>/.paladin/mcp.json` (folder), both in the common shape:
+
+```json
+{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}},
+                "docs": {"type": "http", "url": "https://example.com/mcp", "headers": {"Authorization": "Bearer ${DOCS_TOKEN}"}}}}
+```
+
+Per server: `type` (`stdio`/`http`, inferred), `command`, `args`, `env`,
+`cwd`, `url`, `headers`, `enabled`, `startupTimeoutSec` (30),
+`toolTimeoutSec` (120), `allowedTools`, `deniedTools`. Strings expand
+`${VAR}`, `${VAR:-default}` and `${workspaceFolder}`. Transports are
+stdio and Streamable HTTP; legacy SSE is rejected.
+
+Tools appear to the model as `mcp__<server>__<tool>`. A folder server
+replaces a global one of the same name (`shadowed: true` on the
+global). Folder servers run only once the user trusts that exact file
+(`mcpTrust`); any outside edit needs trust again. Servers start lazily
+on a turn's first use (global ones also at launch); a turn waits for
+starting servers, never for failed ones. A server that fails to start
+stays `failed` until its config changes or `mcpRestart`; one that dies
+after starting restarts on next use (3 times per 5 minutes).
+
+MCP calls pass the gate as `kind: "mcp"` cards with `server`, `mcpTool`
+and `args`: tools with `readOnlyHint` run without asking, tools with
+`destructiveHint` always ask `once`/`deny`, others ask and remember
+`server/tool`. Full access runs everything; plan mode keeps only
+read-only MCP tools. Server instructions join the system prompt.
+
+```json
+{"event": "mcp/status", "server": {"name": "github", "scope": "global", "transport": "stdio", "state": "ready", "tools": [{"name": "search", "exposed": "mcp__github__search", "readOnly": true, "destructive": false}], "server": {"name": "github-mcp", "version": "1.0"}, "stderr": "...", "restarts": 0}}
+```
+
+`state` is `disabled`, `untrusted`, `stopped`, `starting`, `ready`,
+`failed` (with `error`) or `removed`. The event has no `sessionId`.
+
+### Tool switches
+
+Every tool (built-in and MCP) is on unless switched off. A session's
+switch beats the global one (`config/tools.json`); session switches and
+the tools a session has seen live in its `meta.json` under `tools`.
+`ToolInfo` is `{name, description?, source: builtin|mcp, server?, tool?,
+readOnly?, destructive?, global?, session?, enabled, pending?}`; MCP
+tools are listed while their server is ready. When built-in tools are
+off, the system prompt says so.
+
+A session's first turn takes every switched-on tool. After that, tools
+it has not seen (a new MCP server, a server adding tools, a new
+built-in) are held back, since changing the tool list throws away the
+prompt cache: the turn runs without them and emits
+
+```json
+{"event": "tools/pending", "sessionId": "…", "pending": ["mcp__github__search"]}
+```
+
+`toolsAccept` (or switching the tool on for the session) lets the next
+turn use them. Tools that disappear are simply dropped. New sessions
+never have pending tools.
 
 ### Undo and worktrees
 

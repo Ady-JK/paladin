@@ -11,12 +11,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
+	"github.com/Ady-JK/paladin/core/internal/toolset"
 )
 
 type Role string
@@ -84,6 +86,11 @@ type Meta struct {
 	Revert *Revert `json:"revert,omitempty"`
 	// Worktree is set when the session works in a managed git worktree.
 	Worktree *Worktree `json:"worktree,omitempty"`
+	// Tools holds the session's tool switches and the tools it has seen.
+	Tools *toolset.State `json:"tools,omitempty"`
+	// BudgetUsd is the session's spend limit: nil inherits the app
+	// default, 0 turns the limit off.
+	BudgetUsd *float64 `json:"budgetUsd,omitempty"`
 }
 
 // Worktree ties a session to a managed git worktree.
@@ -546,11 +553,27 @@ func (s *Store) Rename(cwd, sessionID, title string) error {
 	if len([]rune(title)) > MaxTitleRunes {
 		return fmt.Errorf("invalid: title is longer than %d characters", MaxTitleRunes)
 	}
+	return s.UpdateMeta(cwd, sessionID, func(m *Meta) error {
+		m.Title = title
+		return nil
+	})
+}
+
+// metaMu serialises read-modify-write updates of meta.json.
+var metaMu sync.Mutex
+
+// UpdateMeta loads a session's meta, lets fn change it and writes it
+// back; concurrent updates don't lose each other's changes.
+func (s *Store) UpdateMeta(cwd, sessionID string, fn func(*Meta) error) error {
+	metaMu.Lock()
+	defer metaMu.Unlock()
 	sess, err := s.Load(cwd, sessionID)
 	if err != nil {
 		return err
 	}
-	sess.Meta.Title = title
+	if err := fn(&sess.Meta); err != nil {
+		return err
+	}
 	return writeMeta(sess.Dir, sess.Meta)
 }
 

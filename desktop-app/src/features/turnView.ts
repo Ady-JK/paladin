@@ -2,12 +2,14 @@
 // whether or not its nodes are mounted, so a session that is not on
 // screen keeps building its transcript and shows it intact on return.
 
-import { renderMarkdown } from "../core/format";
-import type { Approval, CompactionInfo, RetryInfo, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
+import { escapeHtml, renderMarkdown, renderText } from "../core/format";
+import type { Approval, BudgetNotice, HookNote, CompactionInfo, RetryInfo, SteerInfo, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
 import { setStatus } from "../ui/status";
 import { compactionText, createCompactionDivider, createRetryNotice, createTurn, followTail, retryText, setDividerLabel } from "./chatView";
 import { ToolRun } from "./toolRun";
 import { createApprovalCard, focusApproval, paintApproval } from "./approvals";
+import { formatUsd } from "./usage";
+import { icon } from "../icons";
 
 export interface TurnViewHooks {
   // visible reports whether this turn's session is on screen.
@@ -69,6 +71,15 @@ export class TurnView {
         break;
       case "chat/approval":
         if (ev.approval) this.approval(ev.approval);
+        break;
+      case "chat/steer":
+        if (ev.steer) this.steer(ev.steer);
+        break;
+      case "chat/budget":
+        if (ev.budget) this.budget(ev.budget);
+        break;
+      case "chat/hook":
+        if (ev.hook) this.hook(ev.hook);
         break;
       default:
         return false;
@@ -196,6 +207,49 @@ export class TurnView {
     this.tail();
   }
 
+  // insertBlock puts a block after the text so far; later text and tool
+  // rows stream below it.
+  private insertBlock(el: HTMLElement): void {
+    this.clearRetry();
+    this.flushSegment();
+    this.run = null;
+    this.container.insertBefore(el, this.segEl.nextSibling);
+    this.segment = "";
+    this.segEl = this.newSegment(el);
+    this.tail();
+  }
+
+  // A steer is the user's own message joining the running turn.
+  private steer(info: SteerInfo): void {
+    const el = document.createElement("div");
+    el.className = "steer-bubble";
+    el.innerHTML = `<span class="steer-label">Steered</span><div class="steer-text">${renderText(info.display || info.message)}</div>`;
+    this.insertBlock(el);
+  }
+
+  private budget(info: BudgetNotice): void {
+    const el = document.createElement("div");
+    el.className = "chat-notice budget-notice";
+    el.dataset.notice = "budget";
+    el.dataset.state = info.state;
+    el.setAttribute("role", "status");
+    el.innerHTML = escapeHtml(budgetText(info));
+    this.insertBlock(el);
+  }
+
+  // A hook row is a quiet one-liner; the command is in the tooltip.
+  private hook(note: HookNote): void {
+    const el = document.createElement("div");
+    el.className = "hook-row";
+    el.dataset.outcome = note.outcome;
+    el.title = note.command;
+    el.innerHTML =
+      `<span class="hook-ico">${icon("zap", "h-3 w-3")}</span>` +
+      `<span class="hook-label">${escapeHtml(note.event)} hook ${escapeHtml(HOOK_VERB[note.outcome] ?? note.outcome)}</span>` +
+      (note.message ? `<span class="hook-msg">${escapeHtml(note.message)}</span>` : "");
+    this.insertBlock(el);
+  }
+
   private retry(info: RetryInfo): void {
     if (!this.retryNotice) {
       this.retryNotice = createRetryNotice();
@@ -256,4 +310,24 @@ export class TurnView {
     this.tail();
     return null;
   }
+}
+
+
+const HOOK_VERB: Record<string, string> = {
+  blocked: "blocked",
+  context: "added context",
+  error: "failed",
+  stopped: "stopped the turn",
+  message: "says",
+};
+
+// budgetText words a chat/budget notice.
+export function budgetText(b: BudgetNotice): string {
+  if (b.state === "unknownCost") {
+    return `The ${formatUsd(b.limit)} budget can't be enforced: this provider reports no cost.`;
+  }
+  if (b.ended) {
+    return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} spent, so this message was not sent to the model. Raise the budget to continue.`;
+  }
+  return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} spent. Tools are off; the agent is writing a summary of what's done and what's left.`;
 }

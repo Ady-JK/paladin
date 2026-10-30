@@ -1,0 +1,109 @@
+/* Settings → Hooks: one card per hook file, one row per handler. */
+.hook-source {
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-white, #fff);
+  padding: 8px 10px;
+}
+.dark .hook-source {
+  border-color: rgb(255 255 255 / 0.07);
+  background: rgb(255 255 255 / 0.025);
+}
+.hook-source-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hook-format {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-900);
+}
+.dark .hook-format {
+  color: var(--color-slate-100);
+}
+.hook-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}
+.hook-untrusted,
+.hook-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-slate-500);
+}
+.hook-untrusted svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--color-agent-amber);
+}
+.hook-warning::before {
+  content: "⚠";
+  color: var(--color-agent-amber);
+}
+.hook-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hook-handler {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 6px;
+  padding: 4px 2px;
+}
+.hook-handler[data-live="false"] .hook-command,
+.hook-handler[data-live="false"] .hook-matcher {
+  opacity: 0.5;
+}
+.hook-handler.is-busy {
+  opacity: 0.6;
+}
+.hook-event {
+  flex: none;
+}
+.hook-matcher {
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-slate-600);
+}
+.dark .hook-matcher {
+  color: var(--color-slate-300);
+}
+.hook-command {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-slate-700);
+}
+.dark .hook-command {
+  color: var(--color-slate-200);
+}
+.hook-editor {
+  margin-top: 8px;
+}

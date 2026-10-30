@@ -42,6 +42,13 @@ export function formatCost(cost: number): string {
   return `$${trimNum(roundTo(cost, 2))}`;
 }
 
+// formatUsd renders money with cents ($0.40, $2.00); sub-cent spend
+// keeps formatCost's extra digits so it never reads $0.00.
+export function formatUsd(n: number): string {
+  const v = n || 0;
+  return v > 0 && v < 0.01 ? formatCost(v) : `$${v.toFixed(2)}`;
+}
+
 export function roundTo(n: number, decimals: number): number {
   const factor = 10 ** decimals;
   return Math.round(n * factor) / factor;

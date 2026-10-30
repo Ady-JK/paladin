@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestRunEmptyStreamFallsBackToBuffered(t *testing.T) {
 		streams:  []streamScript{{}},
 		complete: inference.ToolResponse{Content: "buffered"},
 	}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -35,7 +36,7 @@ func TestRunPersistentEmptyFailsLoudly(t *testing.T) {
 	prov := &mockProvider{
 		streams: []streamScript{{}, {}, {}, {}},
 	}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	_, err := a.Run()
 	if err == nil {
@@ -52,7 +53,7 @@ func TestRunEmptyRoundRetriesThenRecovers(t *testing.T) {
 	prov := &mockProvider{
 		streams: []streamScript{{}, {chunks: []inference.Chunk{inference.TextChunk("back")}}},
 	}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -73,7 +74,7 @@ func TestRunRetryableErrorRetriesThenRecovers(t *testing.T) {
 			{chunks: []inference.Chunk{inference.TextChunk("back")}},
 		},
 	}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -91,7 +92,7 @@ func TestRunNonRetryableErrorFailsFast(t *testing.T) {
 	prov := &mockProvider{
 		streams: []streamScript{{err: inference.RequestError("boom: stream: status 401 unauthorized")}},
 	}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	start := time.Now()
 	if _, err := a.Run(); err == nil {
@@ -118,7 +119,7 @@ func TestRunToolRound(t *testing.T) {
 		{chunks: []inference.Chunk{inference.TextChunk("saw it")}},
 	}}
 	sess := testSession(t, "00000000-0000-4000-8000-000000000002")
-	a, tx, done := newAgentForTest(t, prov, sess, 5, "read it", false, true)
+	a, tx, done := newAgentForTest(t, prov, sess, "read it", false, true)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -164,7 +165,7 @@ func TestRunUsesStableSessionIDAcrossRounds(t *testing.T) {
 	}}
 	const sid = "00000000-0000-4000-8000-0000000000aa"
 	sess := testSession(t, sid)
-	a, _, done := newAgentForTest(t, prov, sess, 5, "read it", false, true)
+	a, _, done := newAgentForTest(t, prov, sess, "read it", false, true)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
 		t.Fatal(err)
@@ -181,7 +182,7 @@ func TestRunUsesStableSessionIDAcrossRounds(t *testing.T) {
 
 func TestRunProviderError(t *testing.T) {
 	prov := &mockProvider{streamsErr: inference.RequestError("down")}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err == nil {
 		t.Fatal("provider error swallowed")
@@ -195,7 +196,7 @@ func TestRunStopMidStream(t *testing.T) {
 		chunks: []inference.Chunk{inference.TextChunk("partial")},
 		err:    inference.CancelledError(),
 	}}}
-	a, sess, _, done := testAgent(t, prov, 5)
+	a, sess, _, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -220,27 +221,36 @@ func TestRunStopMidStream(t *testing.T) {
 	}
 }
 
-func TestRunNeedsContinueAtMaxRounds(t *testing.T) {
-	// Stream always returns another tool call so rounds never settle.
-	prov := &mockProvider{streams: []streamScript{
-		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "nope", Arguments: "{}"}}}}},
-		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c2", Name: "nope", Arguments: "{}"}}}}},
-	}}
-	a, _, _, done := testAgent(t, prov, 1)
+func TestLoopHasNoRoundCap(t *testing.T) {
+	// Far past the old 100-round default: only the model ends the turn.
+	const rounds = 150
+	var streams []streamScript
+	for i := 0; i < rounds; i++ {
+		args := fmt.Sprintf(`{"path":"f%d.txt"}`, i)
+		streams = append(streams, streamScript{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: fmt.Sprintf("c%d", i), Name: "read", Arguments: args}}}}})
+	}
+	streams = append(streams, streamScript{chunks: []inference.Chunk{inference.TextChunk("all done")}})
+	prov := &mockProvider{streams: streams}
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
+	go func() {
+		for range tx {
+		}
+	}()
 	outcome, err := a.Run()
+	close(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !outcome.NeedsContinue {
-		t.Fatalf("got %+v", outcome)
+	if outcome.Reply != "all done" || prov.calls != rounds+1 {
+		t.Fatalf("outcome %+v after %d calls", outcome, prov.calls)
 	}
 }
 
 func TestRunPlainPathStreamsText(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000003")
 	prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{inference.TextChunk("plain hello")}}}}
-	a, _, done := newAgentForTest(t, prov, sess, 5, "hi", false, false)
+	a, _, done := newAgentForTest(t, prov, sess, "hi", false, false)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -265,7 +275,7 @@ func TestRunPlainBufferedFallback(t *testing.T) {
 		streams:  []streamScript{{}},
 		complete: inference.ToolResponse{Content: "buffered plain"},
 	}
-	a, _, done := newAgentForTest(t, prov, sess, 5, "hi", false, false)
+	a, _, done := newAgentForTest(t, prov, sess, "hi", false, false)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -279,7 +289,7 @@ func TestRunPlainBufferedFallback(t *testing.T) {
 func TestRunPlainProviderError(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000011")
 	prov := &mockProvider{streamsErr: inference.RequestError("down")}
-	a, _, done := newAgentForTest(t, prov, sess, 5, "hi", false, false)
+	a, _, done := newAgentForTest(t, prov, sess, "hi", false, false)
 	defer close(done)
 	if _, err := a.Run(); err == nil || !strings.Contains(err.Error(), "provider unavailable") {
 		t.Fatalf("got %v", err)
@@ -293,7 +303,7 @@ func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "shell", Arguments: callArgs}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("after")}},
 	}}
-	a, tx, done := newAgentForTest(t, prov, sess, 5, "run bg", false, true)
+	a, tx, done := newAgentForTest(t, prov, sess, "run bg", false, true)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -334,7 +344,7 @@ func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
 }
 
 func TestArmNotifyOnlyForBackgroundNotifyJobs(t *testing.T) {
-	a, _, _, done := testAgent(t, &mockProvider{}, 5)
+	a, _, _, done := testAgent(t, &mockProvider{})
 	defer close(done)
 	cases := []struct {
 		name string

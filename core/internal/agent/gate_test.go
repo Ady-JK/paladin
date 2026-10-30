@@ -12,7 +12,7 @@ func TestPersistRunsInsideGate(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{{
 		chunks: []inference.Chunk{inference.TextChunk("hello")},
 	}}}
-	a, sess, tx, done := testAgent(t, prov, 5)
+	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)
 	calls := 0
 	var before, after int

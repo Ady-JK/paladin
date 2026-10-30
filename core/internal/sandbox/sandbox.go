@@ -42,6 +42,9 @@ type Policy struct {
 	Mode Mode
 	// Writable roots, usually just the workspace (workspace-write only).
 	Writable []string
+	// Granted are folders the user allowed writes to; they stay
+	// writable in every mode, read-only included.
+	Granted []string
 	// NoTemp drops the default temp and cache roots (tests).
 	NoTemp bool
 }
@@ -94,6 +97,83 @@ func LooksBlocked(output string) bool {
 	return false
 }
 
+// BlockedPath picks the absolute path a sandbox-blocked command was
+// denied, from the first output line that reports a block: the path
+// nearest before the error text, else the first one after it. Quoted
+// paths may contain spaces. "" when no line names one.
+func BlockedPath(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		at := markerIndex(line)
+		if at < 0 {
+			continue
+		}
+		before, after := "", ""
+		for _, c := range pathCandidates(line) {
+			if c.at < at {
+				before = c.path
+			} else if after == "" {
+				after = c.path
+			}
+		}
+		if before != "" {
+			return before
+		}
+		if after != "" {
+			return after
+		}
+	}
+	return ""
+}
+
+func markerIndex(line string) int {
+	low := strings.ToLower(line)
+	best := -1
+	for _, m := range blockedMarkers {
+		if i := strings.Index(low, m); i >= 0 && (best < 0 || i < best) {
+			best = i
+		}
+	}
+	return best
+}
+
+type candidate struct {
+	at   int
+	path string
+}
+
+// pathCandidates lists the absolute paths in a line: quoted spans and
+// bare words, trailing punctuation trimmed.
+func pathCandidates(line string) []candidate {
+	var out []candidate
+	for i := 0; i < len(line); {
+		switch c := line[i]; {
+		case c == '\'' || c == '"' || c == '`':
+			end := strings.IndexByte(line[i+1:], c)
+			if end < 0 {
+				i++
+				continue
+			}
+			if q := line[i+1 : i+1+end]; strings.HasPrefix(q, "/") {
+				out = append(out, candidate{i, filepath.Clean(q)})
+			}
+			i += end + 2
+		case c == ' ' || c == '\t':
+			i++
+		default:
+			end := strings.IndexAny(line[i:], " \t")
+			if end < 0 {
+				end = len(line) - i
+			}
+			w := strings.TrimRight(line[i:i+end], ":,;.)]")
+			if strings.HasPrefix(w, "/") && len(w) > 1 {
+				out = append(out, candidate{i, filepath.Clean(w)})
+			}
+			i += end
+		}
+	}
+	return out
+}
+
 // writableRoots resolves every root the policy may write, both as given
 // and symlink-resolved (macOS /var -> /private/var), deduplicated.
 func writableRoots(p Policy) []string {
@@ -101,6 +181,7 @@ func writableRoots(p Policy) []string {
 	if p.Mode == ModeWorkspaceWrite {
 		raw = append(raw, p.Writable...)
 	}
+	raw = append(raw, p.Granted...)
 	if !p.NoTemp {
 		raw = append(raw, os.TempDir(), "/tmp", "/var/tmp")
 		if p.Mode == ModeWorkspaceWrite {

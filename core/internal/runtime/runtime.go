@@ -16,7 +16,9 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
@@ -26,16 +28,19 @@ import (
 )
 
 type Settings struct {
-	MaxToolRounds uint32 `json:"maxToolRounds"`
 	// MaxConcurrentTurns caps turns running at once across sessions;
 	// extra turns wait in the hub queue. 0 means the default.
 	MaxConcurrentTurns uint32 `json:"maxConcurrentTurns,omitempty"`
+	// DefaultBudgetUsd is the spend limit for sessions without their
+	// own; 0 means none.
+	DefaultBudgetUsd float64 `json:"defaultBudgetUsd,omitempty"`
 }
 
 type AgentRuntime struct {
 	dataDir       string
 	config        config.Config
 	configMu      sync.RWMutex
+	settingsMu    sync.Mutex
 	store         *config.Store
 	transcripts   *transcript.Store
 	catalog       *tools.Catalog
@@ -57,6 +62,20 @@ type AgentRuntime struct {
 	fetchModels   ModelFetcher
 	providerCache map[string]inference.Provider
 	cacheMu       sync.Mutex
+	mcp           *mcp.Manager
+	mcpSink       atomic.Pointer[mcpSink]
+	toolsMu       sync.Mutex
+	toolsSink     atomic.Pointer[toolsSink]
+	hooks         *hooks.Manager
+	// started holds sessions whose SessionStart hooks ran in this process.
+	started   map[string]bool
+	startedMu sync.Mutex
+	// live is each running turn's latest model input, for side questions.
+	live   map[string][]inference.LlmMessage
+	liveMu sync.Mutex
+	// sideCtx ends in-flight side questions at shutdown.
+	sideCtx    context.Context
+	sideCancel context.CancelFunc
 }
 
 // New builds the production runtime, backed by the OS keychain. The
@@ -95,7 +114,12 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		worktrees:     worktree.New(filepath.Join(dataDir, "worktrees")),
 		providerCache: map[string]inference.Provider{},
 		fetchModels:   networkModelFetcher,
+		hooks:         hooks.NewManager(dataDir),
+		started:       map[string]bool{},
+		live:          map[string][]inference.LlmMessage{},
 	}
+	r.sideCtx, r.sideCancel = context.WithCancel(context.Background())
+	r.mcp = newMCPManager(dataDir, &r.mcpSink)
 	r.registerKnowledgeTools()
 	r.hub = NewHub(r.runTurn, r.maxConcurrentTurns)
 	return r
@@ -117,15 +141,6 @@ func (r *AgentRuntime) loadSettings() Settings {
 	return s
 }
 
-func (r *AgentRuntime) maxRounds() uint32 {
-	if settings := r.loadSettings(); settings.MaxToolRounds > 0 {
-		return config.ClampMaxToolRounds(settings.MaxToolRounds)
-	}
-	r.configMu.RLock()
-	defer r.configMu.RUnlock()
-	return config.ClampMaxToolRounds(r.config.MaxToolRounds)
-}
-
 // runTurn is the hub's RunFunc: it builds the default agent template
 // (provider, session, history, tools, prompt) and runs one turn under
 // parent. The hub has already validated req and owns tx.
@@ -145,8 +160,11 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	// message drops it so the panel goes empty until the agent plans
 	// the new work. Best-effort — a stale file never fails a turn.
 	workspace := resolveCwd(r, req.Cwd)
+	project := workspace
 	var steps agent.StepRecorder
 	var extraWritable []string
+	var sessionStart string
+	var hookEngine *hooks.Engine
 	if sess, lerr := r.transcripts.Load(req.Cwd, req.SessionID); lerr == nil {
 		// A pending undo becomes permanent once the user moves on.
 		r.undoMu.Lock()
@@ -159,6 +177,14 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		if sess.Meta.Cwd != "" {
 			workspace = sess.Meta.Cwd
 		}
+		project = workspace
+		if p := sess.Meta.ProjectCwd(); p != "" {
+			project = p
+		}
+		hookEngine = r.hooks.Engine(project)
+		if !req.Resume && !req.Compact {
+			sessionStart = r.sessionStartSource(hookEngine, sess)
+		}
 		if rec := r.stepRecorderFor(sess, workspace); rec != nil {
 			steps = rec
 		}
@@ -169,6 +195,8 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			}
 		}
 	}
+	registry := r.turnTools(req.Cwd, req.SessionID, r.tools.With(r.mcpTools(ctx, project)...))
+	req.Budget = r.turnBudget(req.Cwd, req.SessionID)
 	built, err := template.Build(agent.Deps{
 		Sessions:  runtimeSessions{r},
 		Providers: runtimeProviders{r},
@@ -176,16 +204,18 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		Skills:    runtimeSkills{r},
 		Sections:  runtimeSections{r},
 		Commands:  runtimeCommands{r},
-		Tools:     r.tools,
+		Tools:     registry,
 		Shell:     r.shell,
-		MaxRounds: r.maxRounds(),
 		Context:   ctx,
 		Cancel:    cancel,
 		Tx:        tx,
 		Done:      done,
 
-		PersistGate: gate,
-		Steps:       steps,
+		PersistGate:  gate,
+		Steps:        steps,
+		Hooks:        hookEngine,
+		SessionStart: sessionStart,
+		Live:         func(m []inference.LlmMessage) { r.setLiveConversation(req.SessionID, m) },
 		Gate: &permission.Gate{
 			Preset:      preset,
 			Workspace:   workspace,
@@ -195,23 +225,25 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			SandboxKind: sandbox.Kind(),
 
 			ExtraWritable: extraWritable,
+			MCP:           registry.MCPInfo,
 		},
 	}, req)
 	if err != nil {
 		return agent.ChatOutcome{}, err
 	}
+	defer r.setLiveConversation(req.SessionID, nil)
 	outcome, err := built.Run()
 	if err != nil {
-		r.emitDone(tx, req.SessionID, false, false, agent.NewApiError("internal", err.Error()))
+		r.emitDone(tx, req.SessionID, false, agent.NewApiError("internal", err.Error()))
 		return agent.ChatOutcome{}, err
 	}
-	r.emitDone(tx, outcome.SessionID, outcome.Stopped, outcome.NeedsContinue, nil)
+	r.emitDone(tx, outcome.SessionID, outcome.Stopped, nil)
 	return outcome, nil
 }
 
-func (r *AgentRuntime) emitDone(tx chan<- agent.ChatChunk, sessionID string, stopped, needsContinue bool, apiErr *agent.ApiError) {
+func (r *AgentRuntime) emitDone(tx chan<- agent.ChatChunk, sessionID string, stopped bool, apiErr *agent.ApiError) {
 	select {
-	case tx <- agent.ChatChunk{SessionID: sessionID, Done: true, Stopped: stopped, NeedsContinue: needsContinue, Error: apiErr}:
+	case tx <- agent.ChatChunk{SessionID: sessionID, Done: true, Stopped: stopped, Error: apiErr}:
 	default:
 	}
 }
@@ -240,7 +272,7 @@ func (r *AgentRuntime) AnswerAsk(sessionID, callID string, answers []tools.AskAn
 }
 
 // AnswerApproval resolves a pending permission prompt with "once",
-// "session", "folder" or "deny". The gated turn continues on its own.
+// "session", "folder", "global" or "deny". The gated turn continues on its own.
 func (r *AgentRuntime) AnswerApproval(sessionID, callID, decision string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(callID) == "" {
 		return false, fmt.Errorf("session id and call id are required")

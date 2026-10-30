@@ -64,7 +64,7 @@ func TestParallelSafeCallsRunConcurrentlyInOrder(t *testing.T) {
 		{chunks: []inference.Chunk{{ToolCalls: calls}}},
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	a.tools.Register(probeTool{name: "peek", parallel: true, log: log, live: &live, peak: &peak})
 	a.tools.Register(probeTool{name: "poke", parallel: false, log: log, live: &live, peak: &peak})

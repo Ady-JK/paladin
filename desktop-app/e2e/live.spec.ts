@@ -35,7 +35,7 @@ async function setup(page: Page): Promise<void> {
         handlers.onDelta(`started ${params.message}`);
       });
     w.__release = (message: string, reply = "") =>
-      w.__held[message].resolve({ sessionId: "", reply, stopped: false, needsContinue: false });
+      w.__held[message].resolve({ sessionId: "", reply, stopped: false });
   }, SESSIONS);
   await page.goto("/");
   await expect(page.locator('[data-session="sess-b"]')).toBeVisible();

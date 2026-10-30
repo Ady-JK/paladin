@@ -253,8 +253,7 @@
   background: transparent;
   border: 1.5px solid currentColor;
 }
-.live-input .live-dot,
-.live-paused .live-dot {
+.live-input .live-dot {
   background: #e0a800;
 }
 .live-input .live-dot {
@@ -273,4 +272,148 @@
 body.guest-visible .thinking-ph,
 body.guest-visible .tool-spin {
   animation: none;
+}
+
+/* chat/hook: a quiet one-line note that a user hook acted. */
+.hook-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-slate-500);
+  min-width: 0;
+}
+.hook-ico {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  color: var(--color-slate-400);
+}
+.hook-label {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+.hook-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-400);
+}
+.hook-row:hover .hook-msg {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.hook-row[data-outcome="blocked"] .hook-ico,
+.hook-row[data-outcome="stopped"] .hook-ico {
+  color: var(--color-agent-amber);
+}
+.hook-row[data-outcome="error"] .hook-ico,
+.hook-row[data-outcome="error"] .hook-label {
+  color: var(--color-agent-rose);
+}
+.dark .hook-row {
+  color: var(--color-slate-400);
+}
+.dark .hook-msg {
+  color: var(--color-slate-500);
+}
+
+/* /btw: a side answer card; dismissible and never saved. */
+.btw-card {
+  margin: 10px 0;
+  border-radius: 10px;
+  border: 1px dashed var(--color-slate-300);
+  background: var(--color-slate-50);
+  padding: 8px 12px 10px;
+  font-size: 0.8125rem;
+}
+.dark .btw-card {
+  border-color: rgb(255 255 255 / 0.12);
+  background: rgb(255 255 255 / 0.03);
+}
+.btw-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-slate-500);
+}
+.btw-ico {
+  display: inline-flex;
+  color: var(--color-accent-500);
+}
+.btw-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-accent-500);
+}
+.btw-question {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--color-slate-700);
+}
+.dark .btw-question {
+  color: var(--color-slate-200);
+}
+.btw-model {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}
+.btw-close {
+  flex: none;
+  display: inline-flex;
+  border-radius: 6px;
+  padding: 3px;
+  color: var(--color-slate-400);
+}
+.btw-close:hover {
+  color: var(--color-slate-700);
+  background: rgb(0 0 0 / 0.05);
+}
+.dark .btw-close:hover {
+  color: var(--color-slate-100);
+  background: rgb(255 255 255 / 0.08);
+}
+.btw-body {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-slate-500);
+}
+.btw-answer {
+  min-width: 0;
+  flex: 1;
+}
+.btw-error {
+  color: var(--color-agent-rose);
+}
+.btw-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid var(--color-slate-300);
+  border-top-color: var(--color-accent-500);
+  animation: btw-spin 0.8s linear infinite;
+}
+@keyframes btw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btw-spinner {
+    animation: none;
+  }
 }

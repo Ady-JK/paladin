@@ -247,3 +247,38 @@ func TestGoogleStreamKeepsLastUsage(t *testing.T) {
 		t.Fatalf("got %+v (want last-wins, not summed)", usage)
 	}
 }
+
+func TestChatUnaryReadsLiteLLMCostHeader(t *testing.T) {
+	// LiteLLM leaves cost out of a non-streamed body and sends it as a
+	// header instead (streamed calls carry usage.cost in the last chunk).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("x-litellm-response-cost", "0.000384")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":11,"completion_tokens":17,"total_tokens":28}}`)
+	}))
+	defer srv.Close()
+	p := NewOpenAIProvider("litellm", "m", srv.URL, "k")
+	p.protocol = protocolChat
+	resp, err := p.CompleteTools(context.Background(), "", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := resp.Usage; u == nil || !u.HasCost || u.Cost != 0.000384 || u.PromptTokens != 11 {
+		t.Fatalf("usage %+v", resp.Usage)
+	}
+}
+
+func TestChatUnaryIgnoresBadCostHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("x-litellm-response-cost", "nan-ish")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer srv.Close()
+	p := NewOpenAIProvider("litellm", "m", srv.URL, "k")
+	p.protocol = protocolChat
+	resp, err := p.CompleteTools(context.Background(), "", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess")
+	if err != nil || resp.Usage == nil || resp.Usage.HasCost {
+		t.Fatalf("usage %+v err %v", resp.Usage, err)
+	}
+}

@@ -732,12 +732,16 @@ func markSandboxBlocked(content string) string {
 }
 
 // SandboxBlocked reports whether a shell result was flagged by
-// markSandboxBlocked.
-func SandboxBlocked(content string) bool {
+// markSandboxBlocked, and the command's output.
+func SandboxBlocked(content string) (output string, blocked bool) {
 	var m struct {
-		Blocked bool `json:"sandbox_blocked"`
+		Blocked bool   `json:"sandbox_blocked"`
+		Output  string `json:"output"`
 	}
-	return json.Unmarshal([]byte(content), &m) == nil && m.Blocked
+	if json.Unmarshal([]byte(content), &m) != nil || !m.Blocked {
+		return "", false
+	}
+	return m.Output, true
 }
 
 // confine rewrites cmd to run inside the sandbox policy (nil: as is).

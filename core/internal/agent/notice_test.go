@@ -27,7 +27,7 @@ func TestNoticedCallSettledWhenRoundFails(t *testing.T) {
 		chunks: []inference.Chunk{noticeChunk("n1", "shell")},
 		err:    &inference.ProviderError{Kind: "request", Status: 400, Message: "bad request"},
 	}}}
-	a, _, tx, done := testAgent(t, prov, 5)
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err == nil {
 		t.Fatal("want failure")
@@ -43,7 +43,7 @@ func TestNoticedCallSettledWhenRoundRetried(t *testing.T) {
 		{chunks: []inference.Chunk{noticeChunk("n1", "shell")}, err: &inference.ProviderError{Kind: "request", Status: 503, Message: "overloaded"}},
 		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
 	}}
-	a, _, tx, done := testAgent(t, prov, 5)
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	if out, err := a.Run(); err != nil || out.Reply != "ok" {
 		t.Fatalf("out %+v err %v", out, err)
@@ -58,7 +58,7 @@ func TestNoticedCallSettledWhenStoppedMidStream(t *testing.T) {
 		chunks: []inference.Chunk{noticeChunk("n1", "shell")},
 		err:    inference.CancelledError(),
 	}}}
-	a, _, tx, done := testAgent(t, prov, 5)
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	prov.afterChunks = func(int) { a.cancel() }
 	out, err := a.Run()
@@ -79,7 +79,7 @@ func TestNoticedCallThatRunsIsNotDoubleSettled(t *testing.T) {
 		}},
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
-	a, _, tx, done := testAgent(t, prov, 5)
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
 		t.Fatal(err)

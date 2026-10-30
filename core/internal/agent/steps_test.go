@@ -45,7 +45,7 @@ func stepRun(t *testing.T, gate ToolGate, rec StepRecorder, probe *mutProbe) {
 		}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
 	}}
-	a, _, tx, done := testAgent(t, prov, 5)
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	a.tools.Register(probe)
 	a.tools.Register(readProbe{})

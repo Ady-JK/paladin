@@ -114,12 +114,18 @@ func (h *liveHost) waitLine(what string, pred func(map[string]any) bool) map[str
 
 func (h *liveHost) call(method string, params any) map[string]any {
 	h.t.Helper()
-	id := h.send(method, params)
-	msg := h.waitLine(method+" response", func(m map[string]any) bool { return m["id"] == id })
+	msg := h.callRaw(method, params)
 	if msg["ok"] != true {
 		h.t.Fatalf("%s failed: %v", method, msg)
 	}
 	return msg
+}
+
+// callRaw returns the response whether or not the call succeeded.
+func (h *liveHost) callRaw(method string, params any) map[string]any {
+	h.t.Helper()
+	id := h.send(method, params)
+	return h.waitLine(method+" response", func(m map[string]any) bool { return m["id"] == id })
 }
 
 func (h *liveHost) event(event, sessionID string, extra func(map[string]any) bool) map[string]any {
@@ -297,5 +303,59 @@ func TestStdioSigtermPersistsRunningTurns(t *testing.T) {
 	hist := h2.call("sessionHistory", map[string]any{"sessionId": a})["result"].([]any)
 	if !strings.Contains(fmt.Sprint(hist), "signal me") {
 		t.Fatalf("turn not persisted on SIGTERM: %v", hist)
+	}
+}
+
+func TestStdioSteerJoinsTheRunningTurn(t *testing.T) {
+	h, free, open := setupLiveHost(t)
+	defer free()
+	a, cwd := open()
+	idle := h.callRaw("steerChat", map[string]any{"sessionId": a, "message": "nobody home"})
+	if idle["ok"] == true {
+		t.Fatalf("steer with nothing running must fail: %v", idle)
+	}
+	h.call("submitChat", map[string]any{"sessionId": a, "message": "start", "cwd": cwd})
+	h.event("chat/delta", a, nil)
+	steered := h.call("steerChat", map[string]any{"sessionId": a, "message": "also this", "display": "also"})["result"].(map[string]any)
+	if steered["message"] != "start" {
+		t.Fatalf("steer should report the running turn: %v", steered)
+	}
+	free()
+	h.event("chat/steer", a, func(m map[string]any) bool {
+		s, _ := m["steer"].(map[string]any)
+		return s["message"] == "also this" && s["display"] == "also"
+	})
+	h.event("turn/done", a, func(m map[string]any) bool { return turnMessage(m) == "start" })
+	hist := h.call("sessionHistory", map[string]any{"sessionId": a})["result"].([]any)
+	var users []string
+	for _, m := range hist {
+		if msg := m.(map[string]any); msg["role"] == "user" {
+			users = append(users, fmt.Sprint(msg["content"]))
+		}
+	}
+	if len(users) != 2 || users[1] != "also" { // history shows the display form
+		t.Fatalf("history users %v", users)
+	}
+}
+
+func TestStdioBudgetGetAndSet(t *testing.T) {
+	h, free, open := setupLiveHost(t)
+	defer free()
+	a, cwd := open()
+	set := h.call("budgetSet", map[string]any{"scope": "session", "sessionId": a, "cwd": cwd, "budgetUsd": 1.25})["result"].(map[string]any)
+	if set["effectiveUsd"] != 1.25 || set["sessionUsd"] != 1.25 {
+		t.Fatalf("budgetSet %v", set)
+	}
+	h.call("budgetSet", map[string]any{"scope": "global", "budgetUsd": 3})
+	cleared := h.call("budgetSet", map[string]any{"scope": "session", "sessionId": a, "cwd": cwd, "budgetUsd": nil})["result"].(map[string]any)
+	if cleared["sessionUsd"] != nil || cleared["effectiveUsd"] != 3.0 {
+		t.Fatalf("cleared session budget %v", cleared)
+	}
+	got := h.call("budgetGet", map[string]any{"sessionId": a, "cwd": cwd})["result"].(map[string]any)
+	if got["defaultUsd"] != 3.0 || got["hasCost"] != false {
+		t.Fatalf("budgetGet %v", got)
+	}
+	if bad := h.callRaw("budgetSet", map[string]any{"scope": "session", "sessionId": a, "budgetUsd": -1}); bad["ok"] == true {
+		t.Fatalf("negative budget accepted: %v", bad)
 	}
 }

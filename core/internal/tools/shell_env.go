@@ -90,6 +90,13 @@ func shellEnv(extra ...string) []string {
 	return append(out, extra...)
 }
 
+// ChildEnv is shellEnv for other packages that launch user tools, such
+// as MCP servers started with npx or uvx.
+func ChildEnv(extra ...string) []string { return shellEnv(extra...) }
+
+// LookCommand is lookPath for other packages that launch user tools.
+func LookCommand(name string) (string, error) { return lookPath(name) }
+
 // augmentedPath prepends the existing toolchain dirs to path,
 // de-duplicated. Used for spawned commands and for looking up helper
 // binaries (rg) when the sidecar itself runs under a minimal desktop

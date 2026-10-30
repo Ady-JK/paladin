@@ -88,6 +88,38 @@ test("an escalation card asks to rerun without the sandbox", async ({ page }) =>
   await expect(card).toContainText(/Allowed once/);
 });
 
+test("a sandbox block offers to grant the blocked folder", async ({ page }) => {
+  const dir = "/Users/me/.nvm/versions/node/v24/lib/node_modules";
+  await script(page, [
+    {
+      event: "chat/approval",
+      approval: pending({
+        kind: "escalate",
+        command: "npm i -g pnpm",
+        path: dir,
+        reasons: ["blocked by the sandbox"],
+        choices: ["session", "folder", "global", "once", "deny"],
+        remember: [{ tool: "write", pattern: dir, action: "allow" }],
+      }),
+    },
+  ]);
+  await send(page);
+  const card = page.locator('.approval-card[data-approval="c1"]');
+  await expect(card).toHaveClass(/is-escalate/);
+  await expect(card.locator(".approval-title")).toContainText(/sandbox blocked a write/i);
+  await expect(card.locator(".approval-grant")).toContainText(dir);
+  await expect(card.locator("[data-approve]")).toHaveCount(5);
+  await expect(card.locator('[data-approve="session"]')).toBeFocused();
+  await expect(card.locator('[data-approve="session"]')).toHaveText(/^Allow for this session/);
+  await expect(card.locator('[data-approve="folder"]')).toContainText(/for this project/i);
+  await expect(card.locator('[data-approve="global"]')).toContainText(/everywhere/i);
+  await expect(card.locator('[data-approve="once"]')).toContainText(/without the sandbox/i);
+  await card.locator('[data-approve="global"]').click();
+  await expect(card).toContainText(/Always allowed everywhere/);
+  const answers = await page.evaluate(() => (window as any).__e2eApprovalAnswers);
+  expect(answers[0].decision).toBe("global");
+});
+
 test("a write approval from a turn started elsewhere shows up live", async ({ page }) => {
   await send(page, "hello");
   await expect(page.locator("#messages")).toContainText("Stub reply to: hello");
@@ -98,12 +130,13 @@ test("a write approval from a turn started elsewhere shows up live", async ({ pa
       event: "chat/approval",
       sessionId: "sess-notify-1",
       turnId: "t-r",
-      approval: { id: "c9", tool: "write", kind: "write", path: "/etc/hosts", reasons: ["outside the workspace"], choices: ["once", "session", "folder", "deny"], remember: [{ tool: "write", pattern: "/etc", action: "allow" }], state: "pending" },
+      approval: { id: "c9", tool: "write", kind: "write", path: "/etc/hosts", reasons: ["outside the workspace"], choices: ["once", "session", "folder", "global", "deny"], remember: [{ tool: "write", pattern: "/etc", action: "allow" }], state: "pending" },
     });
   });
   const card = page.locator('.approval-card[data-approval="c9"]');
   await expect(card).toContainText("/etc/hosts");
   await expect(card.locator('[data-approve="folder"]')).toContainText("/etc");
+  await expect(card.locator('[data-approve="global"]')).toContainText(/writes to \/etc everywhere/i);
 });
 
 test("the preset chip switches the session's permissions and is sent with the turn", async ({ page }) => {
@@ -147,7 +180,12 @@ test("settings → permissions edits global and folder rules", async ({ page }) 
   await pane.locator('[data-default-preset="read-only"]').click();
   await expect(pane.locator('[data-default-preset="read-only"]')).toHaveAttribute("aria-pressed", "true");
 
+  // Write rules double as folders sandboxed commands may write.
+  await expect(pane.locator(".perm-grant-note")).toContainText(/sandboxed commands/i);
+
   const global = pane.locator('[data-rules="global"]');
+  await global.locator("[data-rule-tool]").selectOption("write");
+  await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /sandbox/i);
   await global.locator('[data-rule-tool]').selectOption("shell");
   await global.locator("[data-rule-pattern]").fill("npm test");
   await global.locator("[data-rule-action]").selectOption("allow");

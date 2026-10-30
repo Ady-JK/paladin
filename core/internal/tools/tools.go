@@ -155,6 +155,18 @@ func (r *Registry) Subset(names []string) (*Registry, error) {
 	return out, nil
 }
 
+// Filter returns a registry over the tools keep accepts, sharing the
+// same instances.
+func (r *Registry) Filter(keep func(name string) bool) *Registry {
+	out := NewRegistry()
+	for n, t := range r.tools {
+		if keep(n) {
+			out.tools[n] = t
+		}
+	}
+	return out
+}
+
 func (r *Registry) Definitions() []ToolDefinition {
 	names := r.Names()
 	var out []ToolDefinition
@@ -198,6 +210,48 @@ func (r *Registry) Mutates(name string) bool {
 	}
 	m, ok := r.tools[resolved].(Mutating)
 	return ok && m.Mutates()
+}
+
+// MCPInfo describes a tool proxied from an MCP server; the hints come
+// from the server's tool annotations.
+type MCPInfo struct {
+	Server      string
+	Tool        string
+	ReadOnly    bool
+	Destructive bool
+}
+
+// MCPTool is implemented by tools that proxy an MCP server.
+type MCPTool interface {
+	MCPInfo() MCPInfo
+}
+
+// MCPInfo reports whether the named tool proxies an MCP server.
+func (r *Registry) MCPInfo(name string) (MCPInfo, bool) {
+	resolved, ok := r.resolveName(name)
+	if !ok {
+		return MCPInfo{}, false
+	}
+	m, ok := r.tools[resolved].(MCPTool)
+	if !ok {
+		return MCPInfo{}, false
+	}
+	return m.MCPInfo(), true
+}
+
+// With returns a copy of the registry plus extra tools, sharing the
+// existing instances. An extra never replaces a tool already present.
+func (r *Registry) With(extra ...Tool) *Registry {
+	out := NewRegistry()
+	for n, t := range r.tools {
+		out.tools[n] = t
+	}
+	for _, t := range extra {
+		if _, taken := out.tools[t.Name()]; !taken {
+			out.tools[t.Name()] = t
+		}
+	}
+	return out
 }
 
 func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {

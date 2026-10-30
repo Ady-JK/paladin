@@ -24,7 +24,16 @@ test("failed and stopped turns say so; dropped ones are silent", () => {
   expect(noteFor(turn({ error: "boom" }))!.body).toContain("boom");
   expect(noteFor(turn({ stopped: true }))).toBeNull();
   expect(noteFor(turn({ cancelled: true }))).toBeNull();
-  expect(noteFor(turn({ needsContinue: true }))!.title).toBe("Paladin · paused at the round cap");
+});
+
+test("a reached budget says so; an unknown-cost warning stays quiet", () => {
+  const budget = (state: string) => ({ event: "chat/budget", sessionId: "s2", budget: { state, spent: 1.5, limit: 1 } });
+  expect(noteFor(budget("reached"))).toEqual({
+    sessionId: "s2",
+    title: "Paladin · budget reached",
+    body: "Spent $1.50 of $1.00 — the agent is wrapping up with a summary.",
+  });
+  expect(noteFor(budget("unknownCost"))).toBeNull();
 });
 
 test("a running ask asks for input; other events are ignored", () => {

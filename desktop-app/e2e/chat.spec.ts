@@ -51,24 +51,3 @@ test("agent markdown renders while the user bubble stays plain", async ({ page }
   await expect(rows.nth(0).locator("strong")).toHaveCount(0);
   await expect(rows.nth(0)).toContainText("explain **boldly**");
 });
-
-test("a paused turn shows continue and resumes without a new message", async ({ page }) => {
-  await page.evaluate(() => {
-    (window as any).__e2eChatPaused = true;
-    (window as any).__e2eChats = [];
-  });
-  await page.fill("#promptInput", "do a lot of work");
-  await page.click("#sendBtn");
-
-  await expect(page.locator("#continueBtn")).toBeVisible();
-  await expect(page.locator("#toastText")).toContainText("Paused at the round cap");
-
-  await page.click("#continueBtn");
-  await expect(page.locator("#messages")).toContainText("Resumed and finished.");
-  await expect(page.locator("#continueBtn")).toBeHidden();
-
-  const chats = await page.evaluate(() => (window as any).__e2eChats);
-  const resumed = chats.find((c: any) => c.resume);
-  expect(resumed, "expected a resume call").toBeTruthy();
-  expect(resumed.message).toBe("");
-});

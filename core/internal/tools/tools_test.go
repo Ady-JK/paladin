@@ -167,3 +167,18 @@ func TestCatalogIgnoresInvalidTemplates(t *testing.T) {
 		t.Fatalf("got %v", names)
 	}
 }
+
+func TestRegistryFilter(t *testing.T) {
+	r := BuiltinRegistry()
+	keep := map[string]bool{"read": true, "todo": true}
+	out := r.Filter(func(name string) bool { return keep[name] })
+	if got := out.Names(); len(got) != 2 || got[0] != "read" || got[1] != "todo" {
+		t.Fatalf("%v", got)
+	}
+	if none := r.Filter(func(string) bool { return false }); none.Len() != 0 {
+		t.Fatalf("filtering everything out must leave nothing: %v", none.Names())
+	}
+	if r.Len() != len(BuiltinCatalog().Names()) {
+		t.Fatal("filter must not change the source registry")
+	}
+}

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
@@ -125,6 +127,21 @@ var methods = map[string]handler{
 	"sessionUsage": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionUsage(a.str("sessionId"), a.str("cwd"))
 	},
+	"budgetGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.BudgetGet(a.str("cwd"), a.str("sessionId"))
+	},
+	"budgetSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			Scope     string   `json:"scope"`
+			Cwd       string   `json:"cwd"`
+			SessionID string   `json:"sessionId"`
+			BudgetUsd *float64 `json:"budgetUsd"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.BudgetSet(p.Scope, p.Cwd, p.SessionID, p.BudgetUsd)
+	},
 	"overallUsage": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.OverallUsage(a.str("cwd"), a.num("limit", 50))
 	},
@@ -163,6 +180,9 @@ var methods = map[string]handler{
 		}
 		info, _, err := rt.SubmitTurn(p.request(), runtime.SubmitOpts{Display: p.Display})
 		return info, err
+	},
+	"steerChat": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SteerTurn(a.str("sessionId"), a.str("message"), a.str("display"))
 	},
 	"turns": func(rt *runtime.AgentRuntime, _ args) (any, error) {
 		return rt.Turns(), nil
@@ -210,5 +230,96 @@ var methods = map[string]handler{
 			return nil, err
 		}
 		return rt.PermissionsSet(p.Scope, p.Cwd, p.Rules)
+	},
+
+	// Side questions (/btw); asynchronous, see asyncMethods.
+	"sideQuestion": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var req runtime.SideQuestionRequest
+		if err := a.decode(&req); err != nil {
+			return nil, err
+		}
+		return rt.SideQuestion(context.Background(), req)
+	},
+
+	// Hooks
+	"hooksList": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.HooksList(a.str("cwd")), nil
+	},
+	"hooksSetConfig": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.HooksSetConfig(a.str("scope"), a.str("cwd"), a.str("text"))
+	},
+	"hooksTrust": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.HooksTrust(a.str("cwd"), a.str("path"), a.flag("trust"))
+	},
+	"hooksToggle": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.HooksToggle(a.str("cwd"), a.str("key"), a.flag("enabled"))
+	},
+
+	// MCP servers
+	"mcpList": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPList(a.str("cwd")), nil
+	},
+	"mcpConfig": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPConfig(a.str("scope"), a.str("cwd"))
+	},
+	"mcpSetConfig": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPSetConfig(a.str("scope"), a.str("cwd"), a.str("text"))
+	},
+	"mcpSetEnabled": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPSetEnabled(a.str("scope"), a.str("cwd"), a.str("name"), a.flag("enabled"))
+	},
+	"mcpRestart": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPRestart(a.str("scope"), a.str("cwd"), a.str("name"))
+	},
+	"mcpTrust": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPTrust(a.str("cwd"), a.flag("trust"))
+	},
+	"mcpParse": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		list, err := mcp.ParseSnippet(a.str("text"))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"servers": list}, nil
+	},
+	"mcpAdd": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			Scope   string            `json:"scope"`
+			Cwd     string            `json:"cwd"`
+			Servers []mcp.NamedServer `json:"servers"`
+			Replace bool              `json:"replace"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.MCPAdd(p.Scope, p.Cwd, p.Servers, p.Replace)
+	},
+
+	// Tool switches
+	"toolsList": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ToolsList(a.str("cwd"), a.str("sessionId"))
+	},
+	"toolsSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			Scope     string   `json:"scope"`
+			Cwd       string   `json:"cwd"`
+			SessionID string   `json:"sessionId"`
+			Names     []string `json:"names"`
+			Enabled   *bool    `json:"enabled"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.ToolsSet(p.Scope, p.Cwd, p.SessionID, p.Names, p.Enabled)
+	},
+	"toolsAccept": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			Cwd       string   `json:"cwd"`
+			SessionID string   `json:"sessionId"`
+			Names     []string `json:"names"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.ToolsAccept(p.Cwd, p.SessionID, p.Names)
 	},
 }

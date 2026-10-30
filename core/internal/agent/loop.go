@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/permission"
@@ -26,12 +27,20 @@ func (a *Agent) runLoop() error {
 	if len(a.toolDefs) == 0 {
 		return a.runPlain()
 	}
-	for !a.needsContinue() {
+	// No round cap: like Codex and OpenCode, only the model (a reply
+	// without tool calls), the user, or an unrecoverable error ends a turn.
+	for {
 		a.round++
 		if a.stopRequested() {
 			return turnStop{}
 		}
+		if end, err := a.checkBudget(); end || err != nil {
+			return err
+		}
 		if err := a.drainNotifications(); err != nil {
+			return err
+		}
+		if err := a.drainSteering(); err != nil {
 			return err
 		}
 		a.settleNotices(nil)
@@ -61,6 +70,7 @@ func (a *Agent) runLoop() error {
 			}
 			return roundFailure(err)
 		}
+		a.noteRoundSucceeded()
 		// Empty stream fallback: one buffered completion. A round that
 		// yields neither text nor tool calls is usually a gateway blip, so
 		// retry before believing it; three strikes ends the turn. Ending
@@ -81,13 +91,14 @@ func (a *Agent) runLoop() error {
 				return err
 			}
 			// Still empty after the buffered fallback: retry next round
-			// instead of ending the turn silent (bounded by emptyRounds
-			// above and maxRounds overall).
+			// instead of ending the turn silent (bounded by emptyRounds).
 			if retry || round.empty() {
 				continue
 			}
 		}
-		if len(round.calls) == 0 {
+		// The budget wrap-up has no tools; a call it hallucinates anyway
+		// is dropped and its text ends the turn.
+		if len(round.calls) == 0 || a.budgetWrapUp {
 			more, err := a.finishTextRound(round.text)
 			if more {
 				continue
@@ -100,9 +111,11 @@ func (a *Agent) runLoop() error {
 		if err := a.runToolsStreaming(round.calls); err != nil {
 			return err
 		}
+		if a.halt.tripped() {
+			a.finish(phaseDone)
+			return nil
+		}
 	}
-	a.finish(phaseNeedsContinue)
-	return nil
 }
 
 // roundResult is what one streamed model round produced.
@@ -123,6 +136,7 @@ func (r roundResult) empty() bool { return r.text == "" && len(r.calls) == 0 }
 // to the client as they arrive.
 func (a *Agent) streamRound() roundResult {
 	a.sentLen = len(a.messages)
+	a.publishLive()
 	prx := make(chan inference.Chunk, 64)
 	providerErr := make(chan error, 1)
 	go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
@@ -222,6 +236,9 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 	if text != "" {
 		a.emptyRounds = 0
 		a.retries, a.timeoutRetries = 0, 0
+		// The model must see its own answer if the turn goes on (a steer,
+		// a job notice or a Stop hook).
+		a.messages = append(a.messages, inference.LlmMessage{Role: "assistant", Content: text})
 		a.records = append(a.records, transcript.Message{
 			Role: transcript.RoleAssistant, Content: text,
 			CreatedAt: time.Now().UTC(),
@@ -236,11 +253,17 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 	if err := a.drainNotifications(); err != nil {
 		return false, err
 	}
+	if err := a.drainSteering(); err != nil {
+		return false, err
+	}
 	if len(a.records) != drained {
 		return true, nil
 	}
 	if a.stopRequested() {
 		return false, turnStop{}
+	}
+	if a.stopHooks(text) {
+		return true, nil
 	}
 	a.finish(phaseDone)
 	return false, nil
@@ -343,10 +366,30 @@ func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
 	return results
 }
 
+// maxEscalations bounds sandbox-block prompts per call: each granted
+// folder reruns the command, which may then hit the next folder.
+const maxEscalations = 3
+
 // callGated runs one call through the permission gate: refused calls
 // never reach the tool, approved shell calls run in the gate's sandbox,
-// and a sandbox block may be escalated to one unconfined rerun.
+// and a sandbox block may be escalated to a rerun, confined with the
+// blocked folder granted or (once) unconfined.
 func (a *Agent) callGated(call *tools.ToolCall) tools.ToolResult {
+	if !a.hooks.Has(hooks.PreToolUse) && !a.hooks.Has(hooks.PostToolUse) {
+		return a.authorizedCall(call, hooks.DecisionNone)
+	}
+	verdict, context, refusal := a.preToolHooks(call)
+	if refusal != nil {
+		return *refusal
+	}
+	result := a.authorizedCall(call, verdict)
+	result.Content += context
+	return a.postToolHooks(call, result)
+}
+
+// authorizedCall runs one call through the permission gate. verdict is
+// a PreToolUse hook's allow/ask, which may skip or force the prompt.
+func (a *Agent) authorizedCall(call *tools.ToolCall, verdict hooks.Decision) tools.ToolResult {
 	if a.gate == nil {
 		return a.callTool(call, a.toolCtx)
 	}
@@ -355,21 +398,26 @@ func (a *Agent) callGated(call *tools.ToolCall) tools.ToolResult {
 		return a.callTool(call, a.toolCtx)
 	}
 	notify := func(ap permission.Approval) { _ = a.emit(ChatChunk{Approval: &ap}) }
-	auth := a.gate.Authorize(a.ctx, call.ID, name, args, notify)
+	auth := a.gate.Authorize(permission.WithHookVerdict(a.ctx, string(verdict)), call.ID, name, args, notify)
 	if !auth.Run {
 		return tools.ToolResult{CallID: call.ID, Name: name, IsError: true, Content: auth.Content}
 	}
 	ctx := *a.toolCtx
 	ctx.Sandbox = auth.Sandbox
 	result := a.callTool(call, &ctx)
-	if auth.Sandbox == nil || !result.IsError || !tools.SandboxBlocked(result.Content) {
-		return result
+	for i := 0; i < maxEscalations && ctx.Sandbox != nil && result.IsError; i++ {
+		output, blocked := tools.SandboxBlocked(result.Content)
+		if !blocked {
+			break
+		}
+		esc := a.gate.Escalate(a.ctx, call.ID, name, args, permission.Blocked{Policy: ctx.Sandbox, Output: output}, notify)
+		if !esc.Run {
+			break
+		}
+		ctx.Sandbox = esc.Sandbox
+		result = a.callTool(call, &ctx)
 	}
-	if !a.gate.Escalate(a.ctx, call.ID, name, args, notify) {
-		return result
-	}
-	ctx.Sandbox = nil
-	return a.callTool(call, &ctx)
+	return result
 }
 
 // callTool runs the tool itself, bracketed by the step recorder when it
@@ -496,8 +544,38 @@ func (a *Agent) drainNotifications() error {
 	return nil
 }
 
+// drainSteering moves messages the user sent mid-turn into the
+// conversation as user messages, ahead of the next model call, and
+// echoes each so live clients can show where it landed.
+func (a *Agent) drainSteering() error {
+	// Steers during the budget wrap-up wait for a later turn.
+	if a.steer == nil || a.budgetWrapUp {
+		return nil
+	}
+	for _, msg := range a.steer() {
+		if strings.TrimSpace(msg.Message) == "" {
+			continue
+		}
+		a.messages = append(a.messages, inference.LlmMessage{Role: "user", Content: msg.Message})
+		rec := transcript.UserMessage(msg.Message)
+		if d := strings.TrimSpace(msg.Display); d != "" && d != strings.TrimSpace(msg.Message) {
+			rec.Display = msg.Display
+		}
+		a.records = append(a.records, rec)
+		if err := a.emit(ChatChunk{Steer: &msg}); err != nil {
+			return turnStop{}
+		}
+	}
+	return nil
+}
+
 // runPlain is the plain completion path for a provider with no tool defs.
 func (a *Agent) runPlain() error {
+	if !a.budgetChecked {
+		if end, err := a.checkBudget(); end || err != nil {
+			return err
+		}
+	}
 	prx := make(chan inference.Chunk, 64)
 	providerErr := make(chan error, 1)
 	go func() {

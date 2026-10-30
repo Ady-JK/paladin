@@ -6,7 +6,7 @@
 // history from the sidecar plus whatever is still running or queued.
 
 import * as api from "../core/api";
-import { continueBtn, messagesEl, pauseBtn, sendBtn, statusDetailEl } from "../core/dom";
+import { messagesEl, pauseBtn, sendBtn, statusDetailEl, steerBtn } from "../core/dom";
 import { state } from "../core/state";
 import type { Approval, AttachSnapshot, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
 import { setStatus } from "../ui/status";
@@ -20,9 +20,10 @@ import { refreshUsage } from "./usage";
 import { refreshSessions, renderSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
+import { syncBudget } from "./budget";
 import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
 
-export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "paused" | "approval";
+export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "approval";
 
 type Entry = {
   sessionId: string;
@@ -34,13 +35,12 @@ type Entry = {
   views: Map<string, TurnView>;
   users: Map<string, HTMLElement>;
   // Outcome badge for a session finished while not on screen.
-  badge: "" | "done" | "error" | "paused";
+  badge: "" | "done" | "error";
   asks: Map<string, ToolInfo>;
   // Approval cards still waiting on the user, by call id.
   approvals: Map<string, Approval>;
   // The sidecar said a turn awaits approval before we saw its events.
   awaitingHint: boolean;
-  paused: boolean;
   // Events that land while an attach is in flight wait here.
   attaching: TurnEvent[] | null;
   // Recently finished turn ids: a late submit reply must not revive them.
@@ -73,7 +73,6 @@ function entry(sessionId: string): Entry {
       asks: new Map(),
       approvals: new Map(),
       awaitingHint: false,
-      paused: false,
       attaching: null,
       finished: new Set(),
       tools: new Map(),
@@ -131,9 +130,9 @@ export function isBusy(sessionId: string): boolean {
   return !!e && (e.running !== null || e.queued.length > 0);
 }
 
-// syncComposer shows the visible session's controls: pause while it
-// works, continue when its last turn hit the round cap. Send stays live
-// so a follow-up queues behind the running turn.
+// syncComposer shows the visible session's controls: pause and steer
+// while it works. Send stays live so a follow-up queues behind the
+// running turn; steer adds it to the running turn instead.
 export function syncComposer(): void {
   const e = state.sessionId ? entries.get(state.sessionId) : undefined;
   const busy = !!e && e.running !== null;
@@ -142,7 +141,7 @@ export function syncComposer(): void {
   sendBtn.disabled = false;
   sendBtn.classList.remove("hidden");
   sendBtn.title = busy ? "Queue after the running turn" : "Send";
-  continueBtn.classList.toggle("hidden", !(e?.paused && !busy && e.queued.length === 0));
+  steerBtn.classList.toggle("hidden", !busy);
   paintWorking();
   syncWorktreeChip();
 }
@@ -211,7 +210,6 @@ function startTurn(e: Entry, turn: TurnInfo): TurnView {
     e.since = 0;
   }
   e.running = turn;
-  e.paused = false;
   let anchor: HTMLElement | null = e.users.get(turn.turnId) ?? null;
   if (anchor) {
     promote(anchor);
@@ -309,6 +307,12 @@ function track(e: Entry, ev: TurnEvent): boolean {
       return true;
     case "chat/approval":
       return noteApproval(e, ev.approval);
+    case "chat/steer":
+      e.phase = "thinking";
+      return true;
+    case "chat/budget":
+      if (visible(e.sessionId)) void syncBudget();
+      return false;
   }
   return false;
 }
@@ -414,7 +418,6 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
       refreshSkillsCache();
     }
   }
-  e.paused = !!turn.needsContinue && !failure;
   const quiet = turn.cancelled || turn.stopped;
   if (shown) {
     e.badge = "";
@@ -423,10 +426,6 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     } else if (quiet) {
       setStatus("stopped", "ok");
       statusDetailEl.textContent = "STOPPED";
-    } else if (turn.needsContinue) {
-      toast("Paused at the round cap — continue?");
-      setStatus("paused", "ok");
-      statusDetailEl.textContent = "PAUSED";
     } else {
       setStatus("ready", "ok");
       statusDetailEl.textContent = "READY";
@@ -435,11 +434,12 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     // Tokens bill even on failed turns; todos may have settled after
     // the last live event.
     void refreshUsage();
+    void syncBudget();
     void refreshTodos();
     void refreshWorktreeBar();
   } else if (!quiet) {
-    e.badge = failure ? "error" : turn.needsContinue ? "paused" : "done";
-    const what = failure ? "failed" : turn.needsContinue ? "paused at the round cap" : "finished";
+    e.badge = failure ? "error" : "done";
+    const what = failure ? "failed" : "finished";
     toast(`“${titleOf(e.sessionId)}” ${what}`, failure ? "error" : "ok");
   }
   void refreshSessions();

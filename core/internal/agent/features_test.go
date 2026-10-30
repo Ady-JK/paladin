@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -163,5 +164,39 @@ func TestCompactOnlyTurn(t *testing.T) {
 	a, _ = DefaultTemplate().Build(d2, Request{SessionID: empty.Meta.SessionID, Compact: true})
 	if _, err := a.Run(); err == nil || !strings.Contains(err.Error(), "nothing") {
 		t.Fatalf("empty compact err = %v", err)
+	}
+}
+
+type fakeMCPTool struct {
+	name     string
+	readOnly bool
+}
+
+func (f fakeMCPTool) Name() string { return f.name }
+func (f fakeMCPTool) Definition() tools.ToolDefinition {
+	return tools.ToolDefinition{Name: f.name, Parameters: map[string]any{"type": "object"}}
+}
+func (f fakeMCPTool) Call(json.RawMessage, *tools.ToolCtx) (string, error) { return "ok", nil }
+func (f fakeMCPTool) MCPInfo() tools.MCPInfo {
+	return tools.MCPInfo{Server: "s", Tool: f.name, ReadOnly: f.readOnly}
+}
+
+func TestPlanModeKeepsOnlyReadOnlyMCPTools(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000036")
+	d, _, _, _ := testDeps(t, sess)
+	d.Tools = d.Tools.With(fakeMCPTool{name: "mcp__s__look", readOnly: true}, fakeMCPTool{name: "mcp__s__change"})
+	a, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "plan", Mode: "plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.tools.Get("mcp__s__look"); !ok {
+		t.Fatal("plan mode dropped a read-only MCP tool")
+	}
+	if _, ok := a.tools.Get("mcp__s__change"); ok {
+		t.Fatal("plan mode kept an MCP tool that may write")
+	}
+	a, _ = DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "go"})
+	if _, ok := a.tools.Get("mcp__s__change"); !ok {
+		t.Fatal("build mode lost MCP tools")
 	}
 }

@@ -2,7 +2,7 @@
 // Single seam between the feature modules and agent-host:
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 
-import type { GitInfo, MergeResult, OpenedSession, RevertPreview, RevertResult, WorktreeStatus, ApprovalDecision, AttachSnapshot, PermissionPreset, PermissionRule, PermissionsView, CommandEntry, MemoryProject, MemoryTarget, MemoryView, TurnEvent, TurnInfo, FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, ResourceSnapshot, RefreshResult, SessionInfo, SessionUsage, SkillEntry, TodoEntry } from "./types";
+import type { BudgetView, HookScope, HooksOverview, SideAnswer, GitInfo, MergeResult, OpenedSession, RevertPreview, RevertResult, WorktreeStatus, ApprovalDecision, AttachSnapshot, MCPConfigFile, MCPNamedServer, MCPOverview, MCPScope, ToolsOverview, PermissionPreset, PermissionRule, PermissionsView, CommandEntry, MemoryProject, MemoryTarget, MemoryView, TurnEvent, TurnInfo, FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, ResourceSnapshot, RefreshResult, SessionInfo, SessionUsage, SkillEntry, TodoEntry } from "./types";
 import { bridge } from "./bridge";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -246,7 +246,7 @@ export function deleteSession(
 export type SubmitArgs = {
   sessionId: string;
   message: string;
-  resume: boolean;
+  resume?: boolean;
   cwd: string;
   provider: string | null;
   model: string | null;
@@ -348,6 +348,81 @@ export function permissionsSet(scope: "global" | "folder", cwd: string | null, r
   return invoke<PermissionsView>("permissionsSet", { scope, cwd, rules });
 }
 
+// ---- MCP servers ----
+
+export function mcpList(cwd: string | null): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpList", { cwd });
+}
+
+export function mcpConfig(scope: MCPScope, cwd: string | null): Promise<MCPConfigFile> {
+  return invoke<MCPConfigFile>("mcpConfig", { scope, cwd });
+}
+
+// mcpSetConfig validates, writes and applies one mcp.json.
+export function mcpSetConfig(scope: MCPScope, cwd: string | null, text: string): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpSetConfig", { scope, cwd, text });
+}
+
+export function mcpSetEnabled(scope: MCPScope, cwd: string | null, name: string, enabled: boolean): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpSetEnabled", { scope, cwd, name, enabled });
+}
+
+export function mcpRestart(scope: MCPScope, cwd: string | null, name: string): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpRestart", { scope, cwd, name });
+}
+
+// mcpTrust approves (or revokes) the folder's current mcp.json.
+export function mcpTrust(cwd: string, trust: boolean): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpTrust", { cwd, trust });
+}
+
+// mcpParse turns a pasted command line, URL or mcp.json snippet into
+// named server configs, without saving anything.
+export function mcpParse(text: string): Promise<{ servers: MCPNamedServer[] }> {
+  return invoke<{ servers: MCPNamedServer[] }>("mcpParse", { text });
+}
+
+// mcpAdd merges servers into one mcp.json and starts them.
+export function mcpAdd(scope: MCPScope, cwd: string | null, servers: MCPNamedServer[], replace: boolean): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpAdd", { scope, cwd, servers, replace });
+}
+
+// ---- Tool switches ----
+
+export function toolsList(cwd: string | null, sessionId: string | null): Promise<ToolsOverview> {
+  return invoke<ToolsOverview>("toolsList", { cwd, sessionId });
+}
+
+// steerChat sends a message into the session's running turn; it fails
+// when nothing is running (send it as a new message instead).
+export function steerChat(sessionId: string, message: string, display: string): Promise<TurnInfo> {
+  return invoke<TurnInfo>("steerChat", { sessionId, message, display });
+}
+
+// budgetGet reads the spend limit that applies to a session (or just
+// the app default when sessionId is null).
+export function budgetGet(cwd: string | null, sessionId: string | null): Promise<BudgetView> {
+  return invoke<BudgetView>("budgetGet", { cwd, sessionId });
+}
+
+// budgetSet stores a USD limit globally or for one session; null
+// clears it, and 0 turns a session's limit off.
+export function budgetSet(scope: "global" | "session", cwd: string | null, sessionId: string | null, budgetUsd: number | null): Promise<BudgetView> {
+  return invoke<BudgetView>("budgetSet", { scope, cwd, sessionId, budgetUsd });
+}
+
+// toolsSet switches tools on or off globally or for one session; null
+// clears the switch.
+export function toolsSet(scope: "global" | "session", cwd: string | null, sessionId: string | null, names: string[], enabled: boolean | null): Promise<ToolsOverview> {
+  return invoke<ToolsOverview>("toolsSet", { scope, cwd, sessionId, names, enabled });
+}
+
+// toolsAccept lets the session use pending tools (all when names is
+// empty) from its next turn.
+export function toolsAccept(cwd: string | null, sessionId: string, names: string[]): Promise<ToolsOverview> {
+  return invoke<ToolsOverview>("toolsAccept", { cwd, sessionId, names });
+}
+
 export function showExternalPage(
   id: string,
   url: string,
@@ -412,4 +487,29 @@ function partitionFor(id: string): string {
 // resources samples per-session process usage (cached ~1.5s in the core).
 export function resources(): Promise<ResourceSnapshot> {
   return invoke<ResourceSnapshot>("resources");
+}
+
+// ---- hooks ----
+
+export function hooksList(cwd: string | null): Promise<HooksOverview> {
+  return invoke<HooksOverview>("hooksList", { cwd });
+}
+
+// hooksSetConfig validates and writes the global or folder hooks.json;
+// blank text deletes it.
+export function hooksSetConfig(scope: HookScope, cwd: string | null, text: string): Promise<HooksOverview> {
+  return invoke<HooksOverview>("hooksSetConfig", { scope, cwd, text });
+}
+
+export function hooksTrust(cwd: string, path: string, trust: boolean): Promise<HooksOverview> {
+  return invoke<HooksOverview>("hooksTrust", { cwd, path, trust });
+}
+
+export function hooksToggle(cwd: string | null, key: string, enabled: boolean): Promise<HooksOverview> {
+  return invoke<HooksOverview>("hooksToggle", { cwd, key, enabled });
+}
+
+// sideQuestion asks a /btw question about a session; nothing is saved.
+export function sideQuestion(sessionId: string, cwd: string | null, question: string, provider: string | null, model: string | null): Promise<SideAnswer> {
+  return invoke<SideAnswer>("sideQuestion", { sessionId, cwd, question, provider, model });
 }

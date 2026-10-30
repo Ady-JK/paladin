@@ -20,7 +20,10 @@ import { undoLast } from "./undo";
 import { forkSessionById, renameSessionById } from "./sessionActions";
 import { openSettings } from "./settings";
 import { attach as attachSkill, loadSkills, parseSkillLine, skillsSnapshot } from "./skills";
+import { openToolsMenu } from "./toolSwitches";
 import { openUsageDashboard } from "./usage";
+import { askSideQuestion } from "./btw";
+import { openBudgetMenu, parseBudget, setSessionBudget } from "./budget";
 
 type Args = "none" | "optional" | "required";
 
@@ -42,10 +45,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "build", label: "Build mode", desc: "Let the agent edit files and run commands", hint: "/build", icon: "sl-build", args: "none" },
   { name: "undo", label: "Undo", desc: "Revert the last message: its file changes and the reply", hint: "/undo", icon: "tl-undo", args: "none" },
   { name: "fork", label: "Fork", desc: "Branch this conversation into a new session", hint: "/fork", icon: "sl-fork", args: "none" },
+  { name: "btw", label: "By the way", desc: "Ask a side question; the answer is not added to the chat", hint: "/btw <question>", icon: "comments", args: "required" },
   { name: "rename", label: "Rename", desc: "Rename this session", hint: "/rename <title>", icon: "tl-pencil", args: "required" },
   { name: "memories", label: "Memories", desc: "View and edit what Paladin remembers", hint: "/memories", icon: "sl-memory", args: "none", chevron: true },
   { name: "skill", label: "Skill", desc: "Attach a skill to this turn", hint: "/skill <name> [message]", icon: "sl-skill", args: "required", chevron: true },
+  { name: "mcp", label: "MCP servers", desc: "Server status, tools and mcp.json", hint: "/mcp", icon: "sl-plug", args: "none", chevron: true },
+  { name: "tools", label: "Tools", desc: "Switch tools on or off for this session", hint: "/tools", icon: "tl-tools", args: "none", chevron: true },
   { name: "models", label: "Model", desc: "Switch the provider and model", hint: "/models", icon: "sl-model", args: "none", chevron: true },
+  { name: "budget", label: "Budget", desc: "Set this session's spend limit", hint: "/budget [usd|off|default]", icon: "sl-budget", args: "optional" },
   { name: "usage", label: "Usage", desc: "Tokens, cost and context for this session", hint: "/usage", icon: "sl-usage", args: "none", chevron: true },
   { name: "settings", label: "Settings", desc: "Open settings", hint: "/settings", icon: "rl-gear", args: "none", chevron: true },
   { name: "config", label: "Providers", desc: "Configure providers and API keys", hint: "/config", icon: "sl-sliders", args: "none", chevron: true },
@@ -479,6 +486,16 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
       clear();
       void undoLast();
       return "local";
+    case "btw":
+      clear();
+      if (!rest) {
+        setComposer("/btw ");
+        toast("Usage: /btw <question>", "error");
+        return "local";
+      }
+      if (!needSession("ask a side question")) return "local";
+      void askSideQuestion(rest);
+      return "local";
     case "rename":
       clear();
       if (!rest) {
@@ -493,6 +510,14 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
       clear();
       openSettings("memory");
       return "local";
+    case "mcp":
+      clear();
+      openSettings("mcp");
+      return "local";
+    case "tools":
+      clear();
+      openToolsMenu();
+      return "local";
     case "models":
       clear();
       modelSelectBtn.click();
@@ -505,6 +530,21 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
       clear();
       openSettings("providers");
       return "local";
+    case "budget": {
+      clear();
+      if (!rest) {
+        openBudgetMenu();
+        return "local";
+      }
+      const v = parseBudget(rest);
+      if (v === undefined) {
+        setComposer("/budget ");
+        toast("Usage: /budget <usd> | off | default", "error");
+        return "local";
+      }
+      void setSessionBudget(v);
+      return "local";
+    }
     case "usage":
       clear();
       void openUsageDashboard();

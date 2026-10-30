@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -87,7 +86,6 @@ func testDeps(t *testing.T, sess transcript.Session) (Deps, *fakeSessions, *fake
 		Prompts:   prompts,
 		Tools:     registry,
 		Shell:     shellTool,
-		MaxRounds: 42,
 		Context:   ctx,
 		Cancel:    cancel,
 		Tx:        make(chan ChatChunk, 8),
@@ -155,7 +153,6 @@ func TestBuildResolvesEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, sessions, providers, _ := testDeps(t, sess)
-	d.MaxRounds = 17
 	providerName, modelName := "openrouter", "model-x"
 	a, err := DefaultTemplate().Build(d, Request{
 		SessionID: sess.Meta.SessionID, Message: "hi", Cwd: "/proj",
@@ -172,9 +169,6 @@ func TestBuildResolvesEverything(t *testing.T) {
 	}
 	if len(a.history) != 1 || a.history[0].Content != "earlier" {
 		t.Fatalf("history not resolved: %+v", a.history)
-	}
-	if a.maxRounds != 17 {
-		t.Fatalf("max rounds %d", a.maxRounds)
 	}
 	if a.session.Meta.SessionID != sess.Meta.SessionID {
 		t.Fatalf("session %+v", a.session.Meta)
@@ -274,38 +268,6 @@ func TestBuildToolSubset(t *testing.T) {
 	}
 }
 
-func TestBuildMaxRounds(t *testing.T) {
-	sess := testSession(t, "00000000-0000-4000-8000-000000000024")
-	d, _, _, _ := testDeps(t, sess)
-	req := Request{SessionID: sess.Meta.SessionID, Message: "hi"}
-
-	a, err := (Template{Name: "t", MaxRounds: 7}).Build(d, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.maxRounds != 7 {
-		t.Fatalf("got %d", a.maxRounds)
-	}
-
-	// Template caps are clamped like runtime settings.
-	a, err = (Template{Name: "t", MaxRounds: 9999}).Build(d, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.maxRounds != config.MaxMaxToolRounds {
-		t.Fatalf("got %d", a.maxRounds)
-	}
-
-	// Zero keeps the runtime value.
-	a, err = (Template{Name: "t"}).Build(d, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.maxRounds != 42 {
-		t.Fatalf("got %d", a.maxRounds)
-	}
-}
-
 func TestRegistryRegisterGetNamesDefault(t *testing.T) {
 	r := NewRegistry()
 	if _, ok := r.Default(); ok {
@@ -318,17 +280,17 @@ func TestRegistryRegisterGetNamesDefault(t *testing.T) {
 	if err := r.Register(first); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Register(Template{Name: "default", MaxRounds: 3}); err != nil {
+	if err := r.Register(Template{Name: "default"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Register(Template{Name: "first", MaxRounds: 9}); err != nil {
+	if err := r.Register(Template{Name: "first", Tools: []string{"read"}}); err != nil {
 		t.Fatal(err)
 	}
 	if names := r.Names(); len(names) != 2 || names[0] != "first" || names[1] != "default" {
 		t.Fatalf("got %+v", names)
 	}
 	got, ok := r.Get("first")
-	if !ok || got.MaxRounds != 9 {
+	if !ok || len(got.Tools) != 1 {
 		t.Fatalf("got %+v %v", got, ok)
 	}
 	if _, ok := r.Get("missing"); ok {

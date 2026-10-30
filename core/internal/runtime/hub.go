@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 )
 
@@ -43,11 +44,10 @@ type TurnInfo struct {
 	Permissions string `json:"permissions,omitempty"`
 	State       string `json:"state"`
 	// Persisted means the transcript already holds this turn.
-	Persisted     bool   `json:"persisted,omitempty"`
-	Reply         string `json:"reply,omitempty"`
-	Stopped       bool   `json:"stopped,omitempty"`
-	NeedsContinue bool   `json:"needsContinue,omitempty"`
-	Cancelled     bool   `json:"cancelled,omitempty"`
+	Persisted bool   `json:"persisted,omitempty"`
+	Reply     string `json:"reply,omitempty"`
+	Stopped   bool   `json:"stopped,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
 	// AwaitingApproval is set while a tool call waits on the user.
 	AwaitingApproval bool   `json:"awaitingApproval,omitempty"`
 	Error            string `json:"error,omitempty"`
@@ -69,6 +69,9 @@ type TurnEvent struct {
 	Retry      *agent.RetryStatus      `json:"retry,omitempty"`
 	Compaction *agent.CompactionStatus `json:"compaction,omitempty"`
 	Approval   *permission.Approval    `json:"approval,omitempty"`
+	Steer      *agent.SteerMessage     `json:"steer,omitempty"`
+	Budget     *agent.BudgetNotice     `json:"budget,omitempty"`
+	Hook       *hooks.Note             `json:"hook,omitempty"`
 	Turn       *TurnInfo               `json:"turn,omitempty"`
 }
 
@@ -98,6 +101,17 @@ type hubTurn struct {
 	errMsg   string
 	result   chan TurnInfo
 	finished chan struct{}
+	// steer holds messages sent mid-turn that the agent has not taken.
+	steer []agent.SteerMessage
+	// halted marks a user stop (or shutdown), as opposed to the turn
+	// ending on its own.
+	halted bool
+}
+
+// halt stops the turn on the user's behalf. Callers hold the hub lock.
+func (t *hubTurn) halt() {
+	t.halted = true
+	t.cancel()
 }
 
 // Hub owns every turn: it runs different sessions concurrently (up to
@@ -146,7 +160,22 @@ func (h *Hub) Submit(req agent.Request, opts SubmitOpts) (TurnInfo, <-chan TurnI
 	if _, err := permission.ParsePreset(req.Permissions); err != nil {
 		return TurnInfo{}, nil, err
 	}
-	t := &hubTurn{
+	t := h.newTurn(req, opts)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return TurnInfo{}, nil, fmt.Errorf("agent host is shutting down")
+	}
+	h.queue = append(h.queue, t)
+	h.pumpLocked()
+	if t.info.State == TurnQueued {
+		h.publishLocked(t, TurnEvent{Event: "turn/queued", Turn: infoPtr(t.info)})
+	}
+	return t.info, t.result, nil
+}
+
+func (h *Hub) newTurn(req agent.Request, opts SubmitOpts) *hubTurn {
+	return &hubTurn{
 		req:      req,
 		toolAt:   map[string]int{},
 		waiting:  map[string]bool{},
@@ -168,17 +197,79 @@ func (h *Hub) Submit(req agent.Request, opts SubmitOpts) (TurnInfo, <-chan TurnI
 			QueuedAt:    time.Now().UnixMilli(),
 		},
 	}
+}
+
+// Steer sends a message into the session's running turn; the agent
+// adds it before its next model call. A message the turn never takes
+// (it was already wrapping up) becomes the session's next turn, unless
+// the user stops the turn. It fails when nothing is running, so the
+// client can submit a normal turn instead.
+func (h *Hub) Steer(sessionID, message, display string) (TurnInfo, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return TurnInfo{}, fmt.Errorf("sessionId is required")
+	}
+	if strings.TrimSpace(message) == "" {
+		return TurnInfo{}, fmt.Errorf("message is required")
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed {
-		return TurnInfo{}, nil, fmt.Errorf("agent host is shutting down")
+	t := h.active[sessionID]
+	if t == nil || t.halted {
+		return TurnInfo{}, fmt.Errorf("no turn is running in this session")
 	}
-	h.queue = append(h.queue, t)
-	h.pumpLocked()
-	if t.info.State == TurnQueued {
-		h.publishLocked(t, TurnEvent{Event: "turn/queued", Turn: infoPtr(t.info)})
+	t.steer = append(t.steer, agent.SteerMessage{Message: message, Display: display})
+	return t.info, nil
+}
+
+// takeSteer hands the turn's pending steer messages to its agent.
+func (h *Hub) takeSteer(t *hubTurn) []agent.SteerMessage {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := t.steer
+	t.steer = nil
+	return out
+}
+
+// queueLeftoverSteerLocked turns steer messages the agent never took
+// into a follow-up turn with the same settings, ahead of anything the
+// session queued later.
+func (h *Hub) queueLeftoverSteerLocked(t *hubTurn) {
+	if len(t.steer) == 0 || t.halted || h.closed {
+		t.steer = nil
+		return
 	}
-	return t.info, t.result, nil
+	var msgs, shown []string
+	for _, m := range t.steer {
+		msgs = append(msgs, m.Message)
+		d := m.Display
+		if strings.TrimSpace(d) == "" {
+			d = m.Message
+		}
+		shown = append(shown, d)
+	}
+	t.steer = nil
+	req := t.req
+	req.Message = strings.Join(msgs, "\n\n")
+	req.Display = ""
+	req.Resume, req.Compact = false, false
+	req.Skill, req.Command = nil, nil
+	req.Steer = nil
+	display := strings.Join(shown, "\n\n")
+	if display == req.Message {
+		display = ""
+	}
+	next := h.newTurn(req, SubmitOpts{Display: display})
+	at := len(h.queue)
+	for i, q := range h.queue {
+		if q.info.SessionID == t.info.SessionID {
+			at = i
+			break
+		}
+	}
+	h.queue = append(h.queue, nil)
+	copy(h.queue[at+1:], h.queue[at:])
+	h.queue[at] = next
+	h.publishLocked(next, TurnEvent{Event: "turn/queued", Turn: infoPtr(next.info)})
 }
 
 // pumpLocked starts every queued turn whose session is idle while
@@ -210,6 +301,7 @@ func (h *Hub) pumpLocked() {
 func (h *Hub) startLocked(t *hubTurn) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
+	t.req.Steer = func() []agent.SteerMessage { return h.takeSteer(t) }
 	t.info.State = TurnRunning
 	t.info.StartedAt = time.Now().UnixMilli()
 	h.active[t.info.SessionID] = t
@@ -265,9 +357,6 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	if chunk.Stopped {
 		t.info.Stopped = true
 	}
-	if chunk.NeedsContinue {
-		t.info.NeedsContinue = true
-	}
 	if chunk.Delta != "" {
 		t.reply.WriteString(chunk.Delta)
 		h.publishLocked(t, TurnEvent{Event: "chat/delta", Delta: chunk.Delta})
@@ -280,6 +369,15 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	}
 	if chunk.Tool != nil {
 		h.publishLocked(t, TurnEvent{Event: "chat/tool", Tool: chunk.Tool})
+	}
+	if chunk.Steer != nil {
+		h.publishLocked(t, TurnEvent{Event: "chat/steer", Steer: chunk.Steer})
+	}
+	if chunk.Budget != nil {
+		h.publishLocked(t, TurnEvent{Event: "chat/budget", Budget: chunk.Budget})
+	}
+	if chunk.Hook != nil {
+		h.publishLocked(t, TurnEvent{Event: "chat/hook", Hook: chunk.Hook})
 	}
 	if chunk.Approval != nil {
 		if chunk.Approval.State == permission.StatePending {
@@ -302,7 +400,6 @@ func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
 		t.info.Reply = t.reply.String()
 	}
 	t.info.Stopped = t.info.Stopped || out.Stopped
-	t.info.NeedsContinue = t.info.NeedsContinue || out.NeedsContinue
 	switch {
 	case err != nil:
 		t.info.Error = err.Error()
@@ -316,6 +413,7 @@ func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
 	h.publishLocked(t, TurnEvent{Event: "turn/done", Turn: infoPtr(t.info)})
 	t.result <- t.info
 	close(t.finished)
+	h.queueLeftoverSteerLocked(t)
 	h.pumpLocked()
 }
 
@@ -444,7 +542,7 @@ func (h *Hub) StopSession(sessionID, cwd string) bool {
 	hit := h.dropQueuedLocked(match)
 	for _, t := range h.active {
 		if match(t) {
-			t.cancel()
+			t.halt()
 			hit = true
 		}
 	}
@@ -456,7 +554,7 @@ func (h *Hub) StopRunning(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if t := h.active[sessionID]; t != nil {
-		t.cancel()
+		t.halt()
 		return true
 	}
 	return false
@@ -471,7 +569,7 @@ func (h *Hub) Cancel(turnID string) bool {
 	}
 	for _, t := range h.active {
 		if t.info.TurnID == turnID {
-			t.cancel()
+			t.halt()
 			return true
 		}
 	}

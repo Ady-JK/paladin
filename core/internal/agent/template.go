@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/prompt"
 	"github.com/Ady-JK/paladin/core/internal/skills"
@@ -32,9 +32,6 @@ type Template struct {
 	// Tools selects a subset by name. Empty means every tool in the
 	// runtime registry.
 	Tools []string `json:"tools,omitempty"`
-	// MaxRounds caps tool rounds for this agent. Zero means the runtime
-	// default.
-	MaxRounds uint32 `json:"maxToolRounds,omitempty"`
 }
 
 // DefaultTemplate is the built-in single agent.
@@ -98,7 +95,6 @@ type Deps struct {
 	Commands  CommandSource
 	Tools     *tools.Registry
 	Shell     *tools.ShellTool
-	MaxRounds uint32
 	Context   context.Context
 	Cancel    context.CancelFunc
 	Tx        chan<- ChatChunk
@@ -109,6 +105,13 @@ type Deps struct {
 	Gate ToolGate
 	// Steps, when set, records each file-changing tool run for undo.
 	Steps StepRecorder
+	// Hooks runs the user's hook scripts; nil runs none. SessionStart is
+	// "startup" or "resume" when this turn opens the session.
+	Hooks        *hooks.Engine
+	SessionStart string
+	// Live, when set, receives a copy of the conversation before each
+	// model round (see Agent.live).
+	Live func([]inference.LlmMessage)
 }
 
 // Build resolves a Template into an Agent. Everything the loop needs
@@ -187,15 +190,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		message = FormatSkillMessage(message, skill.Name, skill.Content)
 	}
 
-	base := d.Prompts.SystemPrompt(strVal(req.SystemPrompt))
-	system := prompt.ToolSystem(base, sess.Meta.Cwd)
-	if d.Sections != nil {
-		for _, section := range d.Sections.SystemSections(sess) {
-			if section = strings.TrimSpace(section); section != "" {
-				system += "\n\n" + section
-			}
-		}
-	}
+	system := ComposeSystem(d.Prompts.SystemPrompt(strVal(req.SystemPrompt)), sess, d.Sections)
 
 	registry := d.Tools
 	shell := d.Shell
@@ -216,11 +211,6 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		system += "\n\n" + prompt.PlanMode
 	}
 
-	maxRounds := d.MaxRounds
-	if t.MaxRounds > 0 {
-		maxRounds = config.ClampMaxToolRounds(t.MaxRounds)
-	}
-
 	return newAgent(runConfig{
 		session:     sess,
 		provider:    provider,
@@ -229,7 +219,6 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		toolDefs:    toolDefinitions(registry),
 		history:     history,
 		system:      system,
-		maxRounds:   maxRounds,
 		ctx:         d.Context,
 		cancel:      d.Cancel,
 		tx:          d.Tx,
@@ -237,10 +226,17 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		persistGate: d.PersistGate,
 		gate:        d.Gate,
 		steps:       d.Steps,
+		steer:       req.Steer,
+		budget:      req.Budget,
 		message:     message,
 		display:     display,
 		resume:      req.Resume,
 		compactOnly: req.Compact,
+
+		hooks:          d.Hooks,
+		sessionStart:   d.SessionStart,
+		live:           d.Live,
+		permissionMode: req.Permissions,
 	}), nil
 }
 
@@ -338,6 +334,7 @@ func (r *Registry) Default() (Template, bool) {
 var planWriteTools = map[string]bool{"write": true, "edit": true}
 
 // planRegistry is the read-only view of a registry: no file writers,
+// no MCP tools without a readOnly hint,
 // and a shell that refuses anything but inspection commands. The real
 // shell stays as the agent's job-notice source.
 func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *tools.ShellTool) {
@@ -347,6 +344,9 @@ func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *
 			continue
 		}
 		t, _ := r.Get(name)
+		if m, ok := t.(tools.MCPTool); ok && !m.MCPInfo().ReadOnly {
+			continue
+		}
 		if name == "shell" {
 			sh, ok := t.(*tools.ShellTool)
 			if !ok {
@@ -359,4 +359,19 @@ func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *
 		out.Register(t)
 	}
 	return out, shell
+}
+
+// ComposeSystem is a session's full system prompt: the base prompt with
+// tool guidance and environment, then the runtime's sections
+// (instructions, skills, MCP).
+func ComposeSystem(base string, sess transcript.Session, sections SectionSource) string {
+	system := prompt.ToolSystem(base, sess.Meta.Cwd)
+	if sections != nil {
+		for _, section := range sections.SystemSections(sess) {
+			if section = strings.TrimSpace(section); section != "" {
+				system += "\n\n" + section
+			}
+		}
+	}
+	return system
 }

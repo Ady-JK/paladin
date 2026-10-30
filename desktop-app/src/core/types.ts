@@ -400,7 +400,6 @@ export type TurnInfo = {
   persisted?: boolean;
   reply?: string;
   stopped?: boolean;
-  needsContinue?: boolean;
   cancelled?: boolean;
   permissions?: string;
   awaitingApproval?: boolean;
@@ -413,6 +412,10 @@ export type TurnInfo = {
 // TurnEvent is any chat/* or turn/* line, for any session.
 export type TurnEvent = {
   event: string;
+  // mcp/status only (it has no sessionId).
+  server?: MCPServerStatus;
+  // tools/pending only: new tools the session holds back.
+  pending?: string[];
   seq: number;
   sessionId: string;
   turnId: string;
@@ -421,15 +424,68 @@ export type TurnEvent = {
   retry?: RetryInfo;
   compaction?: CompactionInfo;
   approval?: Approval;
+  steer?: SteerInfo;
+  budget?: BudgetNotice;
+  hook?: HookNote;
   turn?: TurnInfo;
+};
+
+// HookNote is chat/hook: a user hook ran and did something worth showing.
+export type HookOutcome = "blocked" | "context" | "error" | "stopped" | "message";
+export type HookNote = { event: string; command: string; outcome: HookOutcome; message?: string };
+
+// Hooks settings (hooksList and friends).
+export type HookHandler = {
+  key: string;
+  event: string;
+  matcher?: string;
+  command: string;
+  timeout?: number;
+  statusMessage?: string;
+  enabled: boolean;
+};
+export type HookScope = "global" | "folder";
+export type HookSource = {
+  path: string;
+  scope: HookScope;
+  format: "paladin" | "codex" | "claude";
+  exists: boolean;
+  editable: boolean;
+  trusted: boolean;
+  error?: string;
+  warnings?: string[];
+  text?: string;
+  handlers: HookHandler[] | null;
+};
+export type HooksOverview = { sources: HookSource[]; events: string[] };
+
+// SideAnswer is a /btw answer (sideQuestion).
+export type SideAnswer = { answer: string; model: string };
+
+// SteerInfo is a message sent into a running turn (chat/steer).
+export type SteerInfo = { message: string; display?: string };
+
+// BudgetNotice is chat/budget: the spend limit was hit, or it cannot
+// be enforced because the provider reports no cost.
+export type BudgetNotice = { state: "reached" | "unknownCost"; spent: number; limit: number; ended?: boolean };
+
+// BudgetView is budgetGet/budgetSet: sessionUsd null inherits the
+// default; effectiveUsd 0 means no limit.
+export type BudgetView = {
+  defaultUsd: number;
+  sessionUsd: number | null;
+  effectiveUsd: number;
+  spentUsd: number;
+  hasCost: boolean;
+  calls: number;
 };
 
 // Permission presets, rules and the approval card the gate sends.
 export type PermissionPreset = "read-only" | "auto" | "full-access";
-export type ApprovalDecision = "once" | "session" | "folder" | "deny";
+export type ApprovalDecision = "once" | "session" | "folder" | "global" | "deny";
 
 export type PermissionRule = {
-  tool: "shell" | "write";
+  tool: "shell" | "write" | "mcp";
   pattern: string;
   action: "allow" | "deny";
 };
@@ -437,9 +493,13 @@ export type PermissionRule = {
 export type Approval = {
   id: string;
   tool: string;
-  kind: "shell" | "write" | "escalate" | string;
+  kind: "shell" | "write" | "escalate" | "mcp" | string;
   command?: string;
   path?: string;
+  // MCP calls: the server, its own tool name and the JSON arguments.
+  server?: string;
+  mcpTool?: string;
+  args?: string;
   reasons?: string[];
   destructive?: boolean;
   choices?: ApprovalDecision[];
@@ -479,3 +539,73 @@ export type ResourceSnapshot = {
   self: ResourceUsage;
   sessions: Record<string, ResourceUsage>;
 };
+
+// MCP servers, as mcpList and mcp/status report them.
+export type MCPScope = "global" | "folder";
+export type MCPState = "disabled" | "untrusted" | "stopped" | "starting" | "ready" | "failed" | "removed";
+
+export type MCPToolStatus = {
+  name: string;
+  exposed: string;
+  description?: string;
+  readOnly: boolean;
+  destructive: boolean;
+};
+
+export type MCPServerStatus = {
+  name: string;
+  scope: MCPScope;
+  folder?: string;
+  transport: string;
+  state: MCPState;
+  error?: string;
+  shadowed?: boolean;
+  tools: MCPToolStatus[];
+  server?: { name: string; version?: string } | null;
+  stderr?: string;
+  restarts: number;
+};
+
+export type MCPOverview = {
+  servers: MCPServerStatus[];
+  globalPath: string;
+  folderPath?: string;
+  hasFolderConfig: boolean;
+  trusted: boolean;
+  errors?: Partial<Record<MCPScope, string>>;
+};
+
+export type MCPConfigFile = { path: string; text: string; exists: boolean };
+
+// MCPServerConfig is one mcp.json entry; MCPNamedServer pairs it with
+// the name mcpParse derived (or the user typed).
+export type MCPServerConfig = {
+  type?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+};
+
+export type MCPNamedServer = { name: string; config: MCPServerConfig };
+
+// ToolSwitch is one tool as toolsList reports it: the global and session
+// switches (unset when absent) and the result, session beating global.
+export type ToolSwitch = {
+  name: string;
+  description?: string;
+  source: "builtin" | "mcp";
+  server?: string;
+  tool?: string;
+  readOnly?: boolean;
+  destructive?: boolean;
+  global?: boolean;
+  session?: boolean;
+  enabled: boolean;
+  pending?: boolean;
+};
+
+export type ToolsOverview = { tools: ToolSwitch[]; pending: string[] };

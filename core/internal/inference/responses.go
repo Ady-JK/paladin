@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
 	"github.com/openai/openai-go/shared"
 )
@@ -149,13 +151,15 @@ func responsesUsage(u responses.ResponseUsage, raw string) *Usage {
 func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	res, err := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), p.headers(sessionID)...)
+	var httpRes *http.Response
+	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
+	res, err := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), opts...)
 	if err != nil {
 		// One immediate retry for transport blips (EOF/reset before
 		// any response): the SDK retries cover most, this catches the
 		// stragglers without turning a blip into a failed turn.
 		if isTransientTransport(err) {
-			if res2, err2 := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), p.headers(sessionID)...); err2 == nil {
+			if res2, err2 := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), opts...); err2 == nil {
 				res, err = res2, nil
 			} else {
 				err = err2
@@ -169,7 +173,7 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: responses: %s", p.name, res.Error.Message))
 	}
 	out := parseResponsesOutput(res)
-	out.Usage = responsesUsage(res.Usage, res.RawJSON())
+	out.Usage = withHeaderCost(responsesUsage(res.Usage, res.RawJSON()), httpRes)
 	return out, nil
 }
 

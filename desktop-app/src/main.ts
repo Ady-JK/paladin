@@ -55,6 +55,9 @@ import { initResources } from "./features/resources";
 import { initMotion } from "./ui/motion";
 import { initUndo } from "./features/undo";
 import { bootLive, initLive, openPendingSession, syncComposer } from "./features/live";
+import { syncMcp } from "./features/mcp";
+import { syncTools } from "./features/toolSwitches";
+import { syncBudget } from "./features/budget";
 
 async function connect(): Promise<void> {
   setStatus("connecting…", "busy");
@@ -76,6 +79,9 @@ async function connect(): Promise<void> {
 
     state.sessionId = "";
     syncPermChip();
+    syncMcp();
+    syncTools();
+    void syncBudget();
     sessionLabelEl.textContent = "—";
     clearUsage();
     clearTodos();

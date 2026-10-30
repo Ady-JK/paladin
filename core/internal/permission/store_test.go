@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"encoding/json"
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"strings"
 	"sync"
 	"testing"
@@ -199,12 +200,14 @@ func TestGateEscalation(t *testing.T) {
 	g := newGate(t, Auto)
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "c1", ReplyOnce)
-	ok := g.Escalate(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm i -g x"}), rec.notify)
-	if !ok || rec.evs[0].Kind != KindEscalate || len(rec.evs[0].Choices) != 2 {
-		t.Fatalf("ok=%v %+v", ok, rec.evs)
+	pol := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Writable: []string{"/ws"}}
+	esc := g.Escalate(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm i -g x"}),
+		Blocked{Policy: pol, Output: "Operation not permitted"}, rec.notify)
+	if !esc.Run || esc.Sandbox != nil || rec.evs[0].Kind != KindEscalate || len(rec.evs[0].Choices) != 2 {
+		t.Fatalf("esc=%+v %+v", esc, rec.evs)
 	}
 	g.Preset = FullAccess
-	if g.Escalate(context.Background(), "c2", "shell", args(map[string]any{"cmd": "x"}), rec.notify) {
+	if g.Escalate(context.Background(), "c2", "shell", args(map[string]any{"cmd": "x"}), Blocked{Policy: pol}, rec.notify).Run {
 		t.Fatal("full access never sandboxes, so never escalates")
 	}
 }

@@ -37,7 +37,7 @@ func TestSandboxedShellWritesInsideOnly(t *testing.T) {
 		t.Fatal("outside write should fail")
 	}
 	content := err.(*ToolError).ResultContent()
-	if !SandboxBlocked(content) {
+	if out, ok := SandboxBlocked(content); !ok || out == "" {
 		t.Fatalf("missing sandbox_blocked flag: %s", content)
 	}
 	if _, statErr := os.Stat(target); statErr == nil {
@@ -48,7 +48,7 @@ func TestSandboxedShellWritesInsideOnly(t *testing.T) {
 func TestPlainFailureIsNotSandboxBlocked(t *testing.T) {
 	ctx, _, _ := sandboxCtx(t)
 	_, err := NewShellTool().Call(json.RawMessage(`{"cmd":"cat does-not-exist"}`), ctx)
-	if err == nil || SandboxBlocked(err.(*ToolError).ResultContent()) {
+	if err == nil || sandboxBlocked(err.(*ToolError).ResultContent()) {
 		t.Fatalf("plain failure flagged: %v", err)
 	}
 }
@@ -56,7 +56,7 @@ func TestPlainFailureIsNotSandboxBlocked(t *testing.T) {
 func TestUnsandboxedFailureNeverFlagged(t *testing.T) {
 	ctx, _ := testCtx(t)
 	_, err := NewShellTool().Call(json.RawMessage(`{"cmd":"echo 'Operation not permitted' >&2; exit 1"}`), ctx)
-	if err == nil || SandboxBlocked(err.(*ToolError).ResultContent()) {
+	if err == nil || sandboxBlocked(err.(*ToolError).ResultContent()) {
 		t.Fatal("no sandbox, no flag")
 	}
 }
@@ -79,3 +79,5 @@ func TestSandboxedBackgroundJobIsConfined(t *testing.T) {
 		}
 	}
 }
+
+func sandboxBlocked(content string) bool { _, ok := SandboxBlocked(content); return ok }

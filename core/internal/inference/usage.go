@@ -2,12 +2,19 @@
 // Every dialect reports usage in its own shape; each one maps onto Usage
 // so turns, sessions and the wire API share one vocabulary. Token counts
 // come from the provider's typed response; dollar costs come from the
-// OpenCode gateway extras (cost/list_cost), which only OpenCode sends.
-// Plain providers leave HasCost false and costs at zero.
+// gateway: usage.cost in the body (OpenCode, OpenRouter, and LiteLLM when
+// streaming), OpenCode's list_cost, or LiteLLM's cost header on
+// non-streamed calls. Plain providers leave HasCost false and costs at zero.
 
 package inference
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"math"
+	"net/http"
+	"strconv"
+	"strings"
+)
 
 // Usage is one LLM call's token and spend footprint.
 type Usage struct {
@@ -114,4 +121,31 @@ func gatewayCost(raw string) (cost, listCost float64, cacheRead, cacheWrite int6
 		cacheWrite += *ex.PromptTokensDetails.CacheWriteTokens
 	}
 	return cost, listCost, cacheRead, cacheWrite, ok
+}
+
+// liteLLMCostHeader carries the call's USD cost on LiteLLM responses.
+// Streamed calls also report it as usage.cost in the final chunk, but a
+// non-streamed body leaves it out, so the header is the only source there.
+const liteLLMCostHeader = "x-litellm-response-cost"
+
+// withHeaderCost fills in a cost the body did not report from the
+// response's LiteLLM cost header. Garbage or negative values are
+// ignored rather than trusted.
+func withHeaderCost(u *Usage, res *http.Response) *Usage {
+	if res == nil || (u != nil && u.HasCost) {
+		return u
+	}
+	raw := strings.TrimSpace(res.Header.Get(liteLLMCostHeader))
+	if raw == "" {
+		return u
+	}
+	cost, err := strconv.ParseFloat(raw, 64)
+	if err != nil || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+		return u
+	}
+	if u == nil {
+		u = &Usage{}
+	}
+	u.Cost, u.HasCost = cost, true
+	return u
 }

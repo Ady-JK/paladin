@@ -620,7 +620,7 @@ func TestResolveProviderCatalogDefaultForPlainProvider(t *testing.T) {
 	}
 }
 
-func TestSystemPromptFileMaxRounds(t *testing.T) {
+func TestSystemPromptFile(t *testing.T) {
 	rt, dir := testRuntime(t)
 	if got := rt.systemPrompt("override"); got != "override" {
 		t.Fatalf("got %q", got)
@@ -631,9 +631,6 @@ func TestSystemPromptFileMaxRounds(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "config", config.SystemPromptFileName)); err != nil {
 		t.Fatalf("system prompt file not seeded: %v", err)
-	}
-	if got := rt.maxRounds(); got != config.DefaultMaxToolRounds {
-		t.Fatalf("got %d", got)
 	}
 	// The edited file is authoritative.
 	edited, err := rt.SetPrompt("custom sys")
@@ -677,33 +674,6 @@ func TestSystemPromptFileMaxRounds(t *testing.T) {
 	}
 	if reset.SystemPrompt != config.DefaultSystemPrompt() {
 		t.Fatalf("reset did not restore default")
-	}
-	// settings.json max rounds still apply; corrupt files fall back.
-	settings := `{"maxToolRounds":7}`
-	if err := os.MkdirAll(filepath.Dir(rt.settingsPath()), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(rt.settingsPath(), []byte(settings), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := rt.maxRounds(); got != 7 {
-		t.Fatalf("got %d", got)
-	}
-	if err := os.WriteFile(rt.settingsPath(), []byte("{bad"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := rt.maxRounds(); got != config.DefaultMaxToolRounds {
-		t.Fatalf("got %d", got)
-	}
-	// Config-level max rounds respected when no settings file.
-	rt2, _ := testRuntime(t)
-	rt2.config.MaxToolRounds = 12
-	if got := rt2.maxRounds(); got != 12 {
-		t.Fatalf("got %d", got)
-	}
-	rt2.config.MaxToolRounds = 9999
-	if got := rt2.maxRounds(); got != config.MaxMaxToolRounds {
-		t.Fatalf("got %d", got)
 	}
 }
 
@@ -890,8 +860,8 @@ func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 
 func TestEmitDoneNonBlocking(t *testing.T) {
 	rt, _ := testRuntime(t)
-	tx := make(chan agent.ChatChunk)        // unbuffered, no receiver.
-	rt.emitDone(tx, "s", false, false, nil) // must not block.
+	tx := make(chan agent.ChatChunk) // unbuffered, no receiver.
+	rt.emitDone(tx, "s", false, nil) // must not block.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_ = ctx

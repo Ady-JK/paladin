@@ -1,7 +1,7 @@
 // chat.ts sends messages and streams the agent reply.
 
 import * as api from "../core/api";
-import { attachBtnEl, continueBtn, inputEl, pauseBtn, sendBtn, sessionLabelEl, workspaceInputEl, workspaceLabelEl } from "../core/dom";
+import { attachBtnEl, inputEl, pauseBtn, sendBtn, sessionLabelEl, steerBtn, workspaceInputEl, workspaceLabelEl } from "../core/dom";
 import { state } from "../core/state";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
@@ -18,6 +18,9 @@ import { isBusy, noteSubmitted, syncComposer } from "./live";
 import { noteSent } from "./undo";
 import { setWorktree, takeWorktreeRequest } from "./worktrees";
 import { shortPath } from "../core/format";
+import { syncMcp } from "./mcp";
+import { applyToolDraft, syncTools } from "./toolSwitches";
+import { applyBudgetDraft, syncBudget } from "./budget";
 
 // TurnPlan is what a composer line resolves to before it is sent.
 interface TurnPlan {
@@ -28,13 +31,10 @@ interface TurnPlan {
 
 // planTurn resolves the skill and the bubble text for a non-slash line
 // (route null) or a slash line that becomes a special agent turn.
-function planTurn(message: string, route: AgentRoute | null, resume: boolean): TurnPlan {
+function planTurn(message: string, route: AgentRoute | null): TurnPlan {
   if (route) {
     const skill = route.compact || route.skill ? (route.skill ?? null) : takeAttached();
     return { skill, display: route.display };
-  }
-  if (resume) {
-    return { skill: null, display: message };
   }
   const parsed = parseSkillLine(message);
   if (!parsed) {
@@ -69,15 +69,20 @@ async function ensureSession(title: string): Promise<void> {
     workspaceLabelEl.textContent = shortPath(state.cwd);
     workspaceInputEl.value = state.cwd;
     setWorktree(opened.worktree);
+    syncMcp();
   }
+  await applyToolDraft(state.sessionId);
+  syncTools();
   keepDraftFor(state.sessionId);
+  await applyBudgetDraft(state.sessionId);
+  void syncBudget();
   sessionLabelEl.textContent = state.sessionId.slice(0, 8);
   renderSessions();
 }
 
-export async function send(resume = false): Promise<void> {
-  const message = resume ? "" : inputEl.value.trim();
-  if (!message && !resume) {
+export async function send(): Promise<void> {
+  const message = inputEl.value.trim();
+  if (!message) {
     return;
   }
 
@@ -86,38 +91,32 @@ export async function send(resume = false): Promise<void> {
   // `/skill <name> …` routes to the agent with the name sent separately;
   // the sidecar injects SKILL.md before the LLM call.
   let route: AgentRoute | null = null;
-  if (!resume) {
-    const routed = await routeSlash(message);
-    if (routed === "local") {
-      autosizeComposer();
-      return;
-    }
-    if (routed !== "none") {
-      route = routed;
-    }
+  const routed = await routeSlash(message);
+  if (routed === "local") {
+    autosizeComposer();
+    return;
+  }
+  if (routed !== "none") {
+    route = routed;
   }
   // A new user message retires a fully-landed plan: the panel goes
   // empty at once and the agent plans the new work if it is multi-step.
-  if (!resume && !route?.compact) {
+  if (!route?.compact) {
     dropFinishedPanel();
   }
-  const { skill, display } = planTurn(message, route, resume);
+  const { skill, display } = planTurn(message, route);
 
   // Hand-typed @paths resolve to OS-specific absolute paths here;
   // popup-accepted rows are already absolute. The bubble keeps the
   // original text (display) so the chat shows what was typed.
-  let outgoing = "";
-  if (!resume) {
-    inputEl.value = "";
-    autosizeComposer();
-    try {
-      outgoing = await expandMentions(route ? route.message : display);
-    } catch (error) {
-      console.warn(`expandMentions failed: ${String(error)}`);
-      outgoing = display;
-    }
-  } else {
-    continueBtn.classList.add("hidden");
+  inputEl.value = "";
+  autosizeComposer();
+  let outgoing: string;
+  try {
+    outgoing = await expandMentions(route ? route.message : display);
+  } catch (error) {
+    console.warn(`expandMentions failed: ${String(error)}`);
+    outgoing = display;
   }
 
   try {
@@ -129,12 +128,11 @@ export async function send(resume = false): Promise<void> {
     const info = await api.submitChat({
       sessionId: state.sessionId,
       message: outgoing,
-      resume,
       cwd: state.cwd,
       provider: state.selectedProvider || null,
       model: state.selectedModel || null,
       skill,
-      display: resume ? "" : display,
+      display,
       command: route?.command ?? null,
       compact: !!route?.compact,
       mode: turnMode(route),
@@ -143,7 +141,7 @@ export async function send(resume = false): Promise<void> {
     noteSubmitted(info);
     noteSent(state.sessionId);
   } catch (error) {
-    if (!resume && !inputEl.value && !route?.compact) {
+    if (!inputEl.value && !route?.compact) {
       inputEl.value = message;
       autosizeComposer();
     }
@@ -156,6 +154,34 @@ export async function send(resume = false): Promise<void> {
   } finally {
     // An approval card that took focus mid-submit keeps it.
     if (!document.activeElement?.closest(".approval-card")) inputEl.focus();
+  }
+}
+
+// steer adds the composer line to the running turn: the agent reads it
+// before its next model call instead of after the turn ends. Slash
+// lines, idle sessions and a turn that already finished fall back to a
+// normal (queued) send.
+export async function steer(): Promise<void> {
+  const message = inputEl.value.trim();
+  if (!message) return;
+  if (message.startsWith("/") || !state.sessionId || !isBusy(state.sessionId)) {
+    return send();
+  }
+  inputEl.value = "";
+  autosizeComposer();
+  let outgoing: string;
+  try {
+    outgoing = await expandMentions(message);
+  } catch {
+    outgoing = message;
+  }
+  try {
+    await api.steerChat(state.sessionId, outgoing, message);
+  } catch {
+    if (!inputEl.value) inputEl.value = message;
+    return send();
+  } finally {
+    inputEl.focus();
   }
 }
 
@@ -213,7 +239,9 @@ export function initChat(): void {
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void send();
+      // Mod+Enter steers the running turn; Enter queues a follow-up.
+      if ((event.metaKey || event.ctrlKey) && isBusy(state.sessionId)) void steer();
+      else void send();
     }
   });
 
@@ -222,7 +250,7 @@ export function initChat(): void {
     state.escArmedAt = 0;
     requestStop();
   });
-  continueBtn.addEventListener("click", () => void send(true));
+  steerBtn.addEventListener("click", () => void steer());
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !isBusy(state.sessionId)) {

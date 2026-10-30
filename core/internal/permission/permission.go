@@ -39,13 +39,15 @@ func ParsePreset(s string) (Preset, error) {
 const (
 	ToolShell    = "shell"
 	ToolWrite    = "write"
+	ToolMCP      = "mcp"
 	ActionAllow  = "allow"
 	ActionDeny   = "deny"
 	matchAnyRule = "*"
 )
 
-// Rule allows or denies shell commands by word prefix ("npm test") or
-// writes by directory ("/etc"). "*" matches everything of that tool.
+// Rule allows or denies shell commands by word prefix ("npm test"),
+// writes by directory ("/etc") or MCP tools by "server" / "server/*" /
+// "server/tool". "*" matches everything of that tool.
 type Rule struct {
 	Tool    string `json:"tool"`
 	Pattern string `json:"pattern"`
@@ -54,9 +56,9 @@ type Rule struct {
 
 func (r Rule) validate() error {
 	switch r.Tool {
-	case ToolShell, ToolWrite:
+	case ToolShell, ToolWrite, ToolMCP:
 	default:
-		return fmt.Errorf("rule tool must be %q or %q, got %q", ToolShell, ToolWrite, r.Tool)
+		return fmt.Errorf("rule tool must be %q, %q or %q, got %q", ToolShell, ToolWrite, ToolMCP, r.Tool)
 	}
 	if r.Action != ActionAllow && r.Action != ActionDeny {
 		return fmt.Errorf("rule action must be %q or %q, got %q", ActionAllow, ActionDeny, r.Action)
@@ -68,14 +70,22 @@ func (r Rule) validate() error {
 	if r.Tool == ToolWrite && p != matchAnyRule && !filepath.IsAbs(p) {
 		return fmt.Errorf("write rule pattern must be an absolute directory, got %q", p)
 	}
+	if r.Tool == ToolMCP && p != matchAnyRule {
+		server, tool, hasTool := strings.Cut(p, "/")
+		if server == "" || server == matchAnyRule || (hasTool && (tool == "" || strings.Contains(tool, "/"))) {
+			return fmt.Errorf("mcp rule pattern must be \"*\", \"server\", \"server/*\" or \"server/tool\", got %q", p)
+		}
+	}
 	return nil
 }
 
 func (r Rule) normalized() Rule {
 	r.Pattern = strings.TrimSpace(r.Pattern)
-	if r.Tool == ToolShell {
+	switch {
+	case r.Tool == ToolShell:
 		r.Pattern = strings.Join(strings.Fields(r.Pattern), " ")
-	} else if r.Pattern != matchAnyRule {
+	case r.Tool == ToolMCP:
+	case r.Pattern != matchAnyRule:
 		r.Pattern = filepath.Clean(r.Pattern)
 	}
 	return r
@@ -95,6 +105,7 @@ const (
 	ReplyOnce    = "once"
 	ReplySession = "session"
 	ReplyFolder  = "folder"
+	ReplyGlobal  = "global"
 	ReplyDeny    = "deny"
 )
 
@@ -128,8 +139,53 @@ func Decide(p Preset, req Request, rules []Rule) Decision {
 		return decideWrite(p, req, rules)
 	case KindShell:
 		return decideShell(p, req, rules)
+	case KindMCP:
+		return decideMCP(p, req, rules)
 	}
 	return Decision{Verdict: Allow}
+}
+
+// decideMCP: allow rules and the server's readOnly hint run the call;
+// destructive tools always ask once; anything else asks and can be
+// remembered per tool.
+func decideMCP(p Preset, req Request, rules []Rule) Decision {
+	if req.Destructive {
+		return Decision{Verdict: Ask, Destructive: true, Reasons: []string{"the server marks this tool destructive"},
+			Choices: []string{ReplyOnce, ReplyDeny}}
+	}
+	if r := allowingMCP(req, rules); r != nil {
+		return Decision{Verdict: Allow, Rule: r}
+	}
+	if req.Safe {
+		return Decision{Verdict: Allow}
+	}
+	reason := "MCP tool that may make changes"
+	if p == ReadOnly {
+		reason = "read-only mode"
+	}
+	remember := []Rule{{Tool: ToolMCP, Pattern: req.Server + "/" + req.MCPTool, Action: ActionAllow}}
+	return Decision{Verdict: Ask, Reasons: []string{reason}, Remember: remember, Choices: allChoices()}
+}
+
+func allowingMCP(req Request, rules []Rule) *Rule {
+	for i := range rules {
+		r := &rules[i]
+		if r.Tool == ToolMCP && r.Action == ActionAllow && mcpMatches(r.Pattern, req.Server, req.MCPTool) {
+			return r
+		}
+	}
+	return nil
+}
+
+func mcpMatches(pattern, server, tool string) bool {
+	if pattern == matchAnyRule {
+		return true
+	}
+	ps, pt, hasTool := strings.Cut(pattern, "/")
+	if ps != server {
+		return false
+	}
+	return !hasTool || pt == matchAnyRule || pt == tool
 }
 
 func decideWrite(p Preset, req Request, rules []Rule) Decision {
@@ -146,7 +202,7 @@ func decideWrite(p Preset, req Request, rules []Rule) Decision {
 		return Decision{Verdict: Allow}
 	}
 	remember := []Rule{{Tool: ToolWrite, Pattern: filepath.Dir(req.Path), Action: ActionAllow}}
-	return Decision{Verdict: Ask, Reasons: reasons, Remember: remember, Choices: allChoices()}
+	return Decision{Verdict: Ask, Reasons: reasons, Remember: remember, Choices: writeChoices()}
 }
 
 func decideShell(p Preset, req Request, rules []Rule) Decision {
@@ -191,6 +247,12 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 
 func allChoices() []string { return []string{ReplyOnce, ReplySession, ReplyFolder, ReplyDeny} }
 
+// writeChoices adds "everywhere": a folder outside the workspace (a
+// tool's install prefix, a config dir) is often shared by every project.
+func writeChoices() []string {
+	return []string{ReplyOnce, ReplySession, ReplyFolder, ReplyGlobal, ReplyDeny}
+}
+
 func denyingRule(req Request, rules []Rule) *Rule {
 	for i := range rules {
 		r := &rules[i]
@@ -200,6 +262,10 @@ func denyingRule(req Request, rules []Rule) *Rule {
 		switch req.Kind {
 		case KindWrite:
 			if r.Tool == ToolWrite && pathMatches(r.Pattern, req.Path) {
+				return r
+			}
+		case KindMCP:
+			if r.Tool == ToolMCP && mcpMatches(r.Pattern, req.Server, req.MCPTool) {
 				return r
 			}
 		case KindShell:

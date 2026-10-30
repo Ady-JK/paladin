@@ -22,7 +22,7 @@ async function setup(page: Page): Promise<void> {
     w.__e2eRunTurn = (_params: any, handlers: any) =>
       new Promise((resolve) => {
         w.__h = handlers;
-        w.__done = () => resolve({ sessionId: "", reply: "", stopped: false, needsContinue: false });
+        w.__done = () => resolve({ sessionId: "", reply: "", stopped: false });
       });
   });
   await page.goto("/");

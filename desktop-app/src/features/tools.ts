@@ -378,7 +378,15 @@ function richEditHtml(tool: ToolInfo): string | null {
 
 // ToolLabel is the one-line reading of a call: a verb, a muted detail,
 // and an optional inline code chip (the command for shell).
-export type ToolLabel = { verb: string; detail: string; chip: string };
+export type ToolLabel = { verb: string; detail: string; chip: string; server?: string };
+
+// mcpName splits an exposed MCP tool name (mcp__server__tool).
+export function mcpName(name: string): { server: string; tool: string } | null {
+  if (!name.startsWith("mcp__")) return null;
+  const rest = name.slice(5);
+  const at = rest.indexOf("__");
+  return at > 0 && at < rest.length - 2 ? { server: rest.slice(0, at), tool: rest.slice(at + 2) } : null;
+}
 
 type ToolKind = {
   icon: IconName;
@@ -399,9 +407,10 @@ const KINDS: Record<string, ToolKind> = {
 };
 
 const OTHER: ToolKind = { icon: "tl-tools", past: "Called", now: "Calling", noun: plural("tool", "tools") };
+const MCP: ToolKind = { icon: "sl-plug", past: "Called", now: "Calling", noun: plural("MCP tool", "MCP tools") };
 
 function kindOf(name: string): ToolKind {
-  return KINDS[name] ?? OTHER;
+  return KINDS[name] ?? (mcpName(name) ? MCP : OTHER);
 }
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -432,8 +441,13 @@ export function toolLabel(tool: ToolInfo): ToolLabel {
       const todos = Array.isArray(args.todos) ? args.todos.length : 0;
       return { verb, detail: todos ? `the plan · ${todos} ${todos === 1 ? "item" : "items"}` : "the plan", chip: "" };
     }
-    default:
+    default: {
+      const mcp = mcpName(tool.name);
+      if (mcp) {
+        return { verb, detail: mcp.tool, chip: summary && summary !== tool.arguments ? summary : "", server: mcp.server };
+      }
       return { verb, detail: tool.name, chip: summary && summary !== tool.name ? summary : "" };
+    }
   }
 }
 
@@ -444,7 +458,7 @@ export function runLabel(tools: ToolInfo[]): string {
   const groups = new Map<string, { kind: ToolKind; n: number; running: boolean }>();
   for (const tool of tools) {
     const kind = kindOf(tool.name);
-    const key = KINDS[tool.name] ? tool.name : "*";
+    const key = KINDS[tool.name] ? tool.name : mcpName(tool.name) ? "mcp" : "*";
     let g = groups.get(key);
     if (!g) {
       g = { kind, n: 0, running: false };
@@ -479,6 +493,10 @@ function paintToolHead(row: HTMLElement, head: HTMLElement, tool: ToolInfo): voi
     ico.innerHTML = tool.status === "running" ? '<span class="tool-spin"></span>' : icon(kind, "h-4 w-4");
   }
   head.querySelector(".tool-verb")!.textContent = label.verb;
+  const server = head.querySelector<HTMLElement>(".tool-server")!;
+  server.textContent = label.server ?? "";
+  server.hidden = !label.server;
+  server.title = label.server ? `MCP server ${label.server}` : "";
   const detail = head.querySelector<HTMLElement>(".tool-detail")!;
   detail.textContent = label.detail;
   detail.hidden = !label.detail;
@@ -506,7 +524,7 @@ export function createToolActivity(tool: ToolInfo): ToolView {
   toggle.className = "tool-row-head";
   toggle.setAttribute("aria-expanded", "false");
   toggle.innerHTML =
-    '<span class="tool-ico"></span><span class="tool-verb"></span><span class="tool-detail"></span>' +
+    '<span class="tool-ico"></span><span class="tool-verb"></span><span class="tool-server"></span><span class="tool-detail"></span>' +
     '<code class="tool-chip"></code><span class="tool-fail"></span>';
   paintToolHead(box, toggle, current);
 

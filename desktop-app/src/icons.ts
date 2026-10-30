@@ -151,6 +151,10 @@ const ICONS: Record<string, Icon> = {
   "sl-shield-check": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Zm-3 9 2 2 4-4", line: true, thin: true },
   "sl-shield-off": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3ZM4 4l16 16", line: true, thin: true },
   "sl-eye": { d: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z", line: true, thin: true },
+  "sl-sparkles": { d: "M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3Zm6 11l.8 2.2 2.2.8-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z", line: true, thin: true },
+  "sl-plug": { d: "M9 3v5m6-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4", line: true, thin: true },
+  "sl-budget": { d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm2.6-11.6c-.5-.9-1.5-1.4-2.6-1.4-1.6 0-2.6.8-2.6 1.9s1 1.6 2.6 1.9 2.6.9 2.6 2-1 2-2.6 2c-1.2 0-2.2-.5-2.7-1.4M12 6.5V8m0 8v1.5", line: true, thin: true },
+  steer: { d: "M5 4v7a4 4 0 0 0 4 4h10m0 0-4-4m4 4-4 4", line: true },
   "sl-init": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M12 11v6m-3-3h6", line: true, thin: true },
 };
 

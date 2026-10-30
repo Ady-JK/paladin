@@ -84,6 +84,28 @@ async function __paladinBaseInvoke(cmd, args) {
           presets: ["read-only", "auto", "full-access"],
         };
       }
+      case "mcpList":
+      case "mcpConfig":
+      case "mcpSetConfig":
+      case "mcpSetEnabled":
+      case "mcpRestart":
+      case "mcpTrust":
+      case "mcpParse":
+      case "mcpAdd":
+        return window.__e2eMcpInvoke(cmd, args || {});
+      case "hooksList":
+      case "hooksSetConfig":
+      case "hooksTrust":
+      case "hooksToggle":
+        return window.__e2eHooksInvoke(cmd, args || {});
+      case "sideQuestion":
+        window.__e2eSideCalls = (window.__e2eSideCalls || []).concat([JSON.parse(JSON.stringify(args || {}))]);
+        if (window.__e2eSideQuestion) return window.__e2eSideQuestion(args || {});
+        return { answer: "Side answer to: " + (args && args.question), model: (args && args.model) || "stub-model" };
+      case "toolsList":
+      case "toolsSet":
+      case "toolsAccept":
+        return window.__e2eToolsInvoke(cmd, args || {});
       case "memoryProjects":
         return [{ cwd: "/home/tester/project", key: "project-1234", entries: 1, used: 20, limit: 4000 }];
       case "memoryRefreshSnapshot":
@@ -426,34 +448,38 @@ async function __paladinBaseInvoke(cmd, args) {
           compact: !!inner.compact,
         });
         if (inner.compact) {
-          return { sessionId: inner.sessionId || "sess-notify-1", reply: "", stopped: false, needsContinue: false };
-        }
-        if (inner.resume) {
-          return {
-            sessionId: inner.sessionId || "sess-notify-1",
-            reply: "Resumed and finished.",
-            stopped: false,
-            needsContinue: false,
-          };
-        }
-        if (window.__e2eChatPaused) {
-          window.__e2eChatPaused = false;
-          return {
-            sessionId: inner.sessionId || "sess-notify-1",
-            reply: "Partial work before the cap.",
-            stopped: false,
-            needsContinue: true,
-          };
+          return { sessionId: inner.sessionId || "sess-notify-1", reply: "", stopped: false };
         }
         return {
           sessionId: inner.sessionId || "sess-notify-1",
           reply: "Stub reply to: " + (inner.message || ""),
           stopped: false,
-          needsContinue: false,
         };
       }
       case "submitChat":
         return __e2eHub.submit(args || {});
+      case "steerChat":
+        return __e2eHub.steer(args || {});
+      case "budgetGet":
+      case "budgetSet": {
+        const b = (window.__e2eBudget = window.__e2eBudget || { defaultUsd: 0, sessions: {}, spentUsd: 0, hasCost: true });
+        const sid = (args && args.sessionId) || "";
+        if (cmd === "budgetSet") {
+          window.__e2eBudgetSets = (window.__e2eBudgetSets || []).concat([JSON.parse(JSON.stringify(args))]);
+          if (args.scope === "global") b.defaultUsd = args.budgetUsd || 0;
+          else if (args.budgetUsd === null || args.budgetUsd === undefined) delete b.sessions[sid];
+          else b.sessions[sid] = args.budgetUsd;
+        }
+        const own = sid && sid in b.sessions ? b.sessions[sid] : null;
+        return {
+          defaultUsd: b.defaultUsd,
+          sessionUsd: own,
+          effectiveUsd: own ?? b.defaultUsd,
+          spentUsd: sid ? b.spentUsd : 0,
+          hasCost: sid ? b.hasCost : false,
+          calls: sid ? (b.calls ?? 1) : 0,
+        };
+      }
       case "turns":
         return __e2eHub.list();
       case "attach":
@@ -545,6 +571,140 @@ async function __paladinBaseInvoke(cmd, args) {
 
 window.__paladinBaseInvoke = __paladinBaseInvoke;
 
+// __e2eMcpInvoke backs the mcp* RPCs from window.__e2eMcp
+// ({servers, hasFolderConfig, trusted, errors, configs}); every call is
+// logged to __e2eMcpCalls.
+window.__e2eMcpInvoke = (cmd, args) => {
+  const m = (window.__e2eMcp = window.__e2eMcp || {});
+  m.servers = m.servers || [];
+  m.configs = m.configs || {};
+  window.__e2eMcpCalls = (window.__e2eMcpCalls || []).concat([{ cmd, args: JSON.parse(JSON.stringify(args)) }]);
+  const cwd = args.cwd || "/home/tester/project";
+  const overview = () => ({
+    servers: JSON.parse(JSON.stringify(m.servers)),
+    globalPath: "/data/config/mcp.json",
+    folderPath: cwd + "/.paladin/mcp.json",
+    hasFolderConfig: !!m.hasFolderConfig,
+    trusted: m.trusted !== false,
+    errors: m.errors || undefined,
+  });
+  const find = () => m.servers.find((s) => s.name === args.name && s.scope === args.scope);
+  switch (cmd) {
+    case "mcpList":
+      return overview();
+    case "mcpConfig": {
+      const text = m.configs[args.scope];
+      return { path: args.scope === "global" ? "/data/config/mcp.json" : cwd + "/.paladin/mcp.json", text: text || '{\n  "mcpServers": {}\n}\n', exists: !!text };
+    }
+    case "mcpSetConfig": {
+      let parsed;
+      try {
+        parsed = JSON.parse(args.text);
+      } catch (err) {
+        throw new Error("invalid JSON: " + err.message);
+      }
+      m.configs[args.scope] = args.text;
+      m.servers = m.servers.filter((s) => s.scope !== args.scope);
+      for (const name of Object.keys(parsed.mcpServers || {})) {
+        m.servers.push({ name, scope: args.scope, transport: "stdio", state: "ready", restarts: 0, tools: [] });
+      }
+      if (args.scope === "folder") {
+        m.hasFolderConfig = true;
+        m.trusted = true;
+      }
+      return overview();
+    }
+    case "mcpSetEnabled": {
+      const s = find();
+      if (!s) throw new Error("no server " + args.name);
+      s.state = args.enabled ? "ready" : "disabled";
+      return overview();
+    }
+    case "mcpRestart": {
+      const s = find();
+      if (!s) throw new Error("no server " + args.name);
+      Object.assign(s, { state: "ready", error: "" });
+      return overview();
+    }
+    case "mcpParse": {
+      if (m.parse) return { servers: m.parse };
+      const lines = String(args.text || "").split("\n").map((l) => l.trim()).filter(Boolean);
+      if (!lines.length || lines.some((l) => l.startsWith("{"))) throw new Error("nothing to add: paste a command, URL or mcp.json snippet");
+      return {
+        servers: lines.map((l) => {
+          if (/^https?:\/\//.test(l)) return { name: new URL(l).hostname.split(".")[0], config: { url: l } };
+          const [command, ...rest] = l.split(/\s+/);
+          const last = rest[rest.length - 1] || command;
+          return { name: last.split("/").pop().replace(/^(mcp-)?server-/, ""), config: { command, args: rest } };
+        }),
+      };
+    }
+    case "mcpAdd": {
+      for (const n of args.servers) {
+        const dup = m.servers.find((s) => s.name === n.name && s.scope === args.scope);
+        if (dup && !args.replace) throw new Error(`a server named "${n.name}" already exists in ${args.scope === "global" ? "/data/config/mcp.json" : cwd + "/.paladin/mcp.json"}`);
+        m.servers = m.servers.filter((s) => !(s.name === n.name && s.scope === args.scope));
+        m.servers.push({ name: n.name, scope: args.scope, transport: n.config.url ? "http" : "stdio", state: "ready", restarts: 0, tools: [] });
+      }
+      return overview();
+    }
+    case "mcpTrust":
+      m.trusted = !!args.trust;
+      for (const s of m.servers) {
+        if (s.scope === "folder") s.state = args.trust ? "ready" : "untrusted";
+      }
+      return overview();
+  }
+  throw new Error("unknown " + cmd);
+};
+
+// __e2eToolsInvoke backs the tools* RPCs from window.__e2eTools
+// ({tools, global: {name: bool}, sessions: {sid: {name: bool}},
+// pending: {sid: [names]}}); every call is logged to __e2eToolsCalls.
+window.__e2eToolsInvoke = (cmd, args) => {
+  const t = (window.__e2eTools = window.__e2eTools || {});
+  t.tools = t.tools || [];
+  t.global = t.global || {};
+  t.sessions = t.sessions || {};
+  t.pending = t.pending || {};
+  window.__e2eToolsCalls = (window.__e2eToolsCalls || []).concat([{ cmd, args: JSON.parse(JSON.stringify(args)) }]);
+  const sid = args.sessionId || "";
+  const mine = () => (sid ? (t.sessions[sid] = t.sessions[sid] || {}) : {});
+  const overview = () => {
+    const sess = mine();
+    const pending = (t.pending[sid] || []).filter((n) => !(n in sess));
+    return {
+      tools: t.tools.map((x) => {
+        const g = t.global[x.name];
+        const s = sess[x.name];
+        const on = s !== undefined ? s : g !== undefined ? g : true;
+        return { ...x, global: g, session: s, enabled: on, pending: pending.includes(x.name) || undefined };
+      }),
+      pending,
+    };
+  };
+  switch (cmd) {
+    case "toolsList":
+      return overview();
+    case "toolsSet": {
+      if (args.scope === "session" && !sid) throw new Error("toolsSet: session scope needs a sessionId");
+      const m = args.scope === "global" ? t.global : mine();
+      for (const n of args.names) {
+        if (args.enabled === null || args.enabled === undefined) delete m[n];
+        else m[n] = args.enabled;
+      }
+      if (args.scope === "session" && args.enabled) t.pending[sid] = (t.pending[sid] || []).filter((n) => !args.names.includes(n));
+      return overview();
+    }
+    case "toolsAccept": {
+      const names = args.names && args.names.length ? args.names : t.pending[sid] || [];
+      t.pending[sid] = (t.pending[sid] || []).filter((n) => !names.includes(n));
+      return overview();
+    }
+  }
+  throw new Error("unknown " + cmd);
+};
+
 // __e2eHub mirrors the sidecar's turn hub: FIFO per session, at most
 // __e2eTurnCap sessions at once, turn/* + chat/* events on the onEvent
 // bus. Each turn runs through window.__e2eRunTurn, so specs that replace
@@ -586,10 +746,12 @@ const __e2eHub = (() => {
       onRetry: (retry) => chat(turn, "chat/retry", { retry }),
       onCompact: (compaction) => chat(turn, "chat/compact", { compaction }),
       onApproval: (approval) => chat(turn, "chat/approval", { approval }),
+      onBudget: (budget) => chat(turn, "chat/budget", { budget }),
+      onHook: (hook) => chat(turn, "chat/hook", { hook }),
     };
     Promise.resolve()
       .then(() => window.__e2eRunTurn({ ...turn.params }, handlers))
-      .then((res) => finish(turn, { reply: res?.reply || "", stopped: !!res?.stopped, needsContinue: !!res?.needsContinue }))
+      .then((res) => finish(turn, { reply: res?.reply || "", stopped: !!res?.stopped }))
       .catch((err) => finish(turn, { error: String((err && err.message) || err) }));
   };
   const pump = () => {
@@ -650,6 +812,17 @@ const __e2eHub = (() => {
       }
       return info(turn);
     },
+    // steer mirrors steerChat: it joins the session's running turn at
+    // once (the real agent waits for the next model call).
+    steer(args) {
+      const running = turns.find((t) => t.sessionId === args.sessionId && t.state === "running");
+      if (!running) throw new Error(`session ${args.sessionId} has no running turn to steer`);
+      window.__e2eSteers = (window.__e2eSteers || []).concat([JSON.parse(JSON.stringify(args))]);
+      const steer = { message: args.message };
+      if (args.display && args.display !== args.message) steer.display = args.display;
+      chat(running, "chat/steer", { steer });
+      return info(running);
+    },
     list() {
       return turns.map(info);
     },
@@ -680,6 +853,58 @@ const __e2eHub = (() => {
 })();
 window.__e2eHub = __e2eHub;
 
+// __e2eHooksInvoke backs the hooks* RPCs from window.__e2eHooks
+// ({sources}); every call is logged to __e2eHooksCalls.
+window.__e2eHooksInvoke = (cmd, args) => {
+  const cwd = args.cwd || "/home/tester/project";
+  const h = (window.__e2eHooks = window.__e2eHooks || {});
+  if (!h.sources) {
+    h.sources = [
+      { path: "/data/config/hooks.json", scope: "global", format: "paladin", exists: false, editable: true, trusted: true, text: "", handlers: [] },
+      { path: cwd + "/.paladin/hooks.json", scope: "folder", format: "paladin", exists: false, editable: true, trusted: false, text: "", handlers: [] },
+    ];
+  }
+  window.__e2eHooksCalls = (window.__e2eHooksCalls || []).concat([{ cmd, args: JSON.parse(JSON.stringify(args)) }]);
+  const overview = () => ({ sources: JSON.parse(JSON.stringify(h.sources)), events: ["PreToolUse", "PostToolUse", "Stop"] });
+  switch (cmd) {
+    case "hooksList":
+      return overview();
+    case "hooksSetConfig": {
+      const src = h.sources.find((s) => s.scope === args.scope && s.format === "paladin");
+      if (!args.text.trim()) {
+        Object.assign(src, { exists: false, text: "", handlers: [] });
+        return overview();
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(args.text);
+      } catch (e) {
+        throw new Error("invalid JSON: " + e.message);
+      }
+      const handlers = [];
+      for (const [event, groups] of Object.entries(parsed.hooks || {})) {
+        groups.forEach((g, gi) =>
+          (g.hooks || []).forEach((x, hi) =>
+            handlers.push({ key: `${src.path}#${event}/${gi}/${hi}`, event, matcher: g.matcher || "", command: x.command, enabled: true }),
+          ),
+        );
+      }
+      Object.assign(src, { exists: true, text: args.text, handlers, trusted: src.scope === "global" });
+      return overview();
+    }
+    case "hooksTrust": {
+      const src = h.sources.find((s) => s.path === args.path);
+      src.trusted = !!args.trust;
+      return overview();
+    }
+    case "hooksToggle": {
+      for (const s of h.sources) for (const x of s.handlers) if (x.key === args.key) x.enabled = !!args.enabled;
+      return overview();
+    }
+  }
+  throw new Error("unknown " + cmd);
+};
+
 // __e2eRunTurn runs one stub turn for __e2eHub: it streams the scripted
 // __e2eChatEvents ({event, ..., waitMs?}) through the handlers, then
 // resolves with the "run_turn" fixture reply. Specs replace it to script a turn.
@@ -692,6 +917,8 @@ window.__e2eRunTurn = async (params, handlers) => {
     else if (ev.event === "chat/tool") handlers.onTool(ev.tool);
     else if (ev.event === "chat/retry" && handlers.onRetry) handlers.onRetry(ev.retry);
     else if (ev.event === "chat/compact" && handlers.onCompact) handlers.onCompact(ev.compaction);
+    else if (ev.event === "chat/budget" && handlers.onBudget) handlers.onBudget(ev.budget);
+    else if (ev.event === "chat/hook" && handlers.onHook) handlers.onHook(ev.hook);
     else if (ev.event === "chat/approval" && handlers.onApproval) {
       // A pending approval blocks the stub turn until answerApproval,
       // then reports the outcome like the real gate.

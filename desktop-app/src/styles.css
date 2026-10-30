@@ -22,3 +22,7 @@
 @import "./styles/permissions.css";
 @import "./styles/undo.css";
 @import "./styles/worktrees.css";
+@import "./styles/mcp.css";
+@import "./styles/hooks.css";
+@import "./styles/tools.css";
+@import "./styles/budget.css";

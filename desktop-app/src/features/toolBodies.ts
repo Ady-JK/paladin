@@ -275,6 +275,16 @@ function kvHtml(obj: Obj, depth = 0, attr = ""): string {
   return `<div${attr} class="kv">${rows}</div>`;
 }
 
+// argsHtml renders a call's JSON arguments as key/value rows (raw
+// text when they are not an object).
+export function argsHtml(raw: string): string {
+  const v = parse(raw);
+  if (isObj(v)) {
+    return Object.keys(v).length ? kvHtml(v) : `<div class="tb-muted">no arguments</div>`;
+  }
+  return v === null ? `<div class="tb-muted">no arguments</div>` : `<pre class="kv-text">${escapeHtml(capText(String(raw)))}</pre>`;
+}
+
 function section(label: string, inner: string): string {
   return `<div class="tb-sec"><div class="tb-label">${label}</div>${inner}</div>`;
 }

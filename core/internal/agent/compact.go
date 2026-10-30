@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -25,10 +26,12 @@ const (
 	// compactThresholdPct is the window fill that triggers proactive
 	// compaction before the next round.
 	compactThresholdPct = 85
-	// maxCompactionsPerTurn bounds summary calls per turn (attempts,
-	// successful or not), so a prompt that can't shrink fails instead
-	// of looping.
-	maxCompactionsPerTurn = 2
+	// maxUnproductiveCompactions bounds back-to-back compactions that
+	// did not make room (failed, or the context is still over the
+	// threshold). A turn has no round cap and may compact any number of
+	// times, but a prompt that can't shrink stops compacting, and an
+	// overflow then fails the turn instead of looping.
+	maxUnproductiveCompactions = 3
 	// summaryToolResultChars caps each tool result fed to the summarizer.
 	summaryToolResultChars = 2000
 	// summaryArgChars caps each tool call's arguments in the summary input.
@@ -222,21 +225,34 @@ func replayRecord(m inference.LlmMessage, now time.Time) transcript.Message {
 // fill most of a known context window. Failure is not fatal: the round
 // runs uncompacted and a real overflow still gets the reactive path.
 func (a *Agent) maybeCompact() {
-	if a.window <= 0 || a.compactions >= maxCompactionsPerTurn {
+	if a.window <= 0 || a.compactStreak >= maxUnproductiveCompactions {
 		return
 	}
 	est := a.estimateContext()
-	if est*100 < a.window*compactThresholdPct {
+	if !a.overThreshold(est) {
 		return
 	}
 	_ = a.compact("auto", est)
+}
+
+// overThreshold reports whether est fills most of a known window.
+func (a *Agent) overThreshold(est int64) bool {
+	return a.window > 0 && est*100 >= a.window*compactThresholdPct
+}
+
+// noteRoundSucceeded ends a compaction streak once a round got through
+// with the context back under the threshold.
+func (a *Agent) noteRoundSucceeded() {
+	if !a.overThreshold(a.estimateContext()) {
+		a.compactStreak = 0
+	}
 }
 
 // recoverRound decides whether a failed round runs again: a context
 // overflow is answered by compacting, anything else by retryRound.
 func (a *Agent) recoverRound(err error, noProgress bool) bool {
 	if inference.IsContextOverflow(err) {
-		if !noProgress || a.compactions >= maxCompactionsPerTurn {
+		if !noProgress || a.compactStreak >= maxUnproductiveCompactions {
 			return false
 		}
 		if a.compact("overflow", a.estimateContext()) != nil {
@@ -261,7 +277,7 @@ func roundFailure(err error) turnFailed {
 // compact summarizes the older part of a.messages and swaps it for the
 // summary. On success the marker and replay copies join a.records.
 func (a *Agent) compact(reason string, before int64) error {
-	a.compactions++
+	a.compactStreak++
 	// Keep a quarter of the conversation itself (the system prompt and
 	// tool schemas are fixed overhead), at most a quarter of the window.
 	keep := estimateMessagesTokens(a.messages) / 4
@@ -272,6 +288,20 @@ func (a *Agent) compact(reason string, before int64) error {
 	if cut == 0 {
 		return errNothingToCompact
 	}
+	trigger := "auto"
+	if reason == "manual" {
+		trigger = "manual"
+	}
+	pre := a.hookInput(hooks.PreCompact)
+	pre.Trigger = trigger
+	preOut := a.runHooks(pre)
+	if preOut.Blocked || preOut.Stop {
+		why := preOut.Reason
+		if why == "" {
+			why = preOut.StopReason
+		}
+		return fmt.Errorf("blocked by a PreCompact hook: %s", why)
+	}
 	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "start", Reason: reason, TokensBefore: before}})
 	budget := int64(summaryInputTokensUnknown)
 	if a.window > 0 {
@@ -280,6 +310,9 @@ func (a *Agent) compact(reason string, before int64) error {
 	prompt := "Summarize the conversation below.\n\n<conversation>\n" +
 		renderForSummary(a.messages[:cut], int(budget*4)) +
 		"</conversation>"
+	if len(preOut.Context) > 0 {
+		prompt += "\n\nAdditional instructions for the summary:\n" + strings.Join(preOut.Context, "\n")
+	}
 	var resp inference.ToolResponse
 	err := guardProvider(func() error {
 		var cerr error
@@ -298,6 +331,11 @@ func (a *Agent) compact(reason string, before int64) error {
 		_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "failed", Reason: reason, TokensBefore: before, Error: err.Error()}})
 		return err
 	}
+	if a.hooks.Has(hooks.SessionStart) {
+		start := a.hookInput(hooks.SessionStart)
+		start.Source = "compact"
+		summary += hookContext(hooks.SessionStart, a.runHooks(start).Context)
+	}
 	now := time.Now().UTC()
 	tail := a.messages[cut:]
 	a.records = append(a.records, transcript.Message{
@@ -312,6 +350,9 @@ func (a *Agent) compact(reason string, before int64) error {
 	a.messages = append(msgs, tail...)
 	a.promptTokens, a.promptLen = 0, 0
 	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: a.estimateContext()}})
+	post := a.hookInput(hooks.PostCompact)
+	post.Trigger = trigger
+	a.runHooks(post)
 	return nil
 }
 

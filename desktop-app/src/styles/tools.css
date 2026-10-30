@@ -1,0 +1,569 @@
+/* tools.css: tool switches (Settings → Tools, the composer's Tools
+ * popover, the "new tools" banner) and the MCP "Add server" box. */
+
+/* ============ Settings → Tools ============ */
+.tsw-search,
+.tools-menu-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 5px 9px;
+  color: var(--color-slate-400);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.tsw-search {
+  margin: 10px 0 12px;
+}
+.tsw-search:focus-within,
+.tools-menu-search:focus-within {
+  border-color: var(--color-accent-400);
+  box-shadow: 0 0 0 3px rgb(146 134 214 / 0.16);
+}
+.dark .tsw-search,
+.dark .tools-menu-search {
+  border-color: var(--color-slate-700);
+  background: rgb(2 6 23 / 0.4);
+}
+.tsw-search input,
+.tools-menu-search input {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  font-size: 12px;
+  color: var(--color-slate-800);
+  outline: none;
+}
+.dark .tsw-search input,
+.dark .tools-menu-search input {
+  color: var(--color-slate-100);
+}
+
+.tsw-group {
+  margin-bottom: 12px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+.dark .tsw-group {
+  border-color: rgb(51 65 85 / 0.7);
+  background: rgb(15 23 42 / 0.5);
+  box-shadow: none;
+}
+.tsw-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-slate-100);
+  padding: 8px 12px;
+  background: var(--color-slate-50);
+}
+.dark .tsw-group-head {
+  border-color: rgb(51 65 85 / 0.6);
+  background: rgb(255 255 255 / 0.02);
+}
+.tsw-group-ico {
+  display: inline-flex;
+  color: var(--color-accent-600);
+}
+.dark .tsw-group-ico {
+  color: var(--color-accent-400);
+}
+.tsw-group-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .tsw-group-name {
+  color: var(--color-slate-100);
+}
+.tsw-group-count {
+  flex: 1;
+  font-size: 11px;
+  color: var(--color-slate-400);
+}
+.tsw-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tsw-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  transition:
+    background-color 120ms ease,
+    opacity 160ms ease;
+}
+.tsw-row + .tsw-row {
+  border-top: 1px solid var(--color-slate-100);
+}
+.dark .tsw-row + .tsw-row {
+  border-color: rgb(51 65 85 / 0.45);
+}
+.tsw-row:hover {
+  background: var(--color-slate-50);
+}
+.dark .tsw-row:hover {
+  background: rgb(255 255 255 / 0.025);
+}
+.tsw-row[data-enabled="false"] .tsw-text {
+  opacity: 0.55;
+}
+.tsw-text {
+  min-width: 0;
+  flex: 1;
+}
+.tsw-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tsw-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-slate-800);
+}
+.dark .tsw-name {
+  color: var(--color-slate-100);
+}
+.tsw-desc {
+  margin-top: 2px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--color-slate-500);
+}
+.tsw-badge {
+  border-radius: 9999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--color-slate-500);
+  background: var(--color-slate-100);
+}
+.dark .tsw-badge {
+  color: var(--color-slate-400);
+  background: rgb(255 255 255 / 0.06);
+}
+.tsw-badge.is-ro {
+  color: var(--color-agent-emerald);
+  background: rgb(16 185 129 / 0.1);
+}
+.tsw-badge.is-risky {
+  color: var(--color-agent-rose);
+  background: rgb(244 63 94 / 0.08);
+}
+.tsw-badge.is-new {
+  margin-left: 6px;
+  color: var(--color-accent-600);
+  background: rgb(146 134 214 / 0.16);
+}
+.dark .tsw-badge.is-new {
+  color: var(--color-accent-300);
+}
+.tsw-badge.is-session {
+  color: var(--color-accent-600);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(146 134 214 / 0.4);
+}
+
+/* ============ composer: Tools chip and popover ============ */
+.tools-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.tools-chip-count {
+  min-width: 16px;
+  border-radius: 9999px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--color-slate-500);
+}
+.tools-chip[data-off="true"] {
+  color: var(--color-slate-700);
+}
+.dark .tools-chip[data-off="true"] {
+  color: var(--color-slate-200);
+}
+.tools-pending-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-accent-700);
+  background: rgb(146 134 214 / 0.16);
+  animation: chip-in 160ms ease-out;
+}
+.tools-pending-chip:hover {
+  background: rgb(146 134 214 / 0.26);
+}
+.dark .tools-pending-chip {
+  color: var(--color-accent-300);
+}
+.tools-pending-chip[hidden] {
+  display: none;
+}
+.tools-menu {
+  display: flex;
+  width: 360px;
+  max-height: min(60vh, 460px);
+  flex-direction: column;
+}
+.tools-menu.hidden {
+  display: none;
+}
+.tools-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tools-menu-settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-slate-500);
+}
+.tools-menu-settings:hover {
+  color: var(--color-slate-800);
+  background: var(--color-slate-100);
+}
+.dark .tools-menu-settings:hover {
+  color: var(--color-slate-100);
+  background: var(--color-slate-800);
+}
+.tools-menu-search {
+  margin: 2px 4px 6px;
+  padding: 4px 8px;
+}
+.tools-menu-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 2px;
+}
+.tools-menu-empty {
+  padding: 12px 8px;
+  font-size: 12px;
+  color: var(--color-slate-400);
+}
+.tsw-menu-group + .tsw-menu-group {
+  margin-top: 4px;
+}
+.tsw-menu-group-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 6px 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-slate-400);
+}
+.tsw-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 4px 6px;
+}
+.tsw-item:hover {
+  background: var(--color-slate-100);
+}
+.dark .tsw-item:hover {
+  background: var(--color-slate-800);
+}
+.tsw-item-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--color-agent-emerald);
+  transition: background-color 160ms ease;
+}
+.tsw-item[data-enabled="false"] .tsw-item-dot {
+  background: var(--color-slate-300);
+}
+.dark .tsw-item[data-enabled="false"] .tsw-item-dot {
+  background: var(--color-slate-600);
+}
+.tsw-item-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-slate-700);
+}
+.dark .tsw-item-name {
+  color: var(--color-slate-200);
+}
+.tsw-item[data-enabled="false"] .tsw-item-name {
+  color: var(--color-slate-400);
+  text-decoration: line-through;
+  text-decoration-color: rgb(148 163 184 / 0.5);
+}
+.tsw-seg {
+  display: inline-flex;
+  flex: none;
+  border-radius: 7px;
+  padding: 2px;
+  background: var(--color-slate-100);
+}
+.dark .tsw-seg {
+  background: rgb(255 255 255 / 0.05);
+}
+.tsw-seg button {
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+.tsw-seg button:hover {
+  color: var(--color-slate-800);
+}
+.dark .tsw-seg button:hover {
+  color: var(--color-slate-100);
+}
+.tsw-seg button[aria-pressed="true"] {
+  color: var(--color-slate-900);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.12);
+}
+.dark .tsw-seg button[aria-pressed="true"] {
+  color: var(--color-slate-100);
+  background: var(--color-slate-700);
+}
+.tsw-seg button[data-tsw-set="off"][aria-pressed="true"] {
+  color: var(--color-agent-rose);
+}
+.tsw-seg button[data-tsw-set="on"][aria-pressed="true"] {
+  color: var(--color-agent-emerald);
+}
+.tools-menu-foot {
+  margin-top: 4px;
+  border-top: 1px solid var(--color-slate-100);
+  padding: 6px 8px 3px;
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}
+.dark .tools-menu-foot {
+  border-color: rgb(51 65 85 / 0.6);
+}
+
+/* ============ the "new tools" banner ============ */
+.tools-banner {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 16px;
+  border: 1px solid rgb(146 134 214 / 0.35);
+  padding: 10px 12px;
+  background:
+    linear-gradient(135deg, rgb(146 134 214 / 0.1), rgb(146 134 214 / 0.03)),
+    #fff;
+  box-shadow:
+    0 10px 28px -12px rgb(91 77 170 / 0.35),
+    0 1px 3px rgb(15 23 42 / 0.05);
+  animation: tools-banner-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.dark .tools-banner {
+  border-color: rgb(146 134 214 / 0.3);
+  background:
+    linear-gradient(135deg, rgb(146 134 214 / 0.12), rgb(146 134 214 / 0.03)),
+    var(--color-slate-900);
+  box-shadow: 0 14px 36px -12px rgb(0 0 0 / 0.6);
+}
+.tools-banner[hidden] {
+  display: none;
+}
+@keyframes tools-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tools-banner-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-accent-600);
+}
+.dark .tools-banner-ico {
+  color: var(--color-accent-300);
+}
+.tools-banner-text {
+  min-width: 0;
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--color-slate-500);
+}
+.dark .tools-banner-text {
+  color: var(--color-slate-400);
+}
+.tools-banner-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-900);
+}
+.dark .tools-banner-title {
+  color: var(--color-slate-100);
+}
+.tools-banner-sub code {
+  font-size: 11px;
+}
+.tools-banner-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+/* ============ Settings → MCP: Add server ============ */
+.mcp-paste {
+  margin: 10px 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgb(146 134 214 / 0.35);
+  padding: 10px 12px;
+  background: rgb(146 134 214 / 0.05);
+  animation: chip-in 160ms ease-out;
+}
+.mcp-paste textarea {
+  min-height: 84px;
+}
+.mcp-paste-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .mcp-paste-title {
+  color: var(--color-slate-100);
+}
+.mcp-preview-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+.mcp-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--color-slate-200);
+  padding: 8px 10px;
+  background: #fff;
+}
+.dark .mcp-preview {
+  border-color: var(--color-slate-700);
+  background: rgb(2 6 23 / 0.35);
+}
+.mcp-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mcp-preview input,
+.mcp-paste-scope select {
+  min-width: 0;
+  border-radius: 6px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 3px 7px;
+  font-size: 12px;
+  color: var(--color-slate-800);
+  outline: none;
+}
+.mcp-preview-head input {
+  flex: 1;
+  font-weight: 600;
+}
+.mcp-preview input:focus,
+.mcp-paste-scope select:focus {
+  border-color: var(--color-accent-400);
+  box-shadow: 0 0 0 3px rgb(146 134 214 / 0.16);
+}
+.dark .mcp-preview input,
+.dark .mcp-paste-scope select {
+  border-color: var(--color-slate-700);
+  background: rgb(2 6 23 / 0.45);
+  color: var(--color-slate-100);
+}
+.mcp-preview-cmd {
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-slate-500);
+}
+.mcp-preview-env {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.mcp-preview-env code {
+  min-width: 120px;
+  color: var(--color-slate-500);
+}
+.mcp-preview-env input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.mcp-paste-scope {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--color-slate-500);
+}
+.mcp-btn.is-danger {
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-family: var(--font-sans, inherit);
+  color: var(--color-agent-rose);
+  border-color: rgb(244 63 94 / 0.35);
+}

@@ -23,6 +23,12 @@ import {
   settingsPaneMemoryEl,
   settingsNavPermissionsEl,
   settingsPanePermissionsEl,
+  settingsNavMcpEl,
+  settingsPaneMcpEl,
+  settingsNavHooksEl,
+  settingsPaneHooksEl,
+  settingsNavToolsEl,
+  settingsPaneToolsEl,
   settingsPaneAppearanceEl,
   settingsPaneResourcesEl,
   motionOptionsEl,
@@ -59,12 +65,16 @@ import { refreshExternalVisibility } from "./sites";
 import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
 import { load as loadAnalytics } from "./analytics";
+import { initBudgetSettings, loadDefaultBudget } from "./budget";
 import { refreshResources } from "./resources";
 import { loadMemory } from "./memory";
 import { initPermissionsPane, loadPermissions } from "./permissions";
+import { initMcp, loadMcp, syncMcp } from "./mcp";
+import { loadHooks } from "./hooks";
+import { initToolSwitches, loadTools, syncTools } from "./toolSwitches";
 import { motionPref, setMotionPref, type MotionPref } from "../ui/motion";
 
-export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics" | "appearance" | "resources" | "memory" | "permissions";
+export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics" | "appearance" | "resources" | "memory" | "permissions" | "mcp" | "hooks" | "tools";
 
 const paintSettingsNav = (tab: SettingsNav): void => {
   const tabs: [SettingsNav, HTMLButtonElement, HTMLElement, string][] = [
@@ -77,6 +87,9 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     ["resources", settingsNavResourcesEl, settingsPaneResourcesEl, "Resources"],
     ["memory", settingsNavMemoryEl, settingsPaneMemoryEl, "Memory"],
     ["permissions", settingsNavPermissionsEl, settingsPanePermissionsEl, "Permissions"],
+    ["mcp", settingsNavMcpEl, settingsPaneMcpEl, "MCP servers"],
+    ["hooks", settingsNavHooksEl, settingsPaneHooksEl, "Hooks"],
+    ["tools", settingsNavToolsEl, settingsPaneToolsEl, "Tools"],
   ];
   for (const [name, btn, pane, title] of tabs) {
     const active = name === tab;
@@ -293,8 +306,16 @@ export const openSettings = (tab: SettingsNav = "workspace"): void => {
     void loadMemory();
   } else if (tab === "permissions") {
     void loadPermissions(state.cwd);
+  } else if (tab === "mcp") {
+    void loadMcp();
+  } else if (tab === "hooks") {
+    void loadHooks();
+  } else if (tab === "tools") {
+    void loadTools();
   } else if (tab === "resources") {
     refreshResources();
+  } else if (tab === "analytics") {
+    void loadDefaultBudget();
   }
   renderProviderList();
   paintSettingsConnection();
@@ -320,6 +341,7 @@ function clearWorkspaceError(): void {
 
 // initSettings wires the settings modal. reconnect re-runs bootstrap connect().
 export function initSettings(reconnect: () => Promise<void>): void {
+  initBudgetSettings();
   state.onProvidersChanged = () => {
     if (!settingsModalEl.classList.contains("hidden")) {
       renderProviderList();
@@ -339,6 +361,7 @@ export function initSettings(reconnect: () => Promise<void>): void {
   });
   settingsNavAnalyticsEl.addEventListener("click", () => {
     paintSettingsNav("analytics");
+    void loadDefaultBudget();
     void loadAnalytics(true);
   });
   settingsNavAppearanceEl.addEventListener("click", () => {
@@ -358,6 +381,20 @@ export function initSettings(reconnect: () => Promise<void>): void {
   settingsNavPermissionsEl.addEventListener("click", () => {
     paintSettingsNav("permissions");
     void loadPermissions(state.cwd);
+  });
+  initMcp(() => openSettings("mcp"));
+  initToolSwitches(() => openSettings("tools"));
+  settingsNavToolsEl.addEventListener("click", () => {
+    paintSettingsNav("tools");
+    void loadTools();
+  });
+  settingsNavMcpEl.addEventListener("click", () => {
+    paintSettingsNav("mcp");
+    void loadMcp();
+  });
+  settingsNavHooksEl.addEventListener("click", () => {
+    paintSettingsNav("hooks");
+    void loadHooks();
   });
   settingsNavMemoryEl.addEventListener("click", () => {
     paintSettingsNav("memory");
@@ -466,6 +503,8 @@ export function initSettings(reconnect: () => Promise<void>): void {
       if (path) {
         state.cwd = path;
         workspaceLabelEl.textContent = shortPath(path);
+        syncMcp();
+        syncTools();
         await refreshSessions();
       }
     })();

@@ -43,15 +43,6 @@ func TestPromptFileSeedsSavesResets(t *testing.T) {
 	}
 }
 
-func TestClampMaxToolRounds(t *testing.T) {
-	if got := ClampMaxToolRounds(0); got != 100 {
-		t.Fatalf("got %d", got)
-	}
-	if got := ClampMaxToolRounds(999); got != 500 {
-		t.Fatalf("got %d", got)
-	}
-}
-
 func TestIsPlaceholderKey(t *testing.T) {
 	if !IsPlaceholderKey("replace_me") || !IsPlaceholderKey("") {
 		t.Fatal("expected placeholders")
@@ -600,16 +591,4 @@ func TestMemoryKeyStoreConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-func TestClampMaxToolRoundsEdges(t *testing.T) {
-	if got := ClampMaxToolRounds(1); got != 1 {
-		t.Fatalf("got %d", got)
-	}
-	if got := ClampMaxToolRounds(MaxMaxToolRounds); got != MaxMaxToolRounds {
-		t.Fatalf("got %d", got)
-	}
-	if got := ClampMaxToolRounds(MaxMaxToolRounds + 1); got != MaxMaxToolRounds {
-		t.Fatalf("got %d", got)
-	}
 }

@@ -122,3 +122,50 @@ func TestSymlinkedRootIsResolved(t *testing.T) {
 		t.Fatalf("write through symlinked root failed: %v %s", err, out)
 	}
 }
+
+func TestBlockedPathFindsTheDeniedPath(t *testing.T) {
+	cases := map[string]string{
+		"npm error Error: EPERM: operation not permitted, mkdir '/Users/a/.nvm/lib/node_modules/is-number'": "/Users/a/.nvm/lib/node_modules/is-number",
+		"touch: /etc/x: Operation not permitted":                                                            "/etc/x",
+		"mkdir: cannot create directory '/usr/x': Read-only file system":                                    "/usr/x",
+		"/bin/sh: /Users/a/out.txt: Operation not permitted":                                                "/Users/a/out.txt",
+		"PermissionError: [Errno 1] Operation not permitted: '/opt/y/z.txt'":                                "/opt/y/z.txt",
+		"open /var/lib/foo/bar: operation not permitted":                                                    "/var/lib/foo/bar",
+		"touch: cannot touch '/root/f': Permission denied":                                                  "/root/f",
+		"cp: cannot create regular file '/opt/a b/c': Permission denied":                                    "/opt/a b/c",
+		"zsh:1: permission denied: /etc/hosts":                                                              "/etc/hosts",
+		"reading /src/a.go\nnpm ERR! EACCES: permission denied, open \"/opt/n/x.json\"":                     "/opt/n/x.json",
+		"Operation not permitted":                                                                           "",
+		"touch: x: Operation not permitted":                                                                 "",
+		"wrote /tmp/a.txt fine":                                                                             "",
+	}
+	for in, want := range cases {
+		if got := BlockedPath(in); got != want {
+			t.Errorf("BlockedPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGrantedRootsAreWritableInEveryMode(t *testing.T) {
+	for _, mode := range []Mode{ModeReadOnly, ModeWorkspaceWrite} {
+		roots := writableRoots(Policy{Mode: mode, Granted: []string{"/opt/granted"}, NoTemp: true})
+		if len(roots) != 1 || roots[0] != "/opt/granted" {
+			t.Errorf("%s: roots %v", mode, roots)
+		}
+	}
+}
+
+func TestGrantedRootOpensOneFolderOnly(t *testing.T) {
+	requireSandbox(t)
+	ws, granted, other := t.TempDir(), t.TempDir(), t.TempDir()
+	p := Policy{Mode: ModeReadOnly, Writable: []string{ws}, Granted: []string{granted}, NoTemp: true}
+	if out, err := run(t, p, "echo ok > "+filepath.Join(granted, "f")); err != nil {
+		t.Fatalf("granted write failed: %v %s", err, out)
+	}
+	if _, err := run(t, p, "echo x > "+filepath.Join(other, "f")); err == nil {
+		t.Fatal("ungranted write should fail")
+	}
+	if _, err := run(t, p, "echo x > "+filepath.Join(ws, "f")); err == nil {
+		t.Fatal("read-only still blocks the workspace")
+	}
+}

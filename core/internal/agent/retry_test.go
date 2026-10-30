@@ -32,7 +32,7 @@ func TestRetryHonorsRetryAfterAndReportsStatus(t *testing.T) {
 		{err: limited},
 		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
 	}}
-	a, _, tx, done := testAgent(t, prov, 5)
+	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	start := time.Now()
 	outcome, err := a.Run()
@@ -54,7 +54,7 @@ func TestRetryHonorsRetryAfterAndReportsStatus(t *testing.T) {
 func TestRetryBudgetIsSixAttempts(t *testing.T) {
 	fastRetries(t)
 	prov := &mockProvider{streamsErr: inference.RequestError("p: stream: status 503")}
-	a, _, _, done := testAgent(t, prov, 10)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err == nil {
 		t.Fatal("persistent 503 must fail the turn")
@@ -67,7 +67,7 @@ func TestRetryBudgetIsSixAttempts(t *testing.T) {
 func TestTimeoutRetriesAreLimited(t *testing.T) {
 	fastRetries(t)
 	prov := &mockProvider{streamsErr: &inference.ProviderError{Kind: "request", Timeout: true, Message: "p: stream: stream stalled"}}
-	a, _, _, done := testAgent(t, prov, 10)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err == nil {
 		t.Fatal("persistent stall must fail the turn")
@@ -80,7 +80,7 @@ func TestTimeoutRetriesAreLimited(t *testing.T) {
 func TestRetryAfterBeyondCapFailsFast(t *testing.T) {
 	fastRetries(t)
 	prov := &mockProvider{streamsErr: &inference.ProviderError{Kind: "request", Status: 429, RetryAfter: 2 * time.Hour, Message: "p: stream: status 429: daily quota"}}
-	a, _, _, done := testAgent(t, prov, 10)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	start := time.Now()
 	_, err := a.Run()
@@ -96,10 +96,10 @@ func TestRetriesDoNotConsumeRounds(t *testing.T) {
 		{err: inference.RequestError("p: stream: status 503")},
 		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
 	}}
-	a, _, _, done := testAgent(t, prov, 1)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
-	if err != nil || outcome.NeedsContinue || outcome.Reply != "ok" {
+	if err != nil || outcome.Reply != "ok" {
 		t.Fatalf("retries burned the round budget: %+v %v", outcome, err)
 	}
 }
@@ -109,7 +109,7 @@ func TestStopDuringBackoffReturnsPromptly(t *testing.T) {
 	retryUnit = time.Second
 	defer func() { retryUnit = old }()
 	prov := &mockProvider{streamsErr: inference.RequestError("p: stream: status 503")}
-	a, _, _, done := testAgent(t, prov, 5)
+	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	go func() {
 		time.Sleep(50 * time.Millisecond)

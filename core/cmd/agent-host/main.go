@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,12 +41,16 @@ func main() {
 	initLogging(dataDir)
 	rt := runtime.New(dataDir, config.NewConfig(dataDir))
 	installTurnSink(rt)
+	installMCPSink(rt)
+	installToolsSink(rt)
+	rt.StartMCP()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	go handleSignals(rt, sigs, os.Exit)
 
 	fmt.Fprintf(os.Stderr, "agent-host ready dir=%s\n", rt.GetWorkspace())
 
+	var slow sync.WaitGroup
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -58,17 +63,14 @@ func main() {
 			logf("WARN bad request line: %v", err)
 			continue
 		}
-		var resp Response
-		if err := guard("request "+req.Method, func() { resp = runUnary(rt, &req) }); err != nil {
-			resp = errResponse(req.ID, err.Error())
-		}
-		emit(resp)
+		dispatch(rt, &req, func(r Response) { emit(r) }, &slow)
 	}
 	if err := scanner.Err(); err != nil {
 		logf("WARN read stdin: %v", err)
 	}
 	// The client is gone: stop every turn and let them persist.
 	rt.ShutdownTurns(20 * time.Second)
+	slow.Wait()
 }
 
 // handleSignals treats SIGTERM/SIGINT like the client hanging up: stop

@@ -53,7 +53,7 @@ func TestModelMessagesIncludesCurrent(t *testing.T) {
 	if len(with) != 1 || with[0].Content != "old" {
 		t.Fatalf("got %+v", with)
 	}
-	a, _, _, done := testAgent(t, &mockProvider{}, 5)
+	a, _, _, done := testAgent(t, &mockProvider{})
 	defer close(done)
 	msgs := a.modelMessages("new", false)
 	if len(msgs) != 1 || msgs[0].Content != "new" {

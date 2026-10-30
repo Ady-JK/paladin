@@ -63,6 +63,9 @@ func killProcessGroup(pid int) {
 	if pid == 0 {
 		return
 	}
+	// Freeze first: macOS signals members one by one, so a parent woken by
+	// its child's death could fork the next command past the SIGKILL.
+	_ = syscall.Kill(-pid, syscall.SIGSTOP)
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 

@@ -37,12 +37,14 @@ func (s runtimeSections) SystemSections(sess transcript.Session) []string {
 	if _, ok := s.r.tools.Get("skill"); ok {
 		out = append(out, tools.SkillCatalog(s.r.dataDir, cwd, skillCatalogMax))
 	}
+	out = append(out, mcpSection(s.r.mcp, sess.Meta.ProjectCwd()))
 	if s.r.memory != nil {
 		out = append(out, s.r.memory.SessionSnapshot(sess.Dir, sess.Meta.ProjectCwd()))
 	}
 	if wt := sess.Meta.Worktree; wt != nil {
 		out = append(out, worktreeSection(wt))
 	}
+	out = append(out, s.r.switchedOffSection(sess.Meta))
 	return out
 }
 

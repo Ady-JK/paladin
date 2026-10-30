@@ -16,8 +16,8 @@ export const inputEl = $<HTMLTextAreaElement>("#promptInput");
 export const attachBtnEl = $<HTMLButtonElement>("#attachBtn");
 export const sendBtn = $<HTMLButtonElement>("#sendBtn");
 export const pauseBtn = $<HTMLButtonElement>("#pauseBtn");
-// Resumes a turn paused at the round cap.
-export const continueBtn = $<HTMLButtonElement>("#continueBtn");
+// Sends the composer text into the running turn.
+export const steerBtn = $<HTMLButtonElement>("#steerBtn");
 export const statusDotEl = $("#daemonDot");
 export const statusLabelEl = $("#daemonLabel");
 export const statusDetailEl = $("#daemonDetail");
@@ -110,6 +110,15 @@ export const settingsPaneMemoryEl = $("#settingsPaneMemory");
 export const settingsNavPermissionsEl = $<HTMLButtonElement>("#settingsNavPermissions");
 export const settingsPanePermissionsEl = $("#settingsPanePermissions");
 export const permBodyEl = $("#permBody");
+export const settingsNavMcpEl = $<HTMLButtonElement>("#settingsNavMcp");
+export const settingsPaneMcpEl = $("#settingsPaneMcp");
+export const mcpBodyEl = $("#mcpBody");
+export const settingsNavHooksEl = $<HTMLButtonElement>("#settingsNavHooks");
+export const settingsPaneHooksEl = $("#settingsPaneHooks");
+export const hooksBodyEl = $("#hooksBody");
+export const settingsNavToolsEl = $<HTMLButtonElement>("#settingsNavTools");
+export const settingsPaneToolsEl = $("#settingsPaneTools");
+export const toolsBodyEl = $("#toolsBody");
 export const memoryBodyEl = $("#memoryBody");
 export const motionOptionsEl = $("#motionOptions");
 export const settingsProviderListEl = $("#settingsProviderList");

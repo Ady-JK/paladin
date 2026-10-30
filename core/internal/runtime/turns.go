@@ -28,6 +28,12 @@ func (r *AgentRuntime) SubmitTurn(req agent.Request, opts SubmitOpts) (TurnInfo,
 	return r.hub.Submit(req, opts)
 }
 
+// SteerTurn sends a message into the session's running turn (see
+// Hub.Steer).
+func (r *AgentRuntime) SteerTurn(sessionID, message, display string) (TurnInfo, error) {
+	return r.hub.Steer(sessionID, message, display)
+}
+
 // SetTurnSink routes every hub event (see Hub.SetSink).
 func (r *AgentRuntime) SetTurnSink(sink func(TurnEvent)) { r.hub.SetSink(sink) }
 
@@ -45,5 +51,10 @@ func (r *AgentRuntime) Attach(sessionID, cwd string) (Attachment, error) {
 	})
 }
 
-// ShutdownTurns stops everything and waits (bounded) for turns to persist.
-func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) { r.hub.Shutdown(timeout) }
+// ShutdownTurns stops everything and waits (bounded) for turns to
+// persist, then stops the MCP servers.
+func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) {
+	r.sideCancel()
+	r.hub.Shutdown(timeout)
+	r.mcp.Close()
+}

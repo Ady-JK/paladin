@@ -143,7 +143,7 @@ func TestStopMidToolsPersistsAbortedResults(t *testing.T) {
 		{ID: "b", Name: "read", Arguments: "{}"},
 		{ID: "c", Name: "read", Arguments: "{}"},
 	}}}}}}
-	a, sess, tx, done := testAgent(t, prov, 5)
+	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)
 	a.tools.Register(stopperTool{stop: a.cancel})
 	outcome, err := a.Run()

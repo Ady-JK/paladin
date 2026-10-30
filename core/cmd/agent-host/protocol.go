@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 )
 
@@ -59,7 +60,43 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 	return okResponse(req.ID, result)
 }
 
+// asyncMethods answer off the request loop (their responses may come
+// back out of order) so a long call never holds up stopChat or an
+// approval.
+var asyncMethods = map[string]bool{"sideQuestion": true}
+
+// dispatch answers one request through out, in a goroutine tracked by
+// slow for asyncMethods.
+func dispatch(rt *runtime.AgentRuntime, req *Request, out func(Response), slow *sync.WaitGroup) {
+	answer := func() {
+		var resp Response
+		if err := guard("request "+req.Method, func() { resp = runUnary(rt, req) }); err != nil {
+			resp = errResponse(req.ID, err.Error())
+		}
+		out(resp)
+	}
+	if asyncMethods[req.Method] {
+		slow.Add(1)
+		go func() {
+			defer slow.Done()
+			answer()
+		}()
+		return
+	}
+	answer()
+}
+
 // installTurnSink streams every hub event (chat/* and turn/*) to the client.
 func installTurnSink(rt *runtime.AgentRuntime) {
 	rt.SetTurnSink(func(e runtime.TurnEvent) { emit(e) })
 }
+
+// installMCPSink streams MCP server status changes as mcp/status.
+func installMCPSink(rt *runtime.AgentRuntime) {
+	rt.SetMCPSink(func(s mcp.ServerStatus) { emit(runtime.MCPEvent{Event: "mcp/status", Server: s}) })
+}
+
+// installToolsSink streams tools/pending events.
+func installToolsSink(rt *runtime.AgentRuntime) { rt.SetToolsSink(emitToolsEvent) }
+
+func emitToolsEvent(e runtime.ToolsEvent) { emit(e) }

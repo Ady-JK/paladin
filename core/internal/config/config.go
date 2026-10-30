@@ -18,9 +18,6 @@ import (
 )
 
 const (
-	DefaultMaxToolRounds = 100
-	MaxMaxToolRounds     = 500
-
 	DefaultProviderName = "Opencode Go"
 	OpencodeBaseURL     = "https://opencode.ai/inference/go/openai/v1"
 	// OpencodeDefaultModel is used only when a session has no model and
@@ -491,16 +488,6 @@ func ValidateProviderInput(input ProviderInput, isNew bool) (name, url string, a
 	return name, url, apiType, nil
 }
 
-func ClampMaxToolRounds(value uint32) uint32 {
-	if value == 0 {
-		return DefaultMaxToolRounds
-	}
-	if value > MaxMaxToolRounds {
-		return MaxMaxToolRounds
-	}
-	return value
-}
-
 func IsPlaceholderKey(key string) bool {
 	lower := strings.ToLower(key)
 	return key == "" ||
@@ -562,8 +549,7 @@ func AtomicWrite(path string, data []byte) error {
 
 // Config is the runtime configuration fixed at startup.
 type Config struct {
-	DataDir       string
-	MaxToolRounds uint32
+	DataDir string
 }
 
 func NewConfig(dataDir string) Config {

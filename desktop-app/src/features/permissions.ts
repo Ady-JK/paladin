@@ -20,6 +20,14 @@ const INFO: Record<PermissionPreset, { label: string; icon: "sl-eye" | "sl-shiel
   "full-access": { label: "Full access", icon: "sl-shield-off", blurb: "Runs anything without asking, outside the sandbox." },
 };
 
+const RULE_LABEL: Record<PermissionRule["tool"], string> = { shell: "command", write: "write", mcp: "mcp" };
+
+const RULE_HINT: Record<PermissionRule["tool"], string> = {
+  shell: "npm test",
+  write: "/abs/dir (sandboxed commands may write here too)",
+  mcp: "server/tool   or   server",
+};
+
 const SANDBOX: Record<string, string> = {
   seatbelt: "macOS Seatbelt sandbox",
   landlock: "Linux Landlock sandbox",
@@ -209,7 +217,7 @@ export async function loadPermissions(cwd?: string): Promise<void> {
 function ruleRow(r: PermissionRule, i: number): string {
   return (
     `<li class="perm-rule" data-rule-row="${i}">` +
-    `<span class="perm-rule-tool">${r.tool === "shell" ? "command" : "write"}</span>` +
+    `<span class="perm-rule-tool">${RULE_LABEL[r.tool] ?? r.tool}</span>` +
     `<code class="perm-rule-pattern" title="${escapeHtml(r.pattern)}">${escapeHtml(r.pattern)}</code>` +
     `<span class="perm-rule-action is-${r.action}">${r.action}</span>` +
     `<button type="button" class="mem-x" data-rule-remove="${i}" title="Remove rule" aria-label="Remove rule">${icon("xmark", "h-3 w-3")}</button>` +
@@ -229,8 +237,8 @@ function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): stri
     `<div class="mem-head"><div>${head}</div></div>` +
     `<ul class="mem-list">${rows}</ul>` +
     `<div class="perm-add">` +
-    `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option></select>` +
-    `<input data-rule-pattern type="text" spellcheck="false" placeholder="npm test   or   /abs/dir" aria-label="Pattern" />` +
+    `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option><option value="mcp">mcp</option></select>` +
+    `<input data-rule-pattern type="text" spellcheck="false" placeholder="${RULE_HINT.shell}" aria-label="Pattern" />` +
     `<select data-rule-action aria-label="Action"><option value="allow">allow</option><option value="deny">deny</option></select>` +
     `<button type="button" class="perm-add-btn" data-rule-add>Add</button>` +
     `</div></section>`
@@ -261,12 +269,15 @@ function paintPane(): void {
     : "";
   const session = view.session.length
     ? `<section class="mem-section"><div class="mem-title">This session</div><div class="mem-blurb">Allowed from approval cards; forgotten when the app quits.</div><ul class="mem-list">${view.session
-        .map((r) => `<li class="perm-rule"><span class="perm-rule-tool">${r.tool === "shell" ? "command" : "write"}</span><code class="perm-rule-pattern">${escapeHtml(r.pattern)}</code><span class="perm-rule-action is-${r.action}">${r.action}</span></li>`)
+        .map((r) => `<li class="perm-rule"><span class="perm-rule-tool">${RULE_LABEL[r.tool] ?? r.tool}</span><code class="perm-rule-pattern">${escapeHtml(r.pattern)}</code><span class="perm-rule-action is-${r.action}">${r.action}</span></li>`)
         .join("")}</ul></section>`
     : "";
   permBodyEl.innerHTML =
     `<section class="mem-section"><div class="mem-head"><div><div class="mem-title">Default for new sessions</div>` +
     `<div class="mem-blurb">Each session can switch from the composer chip.</div></div>${sandbox}</div>` +
+    (kind
+      ? `<div class="mem-blurb perm-grant-note">Allow-write rules also open their folders to sandboxed commands; the rest of the disk stays read-only.</div>`
+      : "") +
     `<div class="perm-segs" role="group" aria-label="Default permissions">${presets}</div></section>` +
     rulesSection("global", view.global) +
     (folderCwd ? rulesSection("folder", view.folder) : "") +
@@ -333,5 +344,11 @@ export function initPermissionsPane(): void {
       const section = t.closest<HTMLElement>("[data-rules]");
       if (section) addFrom(section);
     }
+  });
+  permBodyEl.addEventListener("change", (event) => {
+    const t = event.target as HTMLSelectElement;
+    if (!t.matches("[data-rule-tool]")) return;
+    const input = t.closest("[data-rules]")?.querySelector<HTMLInputElement>("[data-rule-pattern]");
+    if (input) input.placeholder = RULE_HINT[t.value as PermissionRule["tool"]] ?? "";
   });
 }

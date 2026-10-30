@@ -34,6 +34,9 @@ import { forkSessionById, renameSessionById } from "./sessionActions";
 import { resetDraft, syncPermChip } from "./permissions";
 import { paintRevert, setRevert } from "./undo";
 import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
+import { syncMcp } from "./mcp";
+import { syncTools } from "./toolSwitches";
+import { resetBudgetDraft, syncBudget } from "./budget";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -251,7 +254,6 @@ const LIVE_LABELS: Record<string, string> = {
   error: "Failed in the background",
   input: "Waiting for your answer",
   approval: "Waiting for approval",
-  paused: "Paused at the round cap",
 };
 
 // liveIndicator is the per-row turn state: a spinner while working
@@ -349,6 +351,9 @@ export async function openSession(id: string): Promise<void> {
     state.sessionId = session.sessionId;
     state.cwd = session.cwd;
     syncPermChip();
+    syncMcp();
+    syncTools();
+    void syncBudget();
 
     sessionLabelEl.textContent = state.sessionId.slice(0, 8);
     paintResources();
@@ -493,6 +498,7 @@ function renderHistory(history: MessageInfo[]): void {
 export function newSession(): void {
   state.sessionId = "";
   resetDraft();
+  resetBudgetDraft();
   clearUsage();
   clearTodos();
   paintResources();
@@ -500,6 +506,8 @@ export function newSession(): void {
   paintRevert();
   setWorktree(null);
   syncWorktreeChip();
+  syncTools();
+  void syncBudget();
 
   messagesEl.innerHTML = "";
   renderGreeting();

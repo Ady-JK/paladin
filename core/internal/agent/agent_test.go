@@ -25,6 +25,7 @@ type mockProvider struct {
 	streamMsgs   [][]inference.LlmMessage
 	completeMsgs [][]inference.LlmMessage
 	completeSys  []string
+	streamDefs   [][]inference.ToolDefinition
 	// afterChunks runs once a stream's scripted chunks are delivered.
 	afterChunks func(idx int)
 }
@@ -49,6 +50,7 @@ func (m *mockProvider) CompleteTools(ctx context.Context, system string, message
 func (m *mockProvider) StreamTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string, tx chan<- inference.Chunk, done <-chan struct{}) error {
 	m.sessionIDs = append(m.sessionIDs, sessionID)
 	m.streamMsgs = append(m.streamMsgs, append([]inference.LlmMessage(nil), messages...))
+	m.streamDefs = append(m.streamDefs, defs)
 	idx := m.calls
 	m.calls++
 	if m.streamsErr != nil {
@@ -93,7 +95,7 @@ func testSession(t *testing.T, id string) transcript.Session {
 	}
 }
 
-func newAgentForTest(t *testing.T, provider inference.Provider, sess transcript.Session, maxRounds uint32, message string, resume bool, withTools bool) (*Agent, chan ChatChunk, chan struct{}) {
+func newAgentForTest(t *testing.T, provider inference.Provider, sess transcript.Session, message string, resume bool, withTools bool) (*Agent, chan ChatChunk, chan struct{}) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -109,18 +111,18 @@ func newAgentForTest(t *testing.T, provider inference.Provider, sess transcript.
 	done := make(chan struct{})
 	a := newAgent(runConfig{
 		session: sess, provider: provider, tools: reg, shell: shell,
-		toolDefs: defs, maxRounds: maxRounds,
-		ctx: ctx, cancel: cancel, system: "sys",
+		toolDefs: defs,
+		ctx:      ctx, cancel: cancel, system: "sys",
 		tx: tx, done: done, message: message, resume: resume,
 	})
 	return a, tx, done
 }
 
 // testAgent builds a tool-capable agent with read + shell registered.
-func testAgent(t *testing.T, provider inference.Provider, maxRounds uint32) (*Agent, transcript.Session, chan ChatChunk, chan struct{}) {
+func testAgent(t *testing.T, provider inference.Provider) (*Agent, transcript.Session, chan ChatChunk, chan struct{}) {
 	t.Helper()
 	sess := testSession(t, "00000000-0000-4000-8000-000000000001")
-	a, tx, done := newAgentForTest(t, provider, sess, maxRounds, "hi", false, true)
+	a, tx, done := newAgentForTest(t, provider, sess, "hi", false, true)
 	return a, sess, tx, done
 }
 
@@ -140,13 +142,13 @@ func TestRunStreamsTextAndPersists(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{{
 		chunks: []inference.Chunk{inference.TextChunk("hello")},
 	}}}
-	a, sess, tx, done := testAgent(t, prov, 5)
+	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.Reply != "hello" || outcome.Stopped || outcome.NeedsContinue {
+	if outcome.Reply != "hello" || outcome.Stopped {
 		t.Fatalf("got %+v", outcome)
 	}
 	if outcome.SessionID != sess.Meta.SessionID {
@@ -178,7 +180,7 @@ func TestRunReplaysHistoryIntoModel(t *testing.T) {
 	if err := sess.Append(transcript.RoleUser, "earlier"); err != nil {
 		t.Fatal(err)
 	}
-	a, _, done := newAgentForTest(t, prov, sess, 5, "hi", false, true)
+	a, _, done := newAgentForTest(t, prov, sess, "hi", false, true)
 	defer close(done)
 	history, err := sess.History()
 	if err != nil {
@@ -201,7 +203,7 @@ func TestRunReplaysHistoryIntoModel(t *testing.T) {
 func TestRunResumeSkipsUserAppend(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{inference.TextChunk("r")}}}}
 	sess := testSession(t, "00000000-0000-4000-8000-000000000001")
-	a, _, done := newAgentForTest(t, prov, sess, 5, "", true, true)
+	a, _, done := newAgentForTest(t, prov, sess, "", true, true)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
 		t.Fatal(err)
@@ -221,7 +223,7 @@ func TestRunUnknownToolIsErrorResult(t *testing.T) {
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c9", Name: "nope", Arguments: "{}"}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("after")}},
 	}}
-	a, sess, _, done := testAgent(t, prov, 5)
+	a, sess, _, done := testAgent(t, prov)
 	defer close(done)
 	outcome, err := a.Run()
 	if err != nil {
@@ -246,7 +248,7 @@ func TestRunUnknownToolIsErrorResult(t *testing.T) {
 }
 
 func TestAppendNotifyShape(t *testing.T) {
-	a, _, _, done := testAgent(t, &mockProvider{}, 5)
+	a, _, _, done := testAgent(t, &mockProvider{})
 	defer close(done)
 	a.appendNotify("content", "c1#notify", true)
 	if len(a.records) != 1 || !a.records[0].IsNotify {
@@ -261,7 +263,7 @@ func TestAppendNotifyShape(t *testing.T) {
 }
 
 func TestAppendAssistantAndToolResult(t *testing.T) {
-	a, _, _, done := testAgent(t, &mockProvider{}, 5)
+	a, _, _, done := testAgent(t, &mockProvider{})
 	defer close(done)
 	calls := []inference.ToolCall{{ID: "c1", Name: "read", Arguments: "{}", Signature: "sig-1"}}
 	a.appendAssistant("text", calls)
@@ -289,18 +291,11 @@ func TestAppendAssistantAndToolResult(t *testing.T) {
 	}
 }
 
-func TestStopRequestedAndNeedsContinue(t *testing.T) {
-	a, _, _, done := testAgent(t, &mockProvider{}, 3)
+func TestStopRequested(t *testing.T) {
+	a, _, _, done := testAgent(t, &mockProvider{})
 	defer close(done)
 	if a.stopRequested() {
 		t.Fatal("stop before cancel")
-	}
-	if a.needsContinue() {
-		t.Fatal("round 0 needs continue")
-	}
-	a.round = 3
-	if !a.needsContinue() {
-		t.Fatal("round 3 should need continue")
 	}
 	a.cancel()
 	if !a.stopRequested() {
@@ -313,14 +308,14 @@ func TestNewApiErrorAndChatChunkFields(t *testing.T) {
 	if e.Code != "internal" || e.Message != "boom" {
 		t.Fatalf("got %+v", e)
 	}
-	c := ChatChunk{Delta: "d", Done: true, NeedsContinue: true, SessionID: "s", Stopped: true}
-	if !c.Done || !c.NeedsContinue || !c.Stopped {
+	c := ChatChunk{Delta: "d", Done: true, SessionID: "s", Stopped: true}
+	if !c.Done || !c.Stopped {
 		t.Fatalf("got %+v", c)
 	}
 }
 
 func TestEmitStopsWhenClientLeaves(t *testing.T) {
-	a, _, _, done := testAgent(t, &mockProvider{}, 5)
+	a, _, _, done := testAgent(t, &mockProvider{})
 	// Fill the stream buffer so only the done channel can make progress.
 	for i := 0; i < cap(a.tx); i++ {
 		a.tx <- ChatChunk{}
@@ -339,7 +334,7 @@ func TestPersistFailureSurfaces(t *testing.T) {
 		Dir:  "/nonexistent/paladin/session",
 	}
 	prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{inference.TextChunk("x")}}}}
-	a, _, done := newAgentForTest(t, prov, sess, 5, "hi", false, true)
+	a, _, done := newAgentForTest(t, prov, sess, "hi", false, true)
 	defer close(done)
 	if _, err := a.Run(); err == nil {
 		t.Fatal("persist failure swallowed")
