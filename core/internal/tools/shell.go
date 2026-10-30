@@ -5,27 +5,29 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
+	"github.com/Ady-JK/paladin/core/internal/redact"
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
 const (
 	DefaultShellTimeoutMs = 10_000
-	MaxShellOutput        = 32 * 1024
-	shellTruncatedMarker  = "\n… [truncated]"
+	// DefaultJobTimeoutMs is the default for background runs, which
+	// are meant for long work.
+	DefaultJobTimeoutMs  = 300_000
+	MaxShellOutput       = 32 * 1024
+	shellTruncatedMarker = "\n… [truncated]"
 
 	ShellRun    = "run"
 	ShellStatus = "status"
@@ -59,56 +61,13 @@ type ShellResponse struct {
 	Log       *string `json:"log,omitempty"`
 }
 
-type job struct {
-	id           string
-	log          string
-	status       string
-	exitCode     *int
-	finished     bool
-	notify       bool
-	notifyCallID string
-	owner        string
-	reported     bool
-	childPID     int
-	logDone      bool
-}
-
-// broadcaster wakes all waiters; each notify swaps the channel.
-type broadcaster struct {
-	mu sync.Mutex
-	ch chan struct{}
-}
-
-func newBroadcaster() *broadcaster {
-	return &broadcaster{ch: make(chan struct{})}
-}
-
-func (b *broadcaster) notify() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	close(b.ch)
-	b.ch = make(chan struct{})
-}
-
-func (b *broadcaster) waitChan() <-chan struct{} {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.ch
-}
-
-type shellJobs struct {
-	mu      sync.Mutex
-	byID    map[string]*job
-	counter atomic.Uint64
-	changed *broadcaster
-}
-
 // procTracker attributes shell children to their session for the
 // resources RPC; tests swap it.
 var procTracker = procstat.Default
 
 type ShellTool struct {
-	inner *shellJobs
+	inner    *shellJobs
+	observer JobObserver
 }
 
 func NewShellTool() *ShellTool {
@@ -117,7 +76,10 @@ func NewShellTool() *ShellTool {
 
 const maxShellTimeoutMs = int64(^uint64(0)>>1) / int64(time.Millisecond)
 
-func shellTimeoutMs(ms int64) (time.Duration, error) {
+func shellTimeoutMs(ms int64, background bool) (time.Duration, error) {
+	if ms == 0 && background {
+		return DefaultJobTimeoutMs * time.Millisecond, nil
+	}
 	if ms == 0 {
 		return DefaultShellTimeoutMs * time.Millisecond, nil
 	}
@@ -131,130 +93,21 @@ func shellTimeoutMs(ms int64) (time.Duration, error) {
 }
 
 func (s *ShellTool) runSync(cmd, dir, owner string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, error) {
-	type verdict struct {
-		out string
-		err *ToolError
+	out, terr := runSyncInner(cmd, dir, owner, limit, cancel, sb)
+	if terr != nil {
+		return "", terr
 	}
-	ch := make(chan verdict, 1)
-	go func() {
-		out, terr := runSyncInner(cmd, dir, owner, limit, cancel, sb)
-		ch <- verdict{out: out, err: terr}
-	}()
-	v := <-ch
-	if v.err != nil {
-		return "", v.err
-	}
-	return v.out, nil
-}
-
-func (s *ShellTool) runBackground(cmd, dir, owner string, limit time.Duration, notify bool, sessionDir string, sb *sandbox.Policy) (string, error) {
-	if sessionDir == "" {
-		return "", ArgsError("shell: no session to keep the background job in")
-	}
-	now := time.Now().Unix()
-	id := fmt.Sprintf("job-%d-%d", now, s.inner.counter.Add(1))
-	tmp := filepath.Join(sessionDir, "tmp")
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		return "", ArgsError(fmt.Sprintf("shell: cannot keep the job log: %s", syserr.Str(err)))
-	}
-	logPath := filepath.Join(tmp, id+".log")
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return "", ArgsError(fmt.Sprintf("shell: cannot write the job log: %s", syserr.Str(err)))
-	}
-	child, err := spawnToLog(cmd, dir, logFile, sb)
-	logFile.Close()
-	if err != nil {
-		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
-	}
-	childPID := 0
-	if child.Process != nil {
-		childPID = child.Process.Pid
-	}
-	untrack := procTracker.Track(owner, childPID)
-	s.inner.mu.Lock()
-	s.inner.byID[id] = &job{
-		id: id, log: logPath, status: JobRunning,
-		notify: notify, childPID: childPID,
-	}
-	s.inner.mu.Unlock()
-	guardThis := s
-	guardID := id
-	go func() {
-		start := time.Now()
-		for {
-			time.Sleep(100 * time.Millisecond)
-			s.inner.mu.Lock()
-			j, ok := s.inner.byID[guardID]
-			if !ok {
-				s.inner.mu.Unlock()
-				return
-			}
-			if j.finished {
-				s.inner.mu.Unlock()
-				return
-			}
-			if time.Since(start) >= limit {
-				j.finished = true
-				j.status = JobTimeout
-				pid := j.childPID
-				s.inner.mu.Unlock()
-				if pid != 0 {
-					killProcessGroup(pid)
-				}
-				guardThis.inner.changed.notify()
-				return
-			}
-			s.inner.mu.Unlock()
-		}
-	}()
-	this := s
-	idClone := id
-	go func() {
-		err := child.Wait()
-		untrack()
-		var code *int
-		if err == nil {
-			z := 0
-			code = &z
-		} else if ee, ok := err.(*exec.ExitError); ok {
-			c := ee.ExitCode()
-			code = &c
-		}
-		s.inner.mu.Lock()
-		if j, ok := s.inner.byID[idClone]; ok {
-			if !j.finished {
-				j.finished = true
-				switch {
-				case code != nil && *code == 0:
-					j.status = JobDone
-					j.exitCode = code
-				case code != nil:
-					j.status = JobFailed
-					j.exitCode = code
-				default:
-					j.status = JobFailed
-					one := 1
-					j.exitCode = &one
-				}
-			}
-			j.logDone = true
-		}
-		s.inner.mu.Unlock()
-		this.inner.changed.notify()
-	}()
-	out := ShellResponse{JobID: &id, Status: JobRunning, Log: &logPath}
-	data, merr := jsonx.Marshal(out)
-	if merr != nil {
-		return "", ArgsError(fmt.Sprintf("shell: encode the result: %v", merr))
-	}
-	return string(data), nil
+	return out, nil
 }
 
 func shellResponseJSON(id, status string, exitCode *int, output *string, truncated *bool, log string) (string, error) {
 	var logPtr *string
 	if log != "" {
 		logPtr = &log
+	}
+	if output != nil {
+		masked := redact.String(*output)
+		output = &masked
 	}
 	out := ShellResponse{Status: status, ExitCode: exitCode, Output: output, Truncated: truncated, Log: logPtr}
 	if id != "" {
@@ -265,146 +118,6 @@ func shellResponseJSON(id, status string, exitCode *int, output *string, truncat
 		return "", ArgsError(fmt.Sprintf("shell: encode the result: %v", err))
 	}
 	return string(data), nil
-}
-
-func (s *ShellTool) status(jobID string) (string, error) {
-	s.inner.mu.Lock()
-	j, ok := s.inner.byID[strings.TrimSpace(jobID)]
-	// Snapshot under the lock: the waiter goroutine mutates the entry
-	// (status/exitCode/logDone) while a status check is in flight.
-	var snap job
-	if ok {
-		snap = *j
-	}
-	s.inner.mu.Unlock()
-	if !ok {
-		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
-	}
-	text, err := shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log)
-	if err != nil {
-		return "", err
-	}
-	if snap.finished && (snap.status == JobFailed || snap.status == JobTimeout) {
-		return "", WithContent(text, fmt.Sprintf("shell: job %s %s", snap.id, snap.status))
-	}
-	return text, nil
-}
-
-func (s *ShellTool) cancel(jobID string) (string, error) {
-	var childPID int
-	s.inner.mu.Lock()
-	j, ok := s.inner.byID[strings.TrimSpace(jobID)]
-	if !ok {
-		s.inner.mu.Unlock()
-		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
-	}
-	if !j.finished {
-		j.finished = true
-		j.status = JobCancelled
-		childPID = j.childPID
-	}
-	s.inner.mu.Unlock()
-	if childPID != 0 {
-		killProcessGroup(childPID)
-	}
-	s.inner.changed.notify()
-	s.inner.mu.Lock()
-	jj, ok := s.inner.byID[strings.TrimSpace(jobID)]
-	var snap job
-	if ok {
-		snap = *jj
-	}
-	s.inner.mu.Unlock()
-	if !ok {
-		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
-	}
-	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log)
-}
-
-func (s *ShellTool) ArmNotify(owner, callID, jobID string) {
-	s.inner.mu.Lock()
-	defer s.inner.mu.Unlock()
-	if j, ok := s.inner.byID[strings.TrimSpace(jobID)]; ok {
-		j.notify = true
-		j.notifyCallID = callID
-		j.owner = owner
-	}
-}
-
-func (s *ShellTool) PendingNotify(owner string) bool {
-	s.inner.mu.Lock()
-	defer s.inner.mu.Unlock()
-	for _, j := range s.inner.byID {
-		if j.notify && j.owner == owner && !j.finished && !j.reported {
-			return true
-		}
-	}
-	return false
-}
-
-type NotifyResult struct {
-	CallID    string
-	JobID     string
-	Status    string
-	ExitCode  *int
-	Output    string
-	Truncated bool
-	IsError   bool
-}
-
-func (s *ShellTool) PollNotify(owner string) []NotifyResult {
-	s.inner.mu.Lock()
-	snapshot := make([]*job, 0, len(s.inner.byID))
-	for _, j := range s.inner.byID {
-		cp := *j
-		snapshot = append(snapshot, &cp)
-	}
-	s.inner.mu.Unlock()
-	var out []NotifyResult
-	for _, js := range snapshot {
-		s.inner.mu.Lock()
-		entry, ok := s.inner.byID[js.id]
-		if !ok {
-			s.inner.mu.Unlock()
-			continue
-		}
-		if !entry.notify || entry.owner != owner || !entry.finished || entry.reported || !entry.logDone {
-			s.inner.mu.Unlock()
-			continue
-		}
-		entry.reported = true
-		status, exitCode, callID, jobID, log := entry.status, entry.exitCode, entry.notifyCallID, entry.id, entry.log
-		s.inner.mu.Unlock()
-		tail, truncated := tailFile(log)
-		out = append(out, NotifyResult{
-			CallID: callID, JobID: jobID, Status: status, ExitCode: exitCode,
-			Output: tail, Truncated: truncated,
-			IsError: status == JobFailed || status == JobTimeout,
-		})
-	}
-	return out
-}
-
-func (s *ShellTool) WaitPendingNotify(owner string, cancel context.Context) bool {
-	for {
-		s.inner.mu.Lock()
-		pending := false
-		for _, j := range s.inner.byID {
-			if j.notify && j.owner == owner && !j.finished && !j.reported {
-				pending = true
-				break
-			}
-		}
-		s.inner.mu.Unlock()
-		if !pending {
-			return true
-		}
-		select {
-		case <-s.inner.changed.waitChan():
-		case <-cancel.Done():
-			return false
-		}
-	}
 }
 
 func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, *ToolError) {
@@ -553,7 +266,7 @@ func finishSync(output []byte, truncated bool, w waitResult, sandboxed bool) (st
 }
 
 func mustToolError(err error) *ToolError {
-	if terr, ok := err.(*ToolError); ok {
+	if terr := (*ToolError)(nil); errors.As(err, &terr) {
 		return terr
 	}
 	return ArgsError(err.Error())
@@ -589,31 +302,6 @@ func StripANSI(s string) string {
 		}
 	}
 	return string(out)
-}
-
-func tailFile(path string) (string, bool) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	truncated := false
-	slice := data
-	if len(slice) > MaxNotifyOutput {
-		slice = slice[len(slice)-MaxNotifyOutput:]
-		truncated = true
-		if i := indexByte(slice, '\n'); i >= 0 {
-			slice = slice[i+1:]
-		} else {
-			slice = nil
-		}
-	}
-	text := ToLF(string(slice))
-	lines := strings.Split(text, "\n")
-	if len(lines) > NotifyTailLines {
-		lines = lines[len(lines)-NotifyTailLines:]
-		truncated = true
-	}
-	return strings.Join(lines, "\n"), truncated
 }
 
 func indexByte(b []byte, c byte) int {
@@ -652,7 +340,7 @@ func (ShellTool) Definition() ToolDefinition {
 				"cmd":        map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
 				"notify":     map[string]any{"type": "boolean", "description": "With background true, remind the agent when the job finishes: its final state and output tail arrive on their own in a later round. Defaults to false; ignored without background."},
-				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000.", "minimum": 1, "maximum": maxShellTimeoutMs},
+				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000, or 300000 with background.", "minimum": 1, "maximum": maxShellTimeoutMs},
 			},
 		},
 	}
@@ -674,7 +362,7 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		if strings.TrimSpace(args.Cmd) == "" {
 			return "", ArgsError("shell: cmd is required for action run")
 		}
-		limit, err := shellTimeoutMs(args.TimeoutMs)
+		limit, err := shellTimeoutMs(args.TimeoutMs, args.Background)
 		if err != nil {
 			return "", ArgsError(err.Error())
 		}
@@ -694,7 +382,7 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(args.Cmd, dir, ctx.SessionID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
+			return s.runBackground(args.Cmd, dir, ctx.SessionID, ctx.CallID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
 		}
 		return s.runSync(args.Cmd, dir, ctx.SessionID, limit, ctx.Cancel, ctx.Sandbox)
 	case ShellStatus:

@@ -6,9 +6,7 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
@@ -18,6 +16,10 @@ import (
 const (
 	BudgetReached     = "reached"
 	BudgetUnknownCost = "unknownCost"
+	// BudgetSpendIncomplete: the session's ledger was corrupt, so the
+	// spend shown is only a lower bound. The limit is still enforced
+	// against it.
+	BudgetSpendIncomplete = "spendIncomplete"
 )
 
 // BudgetNotice is the spend limit's state as of a check.
@@ -41,15 +43,20 @@ func (a *Agent) budgetLimit() float64 {
 	return a.budget()
 }
 
-// sessionSpend reads the session's gateway-reported spend; known is
-// false while no call has ever reported a cost.
-func (a *Agent) sessionSpend() (spent float64, known bool) {
-	var totals session.UsageTotals
-	data, err := os.ReadFile(a.session.UsagePath())
-	if err != nil || json.Unmarshal(data, &totals) != nil {
-		return 0, false
+// spendState is the session's gateway-reported spend as of a check.
+// known is false while no call has reported a cost; incomplete is true
+// when the ledger is (or was) corrupt, so spent is only a lower bound.
+type spendState struct {
+	spent             float64
+	known, incomplete bool
+}
+
+func (a *Agent) sessionSpend() spendState {
+	totals, err := session.ReadLedger(a.session.UsagePath())
+	if err != nil {
+		return spendState{incomplete: true}
 	}
-	return totals.Cost, totals.HasCost
+	return spendState{spent: totals.Cost, known: totals.HasCost, incomplete: totals.SpendIncomplete()}
 }
 
 // checkBudget runs before each round. It reports end=true when the turn
@@ -65,8 +72,15 @@ func (a *Agent) checkBudget() (end bool, err error) {
 	if limit <= 0 {
 		return false, nil
 	}
-	spent, known := a.sessionSpend()
-	if !known || spent < limit {
+	st := a.sessionSpend()
+	spent := st.spent
+	if !st.known || spent < limit {
+		if st.incomplete && !a.spendWarned {
+			a.spendWarned = true
+			if err := a.emit(ChatChunk{Budget: &BudgetNotice{State: BudgetSpendIncomplete, Spent: spent, Limit: limit}}); err != nil {
+				return false, turnStop{}
+			}
+		}
 		return false, nil
 	}
 	if err := a.emit(ChatChunk{Budget: &BudgetNotice{State: BudgetReached, Spent: spent, Limit: limit, Ended: first}}); err != nil {
@@ -93,6 +107,5 @@ func (a *Agent) noteCallCost(u inference.Usage) {
 		return
 	}
 	a.costWarned = true
-	spent, _ := a.sessionSpend()
-	_ = a.emit(ChatChunk{Budget: &BudgetNotice{State: BudgetUnknownCost, Spent: spent, Limit: limit}})
+	_ = a.emit(ChatChunk{Budget: &BudgetNotice{State: BudgetUnknownCost, Spent: a.sessionSpend().spent, Limit: limit}})
 }

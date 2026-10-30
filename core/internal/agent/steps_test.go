@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -16,7 +17,7 @@ type fakeSteps struct {
 	calls []string
 }
 
-func (f *fakeSteps) Track(callID, name string, run func() tools.ToolResult) tools.ToolResult {
+func (f *fakeSteps) Track(_ context.Context, callID, name string, run func() tools.ToolResult) tools.ToolResult {
 	f.mu.Lock()
 	f.calls = append(f.calls, callID+":"+name)
 	f.mu.Unlock()

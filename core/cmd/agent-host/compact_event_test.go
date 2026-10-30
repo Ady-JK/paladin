@@ -23,7 +23,7 @@ func TestChatForwardsCompactionEvents(t *testing.T) {
 		case strings.Contains(string(body), "compacting the conversation"):
 			fmt.Fprint(w, `{"choices": [{"message": {"content": "SUM"}}]}`)
 		case strings.Contains(string(body), "zz-second-msg") && atomic.AddInt32(&overflowed, 1) == 1:
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `{"error":{"message":"This model's maximum context length is 8192 tokens","code":"context_length_exceeded"}}`)
 		default:
 			fmt.Fprint(w, `{"choices": [{"message": {"content": "hello"}}]}`)

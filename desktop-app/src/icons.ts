@@ -1,4 +1,3 @@
-
 type Icon = {
   d: string;
   line?: boolean;
@@ -71,6 +70,8 @@ const ICONS: Record<string, Icon> = {
     line: true,
   },
   zap: { d: "M13 2 3 14h9l-1 8 10-12h-9l1-8Z" },
+  "zap-line": { d: "M13 2 3 14h9l-1 8 10-12h-9l1-8Z", line: true },
+  "rotate-ccw": { d: "M3 12a9 9 0 1 0 2.6-6.4L3 8m0-5v5h5", line: true },
   layers: {
     d: "m12 2 10 5-10 5L2 7l10-5ZM2 12l10 5 10-5M2 17l10 5 10-5",
     line: true,
@@ -113,49 +114,137 @@ const ICONS: Record<string, Icon> = {
   },
   "arrow-up": { d: "M12 19V5m0 0-6 6m6-6 6 6", line: true },
   // Thin outline glyphs for the tool-call rows.
-  "tl-term": { d: "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm3 5 3 3-3 3m5 0h5", line: true, thin: true },
-  "tl-file": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6m-6 4h4", line: true, thin: true },
-  "tl-file-plus": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5m-7 4v6m-3-3h6", line: true, thin: true },
+  "tl-term": {
+    d: "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm3 5 3 3-3 3m5 0h5",
+    line: true,
+    thin: true,
+  },
+  "tl-file": {
+    d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M9 13h6m-6 4h4",
+    line: true,
+    thin: true,
+  },
+  "tl-file-plus": {
+    d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5m-7 4v6m-3-3h6",
+    line: true,
+    thin: true,
+  },
   "tl-pencil": { d: "M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Zm9.5-13.5 4 4", line: true, thin: true },
   "tl-list": { d: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01", line: true, thin: true },
-  "tl-ask": { d: "M21 12a8.5 8.5 0 0 1-12.4 7.6L3 21l1.4-5.1A8.5 8.5 0 1 1 21 12ZM9.8 9.5a2.3 2.3 0 0 1 4.4.8c0 1.5-2.2 2-2.2 3.2m0 2.6h.01", line: true, thin: true },
-  "tl-tools": { d: "M7 3v7m0 4v7m-3-11h6M17 3v4m0 4v10m-3-14h6M7 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10-3a2 2 0 1 0 0-4", line: true, thin: true },
+  "tl-ask": {
+    d: "M21 12a8.5 8.5 0 0 1-12.4 7.6L3 21l1.4-5.1A8.5 8.5 0 1 1 21 12ZM9.8 9.5a2.3 2.3 0 0 1 4.4.8c0 1.5-2.2 2-2.2 3.2m0 2.6h.01",
+    line: true,
+    thin: true,
+  },
+  "tl-tools": {
+    d: "M7 3v7m0 4v7m-3-11h6M17 3v4m0 4v10m-3-14h6M7 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10-3a2 2 0 1 0 0-4",
+    line: true,
+    thin: true,
+  },
   // Thin outline glyphs for the rail and sidebar.
-  "rl-agent": { d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2.5 5.5L10 12l-2.5 2.5M12.5 15h4", line: true, thin: true },
+  "rl-agent": {
+    d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2.5 5.5L10 12l-2.5 2.5M12.5 15h4",
+    line: true,
+    thin: true,
+  },
   "rl-chat": { d: "M7.5 18.5 4 21v-4.2A8 8 0 1 1 7.5 18.5ZM8.5 10.5h7m-7 3.5h4.5", line: true, thin: true },
-  "rl-gear": { d: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.2-1.3L14.4 3h-4l-.4 2.4A7.4 7.4 0 0 0 7.8 6.7l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.2 1.3l.4 2.4h4l.4-2.4a7.4 7.4 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3Z", line: true, thin: true },
-  "rl-sidebar": { d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm4 0v16", line: true, thin: true },
-  "rl-compose": { d: "M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8 8 16l1.2-4 9.2-9.4Z", line: true, thin: true },
-  "rl-folder": { d: "M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9.5Z", line: true, thin: true },
+  "rl-gear": {
+    d: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7.4 7.4 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.2-1.3L14.4 3h-4l-.4 2.4A7.4 7.4 0 0 0 7.8 6.7l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.2 1.3l.4 2.4h4l.4-2.4a7.4 7.4 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3Z",
+    line: true,
+    thin: true,
+  },
+  "rl-sidebar": {
+    d: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm4 0v16",
+    line: true,
+    thin: true,
+  },
+  "rl-compose": {
+    d: "M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8 8 16l1.2-4 9.2-9.4Z",
+    line: true,
+    thin: true,
+  },
+  "rl-folder": {
+    d: "M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9.5Z",
+    line: true,
+    thin: true,
+  },
   "rl-pulse": { d: "M3 12h4l2.5-6 5 12 2.5-6h4", line: true, thin: true },
   "rl-chevron": { d: "m9 6 6 6-6 6", line: true, thin: true },
   // Thin outline glyphs for the slash palette.
   "sl-compact": { d: "M4 9h16M4 15h16M9 4l3 3 3-3M9 20l3-3 3 3", line: true, thin: true },
   "tl-undo": { d: "M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11", line: true, thin: true },
   "sl-merge": { d: "M6 3v18M6 9a6 6 0 0 0 6 6h3M18 15a2 2 0 1 0 0 .01M6 3a2 2 0 1 0 0 .01", line: true, thin: true },
-  "sl-fork": { d: "M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1M6 3a2 2 0 1 0 0 .01M18 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM6 9v12", line: true, thin: true },
-  "sl-plan": { d: "M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1ZM8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12l2 2 4-4M8 17h8", line: true, thin: true },
-  "sl-build": { d: "M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6Z", line: true, thin: true },
-  "sl-memory": { d: "M9.5 3a3.5 3.5 0 0 0-3.4 4.3A3.5 3.5 0 0 0 5 14a3.5 3.5 0 0 0 4.5 6.4V3Zm5 0a3.5 3.5 0 0 1 3.4 4.3A3.5 3.5 0 0 1 19 14a3.5 3.5 0 0 1-4.5 6.4V3ZM9.5 9H8m6.5 0H16m-6.5 5H8m6.5 0H16", line: true, thin: true },
+  "sl-fork": {
+    d: "M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1M6 3a2 2 0 1 0 0 .01M18 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM6 9v12",
+    line: true,
+    thin: true,
+  },
+  "sl-plan": {
+    d: "M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1ZM8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12l2 2 4-4M8 17h8",
+    line: true,
+    thin: true,
+  },
+  "sl-build": {
+    d: "M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6Z",
+    line: true,
+    thin: true,
+  },
+  "sl-memory": {
+    d: "M9.5 3a3.5 3.5 0 0 0-3.4 4.3A3.5 3.5 0 0 0 5 14a3.5 3.5 0 0 0 4.5 6.4V3Zm5 0a3.5 3.5 0 0 1 3.4 4.3A3.5 3.5 0 0 1 19 14a3.5 3.5 0 0 1-4.5 6.4V3ZM9.5 9H8m6.5 0H16m-6.5 5H8m6.5 0H16",
+    line: true,
+    thin: true,
+  },
   "sl-review": { d: "M11 19a8 8 0 1 1 5.3-2L21 21.7M8 11l2 2 4-4", line: true, thin: true },
   "sl-model": { d: "M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Zm0 0v18M4 7.5l8 4.5 8-4.5", line: true, thin: true },
   "sl-usage": { d: "M4 20V10m6 10V4m6 16v-7m4 7H2", line: true, thin: true },
   "sl-clear": { d: "M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3", line: true, thin: true },
-  "sl-help": { d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.6-2.4 2.2-2.4 3.6m0 3h.01", line: true, thin: true },
-  "sl-skill": { d: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9L12 3Z", line: true, thin: true },
-  "sl-prompt": { d: "M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm3 5 2 2-2 2m4 0h4", line: true, thin: true },
+  "sl-help": {
+    d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.6-2.4 2.2-2.4 3.6m0 3h.01",
+    line: true,
+    thin: true,
+  },
+  "sl-skill": {
+    d: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9L12 3Z",
+    line: true,
+    thin: true,
+  },
+  "sl-prompt": {
+    d: "M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm3 5 2 2-2 2m4 0h4",
+    line: true,
+    thin: true,
+  },
   "sl-new": { d: "M12 5v14M5 12h14", line: true, thin: true },
   "sl-sliders": { d: "M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6M9 8h6m2 8h6", line: true, thin: true },
   "sl-more": { d: "M5 12h.01M12 12h.01M19 12h.01", line: true },
   "sl-shield": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Z", line: true, thin: true },
-  "sl-shield-check": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Zm-3 9 2 2 4-4", line: true, thin: true },
+  "sl-shield-check": {
+    d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Zm-3 9 2 2 4-4",
+    line: true,
+    thin: true,
+  },
   "sl-shield-off": { d: "M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3ZM4 4l16 16", line: true, thin: true },
-  "sl-eye": { d: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z", line: true, thin: true },
-  "sl-sparkles": { d: "M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3Zm6 11l.8 2.2 2.2.8-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z", line: true, thin: true },
+  "sl-eye": {
+    d: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
+    line: true,
+    thin: true,
+  },
+  "sl-sparkles": {
+    d: "M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3Zm6 11l.8 2.2 2.2.8-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z",
+    line: true,
+    thin: true,
+  },
   "sl-plug": { d: "M9 3v5m6-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4", line: true, thin: true },
-  "sl-budget": { d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm2.6-11.6c-.5-.9-1.5-1.4-2.6-1.4-1.6 0-2.6.8-2.6 1.9s1 1.6 2.6 1.9 2.6.9 2.6 2-1 2-2.6 2c-1.2 0-2.2-.5-2.7-1.4M12 6.5V8m0 8v1.5", line: true, thin: true },
+  "sl-budget": {
+    d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm2.6-11.6c-.5-.9-1.5-1.4-2.6-1.4-1.6 0-2.6.8-2.6 1.9s1 1.6 2.6 1.9 2.6.9 2.6 2-1 2-2.6 2c-1.2 0-2.2-.5-2.7-1.4M12 6.5V8m0 8v1.5",
+    line: true,
+    thin: true,
+  },
   steer: { d: "M5 4v7a4 4 0 0 0 4 4h10m0 0-4-4m4 4-4 4", line: true },
-  "sl-init": { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M12 11v6m-3-3h6", line: true, thin: true },
+  "sl-init": {
+    d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5M12 11v6m-3-3h6",
+    line: true,
+    thin: true,
+  },
 };
 
 export type IconName = keyof typeof ICONS;

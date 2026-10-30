@@ -4,6 +4,7 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -34,7 +35,9 @@ func (EditTool) Definition() ToolDefinition {
 			"occurrence with its line numbers and the nearest non-blank lines " +
 			"above and below: retry with more surrounding lines in old_string so " +
 			"it matches exactly once, or pass replace_all true to replace every " +
-			"occurrence. Edits outside the workspace are allowed but reported as outside.",
+			"occurrence. If the file changes while the edit is being applied it fails " +
+			"with a conflict and writes nothing: re-read and retry. " +
+			"Edits outside the workspace are allowed but reported as outside.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -64,10 +67,12 @@ func (e *EditTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	if args.OldString == "" {
 		return "", ArgsError("edit: old_string is required and cannot be empty")
 	}
-	res, err := e.engine.Edit(ctx.Workspace, args.Path, args.OldString, args.NewString, args.ReplaceAll)
+	res, err := e.engine.Edit(ctx.SessionID, ctx.Workspace, args.Path, args.OldString, args.NewString, args.ReplaceAll)
 	if err != nil {
-		if eeng, ok := err.(*EngineError); ok {
+		if eeng := (*EngineError)(nil); errors.As(err, &eeng) {
 			switch eeng.Kind {
+			case "conflict":
+				return "", conflictError(eeng)
 			case "notfound":
 				content, _ := jsonx.Marshal(map[string]any{
 					"error":          "edit: old text not found in file; read the file and copy the exact text",

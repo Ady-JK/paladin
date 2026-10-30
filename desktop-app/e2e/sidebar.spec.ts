@@ -32,7 +32,12 @@ async function setup(page: Page): Promise<void> {
       }
       if (cmd === "openSession") {
         const s = sessions.find((x: any) => x.sessionId === args.sessionId);
-        return { sessionId: args.sessionId, cwd: s ? s.cwd : "/work/api", provider: "Opencode Go", model: "openai/gpt-4o" };
+        return {
+          sessionId: args.sessionId,
+          cwd: s ? s.cwd : "/work/api",
+          provider: "Opencode Go",
+          model: "openai/gpt-4o",
+        };
       }
       if (cmd === "sessionHistory") return [];
       return base(cmd, args);
@@ -42,11 +47,13 @@ async function setup(page: Page): Promise<void> {
   await expect(page.locator('[data-session="s-api-2"]')).toBeVisible();
 }
 
-test("the rail holds the views, the sidebar toggle and settings", async ({ page }) => {
+test("the rail holds the views and settings, with no separate sidebar button", async ({ page }) => {
   await setup(page);
-  for (const id of ["#agentTab", "#chatTab", "#sidebarToggleBtn", "#settingsBtn"]) {
+  for (const id of ["#agentTab", "#chatTab", "#settingsBtn"]) {
     await expect(page.locator(`#rail ${id}`)).toBeVisible();
   }
+  await expect(page.locator("#sidebarToggleBtn")).toHaveCount(0);
+  await expect(page.locator("#rail .rail-btn")).toHaveCount(3);
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
 });
 
@@ -94,13 +101,69 @@ test("search filters projects and hides recents", async ({ page }) => {
   await expect(page.locator("#recentWrap")).toBeVisible();
 });
 
-test("collapsing hides the panel but keeps the rail", async ({ page }) => {
+test("the Agent button opens and closes the drawer", async ({ page }) => {
   await setup(page);
-  await page.click("#sidebarToggleBtn");
+  await page.click("#agentTab");
+  await expect(page.locator("#sidebar")).toBeHidden();
   await expect(page.locator("#sessionList")).toBeHidden();
-  await expect.poll(async () => (await page.locator("#sidebar").boundingBox())?.width ?? 0).toBeLessThan(2);
   await expect(page.locator("#agentTab")).toBeVisible();
   await expect(page.locator("#settingsBtn")).toBeVisible();
-  await page.click("#sidebarToggleBtn");
+  await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeVisible();
+});
+
+test("the sidebar floats over a main view that never resizes", async ({ page }) => {
+  await setup(page);
+  await expect(page.locator("#sidebar")).toBeVisible();
+  const open = await page.locator("#mainCard").boundingBox();
+  const side = await page.locator("#sidebar").boundingBox();
+  const rail = await page.locator("#rail").boundingBox();
+  // The panel sits on top of the card, not beside it.
+  expect(side!.x).toBeLessThan(open!.x + 40);
+  expect(open!.x).toBeLessThanOrEqual(rail!.x + rail!.width + 1);
+
+  await page.click("#agentTab");
+  await expect(page.locator("#sidebar")).toBeHidden();
+  const closed = await page.locator("#mainCard").boundingBox();
+  expect(closed).toEqual(open);
+});
+
+test("the drawer closes on an outside click, Escape, and a session pick", async ({ page }) => {
+  await setup(page);
+  const side = page.locator("#sidebar");
+  await expect(side).toBeVisible();
+
+  // Clicks inside the panel keep it open.
+  await page.click("#searchInput");
+  await expect(side).toBeVisible();
+
+  await page.mouse.click(900, 300);
+  await expect(side).toBeHidden();
+
+  await page.click("#agentTab");
+  await expect(side).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(side).toBeHidden();
+
+  await page.click("#agentTab");
+  await page.locator('[data-recent="s-cli-1"]').click();
+  await expect(side).toBeHidden();
+  await expect(page.locator("#sessionLabel")).toHaveText("s-cli-1".slice(0, 8));
+});
+
+test("the session row menu works inside the drawer", async ({ page }) => {
+  await setup(page);
+  await page.locator('.session-row:has([data-session="s-api-2"])').hover();
+  await page.locator('[data-row-menu="s-api-2"]').click();
+  await expect(page.locator("#sessionRowMenu")).toBeVisible();
+  await page.locator('#sessionRowMenu [data-row-act="rename"]').click();
+  await expect(page.locator("#sidebar")).toBeVisible();
+});
+
+test("the Agent button reports the drawer state", async ({ page }) => {
+  await setup(page);
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "true");
+  await page.click("#agentTab");
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
 });

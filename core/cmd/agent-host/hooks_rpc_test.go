@@ -37,7 +37,7 @@ func TestHooksMethods(t *testing.T) {
 			key, path = s.Handlers[0].Key, s.Path
 		}
 	}
-	ov = decode(callUnary(rt, "4", "hooksToggle", map[string]any{"cwd": ws, "key": key, "enabled": false}))
+	_ = decode(callUnary(rt, "4", "hooksToggle", map[string]any{"cwd": ws, "key": key, "enabled": false}))
 	ov = decode(callUnary(rt, "5", "hooksTrust", map[string]any{"cwd": ws, "path": path, "trust": false}))
 	for _, s := range ov.Sources {
 		if s.Path == path && (s.Trusted || s.Handlers[0].Enabled) {

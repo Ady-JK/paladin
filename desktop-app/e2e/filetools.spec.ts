@@ -30,8 +30,7 @@ test.beforeEach(async ({ page }) => {
           '{"requested_path":"/home/tester/project/app.conf","resolved_path":"/home/tester/project/app.conf","scope":"inside","replacements":1,"bytes":41,"lines":3,"match_start_line":3,"match_end_line":3,"matches":[{"start_line":3,"end_line":3}]}',
         createdAt: at,
         name: "edit",
-        arguments:
-          '{"path":"/home/tester/project/app.conf","old_string":"port = 8080","new_string":"port = 9090"}',
+        arguments: '{"path":"/home/tester/project/app.conf","old_string":"port = 8080","new_string":"port = 9090"}',
         status: "ok",
       },
       {
@@ -43,9 +42,27 @@ test.beforeEach(async ({ page }) => {
           scope: "inside",
           count: 4,
           occurrences: [
-            { occurrence: 1, start_line: 2, end_line: 2, before: { line: 1, text: "[server]" }, after: { line: 3, text: "port = 8080" } },
-            { occurrence: 2, start_line: 2, end_line: 2, before: { line: 1, text: "[server]" }, after: { line: 3, text: "port = 8080" } },
-            { occurrence: 3, start_line: 2, end_line: 2, before: { line: 1, text: "[server]" }, after: { line: 3, text: "port = 8080" } },
+            {
+              occurrence: 1,
+              start_line: 2,
+              end_line: 2,
+              before: { line: 1, text: "[server]" },
+              after: { line: 3, text: "port = 8080" },
+            },
+            {
+              occurrence: 2,
+              start_line: 2,
+              end_line: 2,
+              before: { line: 1, text: "[server]" },
+              after: { line: 3, text: "port = 8080" },
+            },
+            {
+              occurrence: 3,
+              start_line: 2,
+              end_line: 2,
+              before: { line: 1, text: "[server]" },
+              after: { line: 3, text: "port = 8080" },
+            },
             { occurrence: 4, start_line: 3, end_line: 3, before: { line: 2, text: 'host = "localhost"' }, after: null },
           ],
           hint: "copy more surrounding lines into old_string so it matches exactly once, or pass replace_all true",
@@ -87,8 +104,8 @@ test.beforeEach(async ({ page }) => {
         name: "edit",
         arguments: JSON.stringify({
           path: "/home/tester/project/app.conf",
-          old_string: "[server]\nhost = \"localhost\"",
-          new_string: "[server]\nhost = \"0.0.0.0\"",
+          old_string: '[server]\nhost = "localhost"',
+          new_string: '[server]\nhost = "0.0.0.0"',
           replace_all: true,
         }),
         status: "ok",
@@ -112,7 +129,12 @@ test.beforeEach(async ({ page }) => {
         ];
       }
       if (cmd === "openSession") {
-        return { sessionId: "sess-filetools-1", cwd: "/home/tester/project", provider: "Opencode Go", model: "openai/gpt-4o" };
+        return {
+          sessionId: "sess-filetools-1",
+          cwd: "/home/tester/project",
+          provider: "Opencode Go",
+          model: "openai/gpt-4o",
+        };
       }
       if (cmd === "sessionHistory") {
         return history;

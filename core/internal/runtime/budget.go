@@ -5,12 +5,8 @@
 package runtime
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -98,35 +94,12 @@ func (r *AgentRuntime) turnBudget(cwd, sessionID string) func() float64 {
 	}
 }
 
-// setDefaultBudget rewrites settings.json keeping keys it does not know.
+// setDefaultBudget stores the app-wide limit; nil or 0 clears it.
 func (r *AgentRuntime) setDefaultBudget(value *float64) error {
-	r.settingsMu.Lock()
-	defer r.settingsMu.Unlock()
-	raw := map[string]json.RawMessage{}
-	data, err := os.ReadFile(r.settingsPath())
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return fmt.Errorf("settings.json is not valid JSON: %w", err)
+	return r.updateSettings(func(s *Settings) {
+		s.DefaultBudgetUsd = 0
+		if value != nil {
+			s.DefaultBudgetUsd = *value
 		}
-	case !errors.Is(err, os.ErrNotExist):
-		return err
-	}
-	if value == nil || *value == 0 {
-		delete(raw, "defaultBudgetUsd")
-	} else {
-		raw["defaultBudgetUsd"], _ = json.Marshal(*value)
-	}
-	out, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(r.settingsPath()), 0o755); err != nil {
-		return err
-	}
-	tmp := r.settingsPath() + ".tmp"
-	if err := os.WriteFile(tmp, append(out, '\n'), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, r.settingsPath())
+	})
 }

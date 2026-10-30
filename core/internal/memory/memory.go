@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 )
 
 // Delim separates entries on disk; entries may be multiline.
@@ -316,28 +318,7 @@ func dedupe(entries []string) []string {
 }
 
 func atomicWrite(path, content string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".mem_*")
-	if err != nil {
-		return fmt.Errorf("io: write memory: %w", err)
-	}
-	name := tmp.Name()
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("io: write memory: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("io: write memory: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("io: write memory: %w", err)
-	}
-	_ = os.Chmod(name, 0o600)
-	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
+	if err := atomicfile.Write(path, []byte(content)); err != nil {
 		return fmt.Errorf("io: write memory: %w", err)
 	}
 	return nil

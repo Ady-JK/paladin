@@ -406,21 +406,6 @@ func (m *Manager) Close() {
 	wg.Wait()
 }
 
-func (m *Manager) pid(scope, folder, name string) int {
-	m.mu.Lock()
-	s := m.servers[serverKey{scope, cleanFolder(folder), name}]
-	m.mu.Unlock()
-	if s == nil {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.client == nil {
-		return 0
-	}
-	return s.client.PID()
-}
-
 func (m *Manager) sync(folder string) {
 	m.syncScope(ScopeGlobal, "")
 	if folder != "" {

@@ -329,7 +329,7 @@ func TestHubAttachReplaysCoalescedEvents(t *testing.T) {
 		case e.Delta != "":
 			kinds = append(kinds, "d:"+e.Delta)
 		case e.Tool != nil:
-			kinds = append(kinds, "t:"+string(e.Tool.Status))
+			kinds = append(kinds, "t:"+e.Tool.Status)
 		}
 	}
 	if got := strings.Join(kinds, "|"); got != "d:hello|t:ok|d: after" {
@@ -506,4 +506,46 @@ func TestHubApprovalEventsReplayAndFlagTheTurn(t *testing.T) {
 	}
 	close(resolved)
 	log.waitFor(t, "done", func(evs []TurnEvent) bool { return hasEvent(evs, "turn/done", "m") })
+}
+
+func TestHubStreamsAndReplaysThinking(t *testing.T) {
+	h, runs, log := newTestHub(t, 4)
+	step := make(chan struct{})
+	runs.behavior["m"] = func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+		tx <- agent.ChatChunk{ThinkingDropped: "max"}
+		tx <- agent.ChatChunk{Reasoning: "let me "}
+		tx <- agent.ChatChunk{Reasoning: "think"}
+		tx <- agent.ChatChunk{Delta: "ok"}
+		<-step
+		gate(func() {})
+		return agent.ChatOutcome{Reply: "ok"}, nil
+	}
+	submit(t, h, "A", "m")
+	log.waitFor(t, "delta", func(evs []TurnEvent) bool {
+		for _, e := range evs {
+			if e.Delta == "ok" {
+				return true
+			}
+		}
+		return false
+	})
+	att, err := h.Attach("A", func() (any, error) { return nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, e := range att.Events {
+		switch e.Event {
+		case "chat/reasoning":
+			kinds = append(kinds, "r:"+e.Reasoning)
+		case "chat/thinkingDropped":
+			kinds = append(kinds, "x:"+e.ThinkingDropped)
+		case "chat/delta":
+			kinds = append(kinds, "d:"+e.Delta)
+		}
+	}
+	if got := strings.Join(kinds, "|"); got != "x:max|r:let me think|d:ok" {
+		t.Fatalf("replay %s", got)
+	}
+	close(step)
 }

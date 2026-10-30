@@ -430,7 +430,9 @@ Tools:
   more lines follow, continue with a larger offset before drawing
   conclusions.
 - Use the write tool to create a new file with its full content, passing
-  overwrite true to replace an existing file wholesale. Use the edit
+  overwrite true to replace an existing file wholesale (only after reading
+  all of its current content; a conflict means it changed, so re-read,
+  merge and retry). Use the edit
   tool for small changes to an existing file: old_string must match
   verbatim, and when it matches more than once, retry with more
   surrounding lines so it matches exactly once, or pass replace_all true.
@@ -532,6 +534,9 @@ directories are created for you.
 - Wrong: {"path": "/home/user/project/notes/todo.txt", "content": "..."} when
   the file already exists and you did not pass overwrite — the call fails
   with exists true instead of clobbering it.
+- Wrong: overwrite true on a file you have not read in full, or that
+  changed since you read it — the call fails with conflict true and
+  writes nothing; read it again (every page), merge, and retry.
 - Wrong: writing a file and then describing it from memory — the write
   answer only confirms bytes and lines, so read it back when you need
   to quote it.

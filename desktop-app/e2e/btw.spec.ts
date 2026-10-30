@@ -18,12 +18,12 @@ test.beforeEach(async ({ page }) => {
 test("/btw answers in a card while the turn keeps running", async ({ page }) => {
   await page.evaluate(() => {
     const w = window as any;
-    w.__e2eRunTurn = (params: any, handlers: any) =>
+    w.__e2eRunTurn = (_params: any, handlers: any) =>
       new Promise((resolve) => {
         w.__finish = () => resolve({ sessionId: "", reply: "", stopped: false });
         handlers.onDelta("still working");
       });
-    w.__e2eSideQuestion = (args: any) =>
+    w.__e2eSideQuestion = () =>
       new Promise((resolve) => {
         w.__answer = () => resolve({ answer: "It is **refactoring** `auth.go`.", model: "gpt-x" });
       });

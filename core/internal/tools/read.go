@@ -3,8 +3,14 @@
 package tools
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -32,7 +38,10 @@ type ReadResponse struct {
 	StartLine     int    `json:"start_line"`
 	EndLine       int    `json:"end_line"`
 	HasMore       bool   `json:"has_more"`
-	StopReason    string `json:"stop_reason"`
+	// NextOffset is the offset that continues the read; 0 when HasMore
+	// is false.
+	NextOffset int    `json:"next_offset,omitempty"`
+	StopReason string `json:"stop_reason"`
 }
 
 type ReadTool struct{}
@@ -47,8 +56,8 @@ func (ReadTool) Definition() ToolDefinition {
 		Description: "Read a text file from disk. Pass path as a full " +
 			"absolute path; bare relative paths are rejected. " +
 			"The reply holds the file content, the line range that " +
-			"was returned, and whether more lines follow: continue with a larger offset " +
-			"when it does. Reads outside the workspace are allowed but reported as outside. " +
+			"was returned, and whether more lines follow: when has_more is true, " +
+			"call read again with offset set to next_offset. Reads outside the workspace are allowed but reported as outside. " +
 			"Use read to inspect a file before describing or changing it.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -107,19 +116,25 @@ func (ReadTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", ArgsError(fmt.Sprintf("read: path %q is not a regular file", args.Path))
 	}
-	content, start, end, hasMore, reason, rerr := readRange(resolved, offset, limit)
+	page, rerr := readRange(resolved, offset, limit)
 	if rerr != nil {
 		return "", ArgsError(rerr.Error())
+	}
+	fileVersions.notePage(ctx.SessionID, resolved, info, offset, page.end, page.hasMore, page.clipped, page.hash)
+	next := 0
+	if page.hasMore {
+		next = page.end + 1
 	}
 	out := ReadResponse{
 		RequestedPath: args.Path,
 		ResolvedPath:  resolved,
 		Scope:         scope,
-		Content:       content,
-		StartLine:     start,
-		EndLine:       end,
-		HasMore:       hasMore,
-		StopReason:    reason,
+		Content:       page.content,
+		StartLine:     page.start,
+		EndLine:       page.end,
+		HasMore:       page.hasMore,
+		NextOffset:    next,
+		StopReason:    page.reason,
 	}
 	data, err := jsonx.Marshal(out)
 	if err != nil {
@@ -155,56 +170,121 @@ func capRunes(line string) (string, bool) {
 	return string(runes[:maxLineRunes]), true
 }
 
-func readRange(path string, offset, limit int) (string, int, int, bool, string, error) {
-	data, err := os.ReadFile(path)
+// readPage is one page of a streamed read.
+type readPageResult struct {
+	content    string
+	start, end int
+	hasMore    bool
+	reason     string
+	// clipped: at least one returned line was truncated, so the page
+	// does not show the file's full content.
+	clipped bool
+	// hash is the whole file's content hash, set only when the read
+	// reached EOF.
+	hash string
+}
+
+// readRange streams path line by line: memory stays bounded by the
+// page and one capped line, whatever the file or line size. It stops
+// as soon as the line after the page is seen, so hasMore is exact.
+// NUL bytes are detected in everything scanned up to that point.
+func readRange(path string, offset, limit int) (readPageResult, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return "", 0, 0, false, "", fmt.Errorf("read: %s", syserr.Str(err))
+		return readPageResult{}, fmt.Errorf("read: %s", syserr.Str(err))
 	}
-	if hasNul(data) {
-		return "", 0, 0, false, "", fmt.Errorf("read: the file contains NUL bytes and is binary, not text; use a binary-aware tool or convert it before reading")
-	}
-	var content strings.Builder
-	lineNo := 0
-	start, end := 0, 0
-	hasMore := false
-	reason := "ok"
-	for _, raw := range strings.SplitAfter(string(data), "\n") {
-		if strings.HasSuffix(raw, "\n") {
-			raw = raw[:len(raw)-1]
-		} else if raw == "" {
-			continue
-		} else {
-			// The last line has no trailing newline but still counts.
-		}
-		lineNo++
-		if lineNo < offset {
-			continue
-		}
-		text, cut := capLineBytes(raw)
-		text = strings.TrimRight(text, "\r")
-		if capped, over := capRunes(text); over || cut {
-			text = capped + truncatedMarker
-		} else if cut {
-			text = text + truncatedMarker
-		}
-		if start > 0 {
-			if end-start+1 >= limit {
-				hasMore = true
-				reason = "line_limit"
-				break
+	defer f.Close()
+	h := sha256.New()
+	br := bufio.NewReaderSize(io.TeeReader(f, h), 64*1024)
+	binary := fmt.Errorf("read: the file contains NUL bytes and is binary, not text; use a binary-aware tool or convert it before reading")
+
+	var page strings.Builder
+	res := readPageResult{reason: "ok"}
+	line := make([]byte, 0, 256)
+	for lineNo := 1; ; lineNo++ {
+		keep := lineNo >= offset
+		line = line[:0]
+		cut, sawAny, eof := false, false, false
+		for {
+			chunk, err := br.ReadSlice('\n')
+			if len(chunk) > 0 {
+				sawAny = true
+				if bytes.IndexByte(chunk, 0) >= 0 {
+					return readPageResult{}, binary
+				}
+				if keep {
+					if room := maxLineBytes + utf8.UTFMax - len(line); room > 0 {
+						if len(chunk) > room {
+							chunk, cut = chunk[:room], true
+						}
+						line = append(line, chunk...)
+					} else {
+						cut = true
+					}
+				}
 			}
-			if content.Len()+len(text)+1 > MaxReadBytes {
-				hasMore = true
-				reason = "byte_limit"
-				break
+			if errors.Is(err, bufio.ErrBufferFull) {
+				continue
 			}
+			if err == io.EOF {
+				eof = true
+			} else if err != nil {
+				return readPageResult{}, fmt.Errorf("read: %s", syserr.Str(err))
+			}
+			break
 		}
-		if start == 0 {
-			start = lineNo
+		if !sawAny {
+			break
 		}
-		content.WriteString(text)
-		content.WriteByte('\n')
-		end = lineNo
+		if keep {
+			if res.start > 0 && res.end-res.start+1 >= limit {
+				res.hasMore, res.reason = true, "line_limit"
+				return withContent(res, &page), nil
+			}
+			text, marked := formatLine(line, cut)
+			res.clipped = res.clipped || marked
+			if res.start > 0 && page.Len()+len(text)+1 > MaxReadBytes {
+				res.hasMore, res.reason = true, "byte_limit"
+				return withContent(res, &page), nil
+			}
+			if res.start == 0 {
+				res.start = lineNo
+			}
+			page.WriteString(text)
+			page.WriteByte('\n')
+			res.end = lineNo
+		}
+		if eof {
+			break
+		}
 	}
-	return content.String(), start, end, hasMore, reason, nil
+	// Drain anything ReadSlice left buffered so the hash covers the file.
+	if _, err := io.Copy(io.Discard, br); err != nil {
+		return readPageResult{}, fmt.Errorf("read: %s", syserr.Str(err))
+	}
+	if res.start == 0 && offset > 1 {
+		res.reason = "past_end"
+	}
+	res.hash = hex.EncodeToString(h.Sum(nil))
+	return withContent(res, &page), nil
+}
+
+func withContent(res readPageResult, page *strings.Builder) readPageResult {
+	res.content = page.String()
+	return res
+}
+
+// formatLine trims the newline and CR, caps bytes and runes, and marks
+// a cut line.
+func formatLine(raw []byte, cut bool) (string, bool) {
+	raw = bytes.TrimSuffix(raw, []byte("\n"))
+	if !cut {
+		raw = bytes.TrimSuffix(raw, []byte("\r"))
+	}
+	text, over := capLineBytes(string(raw))
+	text = strings.TrimRight(text, "\r")
+	if capped, long := capRunes(text); long || over || cut {
+		return capped + truncatedMarker, true
+	}
+	return text, false
 }

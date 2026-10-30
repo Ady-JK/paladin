@@ -67,7 +67,12 @@ test("consecutive tool calls fold into one summarized group", async ({ page }) =
 
 test("text streamed right before a tool call is kept", async ({ page }) => {
   await setup(page);
-  await emit(page, ["Looking around:", tool("1", "shell", { cmd: "ls" }), "Now the config.", tool("2", "read", { path: "a.txt" })]);
+  await emit(page, [
+    "Looking around:",
+    tool("1", "shell", { cmd: "ls" }),
+    "Now the config.",
+    tool("2", "read", { path: "a.txt" }),
+  ]);
   await expect(page.locator("#messages")).toContainText("Looking around:");
   await expect(page.locator("#messages")).toContainText("Now the config.");
   await expect(page.locator("#messages")).not.toContainText("thinking");
@@ -75,7 +80,11 @@ test("text streamed right before a tool call is kept", async ({ page }) => {
 
 test("a lone call is one row: verb, detail and a command chip", async ({ page }) => {
   await setup(page);
-  await emit(page, [tool("1", "shell", { cmd: "pytest -q" }), "Tests pass.", tool("2", "read", { path: "src/conf.py" })]);
+  await emit(page, [
+    tool("1", "shell", { cmd: "pytest -q" }),
+    "Tests pass.",
+    tool("2", "read", { path: "src/conf.py" }),
+  ]);
   await expect(runs(page)).toHaveCount(2);
   await expect(page.locator(".tool-run-head")).toHaveCount(0);
   const ran = runs(page).nth(0).locator(".tool-row");
@@ -152,7 +161,17 @@ test("history transcripts group calls the same way", async ({ page }) => {
     const prev = p.invoke.bind(p);
     p.invoke = async (cmd: string, args: any) => {
       if (cmd === "listSessions") {
-        return [{ sessionId: "sess-hist", cwd: "/home/tester/project", createdAt: at, provider: "p", model: "m", messageCount: 8, title: "hist" }];
+        return [
+          {
+            sessionId: "sess-hist",
+            cwd: "/home/tester/project",
+            createdAt: at,
+            provider: "p",
+            model: "m",
+            messageCount: 8,
+            title: "hist",
+          },
+        ];
       }
       if (cmd === "sessionHistory") return history;
       return prev(cmd, args);
@@ -178,9 +197,10 @@ test("parallel tool updates keep nodes stable and the group animates shut", asyn
   // (a rebuilt spinner restarts its rotation and the head flickers).
   await page.evaluate(() => {
     const run = document.querySelector("#messages [data-tool-run]")!;
-    (run.querySelector(".tool-run-head .tool-spin") as any).__tag = "head";
-    (run.querySelector(".tool-run-head .tool-verb") as any).__tag = "verb";
-    (run.querySelector('.tool-row[data-tool="shell"] .tool-spin') as any).__tag = "row";
+    const node = (selector: string) => run.querySelector<HTMLElement & { __tag?: string }>(selector)!;
+    node(".tool-run-head .tool-spin").__tag = "head";
+    node(".tool-run-head .tool-verb").__tag = "verb";
+    node('.tool-row[data-tool="shell"] .tool-spin').__tag = "row";
   });
   await emit(page, [
     tool("p3", "read", { path: "src/a.ts" }, "running", ""),
@@ -189,10 +209,11 @@ test("parallel tool updates keep nodes stable and the group animates shut", asyn
   await expect(run.locator(".tool-run-head")).toContainText(/reading 1 file/);
   const tags = await page.evaluate(() => {
     const run = document.querySelector("#messages [data-tool-run]")!;
+    const tagOf = (selector: string) => run.querySelector<HTMLElement & { __tag?: string }>(selector)?.__tag;
     return {
-      head: (run.querySelector(".tool-run-head .tool-spin") as any)?.__tag,
-      verb: (run.querySelector(".tool-run-head .tool-verb") as any)?.__tag,
-      row: (run.querySelector('.tool-row[data-tool="shell"] .tool-spin') as any)?.__tag,
+      head: tagOf(".tool-run-head .tool-spin"),
+      verb: tagOf(".tool-run-head .tool-verb"),
+      row: tagOf('.tool-row[data-tool="shell"] .tool-spin'),
     };
   });
   expect(tags).toEqual({ head: "head", verb: "verb", row: "row" });

@@ -146,8 +146,8 @@ type candidate struct {
 func pathCandidates(line string) []candidate {
 	var out []candidate
 	for i := 0; i < len(line); {
-		switch c := line[i]; {
-		case c == '\'' || c == '"' || c == '`':
+		switch c := line[i]; c {
+		case '\'', '"', '`':
 			end := strings.IndexByte(line[i+1:], c)
 			if end < 0 {
 				i++
@@ -157,7 +157,7 @@ func pathCandidates(line string) []candidate {
 				out = append(out, candidate{i, filepath.Clean(q)})
 			}
 			i += end + 2
-		case c == ' ' || c == '\t':
+		case ' ', '\t':
 			i++
 		default:
 			end := strings.IndexAny(line[i:], " \t")

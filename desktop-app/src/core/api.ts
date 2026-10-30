@@ -2,7 +2,46 @@
 // Single seam between the feature modules and agent-host:
 // window.paladin (Electron preload) speaks JSONL to the sidecar.
 
-import type { BudgetView, HookScope, HooksOverview, SideAnswer, GitInfo, MergeResult, OpenedSession, RevertPreview, RevertResult, WorktreeStatus, ApprovalDecision, AttachSnapshot, MCPConfigFile, MCPNamedServer, MCPOverview, MCPScope, ToolsOverview, PermissionPreset, PermissionRule, PermissionsView, CommandEntry, MemoryProject, MemoryTarget, MemoryView, TurnEvent, TurnInfo, FileEntry, FsList, MessageInfo, OverallUsage, ProviderInfo, ResourceSnapshot, RefreshResult, SessionInfo, SessionUsage, SkillEntry, TodoEntry } from "./types";
+import type {
+  BudgetView,
+  ThinkingView,
+  HookScope,
+  HooksOverview,
+  SideAnswer,
+  GitInfo,
+  MergeResult,
+  OpenedSession,
+  RevertPreview,
+  RevertResult,
+  WorktreeStatus,
+  ApprovalDecision,
+  AttachSnapshot,
+  MCPConfigFile,
+  MCPNamedServer,
+  MCPOverview,
+  MCPScope,
+  ToolsOverview,
+  PermissionPreset,
+  PermissionRule,
+  PermissionsView,
+  CommandEntry,
+  MemoryProject,
+  MemoryTarget,
+  MemoryView,
+  TurnEvent,
+  TurnInfo,
+  FileEntry,
+  FsList,
+  MessageInfo,
+  OverallUsage,
+  ProviderInfo,
+  ResourceSnapshot,
+  RefreshResult,
+  SessionInfo,
+  SessionUsage,
+  SkillEntry,
+  TodoEntry,
+} from "./types";
 import { bridge } from "./bridge";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
@@ -35,16 +74,6 @@ export function canPickNative(): boolean {
   }
 }
 
-// pickFiles opens the OS file picker rooted at defaultPath. Null
-// means unavailable or cancelled; empty multi-select never happens.
-export function pickFiles(defaultPath: string | null): Promise<string[] | null> {
-  const dlg = bridge().dialog;
-  if (!dlg) {
-    return Promise.resolve(null);
-  }
-  return dlg.pickFiles(defaultPath);
-}
-
 // pickDirectory opens the OS folder picker rooted at defaultPath.
 export function pickDirectory(defaultPath: string | null): Promise<string | null> {
   const dlg = bridge().dialog;
@@ -57,11 +86,7 @@ export function pickDirectory(defaultPath: string | null): Promise<string | null
 // fileComplete suggests workspace files and folders for a partial
 // chat path (`@` mentions). Gitignored paths are never suggested;
 // `../` queries complete from the workspace parent.
-export function fileComplete(
-  query: string,
-  cwd: string | null,
-  limit = 20,
-): Promise<FileEntry[]> {
+export function fileComplete(query: string, cwd: string | null, limit = 20): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("fileComplete", { query, cwd, limit });
 }
 
@@ -147,21 +172,25 @@ export function refreshProvider(name: string): Promise<RefreshResult> {
   return invoke<RefreshResult>("refreshProviders", { name });
 }
 
-export function setDefaultProvider(
-  name: string,
-): Promise<ProviderInfo[]> {
+export function setDefaultProvider(name: string): Promise<ProviderInfo[]> {
   return invoke<ProviderInfo[]>("setDefaultProvider", { name });
 }
 
-export function addProvider(
-  entry: { name: string; apiUrl: string; apiKey: string; apiType: string },
-): Promise<ProviderInfo> {
+export function addProvider(entry: {
+  name: string;
+  apiUrl: string;
+  apiKey: string;
+  apiType: string;
+}): Promise<ProviderInfo> {
   return invoke<ProviderInfo>("addProvider", { ...entry });
 }
 
-export function updateProvider(
-  entry: { name: string; apiUrl: string; apiKey: string; apiType: string },
-): Promise<ProviderInfo> {
+export function updateProvider(entry: {
+  name: string;
+  apiUrl: string;
+  apiKey: string;
+  apiType: string;
+}): Promise<ProviderInfo> {
   return invoke<ProviderInfo>("updateProvider", { ...entry });
 }
 
@@ -196,50 +225,32 @@ export function openSession(
   return invoke("openSession", { sessionId, cwd, ...opts });
 }
 
-export function listSessions(
-  cwd: string | null,
-  limit = 100,
-): Promise<SessionInfo[]> {
+export function listSessions(cwd: string | null, limit = 100): Promise<SessionInfo[]> {
   return invoke<SessionInfo[]>("listSessions", { cwd, limit });
 }
 
-export function sessionHistory(
-  sessionId: string,
-  cwd: string | null,
-): Promise<MessageInfo[]> {
+export function sessionHistory(sessionId: string, cwd: string | null): Promise<MessageInfo[]> {
   return invoke<MessageInfo[]>("sessionHistory", { sessionId, cwd });
 }
 
 // sessionTodos reads the session's activity list (todos.json) for the
 // todo hat above the composer. Empty when the agent has not planned
 // yet — never an error for a missing file.
-export function sessionTodos(
-  sessionId: string,
-  cwd: string | null,
-): Promise<TodoEntry[]> {
+export function sessionTodos(sessionId: string, cwd: string | null): Promise<TodoEntry[]> {
   return invoke<TodoEntry[]>("sessionTodos", { sessionId, cwd });
 }
 
-export function sessionUsage(  sessionId: string,
-  cwd: string | null,
-): Promise<SessionUsage> {
+export function sessionUsage(sessionId: string, cwd: string | null): Promise<SessionUsage> {
   return invoke<SessionUsage>("sessionUsage", { sessionId, cwd });
 }
 
-export function overallUsage(
-  cwd: string | null,
-  limit = 50,
-): Promise<OverallUsage> {
+export function overallUsage(cwd: string | null, limit = 50): Promise<OverallUsage> {
   return invoke<OverallUsage>("overallUsage", { cwd, limit });
 }
 
 // deleteSession removes a session; its worktree goes with it when no
 // other session uses it and it is clean, or when discardWorktree is set.
-export function deleteSession(
-  sessionId: string,
-  cwd: string | null,
-  discardWorktree = false,
-): Promise<boolean> {
+export function deleteSession(sessionId: string, cwd: string | null, discardWorktree = false): Promise<boolean> {
   return invoke<boolean>("deleteSession", { sessionId, cwd, discardWorktree });
 }
 
@@ -306,10 +317,7 @@ export function openExternalPage(url: string): Promise<void> {
   return bridge().shell.openExternal(url);
 }
 
-export function stopChat(
-  sessionId: string | null,
-  cwd: string | null,
-): Promise<boolean> {
+export function stopChat(sessionId: string | null, cwd: string | null): Promise<boolean> {
   return invoke<boolean>("stopChat", { sessionId, cwd });
 }
 
@@ -326,10 +334,7 @@ export function answerAsk(
 
 // cancelAsk drops a blocked ask tool call and stops its turn, so the
 // agent never answers its own question after the user walks away.
-export function cancelAsk(
-  sessionId: string | null,
-  callId: string,
-): Promise<boolean> {
+export function cancelAsk(sessionId: string | null, callId: string): Promise<boolean> {
   return invoke<boolean>("cancelAsk", { sessionId, callId });
 }
 
@@ -344,7 +349,11 @@ export function permissionsGet(cwd: string | null, sessionId?: string | null): P
 }
 
 // permissionsSet replaces the global or one folder's saved rules.
-export function permissionsSet(scope: "global" | "folder", cwd: string | null, rules: PermissionRule[]): Promise<PermissionsView> {
+export function permissionsSet(
+  scope: "global" | "folder",
+  cwd: string | null,
+  rules: PermissionRule[],
+): Promise<PermissionsView> {
   return invoke<PermissionsView>("permissionsSet", { scope, cwd, rules });
 }
 
@@ -363,7 +372,12 @@ export function mcpSetConfig(scope: MCPScope, cwd: string | null, text: string):
   return invoke<MCPOverview>("mcpSetConfig", { scope, cwd, text });
 }
 
-export function mcpSetEnabled(scope: MCPScope, cwd: string | null, name: string, enabled: boolean): Promise<MCPOverview> {
+export function mcpSetEnabled(
+  scope: MCPScope,
+  cwd: string | null,
+  name: string,
+  enabled: boolean,
+): Promise<MCPOverview> {
   return invoke<MCPOverview>("mcpSetEnabled", { scope, cwd, name, enabled });
 }
 
@@ -383,7 +397,12 @@ export function mcpParse(text: string): Promise<{ servers: MCPNamedServer[] }> {
 }
 
 // mcpAdd merges servers into one mcp.json and starts them.
-export function mcpAdd(scope: MCPScope, cwd: string | null, servers: MCPNamedServer[], replace: boolean): Promise<MCPOverview> {
+export function mcpAdd(
+  scope: MCPScope,
+  cwd: string | null,
+  servers: MCPNamedServer[],
+  replace: boolean,
+): Promise<MCPOverview> {
   return invoke<MCPOverview>("mcpAdd", { scope, cwd, servers, replace });
 }
 
@@ -407,13 +426,35 @@ export function budgetGet(cwd: string | null, sessionId: string | null): Promise
 
 // budgetSet stores a USD limit globally or for one session; null
 // clears it, and 0 turns a session's limit off.
-export function budgetSet(scope: "global" | "session", cwd: string | null, sessionId: string | null, budgetUsd: number | null): Promise<BudgetView> {
+export function budgetSet(
+  scope: "global" | "session",
+  cwd: string | null,
+  sessionId: string | null,
+  budgetUsd: number | null,
+): Promise<BudgetView> {
   return invoke<BudgetView>("budgetSet", { scope, cwd, sessionId, budgetUsd });
+}
+
+// thinkingGet reads a model's thinking levels and its stored choice.
+export function thinkingGet(provider: string | null, model: string | null): Promise<ThinkingView> {
+  return invoke<ThinkingView>("thinkingGet", { provider, model });
+}
+
+// thinkingSet stores a model's thinking level app-wide; "" goes back to
+// the provider default.
+export function thinkingSet(provider: string, model: string, level: string): Promise<ThinkingView> {
+  return invoke<ThinkingView>("thinkingSet", { provider, model, level });
 }
 
 // toolsSet switches tools on or off globally or for one session; null
 // clears the switch.
-export function toolsSet(scope: "global" | "session", cwd: string | null, sessionId: string | null, names: string[], enabled: boolean | null): Promise<ToolsOverview> {
+export function toolsSet(
+  scope: "global" | "session",
+  cwd: string | null,
+  sessionId: string | null,
+  names: string[],
+  enabled: boolean | null,
+): Promise<ToolsOverview> {
   return invoke<ToolsOverview>("toolsSet", { scope, cwd, sessionId, names, enabled });
 }
 
@@ -444,12 +485,7 @@ export function hideExternalPage(): Promise<unknown> {
   return bridge().views.show("agent");
 }
 
-export function moveExternalPage(rect: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}): Promise<unknown> {
+export function moveExternalPage(rect: { x: number; y: number; width: number; height: number }): Promise<unknown> {
   return bridge().views.setBounds(rect);
 }
 
@@ -510,6 +546,12 @@ export function hooksToggle(cwd: string | null, key: string, enabled: boolean): 
 }
 
 // sideQuestion asks a /btw question about a session; nothing is saved.
-export function sideQuestion(sessionId: string, cwd: string | null, question: string, provider: string | null, model: string | null): Promise<SideAnswer> {
+export function sideQuestion(
+  sessionId: string,
+  cwd: string | null,
+  question: string,
+  provider: string | null,
+  model: string | null,
+): Promise<SideAnswer> {
   return invoke<SideAnswer>("sideQuestion", { sessionId, cwd, question, provider, model });
 }

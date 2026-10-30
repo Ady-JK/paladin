@@ -22,7 +22,3 @@ func killGroup(cmd *exec.Cmd) {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
-
-func processAlive(pid int) bool {
-	return pid > 0 && syscall.Kill(pid, 0) == nil
-}

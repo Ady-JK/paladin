@@ -30,6 +30,9 @@ func scriptModel(t *testing.T, rounds ...string) *httptest.Server {
 		mu.Unlock()
 		if i < len(rounds) && rounds[i] != "" {
 			args := fmt.Sprintf(`{"cmd":%q}`, rounds[i])
+			if strings.HasPrefix(rounds[i], "{") {
+				args = rounds[i]
+			}
 			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", fmt.Sprintf(
 				`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c%d","function":{"name":"shell","arguments":%q}}]}}]}`, i, args))
 			return
@@ -300,4 +303,12 @@ func TestForkDuringAPendingRevertCopiesOnlyTheVisibleConversation(t *testing.T) 
 	if len(got) != 1 || got[0].Content != "first" {
 		t.Fatalf("fork user rows = %+v", got)
 	}
+}
+
+func (r *AgentRuntime) loadSteps(sessionID, cwd string) ([]Step, error) {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return readSteps(sess.Dir)
 }

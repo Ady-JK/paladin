@@ -17,7 +17,7 @@ func TestReadOnlyCommand(t *testing.T) {
 		"find . -name '*.go' 2>/dev/null",
 		"grep -r 'a > b' .",
 		"cd sub && ls",
-		"FOO=1 env",
+		"FOO=1 ls",
 		"go list ./...",
 		"sed -n 1,20p a.go",
 	}
@@ -42,6 +42,17 @@ func TestReadOnlyCommand(t *testing.T) {
 		"python3 -c 'print(1)'",
 		"tee out",
 		"",
+		// Environment and config dumps can expose secrets.
+		"env",
+		"FOO=1 env",
+		"printenv",
+		"printenv OPENAI_API_KEY",
+		"go env",
+		"git config --list",
+		"git config --get remote.origin.url",
+		"awk 'BEGIN{print ENVIRON[\"HOME\"]}'",
+		"jq -n env",
+		"jq -n '$ENV.PATH'",
 	}
 	for _, c := range bad {
 		if err := ReadOnlyCommand(c); err == nil {

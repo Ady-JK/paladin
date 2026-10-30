@@ -180,7 +180,7 @@ func loadFrom(root, name, source string) (Skill, bool, error) {
 		if os.IsNotExist(err) {
 			return Skill{}, false, nil
 		}
-		return Skill{}, false, fmt.Errorf("io: list skills in %s: %s", root, err)
+		return Skill{}, false, fmt.Errorf("io: list skills in %s: %w", root, err)
 	}
 	dir := ""
 	actual := ""

@@ -3,9 +3,7 @@
 package runtime
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -36,10 +34,9 @@ func (r *AgentRuntime) SessionUsage(sessionID, cwd string) (session.SessionUsage
 // and the model it is billed under: the usage file's, else the
 // session's.
 func readUsage(sess transcript.Session) (session.UsageTotals, string) {
-	var totals session.UsageTotals
-	if data, err := os.ReadFile(sess.UsagePath()); err == nil {
-		_ = json.Unmarshal(data, &totals)
-	}
+	// A corrupt ledger shows as zero here; the budget check treats it
+	// as incomplete spend instead.
+	totals, _ := session.ReadLedger(sess.UsagePath())
 	model := totals.Model
 	if model == "" && sess.Meta.Model != nil {
 		model = *sess.Meta.Model

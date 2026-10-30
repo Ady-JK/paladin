@@ -65,7 +65,7 @@ func TestEditFuzzyCascade(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir, path := editFixture(t, c.file)
-			res, err := NewEngine().Edit(dir, path, c.old, c.new, false)
+			res, err := NewEngine().Edit("", dir, path, c.old, c.new, false)
 			if err != nil {
 				t.Fatalf("edit failed: %v", err)
 			}
@@ -82,7 +82,7 @@ func TestEditFuzzyCascade(t *testing.T) {
 func TestEditFuzzyMatchMustBeUnique(t *testing.T) {
 	// No exact hit; both lines match once trailing whitespace is ignored.
 	dir, path := editFixture(t, "foo() \nfoo()\t\n")
-	_, err := NewEngine().Edit(dir, path, "foo()\n", "bar()\n", false)
+	_, err := NewEngine().Edit("", dir, path, "foo()\n", "bar()\n", false)
 	var ee *EngineError
 	if err == nil || !errorsAs(err, &ee) || ee.Kind != "ambiguous" || ee.Count != 2 {
 		t.Fatalf("two fuzzy matches must be ambiguous, got %v", err)
@@ -94,7 +94,7 @@ func TestEditFuzzyMatchMustBeUnique(t *testing.T) {
 
 func TestEditFuzzyReplaceAll(t *testing.T) {
 	dir, path := editFixture(t, "a = 1  \nb\na = 1\t\n")
-	res, err := NewEngine().Edit(dir, path, "a = 1\n", "a = 2\n", true)
+	res, err := NewEngine().Edit("", dir, path, "a = 1\n", "a = 2\n", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestEditFuzzyReplaceAll(t *testing.T) {
 
 func TestEditRejectsNoOp(t *testing.T) {
 	dir, path := editFixture(t, "same\n")
-	_, err := NewEngine().Edit(dir, path, "same", "same", false)
+	_, err := NewEngine().Edit("", dir, path, "same", "same", false)
 	if err == nil || !strings.Contains(err.Error(), "identical") {
 		t.Fatalf("no-op edit must be rejected, got %v", err)
 	}
@@ -113,7 +113,7 @@ func TestEditRejectsNoOp(t *testing.T) {
 
 func TestEditNotFoundStillFails(t *testing.T) {
 	dir, path := editFixture(t, "alpha\nbeta\n")
-	_, err := NewEngine().Edit(dir, path, "gamma", "delta", false)
+	_, err := NewEngine().Edit("", dir, path, "gamma", "delta", false)
 	var ee *EngineError
 	if err == nil || !errorsAs(err, &ee) || ee.Kind != "notfound" {
 		t.Fatalf("got %v", err)
@@ -154,7 +154,7 @@ func TestEditRejectsInvalidUTF8WithoutChangingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewEngine().Edit(dir, path, "target", "changed", false)
+	_, err = NewEngine().Edit("", dir, path, "target", "changed", false)
 	if err == nil || !strings.Contains(err.Error(), "UTF-8") {
 		t.Fatalf("expected invalid UTF-8 guidance, got %v", err)
 	}

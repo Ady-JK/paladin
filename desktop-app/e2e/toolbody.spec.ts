@@ -49,7 +49,10 @@ async function noRawJson(body: ReturnType<Page["locator"]>): Promise<void> {
 
 test("shell shows a terminal: prompt, output and exit status", async ({ page }) => {
   await setup(page);
-  const body = await open(page, tool("1", "shell", { cmd: "ls -la src" }, "ok", { status: "done", exit_code: 0, output: "main.go\nutil.go\n" }));
+  const body = await open(
+    page,
+    tool("1", "shell", { cmd: "ls -la src" }, "ok", { status: "done", exit_code: 0, output: "main.go\nutil.go\n" }),
+  );
   const term = body.locator('[data-body="shell"]');
   await expect(term.locator(".term-cmd")).toHaveText("ls -la src");
   await expect(term.locator(".term-out")).toHaveText("main.go\nutil.go");
@@ -62,7 +65,12 @@ test("a failing command flags its exit code and truncation", async ({ page }) =>
   await setup(page);
   const body = await open(
     page,
-    tool("1", "shell", { cmd: "go test ./..." }, "ok", { status: "failed", exit_code: 2, output: "FAIL pkg", truncated: true }),
+    tool("1", "shell", { cmd: "go test ./..." }, "ok", {
+      status: "failed",
+      exit_code: 2,
+      output: "FAIL pkg",
+      truncated: true,
+    }),
   );
   await expect(body.locator(".term-status")).toHaveText("exit 2");
   await expect(body.locator(".term-status")).toHaveClass(/is-bad/);
@@ -73,7 +81,11 @@ test("a background job shows its id and log instead of output", async ({ page })
   await setup(page);
   const body = await open(
     page,
-    tool("1", "shell", { cmd: "npm run dev", background: true }, "ok", { job_id: "job-7", status: "running", log: "/tmp/job-7.log" }),
+    tool("1", "shell", { cmd: "npm run dev", background: true }, "ok", {
+      job_id: "job-7",
+      status: "running",
+      log: "/tmp/job-7.log",
+    }),
   );
   await expect(body.locator(".term-status")).toHaveText("running in background");
   await expect(body).toContainText("job-7");
@@ -83,7 +95,15 @@ test("a background job shows its id and log instead of output", async ({ page })
 
 test("a shell status check reads as a job, not a command", async ({ page }) => {
   await setup(page);
-  const body = await open(page, tool("1", "shell", { action: "status", job_id: "job-7" }, "ok", { job_id: "job-7", status: "done", exit_code: 0, output: "ready" }));
+  const body = await open(
+    page,
+    tool("1", "shell", { action: "status", job_id: "job-7" }, "ok", {
+      job_id: "job-7",
+      status: "done",
+      exit_code: 0,
+      output: "ready",
+    }),
+  );
   await expect(body.locator(".term-cmd")).toHaveText("status job-7");
   await expect(body.locator(".term-out")).toHaveText("ready");
 });
@@ -100,6 +120,7 @@ test("read shows the lines with their real numbers", async ({ page }) => {
       start_line: 10,
       end_line: 12,
       has_more: true,
+      next_offset: 13,
       stop_reason: "line_limit",
     }),
   );
@@ -108,7 +129,26 @@ test("read shows the lines with their real numbers", async ({ page }) => {
   await expect(view.locator(".file-head")).toContainText("src/a.go");
   await expect(view.locator(".file-head")).toContainText("lines 10–12");
   await expect(view.locator(".file-more")).toBeVisible();
+  await expect(view.locator(".file-more")).toHaveAttribute("title", /line limit.*line 13/);
   await noRawJson(body);
+});
+
+test("read past the end says so instead of 'empty file'", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "read", { path: "src/a.go", offset: 99 }, "ok", {
+      requested_path: "src/a.go",
+      resolved_path: "/home/tester/project/src/a.go",
+      scope: "inside",
+      content: "",
+      start_line: 0,
+      end_line: 0,
+      has_more: false,
+      stop_reason: "past_end",
+    }),
+  );
+  await expect(body.locator(".file-empty")).toHaveText("past the end of the file");
 });
 
 test("todo renders a checklist", async ({ page }) => {
@@ -142,7 +182,10 @@ test("ask renders questions with their answers", async ({ page }) => {
 
 test("a failed call shows its error message plainly", async ({ page }) => {
   await setup(page);
-  const body = await open(page, tool("1", "read", { path: "nope.txt" }, "failed", { error: 'read: path "nope.txt" does not exist' }));
+  const body = await open(
+    page,
+    tool("1", "read", { path: "nope.txt" }, "failed", { error: 'read: path "nope.txt" does not exist' }),
+  );
   await expect(body.locator(".tool-err")).toHaveText('read: path "nope.txt" does not exist');
   await noRawJson(body);
 });
@@ -151,7 +194,10 @@ test("other tools get a key/value view of arguments and result", async ({ page }
   await setup(page);
   const body = await open(
     page,
-    tool("1", "web_fetch", { url: "https://example.com", max: 3, deep: false }, "ok", { title: "Example", links: ["a", "b"] }),
+    tool("1", "web_fetch", { url: "https://example.com", max: 3, deep: false }, "ok", {
+      title: "Example",
+      links: ["a", "b"],
+    }),
   );
   const args = body.locator('[data-body="args"]');
   await expect(args.locator(".kv-key")).toHaveText(["url", "max", "deep"]);

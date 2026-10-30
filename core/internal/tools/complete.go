@@ -14,6 +14,7 @@ package tools
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -362,9 +363,9 @@ func walkFiles(root string) ([]string, error) {
 	}
 	ign := newIgnoreMatcher(root)
 	var files []string
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
 		name := d.Name()
 		if d.IsDir() {
@@ -408,13 +409,13 @@ type ignoreMatcher struct {
 
 func newIgnoreMatcher(root string) *ignoreMatcher {
 	m := &ignoreMatcher{root: cleanPath(root)}
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || d.Name() != ".gitignore" {
-			return nil
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || d.Name() != ".gitignore" {
+			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil //nolint:nilerr // an unreadable .gitignore is skipped
 		}
 		dir := cleanPath(filepath.Dir(path))
 		for _, line := range strings.Split(string(data), "\n") {
@@ -520,20 +521,16 @@ func matchIgnoreRule(r ignoreRule, rel string, isDir bool) bool {
 }
 
 // parentSegments yields rel's parent directories, nearest first.
-func parentSegments(rel string) <-chan string {
-	ch := make(chan string, 4)
-	go func() {
-		defer close(ch)
+func parentSegments(rel string) iter.Seq[string] {
+	return func(yield func(string) bool) {
 		for {
 			i := strings.LastIndex(rel, "/")
-			if i <= 0 {
+			if i <= 0 || !yield(rel[:i]) {
 				return
 			}
 			rel = rel[:i]
-			ch <- rel
 		}
-	}()
-	return ch
+	}
 }
 
 // wildcardMatch matches with * ? and ** (any depth, incl. slashes).

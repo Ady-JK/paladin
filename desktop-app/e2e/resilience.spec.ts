@@ -27,7 +27,11 @@ test("a compaction streams a divider with the token change", async ({ page }) =>
   await page.evaluate(() => {
     (window as any).__e2eChatEvents = [
       { event: "chat/compact", compaction: { phase: "start", reason: "auto", tokensBefore: 170000 } },
-      { event: "chat/compact", compaction: { phase: "done", reason: "auto", tokensBefore: 170000, tokensAfter: 30500 }, waitMs: 600 },
+      {
+        event: "chat/compact",
+        compaction: { phase: "done", reason: "auto", tokensBefore: 170000, tokensAfter: 30500 },
+        waitMs: 600,
+      },
     ];
   });
   await page.fill("#promptInput", "keep going");
@@ -42,7 +46,10 @@ test("a failed compaction says so without failing the turn", async ({ page }) =>
   await page.evaluate(() => {
     (window as any).__e2eChatEvents = [
       { event: "chat/compact", compaction: { phase: "start", reason: "auto", tokensBefore: 170000 } },
-      { event: "chat/compact", compaction: { phase: "failed", reason: "auto", tokensBefore: 170000, error: "summary boom" } },
+      {
+        event: "chat/compact",
+        compaction: { phase: "failed", reason: "auto", tokensBefore: 170000, error: "summary boom" },
+      },
     ];
   });
   await page.fill("#promptInput", "keep going");
@@ -88,8 +95,17 @@ test("an edit applied by a fuzzy match is labeled", async ({ page }) => {
         tool: {
           id: "e1",
           name: "edit",
-          arguments: JSON.stringify({ path: "/home/tester/project/a.go", old_string: "a  :=  1", new_string: "a := 2" }),
-          result: JSON.stringify({ path: "/home/tester/project/a.go", replacements: 1, match_strategy: "whitespace", note: "re-read" }),
+          arguments: JSON.stringify({
+            path: "/home/tester/project/a.go",
+            old_string: "a  :=  1",
+            new_string: "a := 2",
+          }),
+          result: JSON.stringify({
+            path: "/home/tester/project/a.go",
+            replacements: 1,
+            match_strategy: "whitespace",
+            note: "re-read",
+          }),
           status: "ok",
         },
       },

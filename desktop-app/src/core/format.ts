@@ -34,9 +34,7 @@ export function renderMarkdown(text: string): string {
 // unclosed fence (still streaming) renders the same way.
 function renderFence(block: string): string {
   const nl = block.indexOf("\n");
-  const lang = (nl === -1 ? block : block.slice(0, nl))
-    .trim()
-    .replace(/[^a-z0-9+#-]/gi, "");
+  const lang = (nl === -1 ? block : block.slice(0, nl)).trim().replace(/[^a-z0-9+#-]/gi, "");
   const code = (nl === -1 ? "" : block.slice(nl + 1)).replace(/^\n/, "");
   const label = lang ? `<span class="md-lang">${lang}</span>` : "";
   return `<pre class="md-pre"><code>${code}</code>${label}</pre>`;
@@ -243,11 +241,7 @@ function alignAttr(align: string | undefined): string {
 // Anchors carry data-ext and are opened in the system browser by the
 // chat view's delegated click handler.
 function mdLink(text: string, rawUrl: string): string {
-  const url = rawUrl
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .trim();
+  const url = rawUrl.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
   if (!/^(https?:\/\/|mailto:)/i.test(url)) {
     return text;
   }
@@ -269,9 +263,7 @@ function mdInline(src: string): string {
   s = s.replace(/!\[([^\]]*?)\]\((\S+?)(?:\s+"[^"]*")?\)/g, (_m, alt: string, url: string) =>
     stash(mdLink(alt.trim() || "image", url)),
   );
-  s = s.replace(/\[([^\]]+?)\]\((\S+?)(?:\s+"[^"]*")?\)/g, (_m, t: string, url: string) =>
-    stash(mdLink(t, url)),
-  );
+  s = s.replace(/\[([^\]]+?)\]\((\S+?)(?:\s+"[^"]*")?\)/g, (_m, t: string, url: string) => stash(mdLink(t, url)));
   s = s.replace(/\*\*\*([^*\n]+?)\*\*\*/g, "<strong><em>$1</em></strong>");
   s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_\n]+?)__/g, "<strong>$1</strong>");
@@ -330,6 +322,7 @@ export function tryParseJson(raw: string): Record<string, unknown> | null {
       return value as Record<string, unknown>;
     }
   } catch {
+    // Not JSON: the caller falls back to the raw text.
   }
   return null;
 }
@@ -396,9 +389,7 @@ export function labKey(provider: string, lab: string): string {
 // It strips a trailing CR so CRLF files render cleanly, and drops the
 // phantom empty line a trailing newline would otherwise produce.
 export function splitLines(text: string): string[] {
-  const lines = text
-    .split("\n")
-    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+  const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
   if (lines.length > 1 && lines[lines.length - 1] === "") {
     lines.pop();
   }

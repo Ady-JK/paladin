@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -154,7 +153,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := readBody(resp.Body, maxResponseBody)
 	if err != nil {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
@@ -265,8 +264,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(resp.Body)
-		return statusErrorFrom(p.name, "anthropic", resp, string(data))
+		return statusErrorFrom(p.name, "anthropic", resp, readErrorBody(resp.Body))
 	}
 
 	send := func(c Chunk) error {

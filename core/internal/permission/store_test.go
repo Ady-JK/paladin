@@ -3,11 +3,12 @@ package permission
 import (
 	"context"
 	"encoding/json"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
 func TestStoreScopes(t *testing.T) {

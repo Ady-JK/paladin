@@ -10,6 +10,7 @@ import { state } from "../core/state";
 import type { BudgetView } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
+import { claimPopover, registerPopover } from "../ui/popover";
 import { formatUsd } from "./usage";
 
 const EMPTY: BudgetView = { defaultUsd: 0, sessionUsd: null, effectiveUsd: 0, spentUsd: 0, hasCost: false, calls: 0 };
@@ -54,6 +55,7 @@ function ensureChip(): HTMLButtonElement {
   group?.parentElement?.insertBefore(wrap, group);
   chip = wrap.querySelector<HTMLButtonElement>("#budgetChip")!;
   menu = wrap.querySelector<HTMLElement>("#budgetMenu")!;
+  registerPopover("budget", closeMenu);
   chip.addEventListener("click", (event) => {
     event.stopPropagation();
     if (menu!.classList.contains("hidden")) openBudgetMenu();
@@ -106,9 +108,9 @@ function paintChip(): void {
   el.innerHTML = `${icon("sl-budget", "h-3.5 w-3.5")}<span>${escapeHtml(label)}</span>${warn}`;
   el.title =
     lv === "unknown"
-      ? "Budget set, but the provider reports no cost — it can't be enforced"
+      ? "Limit set, but the provider reports no cost, so spend isn't tracked or enforced"
       : v.effectiveUsd > 0
-        ? `Spent ${formatUsd(v.spentUsd)} of ${formatUsd(v.effectiveUsd)}`
+        ? `Tracked spend ${formatUsd(v.spentUsd)} of a ${formatUsd(v.effectiveUsd)} limit`
         : "No spend limit — click to set one";
 }
 
@@ -117,10 +119,13 @@ function paintMenu(): void {
   const v = withDraft(view);
   const own = v.sessionUsd;
   const dflt = v.defaultUsd > 0 ? formatUsd(v.defaultUsd) : "no limit";
-  const spent = v.hasCost || v.calls === 0 ? `Spent ${formatUsd(v.spentUsd)} in this session.` : `${v.calls} call${v.calls === 1 ? "" : "s"}, cost unknown.`;
+  const spent =
+    v.hasCost || v.calls === 0
+      ? `Spent ${formatUsd(v.spentUsd)} in this session.`
+      : `${v.calls} call${v.calls === 1 ? "" : "s"}, cost unknown.`;
   const noCost =
     !v.hasCost && v.calls > 0
-      ? `<div class="budget-warn"><span class="perm-chip-warn" aria-hidden="true"></span><span>This provider reports no cost, so a limit can't be enforced.</span></div>`
+      ? `<div class="budget-warn"><span class="perm-chip-warn" aria-hidden="true"></span><span>This provider reports no cost, so spend isn't tracked and the limit isn't enforced.</span></div>`
       : "";
   const mark = (on: boolean): string => (on ? icon("check", "h-3 w-3") : "");
   menu.innerHTML =
@@ -133,11 +138,12 @@ function paintMenu(): void {
     `</form>` +
     `<button type="button" class="perm-item${own === null ? " is-on" : ""}" data-budget="inherit"><span class="perm-item-text"><span class="perm-item-label">Use app default (${escapeHtml(dflt)})</span></span><span class="perm-item-check">${mark(own === null)}</span></button>` +
     `<button type="button" class="perm-item${own === 0 ? " is-on" : ""}" data-budget="off"><span class="perm-item-text"><span class="perm-item-label">No limit</span></span><span class="perm-item-check">${mark(own === 0)}</span></button>` +
-    `<div class="budget-foot">At the limit the agent stops using tools and writes a summary of what's done and what's left.</div>`;
+    `<div class="budget-foot">A tracked-cost limit, not a guaranteed cap: it counts the cost the provider reports, calls with no reported cost aren't counted, and spend can go past it, since the call that crosses it and the closing summary still run. At the limit the agent stops using tools and writes a summary of what's done and what's left.</div>`;
 }
 
 export function openBudgetMenu(): void {
   ensureChip();
+  claimPopover("budget");
   paintMenu();
   menu!.classList.remove("hidden");
   chip!.setAttribute("aria-expanded", "true");

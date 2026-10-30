@@ -2,6 +2,7 @@ package permission
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +15,7 @@ const (
 	KindWrite    = "write"
 	KindEscalate = "escalate"
 	KindMCP      = "mcp"
+	KindRead     = "read"
 )
 
 // maxCardArgs caps the arguments an approval card shows.
@@ -33,11 +35,20 @@ type Request struct {
 	Outside     bool
 	Safe        bool
 	Destructive bool
+	// Real is Path with symlinks resolved (reads); Linked marks a path
+	// inside the workspace whose symlink leads out.
+	Real   string
+	Linked bool
 	// Unparsed commands use substitution, so no rule can cover them.
 	Unparsed bool
+	// Reads are paths outside the workspace that otherwise read-only
+	// shell segments name; VarRead marks one that expands a variable.
+	Reads    []readTarget
+	VarRead  bool
 	Segments []segment
-	// Server, MCPTool and Args describe an MCP call; Safe and
-	// Destructive carry the server's readOnly/destructive hints.
+	// Server, MCPTool and Args describe an MCP call. Destructive carries
+	// the server's destructiveHint, which can only make the gate stricter;
+	// its readOnlyHint is untrusted and never sets Safe.
 	Server  string
 	MCPTool string
 	Args    string
@@ -50,7 +61,7 @@ func ClassifyMCP(name string, info tools.MCPInfo, raw json.RawMessage) Request {
 		args = args[:maxCardArgs] + "…"
 	}
 	return Request{Tool: name, Kind: KindMCP, Server: info.Server, MCPTool: info.Tool, Args: args,
-		Safe: info.ReadOnly, Destructive: info.Destructive}
+		Destructive: info.Destructive}
 }
 
 // Classify reports whether a call needs a permission decision and what
@@ -65,7 +76,7 @@ func Classify(name string, raw json.RawMessage, workspace string) (Request, bool
 		if json.Unmarshal(raw, &a) != nil || (a.Action != "" && a.Action != "run") || strings.TrimSpace(a.Cmd) == "" {
 			return Request{}, false
 		}
-		return classifyShell(a.Cmd), true
+		return classifyShell(a.Cmd, workspace), true
 	case "write", "edit":
 		var a struct {
 			Path string `json:"path"`
@@ -79,11 +90,24 @@ func Classify(name string, raw json.RawMessage, workspace string) (Request, bool
 			return Request{}, false
 		}
 		return Request{Tool: name, Kind: KindWrite, Path: path, Outside: scope == tools.ScopeOutside}, true
+	case "read":
+		var a struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(raw, &a) != nil {
+			return Request{}, false
+		}
+		path, scope, err := tools.ResolveScopedPath(name, "path", a.Path, workspace)
+		if err != nil || scope == tools.ScopeInside {
+			return Request{}, false
+		}
+		t := newReadTarget(path, workspace)
+		return Request{Tool: name, Kind: KindRead, Path: path, Real: t.real, Linked: t.linked, Outside: true}, true
 	}
 	return Request{}, false
 }
 
-func classifyShell(cmd string) Request {
+func classifyShell(cmd, workspace string) Request {
 	req := Request{Tool: "shell", Kind: KindShell, Command: strings.TrimSpace(cmd)}
 	req.Safe = tools.ReadOnlyCommand(cmd) == nil
 	req.Destructive = isDestructive(cmd)
@@ -97,9 +121,78 @@ func classifyShell(cmd string) Request {
 	for _, words := range segs {
 		safe := !redirects(words) && tools.ReadOnlyCommand(strings.Join(quoteAll(words), " ")) == nil
 		req.Segments = append(req.Segments, segment{words: words, safe: safe})
+		if safe {
+			reads, variable := outsideReads(words, workspace)
+			req.Reads = append(req.Reads, reads...)
+			req.VarRead = req.VarRead || variable
+		}
 	}
 	return req
 }
+
+// readTarget is a path a command reads: as written and symlink-resolved.
+// linked marks a path inside the workspace whose symlink leads out.
+type readTarget struct {
+	path, real string
+	linked     bool
+}
+
+func newReadTarget(path, workspace string) readTarget {
+	return readTarget{path: path, real: tools.RealPath(path), linked: tools.Within(path, workspace)}
+}
+
+// outsideReads finds the arguments of a read-only command that name a
+// path outside the workspace: absolute, ~, .. or an existing symlink
+// that leads out. Best effort — a program can still open paths it does
+// not take as arguments. variable reports a $ the shell would expand.
+func outsideReads(words []string, workspace string) (out []readTarget, variable bool) {
+	home, _ := homeDir()
+	for _, w := range words[1:] {
+		if strings.HasPrefix(w, "-") {
+			_, v, ok := strings.Cut(w, "=")
+			if !ok {
+				continue
+			}
+			w = v
+		}
+		if strings.Contains(w, "$") || (strings.HasPrefix(w, "~") && w != "~" && !strings.HasPrefix(w, "~/")) {
+			variable = true
+			continue
+		}
+		var abs string
+		switch {
+		case w == "~" || strings.HasPrefix(w, "~/"):
+			if home == "" {
+				variable = true
+				continue
+			}
+			abs = filepath.Join(home, strings.TrimPrefix(w, "~"))
+		case filepath.IsAbs(w):
+			abs = w
+		case workspace != "":
+			abs = filepath.Join(workspace, w)
+		default:
+			continue
+		}
+		abs = filepath.Clean(abs)
+		if safeDevice[abs] {
+			continue
+		}
+		if !filepath.IsAbs(w) && !strings.HasPrefix(w, "~") && !strings.Contains(w, "..") {
+			// Plain relative words (patterns, file names) only count
+			// when they exist and resolve out of the workspace.
+			if _, err := os.Lstat(abs); err != nil {
+				continue
+			}
+		}
+		if _, scope, err := tools.ResolveScopedPath("shell", "path", abs, workspace); err == nil && scope == tools.ScopeOutside {
+			out = append(out, newReadTarget(abs, workspace))
+		}
+	}
+	return out, variable
+}
+
+var safeDevice = map[string]bool{"/dev/null": true, "/dev/stdin": true, "/dev/stdout": true, "/dev/stderr": true}
 
 // redirects reports an output redirection; the words were unquoted, so
 // a quoted ">" argument is over-reported, which only costs a prompt.

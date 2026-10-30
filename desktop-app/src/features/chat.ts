@@ -1,7 +1,16 @@
 // chat.ts sends messages and streams the agent reply.
 
 import * as api from "../core/api";
-import { attachBtnEl, inputEl, pauseBtn, sendBtn, sessionLabelEl, steerBtn, workspaceInputEl, workspaceLabelEl } from "../core/dom";
+import {
+  attachBtnEl,
+  inputEl,
+  pauseBtn,
+  sendBtn,
+  sessionLabelEl,
+  steerBtn,
+  workspaceInputEl,
+  workspaceLabelEl,
+} from "../core/dom";
 import { state } from "../core/state";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
@@ -9,7 +18,8 @@ import { addTurn, dismissGreeting, initMessageLinks } from "./chatView";
 import { handleMentionKey, expandMentions } from "./mentions";
 import { openFilePicker } from "./filePicker";
 import { renderSessions } from "./sessions";
-import { handleSlashKey, routeSlash, setSlashRunner, type AgentRoute } from "./slash";
+import { handleSlashKey, setSlashRunner } from "./slash";
+import { routeSlash, type AgentRoute } from "./slashRoute";
 import { initMode, setMode, toggleMode } from "./mode";
 import { currentPreset, initPermissions, keepDraftFor } from "./permissions";
 import { dropFinishedPanel } from "./todos";
@@ -80,7 +90,7 @@ async function ensureSession(title: string): Promise<void> {
   renderSessions();
 }
 
-export async function send(): Promise<void> {
+async function send(): Promise<void> {
   const message = inputEl.value.trim();
   if (!message) {
     return;
@@ -161,7 +171,7 @@ export async function send(): Promise<void> {
 // before its next model call instead of after the turn ends. Slash
 // lines, idle sessions and a turn that already finished fall back to a
 // normal (queued) send.
-export async function steer(): Promise<void> {
+async function steer(): Promise<void> {
   const message = inputEl.value.trim();
   if (!message) return;
   if (message.startsWith("/") || !state.sessionId || !isBusy(state.sessionId)) {
@@ -186,7 +196,7 @@ export async function steer(): Promise<void> {
 }
 
 // requestStop asks the running turn to stop after what already streamed.
-export function requestStop(): void {
+function requestStop(): void {
   if (!state.sessionId) {
     return;
   }

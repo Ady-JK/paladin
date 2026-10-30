@@ -18,10 +18,7 @@ export function toast(message: string, kind: "ok" | "error" = "ok"): void {
   void toastEl.offsetWidth;
   toastEl.classList.add("toast-in");
 
-  toastIconEl.innerHTML = icon(
-    kind === "error" ? "xmark" : "check",
-    "h-3 w-3 flex-shrink-0",
-  );
+  toastIconEl.innerHTML = icon(kind === "error" ? "xmark" : "check", "h-3 w-3 flex-shrink-0");
 
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {

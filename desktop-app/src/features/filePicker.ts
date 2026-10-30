@@ -25,14 +25,7 @@ import type { FsList } from "../core/types";
 import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { autosizeComposer } from "./chat";
-import {
-  crumbsHTML,
-  filterEntries,
-  getShowHidden,
-  rowsHTML,
-  setShowHidden,
-  type PickerSelection,
-} from "./picker";
+import { crumbsHTML, filterEntries, getShowHidden, rowsHTML, setShowHidden, type PickerSelection } from "./picker";
 
 let pickDir = "";
 let currentList: FsList | null = null;
@@ -50,11 +43,7 @@ function paintPicker(): void {
   const visible = filterEntries(currentList, showHidden, query);
   fileCrumbsEl.innerHTML = crumbsHTML(currentList.currentPath);
   filePathEl.textContent = currentList.currentPath;
-  fileListEl.innerHTML = rowsHTML(
-    { ...currentList, ...visible },
-    selection,
-    { filesEnabled: true },
-  );
+  fileListEl.innerHTML = rowsHTML({ ...currentList, ...visible }, selection, { filesEnabled: true });
   paintIcons(fileModalEl);
 
   const fileOk = selection?.kind === "file";
@@ -72,7 +61,7 @@ function paintPicker(): void {
   fileListEl.querySelectorAll<HTMLElement>("[data-fb-open]").forEach((el) => {
     el.addEventListener("click", (event) => {
       event.stopPropagation();
-      const path = (el as HTMLElement).dataset.fbOpen ?? "";
+      const path = el.dataset.fbOpen ?? "";
       void browseFilePicker(path);
     });
     el.addEventListener("dblclick", (event) => {
@@ -81,7 +70,7 @@ function paintPicker(): void {
   });
   fileListEl.querySelectorAll<HTMLButtonElement>("button[data-fb-select]").forEach((button) => {
     const path = button.dataset.fbSelect ?? "";
-    const kind = (button.dataset.fbKind === "file" ? "file" : "folder") as PickerSelection["kind"];
+    const kind = button.dataset.fbKind === "file" ? "file" : "folder";
     button.addEventListener("click", () => {
       selection = { path, kind };
       paintPicker();
@@ -157,7 +146,7 @@ function confirmSelection(which: "file" | "folder"): void {
 
 // openFilePicker shows the in-app attach browser rooted at the
 // workspace. Search and toggle restore their persisted state.
-export async function openFilePicker(): Promise<void> {
+export function openFilePicker(): void {
   pickDir = state.cwd || "";
   currentList = null;
   selection = null;

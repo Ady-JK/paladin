@@ -120,7 +120,7 @@ export type OpenedSession = {
 // UsageModel is one model's slice of a session's usage. FillPercent is
 // the model's last call input over its window; absent for unknown
 // windows. LastInputTokens is absent on fixtures that predate it.
-export type UsageModel = {
+type UsageModel = {
   model: string;
   contextWindow: number;
   contextKnown: boolean;
@@ -200,7 +200,7 @@ export type DailyPoint = {
 };
 
 // OverallSessionEntry is one session's slice of the fleet-wide rollup.
-export type OverallSessionEntry = {
+type OverallSessionEntry = {
   sessionId: string;
   title?: string;
   model: string;
@@ -246,7 +246,8 @@ export type MessageInfo = {
   arguments?: string;
   status?: string;
   // kind tags special rows: "compaction" is a context-compaction
-  // divider whose content is the summary.
+  // divider whose content is the summary; "thinking" is the model's
+  // thinking before the assistant message that follows.
   kind?: string;
   // index is a user row's transcript position, the handle for undo.
   index?: number;
@@ -297,12 +298,12 @@ export type ProviderInfo = {
   hasKey?: boolean;
 };
 
-export type FsDirectory = {
+type FsDirectory = {
   name: string;
   path: string;
 };
 
-export type FsFile = {
+type FsFile = {
   name: string;
   path: string;
 };
@@ -357,14 +358,6 @@ export type AskQuestion = {
   multiple?: boolean;
 };
 
-// AskAnswer pairs one asked question with the user's answer, in the
-// order the questions were asked.
-export type AskAnswer = {
-  question: string;
-  answer: string;
-  selected?: string[];
-};
-
 // TodoEntry is one row of the session's activity list from
 // `sessionTodos`: what to do plus where it stands (not_started,
 // in_progress, finished, cancelled).
@@ -382,7 +375,7 @@ export type ChatEntry = {
 };
 
 // TurnState is where a turn sits in the sidecar's turn hub.
-export type TurnState = "queued" | "running" | "done";
+type TurnState = "queued" | "running" | "done";
 
 // TurnInfo describes one submitted message (see PROTOCOL.md).
 export type TurnInfo = {
@@ -420,6 +413,10 @@ export type TurnEvent = {
   sessionId: string;
   turnId: string;
   delta?: string;
+  // chat/reasoning: a piece of the model's thinking.
+  reasoning?: string;
+  // chat/thinkingDropped: the thinking level the provider rejected.
+  thinkingDropped?: string;
   tool?: ToolInfo;
   retry?: RetryInfo;
   compaction?: CompactionInfo;
@@ -431,7 +428,7 @@ export type TurnEvent = {
 };
 
 // HookNote is chat/hook: a user hook ran and did something worth showing.
-export type HookOutcome = "blocked" | "context" | "error" | "stopped" | "message";
+type HookOutcome = "blocked" | "context" | "error" | "stopped" | "message";
 export type HookNote = { event: string; command: string; outcome: HookOutcome; message?: string };
 
 // Hooks settings (hooksList and friends).
@@ -465,9 +462,15 @@ export type SideAnswer = { answer: string; model: string };
 // SteerInfo is a message sent into a running turn (chat/steer).
 export type SteerInfo = { message: string; display?: string };
 
-// BudgetNotice is chat/budget: the spend limit was hit, or it cannot
-// be enforced because the provider reports no cost.
-export type BudgetNotice = { state: "reached" | "unknownCost"; spent: number; limit: number; ended?: boolean };
+// BudgetNotice is chat/budget: the tracked-cost limit was hit, it is
+// not enforced because the provider reports no cost, or the usage
+// record was damaged so tracked spend is only a lower bound.
+export type BudgetNotice = {
+  state: "reached" | "unknownCost" | "spendIncomplete";
+  spent: number;
+  limit: number;
+  ended?: boolean;
+};
 
 // BudgetView is budgetGet/budgetSet: sessionUsd null inherits the
 // default; effectiveUsd 0 means no limit.
@@ -480,12 +483,22 @@ export type BudgetView = {
   calls: number;
 };
 
+// ThinkingView is thinkingGet/thinkingSet: the thinking levels the
+// model accepts (weakest first, empty when it has none to adjust) and
+// the stored one ("" is the provider default).
+export type ThinkingView = {
+  provider: string;
+  model: string;
+  levels: string[];
+  level: string;
+};
+
 // Permission presets, rules and the approval card the gate sends.
 export type PermissionPreset = "read-only" | "auto" | "full-access";
 export type ApprovalDecision = "once" | "session" | "folder" | "global" | "deny";
 
 export type PermissionRule = {
-  tool: "shell" | "write" | "mcp";
+  tool: "shell" | "write" | "read" | "mcp";
   pattern: string;
   action: "allow" | "deny";
 };
@@ -493,7 +506,7 @@ export type PermissionRule = {
 export type Approval = {
   id: string;
   tool: string;
-  kind: "shell" | "write" | "escalate" | "mcp" | string;
+  kind: "shell" | "write" | "read" | "escalate" | "mcp" | string;
   command?: string;
   path?: string;
   // MCP calls: the server, its own tool name and the JSON arguments.
@@ -544,7 +557,7 @@ export type ResourceSnapshot = {
 export type MCPScope = "global" | "folder";
 export type MCPState = "disabled" | "untrusted" | "stopped" | "starting" | "ready" | "failed" | "removed";
 
-export type MCPToolStatus = {
+type MCPToolStatus = {
   name: string;
   exposed: string;
   description?: string;
@@ -579,7 +592,7 @@ export type MCPConfigFile = { path: string; text: string; exists: boolean };
 
 // MCPServerConfig is one mcp.json entry; MCPNamedServer pairs it with
 // the name mcpParse derived (or the user typed).
-export type MCPServerConfig = {
+type MCPServerConfig = {
   type?: string;
   command?: string;
   args?: string[];

@@ -55,7 +55,9 @@ export function paintRevert(): void {
     parts.push(`${plural(info.restored.length, "file")} restored`);
   }
   if (info.skipped.length) {
-    parts.push(`<span class="revert-skipped" title="Changed since, left as is:\n${escapeHtml(info.skipped.join("\n"))}">${info.skipped.length} skipped</span>`);
+    parts.push(
+      `<span class="revert-skipped" title="Changed since or could not be restored; left as is:\n${escapeHtml(info.skipped.join("\n"))}">${info.skipped.length} skipped</span>`,
+    );
   }
   el.innerHTML =
     `<span class="revert-ico">${icon("tl-undo", "h-3.5 w-3.5")}</span>` +
@@ -123,7 +125,8 @@ function previewHtml(pv: RevertPreview): string {
     body += `<p class="revert-note">No file changes to undo.</p>`;
   }
   if (pv.files.length) {
-    body += `<div class="revert-label">Restores ${plural(pv.files.length, "file")}</div>` + list("revert-files", pv.files);
+    body +=
+      `<div class="revert-label">Restores ${plural(pv.files.length, "file")}</div>` + list("revert-files", pv.files);
   }
   if (pv.conflicts.length) {
     body +=
@@ -171,7 +174,7 @@ async function openPreview(btn: HTMLElement): Promise<void> {
     if (t.closest("#revertCancelBtn")) closePop();
     else if (t.closest("#revertConfirmBtn")) {
       closePop();
-      void revert(sessionId, index!);
+      void revert(sessionId, index);
     }
   });
   pop = el;
@@ -182,7 +185,12 @@ async function revert(sessionId: string, index: number): Promise<void> {
   if (!guard(sessionId)) return;
   try {
     const res = await api.revertSession(sessionId, null, index);
-    pending.set(sessionId, { index: res.index, restored: res.restored, skipped: res.skipped, snapshots: res.snapshots });
+    pending.set(sessionId, {
+      index: res.index,
+      restored: res.restored,
+      skipped: res.skipped,
+      snapshots: res.snapshots,
+    });
     await reload(sessionId);
     if (state.sessionId === sessionId) {
       prefill = res.message || "";
@@ -247,7 +255,8 @@ export function initUndo(): void {
     }
   });
   document.addEventListener("mousedown", (event) => {
-    if (pop && !pop.contains(event.target as Node) && !(event.target as HTMLElement).closest("[data-revert]")) closePop();
+    if (pop && !pop.contains(event.target as Node) && !(event.target as HTMLElement).closest("[data-revert]"))
+      closePop();
   });
   document.addEventListener(
     "keydown",

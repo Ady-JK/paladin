@@ -37,7 +37,10 @@ export async function loadMemory(cwd?: string): Promise<void> {
   if (!projectCwd) projectCwd = state.cwd;
   memoryBodyEl.innerHTML = `<div class="mem-empty">Loading memory…</div>`;
   try {
-    const targets: [MemoryTarget, string][] = [["user", ""], ["global", ""]];
+    const targets: [MemoryTarget, string][] = [
+      ["user", ""],
+      ["global", ""],
+    ];
     if (projectCwd) targets.push(["project", projectCwd]);
     const [views, list] = await Promise.all([
       Promise.all(targets.map(([t, c]) => api.memoryGet(t, c || null))),
@@ -66,7 +69,10 @@ function usage(view: MemoryView): string {
 function sectionHtml(s: Section, idx: number): string {
   const v = s.view;
   const [title, blurb] = BLURB[v.target];
-  const where = v.target === "project" && v.cwd ? `<span class="mem-cwd" title="${escapeHtml(v.cwd)}">${escapeHtml(shortPath(v.cwd))}</span>` : "";
+  const where =
+    v.target === "project" && v.cwd
+      ? `<span class="mem-cwd" title="${escapeHtml(v.cwd)}">${escapeHtml(shortPath(v.cwd))}</span>`
+      : "";
   const rows = v.entries.length
     ? v.entries
         .map(

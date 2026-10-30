@@ -1,6 +1,7 @@
 // resources.spec.ts covers per-session CPU/RAM: the core's `resources`
 // snapshot plus Electron's own metrics, shown on session rows, in the
 // header, the sidebar footer and a Settings pane.
+import { showSidebar } from "./drawer";
 import { test, expect, type Page } from "@playwright/test";
 
 const MB = 1024 * 1024;
@@ -22,8 +23,24 @@ async function setup(page: Page, snap: unknown, app: unknown = { cpu: 4, rss: 20
         if (cmd === "listSessions") {
           const at = Math.floor(Date.now() / 1000);
           return [
-            { sessionId: "sess-busy", cwd: "/home/tester/project", createdAt: at, provider: "p", model: "m", messageCount: 2, title: "busy one" },
-            { sessionId: "sess-idle", cwd: "/home/tester/project", createdAt: at - 5, provider: "p", model: "m", messageCount: 2, title: "idle one" },
+            {
+              sessionId: "sess-busy",
+              cwd: "/home/tester/project",
+              createdAt: at,
+              provider: "p",
+              model: "m",
+              messageCount: 2,
+              title: "busy one",
+            },
+            {
+              sessionId: "sess-idle",
+              cwd: "/home/tester/project",
+              createdAt: at - 5,
+              provider: "p",
+              model: "m",
+              messageCount: 2,
+              title: "idle one",
+            },
           ];
         }
         if (cmd === "openSession") {
@@ -77,7 +94,9 @@ test("row badges update live without rebuilding the list", async ({ page }) => {
   });
   await expect(row.locator(".session-res")).toHaveText("150% · 1.5 GB");
   expect(await row.evaluate((el) => (el as any).__keep)).toBe(true);
-  await page.evaluate(() => ((window as any).__res = { at: 3, supported: true, self: { cpu: 1, rss: 1, procs: 1 }, sessions: {} }));
+  await page.evaluate(
+    () => ((window as any).__res = { at: 3, supported: true, self: { cpu: 1, rss: 1, procs: 1 }, sessions: {} }),
+  );
   await expect(row.locator(".session-res")).toHaveCount(0);
 });
 
@@ -86,6 +105,7 @@ test("the header pill follows the open session", async ({ page }) => {
   await page.click('[data-session="sess-busy"]');
   await expect(page.locator("#resPill")).toBeVisible();
   await expect(page.locator("#resPillLabel")).toHaveText("20% · 100 MB");
+  await showSidebar(page);
   await page.click('[data-session="sess-idle"]');
   await expect(page.locator("#resPillLabel")).toHaveText("idle");
 });

@@ -20,7 +20,9 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 // capText keeps multi-KB dumps out of the live DOM; the full text stays
 // in the session transcript on disk.
 function capText(text: string): string {
-  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n…(${text.length - MAX_TEXT} more characters in the history)` : text;
+  return text.length > MAX_TEXT
+    ? `${text.slice(0, MAX_TEXT)}\n…(${text.length - MAX_TEXT} more characters in the history)`
+    : text;
 }
 
 function parse(raw: string): unknown {
@@ -146,7 +148,9 @@ function readHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null
     chips.push(`<span class="file-chip is-warn">outside workspace</span>`);
   }
   if (res.has_more === true) {
-    chips.push(`<span class="file-chip file-more" title="Stopped at the ${escapeHtml(str(res.stop_reason).replace("_", " ") || "limit")}">more below</span>`);
+    const next = num(res.next_offset);
+    const title = `Stopped at the ${str(res.stop_reason).replace("_", " ") || "limit"}${next ? `; continues at line ${next}` : ""}`;
+    chips.push(`<span class="file-chip file-more" title="${escapeHtml(title)}">more below</span>`);
   }
   let html =
     `<div data-body="read" class="file-view">` +
@@ -156,7 +160,7 @@ function readHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null
   }
   const content = str(res.content);
   if (!content && tool.status !== "running") {
-    return `${html}<div class="file-empty">${start === 0 ? "empty file" : "no lines in range"}</div></div>`;
+    return `${html}<div class="file-empty">${str(res.stop_reason) === "past_end" ? "past the end of the file" : start === 0 ? "empty file" : "no lines in range"}</div></div>`;
   }
   const lines = content.replace(/\n$/, "").split("\n");
   const shown = lines.slice(0, MAX_LINES);
@@ -179,7 +183,8 @@ function todoHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null
   if (err) {
     return errBlock(err);
   }
-  const list = isObj(result) && Array.isArray(result.todos) ? result.todos : Array.isArray(args.todos) ? args.todos : [];
+  const list =
+    isObj(result) && Array.isArray(result.todos) ? result.todos : Array.isArray(args.todos) ? args.todos : [];
   if (list.length === 0) {
     return `<div data-body="todo" class="tb-muted">${tool.status === "running" ? "updating the plan…" : "the plan is empty"}</div>`;
   }
@@ -207,7 +212,9 @@ function askHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null)
   let html = `<div data-body="ask" class="qa">`;
   qs.forEach((q, i) => {
     const question = str(q.question);
-    const answer = answers.get(question) ?? (isObj(result) && Array.isArray(result.answers) && isObj(result.answers[i]) ? str((result.answers[i] as Obj).answer) : "");
+    const answer =
+      answers.get(question) ??
+      (isObj(result) && Array.isArray(result.answers) && isObj(result.answers[i]) ? str(result.answers[i].answer) : "");
     const opts = Array.isArray(q.options) ? q.options.map(str).filter(Boolean) : [];
     html += `<div class="qa-item"><div class="qa-q">${escapeHtml(question)}</div>`;
     if (opts.length) {
@@ -270,7 +277,10 @@ function valueHtml(v: unknown, depth: number): string {
 function kvHtml(obj: Obj, depth = 0, attr = ""): string {
   const rows = Object.entries(obj)
     .slice(0, MAX_ITEMS)
-    .map(([k, v]) => `<div class="kv-row"><div class="kv-key">${escapeHtml(k)}</div><div class="kv-val">${valueHtml(v, depth)}</div></div>`)
+    .map(
+      ([k, v]) =>
+        `<div class="kv-row"><div class="kv-key">${escapeHtml(k)}</div><div class="kv-val">${valueHtml(v, depth)}</div></div>`,
+    )
     .join("");
   return `<div${attr} class="kv">${rows}</div>`;
 }
@@ -282,7 +292,9 @@ export function argsHtml(raw: string): string {
   if (isObj(v)) {
     return Object.keys(v).length ? kvHtml(v) : `<div class="tb-muted">no arguments</div>`;
   }
-  return v === null ? `<div class="tb-muted">no arguments</div>` : `<pre class="kv-text">${escapeHtml(capText(String(raw)))}</pre>`;
+  return v === null
+    ? `<div class="tb-muted">no arguments</div>`
+    : `<pre class="kv-text">${escapeHtml(capText(String(raw)))}</pre>`;
 }
 
 function section(label: string, inner: string): string {

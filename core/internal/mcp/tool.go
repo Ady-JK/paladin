@@ -31,9 +31,6 @@ func (t *mcpTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{Name: t.name, Description: desc, Parameters: sanitizeSchema(t.tool.InputSchema)}
 }
 
-// ParallelSafe: read-only tools may run alongside other calls.
-func (t *mcpTool) ParallelSafe() bool { return t.tool.Annotations.ReadOnly() }
-
 func (t *mcpTool) MCPInfo() tools.MCPInfo {
 	return tools.MCPInfo{
 		Server:      t.srv.key.name,

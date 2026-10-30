@@ -367,8 +367,20 @@ func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
 	}
 }
 
+func TestShellDefaultTimeouts(t *testing.T) {
+	if d, _ := shellTimeoutMs(0, false); d != 10*time.Second {
+		t.Fatalf("foreground default %v", d)
+	}
+	if d, _ := shellTimeoutMs(0, true); d != 300*time.Second {
+		t.Fatalf("background default %v", d)
+	}
+	if d, _ := shellTimeoutMs(2000, true); d != 2*time.Second {
+		t.Fatalf("explicit timeout ignored: %v", d)
+	}
+}
+
 func TestShellTimeoutOverflowRejected(t *testing.T) {
-	if _, err := shellTimeoutMs(int64(^uint64(0) >> 1)); err == nil {
+	if _, err := shellTimeoutMs(int64(^uint64(0)>>1), false); err == nil {
 		t.Fatal("overflowing timeout accepted")
 	}
 }

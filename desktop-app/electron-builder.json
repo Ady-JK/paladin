@@ -1,13 +1,22 @@
 {
   "appId": "com.paladin.app",
   "productName": "paladin",
-  "directories": { "output": "release" },
+  "directories": {
+    "output": "release"
+  },
   "files": ["dist/**", "dist-electron/**", "package.json"],
-  "extraResources": [{ "from": "../core/bin/agent-host", "to": "agent-host/agent-host" }],
+  "extraResources": [
+    {
+      "from": "../core/bin",
+      "to": "agent-host",
+      "filter": ["agent-host", "agent-host.exe"]
+    }
+  ],
   "linux": {
     "target": ["deb"],
     "category": "Utility",
     "executableName": "paladin",
     "maintainer": "paladin"
-  }
+  },
+  "compression": "maximum"
 }

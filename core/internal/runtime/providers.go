@@ -14,20 +14,24 @@ import (
 type runtimeProviders struct{ r *AgentRuntime }
 
 func (p runtimeProviders) ResolveProvider(name, model string) (inference.Provider, error) {
-	_, _, provider, err := p.r.resolveProvider(name, model)
-	return provider, err
+	entry, provider, err := p.r.resolveProvider(name, model)
+	if err != nil {
+		return nil, err
+	}
+	return p.r.withThinking(entry.Name, entry.Model, provider), nil
 }
 
 func (r *AgentRuntime) evictProviderCache() {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	r.providerCache = map[string]inference.Provider{}
+	r.thinkingCache = map[string]inference.Provider{}
 }
 
-func (r *AgentRuntime) resolveProvider(nameOverride, modelOverride string) (config.Provider, string, inference.Provider, error) {
+func (r *AgentRuntime) resolveProvider(nameOverride, modelOverride string) (config.Provider, inference.Provider, error) {
 	entry, key, err := r.store.Resolve(nameOverride)
 	if err != nil {
-		return config.Provider{}, "", nil, err
+		return config.Provider{}, nil, err
 	}
 	if strings.TrimSpace(modelOverride) != "" {
 		entry.Model = strings.TrimSpace(modelOverride)
@@ -39,17 +43,17 @@ func (r *AgentRuntime) resolveProvider(nameOverride, modelOverride string) (conf
 	r.cacheMu.Lock()
 	if cached, ok := r.providerCache[cacheKey]; ok {
 		r.cacheMu.Unlock()
-		return entry, key, cached, nil
+		return entry, cached, nil
 	}
 	r.cacheMu.Unlock()
 	provider, err := inference.BuildProvider(entry.ApiType, entry.Name, entry.Model, entry.ApiURL, key)
 	if err != nil {
-		return config.Provider{}, "", nil, err
+		return config.Provider{}, nil, err
 	}
 	r.cacheMu.Lock()
 	r.providerCache[cacheKey] = provider
 	r.cacheMu.Unlock()
-	return entry, key, provider, nil
+	return entry, provider, nil
 }
 
 // defaultModel picks the model a session should use when the caller did
@@ -116,12 +120,12 @@ func (r *AgentRuntime) AddProvider(req config.ProviderInput) (config.ProviderInf
 		return config.ProviderInfo{}, err
 	}
 	key := strings.TrimSpace(req.ApiKey)
-	return r.addProviderLocked(name, url, apiKeyString(apiType), key, req)
+	return r.addProviderLocked(name, url, apiKeyString(apiType), key)
 }
 
 func apiKeyString(t config.ApiType) string { return string(t) }
 
-func (r *AgentRuntime) addProviderLocked(name, url, apiType, key string, req config.ProviderInput) (config.ProviderInfo, error) {
+func (r *AgentRuntime) addProviderLocked(name, url, apiType, key string) (config.ProviderInfo, error) {
 	at, _ := config.ParseApiType(apiType)
 	r.providersMu.Lock()
 	defer r.providersMu.Unlock()

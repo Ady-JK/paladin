@@ -101,8 +101,8 @@ func TestStreamResponsesAssemblesTextAndCalls(t *testing.T) {
 
 func TestStreamResponsesForwardsReasoningLive(t *testing.T) {
 	// Reasoning models think before answering. The summary deltas
-	// must stream (so the UI shows progress) without suppressing the
-	// final answer carried by the completed envelope.
+	// stream as reasoning (so the UI shows progress) without
+	// suppressing the final answer carried by the completed envelope.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"thinking\"}\n\n")
@@ -119,12 +119,13 @@ func TestStreamResponsesForwardsReasoningLive(t *testing.T) {
 	}
 	close(done)
 	close(tx)
-	var text strings.Builder
+	var text, reasoning strings.Builder
 	for c := range tx {
 		text.WriteString(c.Text)
+		reasoning.WriteString(c.Reasoning)
 	}
-	if text.String() != "thinkingdone" {
-		t.Fatalf("got %q", text.String())
+	if text.String() != "done" || reasoning.String() != "thinking" {
+		t.Fatalf("text %q reasoning %q", text.String(), reasoning.String())
 	}
 }
 

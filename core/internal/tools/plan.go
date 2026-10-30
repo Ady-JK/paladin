@@ -11,12 +11,13 @@ import (
 )
 
 // readOnlyPrograms may run in plan mode. Programs with dangerous flags
-// are further checked in readOnlyArgs.
+// are further checked in readOnlyArgs. Environment and config dumpers
+// (env, printenv, go env, git config) are left out: they print secrets.
 var readOnlyPrograms = map[string]bool{
 	"ls": true, "cat": true, "head": true, "tail": true, "wc": true, "pwd": true,
 	"grep": true, "rg": true, "egrep": true, "fgrep": true, "ag": true, "find": true, "fd": true,
 	"tree": true, "file": true, "stat": true, "du": true, "df": true, "which": true, "whereis": true,
-	"type": true, "echo": true, "printf": true, "env": true, "printenv": true, "uname": true,
+	"type": true, "echo": true, "printf": true, "uname": true,
 	"date": true, "whoami": true, "id": true, "basename": true, "dirname": true, "realpath": true,
 	"readlink": true, "sort": true, "uniq": true, "cut": true, "tr": true, "diff": true, "cmp": true,
 	"jq": true, "sed": true, "awk": true, "less": true, "more": true, "nl": true, "column": true,
@@ -27,10 +28,10 @@ var readOnlyPrograms = map[string]bool{
 var readOnlyGit = map[string]bool{
 	"status": true, "diff": true, "log": true, "show": true, "blame": true, "branch": true,
 	"rev-parse": true, "ls-files": true, "grep": true, "remote": true, "describe": true,
-	"shortlog": true, "tag": true, "config": true, "reflog": true, "cat-file": true, "ls-tree": true,
+	"shortlog": true, "tag": true, "reflog": true, "cat-file": true, "ls-tree": true,
 }
 
-var readOnlyGo = map[string]bool{"list": true, "version": true, "env": true, "doc": true, "vet": true}
+var readOnlyGo = map[string]bool{"list": true, "version": true, "doc": true, "vet": true}
 
 // ReadOnlyCommand reports why cmd is not safe in plan mode, or nil.
 // It is a conservative allowlist: anything it does not understand is
@@ -190,15 +191,12 @@ func readOnlyArgs(words []string) error {
 		if !readOnlyGit[sub] {
 			return fmt.Errorf("git %s may change the repository", sub)
 		}
-		if sub == "branch" || sub == "tag" || sub == "remote" || sub == "config" {
+		if sub == "branch" || sub == "tag" || sub == "remote" {
 			for _, a := range args {
 				switch a {
 				case "-d", "-D", "-m", "-M", "--delete", "--move", "add", "remove", "rm", "set-url", "rename", "--unset", "--add", "--replace-all", "-f", "--force":
 					return fmt.Errorf("git %s %s changes the repository", sub, a)
 				}
-			}
-			if sub == "config" && !hasAny(args, "--get", "--list", "-l", "--get-all") {
-				return fmt.Errorf("git config is only allowed with --get or --list")
 			}
 		}
 	case "go":
@@ -223,26 +221,18 @@ func readOnlyArgs(words []string) error {
 			if strings.Contains(a, "system(") || strings.Contains(a, "print >") || strings.Contains(a, "| getline") {
 				return fmt.Errorf("awk program may run commands or write files")
 			}
+			if strings.Contains(a, "ENVIRON") {
+				return fmt.Errorf("awk ENVIRON reads the environment")
+			}
 		}
-	case "env":
+	case "jq":
 		for _, a := range args {
-			if !isEnvAssign(a) && !strings.HasPrefix(a, "-") {
-				return fmt.Errorf("env may only print the environment")
+			if strings.Contains(a, "$ENV") || strings.Contains(a, "env") {
+				return fmt.Errorf("jq env reads the environment")
 			}
 		}
 	}
 	return nil
-}
-
-func hasAny(args []string, want ...string) bool {
-	for _, a := range args {
-		for _, w := range want {
-			if a == w {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // PlanShell wraps the shell tool for plan mode.

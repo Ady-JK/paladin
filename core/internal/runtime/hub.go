@@ -60,19 +60,22 @@ type TurnInfo struct {
 // turn/{queued,start,done} lifecycle change. Seq is global and strictly
 // increasing so a re-attaching client can drop what its snapshot holds.
 type TurnEvent struct {
-	Event      string                  `json:"event"`
-	Seq        uint64                  `json:"seq"`
-	SessionID  string                  `json:"sessionId"`
-	TurnID     string                  `json:"turnId"`
-	Delta      string                  `json:"delta,omitempty"`
-	Tool       *agent.ToolActivity     `json:"tool,omitempty"`
-	Retry      *agent.RetryStatus      `json:"retry,omitempty"`
-	Compaction *agent.CompactionStatus `json:"compaction,omitempty"`
-	Approval   *permission.Approval    `json:"approval,omitempty"`
-	Steer      *agent.SteerMessage     `json:"steer,omitempty"`
-	Budget     *agent.BudgetNotice     `json:"budget,omitempty"`
-	Hook       *hooks.Note             `json:"hook,omitempty"`
-	Turn       *TurnInfo               `json:"turn,omitempty"`
+	Event     string `json:"event"`
+	Seq       uint64 `json:"seq"`
+	SessionID string `json:"sessionId"`
+	TurnID    string `json:"turnId"`
+	Delta     string `json:"delta,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
+	// ThinkingDropped names a thinking level the provider rejected.
+	ThinkingDropped string                  `json:"thinkingDropped,omitempty"`
+	Tool            *agent.ToolActivity     `json:"tool,omitempty"`
+	Retry           *agent.RetryStatus      `json:"retry,omitempty"`
+	Compaction      *agent.CompactionStatus `json:"compaction,omitempty"`
+	Approval        *permission.Approval    `json:"approval,omitempty"`
+	Steer           *agent.SteerMessage     `json:"steer,omitempty"`
+	Budget          *agent.BudgetNotice     `json:"budget,omitempty"`
+	Hook            *hooks.Note             `json:"hook,omitempty"`
+	Turn            *TurnInfo               `json:"turn,omitempty"`
 }
 
 // SubmitOpts carries client-side extras that never reach the agent.
@@ -357,6 +360,12 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	if chunk.Stopped {
 		t.info.Stopped = true
 	}
+	if chunk.ThinkingDropped != "" {
+		h.publishLocked(t, TurnEvent{Event: "chat/thinkingDropped", ThinkingDropped: chunk.ThinkingDropped})
+	}
+	if chunk.Reasoning != "" {
+		h.publishLocked(t, TurnEvent{Event: "chat/reasoning", Reasoning: chunk.Reasoning})
+	}
 	if chunk.Delta != "" {
 		t.reply.WriteString(chunk.Delta)
 		h.publishLocked(t, TurnEvent{Event: "chat/delta", Delta: chunk.Delta})
@@ -429,13 +438,14 @@ func (h *Hub) publishLocked(t *hubTurn, e TurnEvent) {
 	h.sink(e)
 }
 
-// record keeps the replay log compact: consecutive deltas merge and a
+// record keeps the replay log compact: consecutive deltas (or thinking) merge and a
 // tool's later updates replace its first row in place.
 func (t *hubTurn) record(e TurnEvent) {
-	if e.Event == "chat/delta" && len(t.log) > 0 {
+	if (e.Event == "chat/delta" || e.Event == "chat/reasoning") && len(t.log) > 0 {
 		last := &t.log[len(t.log)-1]
-		if last.Event == "chat/delta" {
+		if last.Event == e.Event {
 			last.Delta += e.Delta
+			last.Reasoning += e.Reasoning
 			last.Seq = e.Seq
 			return
 		}

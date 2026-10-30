@@ -122,6 +122,9 @@ type Gate struct {
 	ExtraWritable []string
 	// MCP identifies tools proxied from MCP servers; nil means none.
 	MCP func(name string) (tools.MCPInfo, bool)
+	// Plan asks once/deny for every MCP call (a server cannot prove a
+	// tool is read-only); only deny rules skip the question.
+	Plan bool
 }
 
 // Auth is the gate's answer for one call.
@@ -155,11 +158,19 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 	}
 	d := Decide(g.Preset, req, rules)
 	d = applyHookVerdict(ctx, d)
+	if g.Plan && req.Kind == KindMCP && d.Verdict != Deny {
+		d = Decision{Verdict: Ask, Destructive: req.Destructive,
+			Reasons: []string{"plan mode: the server's read-only claim cannot be verified"},
+			Choices: []string{ReplyOnce, ReplyDeny}}
+	}
 	switch d.Verdict {
 	case Deny:
 		what := "this call"
 		if d.Rule != nil {
 			what = fmt.Sprintf("%s rule %q", d.Rule.Tool, d.Rule.Pattern)
+		}
+		if req.Kind == KindMCP {
+			what = describe(req) + ", " + what
 		}
 		return Auth{Content: refusal("blocked by a permission rule (" + what + "). Do not retry it; choose another approach or ask the user.")}
 	case Allow:
@@ -332,6 +343,8 @@ func describe(req Request) string {
 		return "write to " + req.Path
 	case KindMCP:
 		return "MCP tool " + req.Server + "/" + req.MCPTool
+	case KindRead:
+		return "read " + req.Path
 	}
 	return "command `" + strings.TrimSpace(req.Command) + "`"
 }

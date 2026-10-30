@@ -74,7 +74,19 @@ import { loadHooks } from "./hooks";
 import { initToolSwitches, loadTools, syncTools } from "./toolSwitches";
 import { motionPref, setMotionPref, type MotionPref } from "../ui/motion";
 
-export type SettingsNav = "workspace" | "providers" | "prompt" | "connection" | "analytics" | "appearance" | "resources" | "memory" | "permissions" | "mcp" | "hooks" | "tools";
+export type SettingsNav =
+  | "workspace"
+  | "providers"
+  | "prompt"
+  | "connection"
+  | "analytics"
+  | "appearance"
+  | "resources"
+  | "memory"
+  | "permissions"
+  | "mcp"
+  | "hooks"
+  | "tools";
 
 const paintSettingsNav = (tab: SettingsNav): void => {
   const tabs: [SettingsNav, HTMLButtonElement, HTMLElement, string][] = [
@@ -162,8 +174,7 @@ const renderProviderList = (): void => {
   }
   settingsProviderListEl.innerHTML = state.providers
     .map((p) => {
-      const models =
-        p.models.length > 0 ? `${p.models.length} models` : "models not fetched yet";
+      const models = p.models.length > 0 ? `${p.models.length} models` : "models not fetched yet";
       const key = p.hasKey ? "key stored" : "no key";
       const badge = p.default
         ? `<span class="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">default</span>`
@@ -251,8 +262,7 @@ const openProviderCard = (mode: "add" | "edit", info?: ProviderInfo): void => {
   providerCardNameEl.disabled = mode === "edit";
   providerCardUrlEl.value = info?.apiUrl ?? "";
   providerCardKeyEl.value = "";
-  providerCardKeyEl.placeholder =
-    mode === "edit" ? "leave empty to keep the stored key" : "paste the provider api key";
+  providerCardKeyEl.placeholder = mode === "edit" ? "leave empty to keep the stored key" : "paste the provider api key";
   providerCardTypeEl.value = info?.apiType ?? "openai";
   providerCardErrorEl.classList.add("hidden");
   providerCardErrorEl.textContent = "";
@@ -322,7 +332,8 @@ export const openSettings = (tab: SettingsNav = "workspace"): void => {
   void (async () => {
     try {
       workspaceInputEl.value = await api.getWorkspace();
-    } catch {
+    } catch (error) {
+      console.warn(`workspace lookup failed: ${String(error)}`);
     }
   })();
   void refreshExternalVisibility();

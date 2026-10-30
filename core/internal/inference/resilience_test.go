@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func TestStreamCarriesStatusAndRetryAfterWithoutHiddenRetries(t *testing.T) {
 		atomic.AddInt32(&hits, 1)
 		w.Header().Set("Retry-After", "7")
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(429)
+		w.WriteHeader(http.StatusTooManyRequests)
 		fmt.Fprint(w, `{"error":{"message":"slow down"}}`)
 	}))
 	defer srv.Close()
@@ -114,7 +115,7 @@ func TestAnthropicStreamIdleWatchdogAndRetryAfter(t *testing.T) {
 	defer close(release)
 	stall := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
 		select {
 		case <-release:
@@ -186,5 +187,18 @@ func TestIsContextOverflow(t *testing.T) {
 		if IsContextOverflow(err) {
 			t.Errorf("false positive: %v", err)
 		}
+	}
+}
+
+func TestReadBodyIsBounded(t *testing.T) {
+	data, err := readBody(strings.NewReader("0123456789"), 10)
+	if err != nil || string(data) != "0123456789" {
+		t.Fatalf("at the limit: %q, %v", data, err)
+	}
+	if _, err := readBody(strings.NewReader("0123456789x"), 10); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("over the limit: err = %v", err)
+	}
+	if got := readErrorBody(strings.NewReader(strings.Repeat("e", maxErrorBody+100))); len(got) != maxErrorBody {
+		t.Fatalf("error body kept %d bytes, want %d", len(got), maxErrorBody)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -181,22 +182,30 @@ func (f fakeMCPTool) MCPInfo() tools.MCPInfo {
 	return tools.MCPInfo{Server: "s", Tool: f.name, ReadOnly: f.readOnly}
 }
 
-func TestPlanModeKeepsOnlyReadOnlyMCPTools(t *testing.T) {
+// Plan mode keeps every MCP tool (a readOnly hint proves nothing); the
+// gate asks for each call instead.
+func TestPlanModeKeepsMCPToolsBehindTheGate(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000036")
 	d, _, _, _ := testDeps(t, sess)
 	d.Tools = d.Tools.With(fakeMCPTool{name: "mcp__s__look", readOnly: true}, fakeMCPTool{name: "mcp__s__change"})
+	d.Gate = &permission.Gate{Preset: permission.Auto}
 	a, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "plan", Mode: "plan"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := a.tools.Get("mcp__s__look"); !ok {
-		t.Fatal("plan mode dropped a read-only MCP tool")
+	for _, name := range []string{"mcp__s__look", "mcp__s__change"} {
+		if _, ok := a.tools.Get(name); !ok {
+			t.Fatalf("plan mode dropped %s", name)
+		}
 	}
-	if _, ok := a.tools.Get("mcp__s__change"); ok {
-		t.Fatal("plan mode kept an MCP tool that may write")
+	if g, ok := a.gate.(*permission.Gate); !ok || !g.Plan || g == d.Gate {
+		t.Fatalf("plan mode gate %#v", a.gate)
+	}
+	if d.Gate.(*permission.Gate).Plan {
+		t.Fatal("plan mode mutated the shared gate")
 	}
 	a, _ = DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "go"})
-	if _, ok := a.tools.Get("mcp__s__change"); !ok {
-		t.Fatal("build mode lost MCP tools")
+	if g := a.gate.(*permission.Gate); g.Plan {
+		t.Fatal("build mode gate is in plan mode")
 	}
 }

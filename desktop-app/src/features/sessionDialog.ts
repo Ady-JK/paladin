@@ -19,8 +19,7 @@ import {
   workspaceInputEl,
   workspaceLabelEl,
 } from "../core/dom";
-import { shortPath, splitModel } from "../core/format";
-import { bare } from "../core/format";
+import { bare, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
 import type { FsList } from "../core/types";
 import { closeModal, openModal } from "../ui/anim";
@@ -28,14 +27,7 @@ import { toast } from "../ui/toast";
 import { pickModel } from "./models";
 import { newSession, refreshSessions } from "./sessions";
 import { refreshExternalVisibility } from "./sites";
-import {
-  crumbsHTML,
-  filterEntries,
-  getShowHidden,
-  rowsHTML,
-  setShowHidden,
-  type PickerSelection,
-} from "./picker";
+import { crumbsHTML, filterEntries, getShowHidden, rowsHTML, setShowHidden, type PickerSelection } from "./picker";
 import { syncMcp } from "./mcp";
 
 let currentList: FsList | null = null;
@@ -66,12 +58,11 @@ function paintFolder(): void {
   newSessionPathEl.textContent = state.pendingWorkspace;
   newSessionPathEl.title = state.pendingWorkspace;
   newSessionModelHintEl.textContent = modelHint();
-  newSessionModelHintEl.title = [state.selectedProvider, state.selectedModel].filter(Boolean).join(" / ") || "default model";
-  newSessionListEl.innerHTML = rowsHTML(
-    { ...currentList, directories: visible.directories, files: [] },
-    selection,
-    { filesEnabled: false },
-  );
+  newSessionModelHintEl.title =
+    [state.selectedProvider, state.selectedModel].filter(Boolean).join(" / ") || "default model";
+  newSessionListEl.innerHTML = rowsHTML({ ...currentList, directories: visible.directories, files: [] }, selection, {
+    filesEnabled: false,
+  });
   paintIcons(sessionModalEl);
 
   newSessionListEl.querySelectorAll<HTMLButtonElement>("button[data-fb-crumb]").forEach((button) => {
@@ -82,7 +73,7 @@ function paintFolder(): void {
   newSessionListEl.querySelectorAll<HTMLElement>("[data-fb-open]").forEach((el) => {
     el.addEventListener("click", (event) => {
       event.stopPropagation();
-      void browseNewSession((el as HTMLElement).dataset.fbOpen ?? "");
+      void browseNewSession(el.dataset.fbOpen ?? "");
     });
     el.addEventListener("dblclick", (event) => {
       event.stopPropagation();

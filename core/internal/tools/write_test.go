@@ -36,18 +36,18 @@ func TestWriteEngineEdges(t *testing.T) {
 	ws := filepath.Join(dir, "ws")
 	engine := NewEngine()
 	// Empty path.
-	if _, err := engine.Write(ws, "  ", "x", false); err == nil {
+	if _, err := engine.Write("", ws, "  ", "x", false); err == nil {
 		t.Fatal("empty path accepted")
 	}
 	// Write through an existing directory path.
 	if err := os.MkdirAll(filepath.Join(ws, "d"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.Write(ws, filepath.Join(ws, "d"), "x", false); err == nil {
+	if _, err := engine.Write("", ws, filepath.Join(ws, "d"), "x", false); err == nil {
 		t.Fatal("directory write accepted")
 	}
 	// Nested parents are created.
-	res, err := engine.Write(ws, filepath.Join(ws, "a/b/c.txt"), "hi\nthere\n", false)
+	res, err := engine.Write("", ws, filepath.Join(ws, "a/b/c.txt"), "hi\nthere\n", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestWriteEngineEdges(t *testing.T) {
 		t.Fatalf("got %+v", res)
 	}
 	// Overwrite replaces.
-	res, err = engine.Write(ws, filepath.Join(ws, "a/b/c.txt"), "new", true)
+	res, err = engine.Write("", ws, filepath.Join(ws, "a/b/c.txt"), "new", true)
 	if err != nil {
 		t.Fatal(err)
 	}

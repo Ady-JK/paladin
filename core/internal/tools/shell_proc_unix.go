@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -74,7 +75,7 @@ func exitCode(err error) (*int, bool) {
 		z := 0
 		return &z, false
 	}
-	if ee, ok := err.(*exec.ExitError); ok {
+	if ee := (*exec.ExitError)(nil); errors.As(err, &ee) {
 		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 			return nil, true
 		}

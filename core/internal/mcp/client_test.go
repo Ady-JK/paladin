@@ -262,7 +262,7 @@ func TestHTTPSessionExpiryMarksDead(t *testing.T) {
 	c := connect(t, ServerConfig{URL: url}, Options{})
 	// Drop the server-side session behind the client's back.
 	req, _ := http.NewRequest(http.MethodDelete, url, nil)
-	req.Header.Set("Mcp-Session-Id", c.sessionID())
+	req.Header.Set("Mcp-Session-Id", c.tr.(*httpTransport).sessionID())
 	if resp, err := http.DefaultClient.Do(req); err == nil {
 		_ = resp.Body.Close()
 	}
@@ -281,4 +281,10 @@ func waitUntil(cond func() bool) {
 	for !cond() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func (t *httpTransport) sessionID() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.session
 }

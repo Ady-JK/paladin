@@ -21,20 +21,13 @@ import {
   modelTreeEl,
   providerPickEl,
 } from "../core/dom";
-import {
-  bare,
-  escapeAttr,
-  escapeHtml,
-  fuzzyMatch,
-  labKey,
-  modelsInLab,
-  modelsOf,
-  splitModel,
-} from "../core/format";
+import { bare, escapeAttr, escapeHtml, fuzzyMatch, labKey, modelsInLab, modelsOf, splitModel } from "../core/format";
 import { collapsedLabs, collapsedProviders, state } from "../core/state";
 import type { GroupedLab, GroupedProvider, ProviderInfo } from "../core/types";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
+import { claimPopover, registerPopover } from "../ui/popover";
 import { icon } from "../icons";
+import { loadJson, saveJson } from "../core/storage";
 
 const MODEL_KEY = "paladin.model";
 
@@ -55,19 +48,11 @@ function restoreModel(): void {
   state.selectedLab = "";
   state.selectedModel = "";
 
-  try {
-    const saved = JSON.parse(localStorage.getItem(MODEL_KEY) ?? "null") as {
-      provider?: string;
-      lab?: string;
-      model?: string;
-    } | null;
-
-    if (saved && state.providers.some((p) => p.name === saved.provider)) {
-      state.selectedProvider = saved.provider ?? "";
-      state.selectedLab = saved.lab ?? "";
-      state.selectedModel = saved.model ?? "";
-    }
-  } catch {
+  const saved = loadJson(MODEL_KEY) as { provider?: string; lab?: string; model?: string } | null | undefined;
+  if (saved && state.providers.some((p) => p.name === saved.provider)) {
+    state.selectedProvider = saved.provider ?? "";
+    state.selectedLab = saved.lab ?? "";
+    state.selectedModel = saved.model ?? "";
   }
 
   if (!state.selectedProvider) {
@@ -87,11 +72,7 @@ function restoreModel(): void {
     (savedShort
       ? [...models]
           .reverse()
-          .find(
-            (m) =>
-              splitModel(m).short.startsWith(savedShort) ||
-              savedShort.startsWith(splitModel(m).short),
-          )
+          .find((m) => splitModel(m).short.startsWith(savedShort) || savedShort.startsWith(splitModel(m).short))
       : undefined) ??
     models[0] ??
     provider?.model ??
@@ -126,14 +107,14 @@ export function syncModelSelects(): void {
 
 // renderTrees repaints the composer picker tree while its menu is open.
 // The detail pane is cheap and always fresh.
-export function renderTrees(): void {
+function renderTrees(): void {
   if (!modelMenu.classList.contains("hidden")) {
     modelTreeEl.innerHTML = treeHTML(groupedTree(modelSearchEl.value));
   }
   modelDetailEl.innerHTML = detailHTML();
 }
 
-export function groupedTree(
+function groupedTree(
   query: string,
   filter: { provider: string; lab: string } | null = state.treeFilter,
 ): GroupedProvider[] {
@@ -155,8 +136,7 @@ export function groupedTree(
       }
     }
 
-    const matchModel = (id: string): boolean =>
-      fuzzyMatch(query, id) || fuzzyMatch(query, bare(splitModel(id).short));
+    const matchModel = (id: string): boolean => fuzzyMatch(query, id) || fuzzyMatch(query, bare(splitModel(id).short));
 
     const labs: GroupedLab[] = [];
     for (const lab of [...byLab.keys()].sort((a, b) => a.localeCompare(b))) {
@@ -170,8 +150,7 @@ export function groupedTree(
     }
 
     if (labs.length === 0) {
-      const self =
-        fuzzyMatch(query, display) || infos.some((i) => fuzzyMatch(query, i.name));
+      const self = fuzzyMatch(query, display) || infos.some((i) => fuzzyMatch(query, i.name));
       if (!self) {
         continue;
       }
@@ -228,10 +207,7 @@ function treeHTML(tree: GroupedProvider[]): string {
 
   const picked = state.highlightedModel || state.selectedModel;
   const CAP = 300;
-  const total = tree.reduce(
-    (n, p) => n + p.labs.reduce((m, l) => m + l.models.length, 0),
-    0,
-  );
+  const total = tree.reduce((n, p) => n + p.labs.reduce((m, l) => m + l.models.length, 0), 0);
   let shown = 0;
 
   let out = "";
@@ -378,8 +354,7 @@ function paintPick(): void {
     filterBarEl.classList.remove("hidden");
     filterBarEl.classList.add("flex");
     filterLabelEl.textContent =
-      `Showing ${state.treeFilter.provider}` +
-      (state.treeFilter.lab ? ` / ${state.treeFilter.lab}` : "");
+      `Showing ${state.treeFilter.provider}` + (state.treeFilter.lab ? ` / ${state.treeFilter.lab}` : "");
   } else {
     filterBarEl.classList.add("hidden");
     filterBarEl.classList.remove("flex");
@@ -387,11 +362,7 @@ function paintPick(): void {
 }
 
 function preferReal(infos: ProviderInfo[], display: string): ProviderInfo | undefined {
-  return (
-    infos.find((i) => i.name === display) ??
-    infos.find((i) => i.default) ??
-    infos[0]
-  );
+  return infos.find((i) => i.name === display) ?? infos.find((i) => i.default) ?? infos[0];
 }
 
 function applyProviderGroup(display: string): void {
@@ -459,19 +430,14 @@ function moveHighlight(query: string, delta: 1 | -1): void {
     return;
   }
 
-  const current =
-    flat.findIndex((m) => m.model === (state.highlightedModel || state.selectedModel));
+  const current = flat.findIndex((m) => m.model === (state.highlightedModel || state.selectedModel));
   const next = flat[(current + delta + flat.length) % flat.length];
   state.highlightedModel = next.model;
 
-  modelTreeEl
-    .querySelectorAll("[data-mpick].bg-slate-100,[data-mpick].dark\\:bg-slate-800")
-    .forEach((row) => {
-      row.classList.remove("bg-slate-100", "dark:bg-slate-800");
-    });
-  const row = modelTreeEl.querySelector(
-    `[data-mpick="${CSS.escape(next.provider)}	${CSS.escape(next.model)}"]`,
-  );
+  modelTreeEl.querySelectorAll("[data-mpick].bg-slate-100,[data-mpick].dark\\:bg-slate-800").forEach((row) => {
+    row.classList.remove("bg-slate-100", "dark:bg-slate-800");
+  });
+  const row = modelTreeEl.querySelector(`[data-mpick="${CSS.escape(next.provider)}	${CSS.escape(next.model)}"]`);
   row?.classList.add("bg-slate-100", "dark:bg-slate-800");
   row?.scrollIntoView({ block: "nearest" });
 
@@ -479,30 +445,46 @@ function moveHighlight(query: string, delta: 1 | -1): void {
 }
 
 function persistModel(): void {
-  try {
-    localStorage.setItem(
-      MODEL_KEY,
-      JSON.stringify({ provider: state.selectedProvider, lab: state.selectedLab, model: state.selectedModel }),
-    );
-  } catch {
+  saveJson(MODEL_KEY, { provider: state.selectedProvider, lab: state.selectedLab, model: state.selectedModel });
+}
+
+// Listeners hear about every change to the picked provider or model.
+const modelListeners: Array<() => void> = [];
+let lastPicked = "";
+
+export function onModelChange(fn: () => void): void {
+  modelListeners.push(fn);
+}
+
+// openModelMenu opens the model picker (no-op when it is open).
+export function openModelMenu(): void {
+  if (!isMenuOpen(modelMenu)) {
+    claimPopover("model");
+    toggleMenu(modelMenu);
   }
+  syncModelSelects();
+  modelSearchEl.focus();
 }
 
 function paintModel(): void {
+  const picked = `${state.selectedProvider}\u0000${state.selectedModel}`;
+  if (picked !== lastPicked) {
+    lastPicked = picked;
+    for (const fn of modelListeners) fn();
+  }
   const provider = bare(state.selectedProvider);
   const short = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "";
   const label = short ? (provider ? `${provider}/${short}` : short) : provider || "default";
 
   modelSelectLabelEl.textContent = label;
-  modelSelectLabelEl.title = [state.selectedProvider, state.selectedLab, state.selectedModel]
-    .filter(Boolean)
-    .join(" / ") || label;
+  modelSelectLabelEl.title =
+    [state.selectedProvider, state.selectedLab, state.selectedModel].filter(Boolean).join(" / ") || label;
 
   paintPick();
 }
 
 // handleTreeClick toggles provider/lab groups and picks models.
-export function handleTreeClick(event: Event): void {
+function handleTreeClick(event: Event): void {
   event.stopPropagation();
   const toggle = (event.target as HTMLElement).closest<HTMLElement>("[data-ptoggle],[data-ltoggle]");
   if (toggle) {
@@ -562,12 +544,13 @@ export function initModelPicker(): void {
   };
   filterClearBtn.addEventListener("click", clearFilter);
 
+  registerPopover("model", () => closeMenu(modelMenu));
   modelSelectBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    const opened = toggleMenu(modelMenu);
-    syncModelSelects();
-    if (opened) {
-      modelSearchEl.focus();
+    if (isMenuOpen(modelMenu)) {
+      closeMenu(modelMenu);
+    } else {
+      openModelMenu();
     }
   });
 
@@ -622,6 +605,7 @@ export function initModelPicker(): void {
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
+      if (!isMenuOpen(modelMenu)) claimPopover("model");
       const opened = toggleMenu(modelMenu);
       syncModelSelects();
       if (opened) {

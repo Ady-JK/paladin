@@ -17,7 +17,7 @@ func TestChatForwardsRetryEvents(t *testing.T) {
 	var hits int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.AddInt32(&hits, 1) == 1 {
-			w.WriteHeader(503)
+			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprint(w, `{"error":{"message":"overloaded"}}`)
 			return
 		}

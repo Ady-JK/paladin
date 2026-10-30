@@ -34,7 +34,7 @@ const queued: Wizard[] = [];
 
 // parseAskArgs reads the questions out of an ask tool call's arguments.
 // Null means the payload is not an ask call (or is malformed).
-export function parseAskArgs(raw: string): AskQuestion[] | null {
+function parseAskArgs(raw: string): AskQuestion[] | null {
   let args: unknown;
   try {
     args = JSON.parse(raw);
@@ -77,10 +77,7 @@ export function parseAskArgs(raw: string): AskQuestion[] | null {
 // handleAskToolEvent opens the wizard for a running ask call. Settled
 // calls close their wizard; a second ask while one is open queues
 // behind it instead of stacking modals.
-export function handleAskToolEvent(
-  sessionId: string,
-  tool: { id: string; arguments: string; status: string },
-): void {
+export function handleAskToolEvent(sessionId: string, tool: { id: string; arguments: string; status: string }): void {
   if (tool.status !== "running") {
     settleAskToolEvent(tool.id);
     return;
@@ -96,7 +93,7 @@ export function handleAskToolEvent(
     sessionId,
     callId: tool.id,
     questions,
-    answers: questions.map((q) => (q.options.length > 0 && !q.multiple ? q.options[0] ?? "" : "")),
+    answers: questions.map((q) => (q.options.length > 0 && !q.multiple ? (q.options[0] ?? "") : "")),
     picked: questions.map((q) => (q.options.length > 0 && !q.multiple ? 0 : -1)),
     chosen: questions.map(() => new Set<number>()),
     index: 0,
@@ -114,7 +111,7 @@ export function handleAskToolEvent(
 
 // settleAskToolEvent closes the wizard for a call that finished without
 // the wizard (the user stopped the turn, or the call errored).
-export function settleAskToolEvent(callId: string): void {
+function settleAskToolEvent(callId: string): void {
   if (active?.callId === callId) {
     closeWizard(false);
     return;
@@ -171,7 +168,11 @@ function openWizard(wizard: Wizard): void {
       event.preventDefault();
       event.stopPropagation();
       void cancelWizard();
-    } else if (/^[1-6]$/.test(event.key) && wizard.index < wizard.questions.length && !(event.target instanceof HTMLInputElement)) {
+    } else if (
+      /^[1-6]$/.test(event.key) &&
+      wizard.index < wizard.questions.length &&
+      !(event.target instanceof HTMLInputElement)
+    ) {
       const pick = Number(event.key) - 1;
       if (pick < (wizard.questions[wizard.index]?.options.length ?? 0)) {
         event.preventDefault();
@@ -236,7 +237,7 @@ function pickOption(questionIdx: number, optionIdx: number): void {
     return;
   }
   if (wizard.questions[questionIdx]?.multiple) {
-    const set = wizard.chosen[questionIdx]!;
+    const set = wizard.chosen[questionIdx];
     if (!set.delete(optionIdx)) set.add(optionIdx);
     paintWizard();
     return;
@@ -261,7 +262,10 @@ function selectedOf(wizard: Wizard, i: number): string[] {
   const q = wizard.questions[i];
   const set = wizard.chosen[i];
   if (!q || !set) return [];
-  return [...set].sort((a, b) => a - b).map((k) => q.options[k] ?? "").filter(Boolean);
+  return [...set]
+    .sort((a, b) => a - b)
+    .map((k) => q.options[k] ?? "")
+    .filter(Boolean);
 }
 
 function advanceWizard(): void {
@@ -368,10 +372,14 @@ function paintWizard(focusCustom = false): void {
   wizard.body.innerHTML =
     `<div class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Question ${wizard.index + 1} of ${n}</div>` +
     `<div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">${escapeHtml(q.question)}</div>` +
-    (n1 > 0 ? `<div class="mt-1 text-[11px] text-slate-400">${multi ? "Pick any that apply" : "Pick one"} — or type your own</div>` : "") +
+    (n1 > 0
+      ? `<div class="mt-1 text-[11px] text-slate-400">${multi ? "Pick any that apply" : "Pick one"} — or type your own</div>`
+      : "") +
     `<div class="mt-3 space-y-2">` +
     q.options
-      .map((opt, i) => (multi ? optionCheckbox(wizard.index, opt, i, chosen.has(i)) : optionButton(wizard.index, opt, i, picked === i)))
+      .map((opt, i) =>
+        multi ? optionCheckbox(wizard.index, opt, i, chosen.has(i)) : optionButton(wizard.index, opt, i, picked === i),
+      )
       .join("") +
     `</div>` +
     `<input data-ask="custom" type="text" placeholder="${multi ? "Add something else…" : "Type your own answer…"}" value="${escapeHtml(custom)}" spellcheck="false" ` +

@@ -102,19 +102,179 @@ body {
     0 4px 12px -4px rgb(0 0 0 / 0.25);
 }
 
-/* The panel shares the frame background; content sits on the card. */
-#sidebar,
-.dark #sidebar {
-  background: transparent;
-  border-right: 0;
+/* The sidebar is a floating drawer beside the rail, over the main card.
+   The card never resizes for it, so the page under it doesn't reflow. */
+#sidebar.side-drawer,
+.dark #sidebar.side-drawer {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 3.5rem;
+  z-index: 40;
+  width: 18rem;
+  border: 1px solid rgb(0 0 0 / 0.08);
+  border-radius: 14px;
+  background: var(--color-slate-100);
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.08),
+    0 24px 48px -16px rgb(0 0 0 / 0.28);
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
+    visibility 0s linear 0s;
 }
 
-#sidebar > * {
-  min-width: 18rem;
+.dark #sidebar.side-drawer {
+  border-color: rgb(255 255 255 / 0.08);
+  background: #18181b;
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.4),
+    0 24px 48px -16px rgb(0 0 0 / 0.7);
 }
 
-#sidebar.w-0 {
-  width: 0;
+#sidebar.side-drawer.is-closed {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateX(-12px);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 160ms ease,
+    visibility 0s linear 160ms;
+}
+
+/* ---- Chat pages as browser-style tabs above the embedded page ---- */
+.chat-tabs {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+}
+
+.dark .chat-tabs {
+  border-bottom-color: rgb(255 255 255 / 0.05);
+  background: var(--color-slate-950);
+}
+
+.chat-tabs-list {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-tab {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  width: 168px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.chat-tab:hover {
+  background: rgb(0 0 0 / 0.04);
+  color: var(--color-slate-700);
+}
+
+.dark .chat-tab:hover {
+  background: rgb(255 255 255 / 0.05);
+  color: var(--color-slate-200);
+}
+
+.chat-tab.is-active {
+  background: #fff;
+  color: var(--color-slate-900);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+.dark .chat-tab.is-active {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+.chat-tab-pick {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.chat-tab-close {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border-radius: 6px;
+  opacity: 0;
+  color: var(--color-slate-400);
+}
+
+.chat-tab:hover .chat-tab-close,
+.chat-tab.is-active .chat-tab-close,
+.chat-tab-close:focus-visible {
+  opacity: 1;
+}
+
+.chat-tab-close:hover {
+  background: rgb(0 0 0 / 0.08);
+  color: var(--color-slate-700);
+}
+
+.dark .chat-tab-close:hover {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--color-slate-100);
+}
+
+.chat-tabs-btn {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--color-slate-500);
+}
+
+.chat-tabs-btn:hover {
+  background: rgb(0 0 0 / 0.05);
+  color: var(--color-slate-800);
+}
+
+.dark .chat-tabs-btn:hover {
+  background: rgb(255 255 255 / 0.06);
+  color: var(--color-slate-100);
+}
+
+.chat-tabs-empty {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--color-slate-400);
 }
 
 #mainCard {
@@ -452,7 +612,9 @@ body {
 
 .pick-btn.is-active {
   background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 2px 8px -3px rgb(0 0 0 / 0.08);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 2px 8px -3px rgb(0 0 0 / 0.08);
 }
 
 .dark .pick-btn.is-active {

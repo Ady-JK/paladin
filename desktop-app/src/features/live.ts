@@ -299,6 +299,10 @@ function track(e: Entry, ev: TurnEvent): boolean {
       if (e.phase === "writing" && e.tools.size === 0) return false;
       e.phase = "writing";
       return true;
+    case "chat/reasoning":
+      if (e.phase === "thinking") return false;
+      e.phase = "thinking";
+      return true;
     case "chat/retry":
       e.phase = "retrying";
       return true;
@@ -333,7 +337,7 @@ let ticker = 0;
 // paintWorking shows what the visible session's running turn is doing:
 // a spinner, how long it has run, and its current step. It stays up for
 // the whole turn so a quiet stretch never looks like a stall.
-export function paintWorking(): void {
+function paintWorking(): void {
   const el = workingBar();
   const e = state.sessionId ? entries.get(state.sessionId) : undefined;
   const turn = e?.running;
@@ -458,6 +462,10 @@ export function noteSubmitted(info: TurnInfo): void {
 }
 
 function onEvent(ev: TurnEvent): void {
+  if (ev?.event === "host/restarted") {
+    void recoverFromRestart();
+    return;
+  }
   if (!ev || typeof ev.sessionId !== "string" || !ev.sessionId) return;
   const e = entry(ev.sessionId);
   if (e.attaching) {
@@ -469,6 +477,23 @@ function onEvent(ev: TurnEvent): void {
   } catch (error) {
     console.error("live event failed", ev.event, error);
   }
+}
+
+// recoverFromRestart runs after the agent host crashed and was
+// restarted: its running and queued turns died with it, so they are
+// ended here before re-reading what the new host knows.
+async function recoverFromRestart(): Promise<void> {
+  for (const e of entries.values()) {
+    const dropped = e.queued.length;
+    for (const queued of [...e.queued]) {
+      finishTurn(e, { ...queued, state: "done", cancelled: true });
+    }
+    if (e.running) {
+      const lost = dropped > 0 ? ` and ${dropped} queued message${dropped === 1 ? " was" : "s were"} dropped` : "";
+      finishTurn(e, { ...e.running, state: "done", error: `agent host restarted: this turn was interrupted${lost}` });
+    }
+  }
+  await bootLive();
 }
 
 // beginAttach starts buffering a session's events while its snapshot
@@ -589,7 +614,7 @@ export function forgetSession(sessionId: string): void {
 // bootLive learns which turns are already running (the sidecar outlives
 // the window) so the sidebar shows them before any session is opened.
 export async function bootLive(): Promise<void> {
-  let turns: TurnInfo[] = [];
+  let turns: TurnInfo[];
   try {
     turns = await api.listTurns();
   } catch (error) {

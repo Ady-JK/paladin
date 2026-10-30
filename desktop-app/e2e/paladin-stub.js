@@ -3,570 +3,680 @@
 // Specs may wrap window.paladin.invoke to override cases per-test.
 
 async function __paladinBaseInvoke(cmd, args) {
-    switch (cmd) {
-      case "resolveWorkspace":
-        return (args && args.cwd) || "/home/tester/project";
-      case "listSessions":
-        return [
-          {
-            sessionId: "sess-notify-1",
-            cwd: "/home/tester/project",
-            createdAt: Math.floor(Date.now() / 1000),
-            provider: "Opencode Go",
-            model: "openai/gpt-4o",
-            messageCount: 6,
-            title: "notify demo",
-            ...(window.__e2eSessionExtra || {}),
-          },
-        ].concat(window.__e2eExtraSessions || []);
-      case "listSkills":
-        return [
-          {
-            name: "reviewer",
-            description: "Reviews code",
-            source: "global",
-            path: "/home/tester/.config/skills/reviewer/SKILL.md",
-          },
-          {
-            name: "deployer",
-            description: "Ships it",
-            source: "workspace",
-            path: "/home/tester/project/.paladin/skills/deployer/SKILL.md",
-          },
-        ];
-      case "listCommands":
-        return [
-          { name: "init", description: "Create or improve AGENTS.md for this project", source: "builtin" },
-          { name: "review", description: "Review the current changes", argumentHint: "[focus]", mode: "plan", source: "builtin" },
-          { name: "ship", description: "Release checklist", argumentHint: "<version>", source: "workspace" },
-        ];
-      case "memoryGet": {
-        window.__e2eMemory = window.__e2eMemory || {};
-        const key = args.target + ":" + (args.cwd || "");
-        const entries = window.__e2eMemory[key] || (args.target === "user" ? ["Prefers terse answers"] : []);
-        const limits = { user: 1500, global: 2500, project: 4000 };
-        return { target: args.target, cwd: args.cwd || undefined, path: `/data/memory/${args.target}.md`, entries, used: entries.join("\n§\n").length, limit: limits[args.target] || 2500 };
-      }
-      case "memorySet": {
-        window.__e2eMemory = window.__e2eMemory || {};
-        window.__e2eMemorySets = (window.__e2eMemorySets || []).concat([args]);
-        const key = args.target + ":" + (args.cwd || "");
-        window.__e2eMemory[key] = args.entries || [];
-        const limits = { user: 1500, global: 2500, project: 4000 };
-        return { target: args.target, cwd: args.cwd || undefined, path: `/data/memory/${args.target}.md`, entries: args.entries || [], used: (args.entries || []).join("\n§\n").length, limit: limits[args.target] || 2500 };
-      }
-      case "answerApproval": {
-        window.__e2eApprovalAnswers = (window.__e2eApprovalAnswers || []).concat([args]);
-        const waiter = (window.__e2eApprovalWaits || {})[args.callId];
-        if (!waiter) throw new Error("no pending approval " + args.callId);
-        delete window.__e2eApprovalWaits[args.callId];
-        waiter(args.decision);
-        return true;
-      }
-      case "permissionsGet":
-      case "permissionsSet": {
-        const p = (window.__e2ePerms = window.__e2ePerms || { global: [], folders: {}, kind: "seatbelt" });
-        if (cmd === "permissionsSet") {
-          window.__e2ePermSets = (window.__e2ePermSets || []).concat([JSON.parse(JSON.stringify(args))]);
-          if (args.scope === "global") p.global = args.rules || [];
-          else if (args.scope === "folder") {
-            if ((args.rules || []).length) p.folders[args.cwd] = args.rules;
-            else delete p.folders[args.cwd];
-          } else throw new Error("scope must be global or folder");
-        }
-        const cwd = (args && args.cwd) || "/home/tester/project";
-        return {
-          global: p.global,
-          folder: p.folders[cwd] || [],
-          session: [],
-          folders: Object.entries(p.folders).map(([c, rules]) => ({ cwd: c, rules })),
-          sandbox: { kind: p.kind },
-          presets: ["read-only", "auto", "full-access"],
-        };
-      }
-      case "mcpList":
-      case "mcpConfig":
-      case "mcpSetConfig":
-      case "mcpSetEnabled":
-      case "mcpRestart":
-      case "mcpTrust":
-      case "mcpParse":
-      case "mcpAdd":
-        return window.__e2eMcpInvoke(cmd, args || {});
-      case "hooksList":
-      case "hooksSetConfig":
-      case "hooksTrust":
-      case "hooksToggle":
-        return window.__e2eHooksInvoke(cmd, args || {});
-      case "sideQuestion":
-        window.__e2eSideCalls = (window.__e2eSideCalls || []).concat([JSON.parse(JSON.stringify(args || {}))]);
-        if (window.__e2eSideQuestion) return window.__e2eSideQuestion(args || {});
-        return { answer: "Side answer to: " + (args && args.question), model: (args && args.model) || "stub-model" };
-      case "toolsList":
-      case "toolsSet":
-      case "toolsAccept":
-        return window.__e2eToolsInvoke(cmd, args || {});
-      case "memoryProjects":
-        return [{ cwd: "/home/tester/project", key: "project-1234", entries: 1, used: 20, limit: 4000 }];
-      case "memoryRefreshSnapshot":
-        window.__e2eSnapshotRefreshes = (window.__e2eSnapshotRefreshes || 0) + 1;
-        return true;
-      case "gitInfo":
-        return window.__e2eGit || { repo: false, hasCommits: false };
-      case "revertPreview":
-        window.__e2ePreviews = (window.__e2ePreviews || []).concat([args]);
-        return { index: args.index, turns: 1, files: [], conflicts: [], snapshots: true, ...(window.__e2ePreview || {}) };
-      case "revertSession": {
-        window.__e2eReverts = (window.__e2eReverts || []).concat([args]);
-        window.__e2eRevertedAt = args.index;
-        return { index: args.index, message: "run the slow job", restored: [], skipped: [], snapshots: true, ...(window.__e2eRevertResult || {}) };
-      }
-      case "unrevertSession":
-        window.__e2eUnreverts = (window.__e2eUnreverts || 0) + 1;
-        window.__e2eRevertedAt = undefined;
-        return true;
-      case "worktreeStatus":
-        return window.__e2eWorktreeStatus || { exists: true, changed: 0, ahead: 0, branch: "paladin/demo", into: "main", path: "/wt/demo", repoRoot: "/home/tester/project" };
-      case "worktreeMerge":
-        window.__e2eMerges = (window.__e2eMerges || []).concat([args]);
-        if (window.__e2eMergeError) throw new Error(window.__e2eMergeError);
-        return window.__e2eMergeResult || { merged: true, nothingToMerge: false, commit: "abc1234", conflicts: [], into: "main" };
-      case "deleteSession":
-        window.__e2eDeletes = (window.__e2eDeletes || []).concat([args]);
-        return true;
-      case "forkSession":
-        window.__e2eForks = (window.__e2eForks || []).concat([args]);
-        if (args && args.worktree) {
-          return { sessionId: "sess-wt-1", cwd: "/wt/demo", title: "notify demo (fork)", messageCount: 2, createdAt: Math.floor(Date.now() / 1000), worktree: { repoRoot: "/home/tester/project", path: "/wt/demo", branch: "paladin/demo", baseBranch: "main", origin: "/home/tester/project" } };
-        }
-        return { sessionId: "sess-fork-1", cwd: "/home/tester/project", title: "notify demo (fork)", messageCount: 2, createdAt: Math.floor(Date.now() / 1000) };
-      case "renameSession":
-        window.__e2eRenames = (window.__e2eRenames || []).concat([args]);
-        return true;
-      case "openSession":
-        window.__e2eOpens = (window.__e2eOpens || []).concat([args]);
-        return {
-          sessionId: (args && args.sessionId) || "sess-notify-1",
+  switch (cmd) {
+    case "resolveWorkspace":
+      return (args && args.cwd) || "/home/tester/project";
+    case "listSessions":
+      return [
+        {
+          sessionId: "sess-notify-1",
           cwd: "/home/tester/project",
+          createdAt: Math.floor(Date.now() / 1000),
           provider: "Opencode Go",
           model: "openai/gpt-4o",
-          ...((window.__e2eOpenExtra || {})[(args && args.sessionId) || ""] || {}),
-        };
-      case "sessionHistory": {
-        const at = Math.floor(Date.now() / 1000);
-        if (window.__e2eRevertedAt === 0) {
-          return [];
-        }
-        return [
-          { role: "user", content: "run the slow job", createdAt: at, index: 0 },
-          { role: "assistant", content: "Starting the slow job.", createdAt: at },
-          {
-            role: "tool",
-            content: '{"job_id":"job-1-1","status":"running"}',
-            createdAt: at,
-            name: "shell",
-            arguments:
-              '{"action":"run","cmd":"sleep 60","background":true,"notify":true}',
-            status: "ok",
-          },
-          { role: "assistant", content: "Meanwhile done.", createdAt: at },
-          {
-            role: "tool",
-            content:
-              '{"notice":"background job finished","job_id":"job-1-1","status":"done","exit_code":0,"output":"hi"}',
-            createdAt: at,
-            name: "shell",
-            arguments: '{"action":"notify","job_id":"job-1-1"}',
-            status: "ok",
-          },
-          { role: "assistant", content: "It printed hi.", createdAt: at },
-        ];
-      }
-      case "sessionUsage":
-        return (
-          window.__e2eUsage || {
-            sessionId: "sess-notify-1",
-            cwd: "/home/tester/project",
-            model: "beam-free",
-            contextWindow: 200000,
-            contextKnown: true,
-            calls: 3,
-            promptTokens: 20000,
-            completionTokens: 5000,
-            reasoningTokens: 0,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            totalTokens: 25000,
-            lastInputTokens: 25000,
-            cost: 0.0042,
-            listCost: 0.008,
-            hasCost: true,
-            fillPercent: 12.5,
-            daily: [
-              {
-                date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
-                calls: 1,
-                promptTokens: 5000,
-                completionTokens: 1000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 6000,
-                cost: 0.0012,
-                listCost: 0.002,
-                hasCost: true,
-              },
-              {
-                date: new Date().toISOString().slice(0, 10),
-                calls: 2,
-                promptTokens: 15000,
-                completionTokens: 4000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 19000,
-                cost: 0.003,
-                listCost: 0.006,
-                hasCost: true,
-              },
-            ],
-            models: [
-              {
-                model: "beam-free",
-                contextWindow: 200000,
-                contextKnown: true,
-                calls: 2,
-                promptTokens: 15000,
-                completionTokens: 4000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 19000,
-                cost: 0.003,
-                listCost: 0.006,
-                hasCost: true,
-                fillPercent: 9.5,
-              },
-              {
-                model: "kimi-k2.6",
-                contextWindow: 262144,
-                contextKnown: true,
-                calls: 1,
-                promptTokens: 5000,
-                completionTokens: 1000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 6000,
-                cost: 0.0012,
-                listCost: 0.002,
-                hasCost: true,
-                fillPercent: 2.29,
-              },
-            ],
-          }
-        );
-      case "sessionTodos":
-        return (
-          window.__e2eTodos || [
-            { content: "Plan the work", status: "finished" },
-            { content: "Build the hat", status: "in_progress" },
-            { content: "Run the checks", status: "not_started" },
-          ]
-        );
-      case "overallUsage":
-        return (
-          window.__e2eOverall || {
-            sessionCount: 2,
-            sessionsWithUsage: 2,
-            calls: 3,
-            promptTokens: 20000,
-            completionTokens: 5000,
-            reasoningTokens: 400,
-            cacheReadTokens: 1200,
-            cacheWriteTokens: 300,
-            totalTokens: 26900,
-            cost: 0.0042,
-            listCost: 0.008,
-            hasCost: true,
-            updatedAt: Math.floor(Date.now() / 1000),
-            models: [
-              {
-                model: "beam-free",
-                contextWindow: 0,
-                contextKnown: false,
-                calls: 2,
-                promptTokens: 15000,
-                completionTokens: 4000,
-                reasoningTokens: 400,
-                cacheReadTokens: 1200,
-                cacheWriteTokens: 300,
-                totalTokens: 20900,
-                cost: 0.003,
-                listCost: 0.006,
-                hasCost: true,
-              },
-              {
-                model: "kimi-k2.6",
-                contextWindow: 0,
-                contextKnown: false,
-                calls: 1,
-                promptTokens: 5000,
-                completionTokens: 1000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 6000,
-                cost: 0.0012,
-                listCost: 0.002,
-                hasCost: true,
-              },
-            ],
-            sessions: [
-              {
-                sessionId: "sess-notify-1",
-                title: "notify demo",
-                model: "beam-free",
-                createdAt: Math.floor(Date.now() / 1000) - 86400,
-                updatedAt: Math.floor(Date.now() / 1000),
-                calls: 2,
-                promptTokens: 15000,
-                completionTokens: 4000,
-                reasoningTokens: 400,
-                cacheReadTokens: 1200,
-                cacheWriteTokens: 300,
-                totalTokens: 20900,
-                cost: 0.003,
-                listCost: 0.006,
-                hasCost: true,
-              },
-              {
-                sessionId: "sess-other-2",
-                title: "second session",
-                model: "kimi-k2.6",
-                createdAt: Math.floor(Date.now() / 1000) - 172800,
-                updatedAt: Math.floor(Date.now() / 1000) - 86400,
-                calls: 1,
-                promptTokens: 5000,
-                completionTokens: 1000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 6000,
-                cost: 0.0012,
-                listCost: 0.002,
-                hasCost: true,
-              },
-            ],
-            daily: [
-              {
-                date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
-                calls: 1,
-                promptTokens: 5000,
-                completionTokens: 1000,
-                reasoningTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                totalTokens: 6000,
-                cost: 0.0012,
-                listCost: 0.002,
-                hasCost: true,
-              },
-              {
-                date: new Date().toISOString().slice(0, 10),
-                calls: 2,
-                promptTokens: 15000,
-                completionTokens: 4000,
-                reasoningTokens: 400,
-                cacheReadTokens: 1200,
-                cacheWriteTokens: 300,
-                totalTokens: 20900,
-                cost: 0.003,
-                listCost: 0.006,
-                hasCost: true,
-              },
-            ],
-          }
-        );
-      case "listProviders":
-        window.__e2eLists = (window.__e2eLists || 0) + 1;
-        if (!window.__e2eProviders) {
-          window.__e2eProviders = [
-            {
-              name: "Opencode Go",
-              apiType: "openai",
-              apiUrl: "https://opencode.ai/inference/go/openai/v1",
-              model: "",
-              models: [],
-              default: true,
-              hasKey: false,
-            },
-            {
-              name: "openrouter",
-              apiType: "openai",
-              apiUrl: "https://openrouter.ai/api/v1",
-              model: "",
-              models: ["openai/gpt-4o"],
-              default: false,
-              hasKey: false,
-            },
-            {
-              name: "local",
-              apiType: "openai",
-              apiUrl: "http://localhost:11434/v1",
-              model: "",
-              models: ["other/llama3.2"],
-              default: false,
-              hasKey: true,
-            },
-          ];
-        }
-        window.__e2eProviders[0].models =
-          window.__e2eLists > 1
-            ? [
-                "anthropic/claude-fable-20990101",
-                "anthropic/claude-3-opus",
-                "openai/gpt-4o",
-              ]
-            : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
-        return window.__e2eProviders;
-      case "refreshProviders":
-        if (args && args.name) {
-          return { name: args.name, count: 3, models: [] };
-        }
-        return false;
-      case "run_turn": {
-        const inner = args && args.args ? args.args : args || {};
-        window.__e2eChats = window.__e2eChats || [];
-        window.__e2eChats.push({
-          sessionId: inner.sessionId,
-          message: inner.message,
-          resume: !!inner.resume,
-          skill: inner.skill ?? null,
-          command: inner.command ?? null,
-          mode: inner.mode || "",
-          compact: !!inner.compact,
-        });
-        if (inner.compact) {
-          return { sessionId: inner.sessionId || "sess-notify-1", reply: "", stopped: false };
-        }
-        return {
-          sessionId: inner.sessionId || "sess-notify-1",
-          reply: "Stub reply to: " + (inner.message || ""),
-          stopped: false,
-        };
-      }
-      case "submitChat":
-        return __e2eHub.submit(args || {});
-      case "steerChat":
-        return __e2eHub.steer(args || {});
-      case "budgetGet":
-      case "budgetSet": {
-        const b = (window.__e2eBudget = window.__e2eBudget || { defaultUsd: 0, sessions: {}, spentUsd: 0, hasCost: true });
-        const sid = (args && args.sessionId) || "";
-        if (cmd === "budgetSet") {
-          window.__e2eBudgetSets = (window.__e2eBudgetSets || []).concat([JSON.parse(JSON.stringify(args))]);
-          if (args.scope === "global") b.defaultUsd = args.budgetUsd || 0;
-          else if (args.budgetUsd === null || args.budgetUsd === undefined) delete b.sessions[sid];
-          else b.sessions[sid] = args.budgetUsd;
-        }
-        const own = sid && sid in b.sessions ? b.sessions[sid] : null;
-        return {
-          defaultUsd: b.defaultUsd,
-          sessionUsd: own,
-          effectiveUsd: own ?? b.defaultUsd,
-          spentUsd: sid ? b.spentUsd : 0,
-          hasCost: sid ? b.hasCost : false,
-          calls: sid ? (b.calls ?? 1) : 0,
-        };
-      }
-      case "turns":
-        return __e2eHub.list();
-      case "attach":
-        return __e2eHub.attach(args || {});
-      case "cancelTurn":
-        return __e2eHub.cancel(args && args.turnId);
-      case "stopChat":
-        return __e2eHub.stop(args && args.sessionId);
-      case "setDefaultProvider":
-        for (const p of window.__e2eProviders || []) {
-          p.default = p.name === args.name;
-        }
-        return window.__e2eProviders;
-      case "addProvider":
-        if (!args.apiKey) throw new Error("api key is required");
-        window.__e2eProviders.push({
-          name: args.name,
-          apiType: args.apiType,
-          apiUrl: args.apiUrl,
-          model: "",
-          models: [],
-          default: false,
-          hasKey: true,
-        });
-        return window.__e2eProviders[window.__e2eProviders.length - 1];
-      case "updateProvider":
-        for (const p of window.__e2eProviders || []) {
-          if (p.name === args.name) {
-            p.apiUrl = args.apiUrl;
-            p.apiType = args.apiType;
-            if (args.apiKey) p.hasKey = true;
-            return p;
-          }
-        }
-        throw new Error("provider not found");
-      case "getWorkspace":
-        return window.localStorage.getItem("e2e-workspace") || "";
-      case "setWorkspace":
-        window.localStorage.setItem("e2e-workspace", args.path);
-        return args.path;
-      case "getPrompt":
-        return window.__e2ePrompt || { systemPrompt: "stub system prompt" };
-      case "setPrompt":
-        window.__e2ePrompt = { systemPrompt: args.systemPrompt || "stub system prompt" };
-        return window.__e2ePrompt;
-      case "resetPrompt":
-        window.__e2ePrompt = { systemPrompt: "stub system prompt" };
-        return window.__e2ePrompt;
-      case "fsHome":
-        return "/home/tester";
-      case "fileComplete": {
-        const q = (args && args.query) || "";
-        const all = [
-          { path: "src/main.go", display: "main.go", resolvedPath: "/home/tester/project/src/main.go", outside: false, isDir: false },
-          { path: "src/server/", display: "server/", resolvedPath: "/home/tester/project/src/server", outside: false, isDir: true },
-          { path: "src/server/app.go", display: "app.go", resolvedPath: "/home/tester/project/src/server/app.go", outside: false, isDir: false },
-          { path: "README.md", display: "README.md", resolvedPath: "/home/tester/project/README.md", outside: false, isDir: false },
-          { path: "../sibling/outside.txt", display: "outside.txt", resolvedPath: "/home/tester/sibling/outside.txt", outside: true, isDir: false },
-        ];
-        const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-        const want = norm(q).toLowerCase();
-        return all.filter((e) => norm(e.path).toLowerCase().includes(want));
-      }
-      case "fsList": {
-        const at = (args && args.path) || "/home/tester";
-        return {
-          currentPath: at,
-          parentPath: "/home",
-          directories: [
-            { name: ".hidden-dir", path: `${at}/.hidden-dir` },
-            { name: "project", path: `${at}/project` },
-          ],
-          files: [
-            { name: ".env", path: `${at}/.env` },
-            { name: "README.md", path: `${at}/README.md` },
-          ],
-        };
-      }
-      case "resources":
-        return window.__e2eRes || { at: 0, supported: false, self: { cpu: 0, rss: 0, procs: 0 }, sessions: {} };
-      default:
-        if (String(cmd).startsWith("plugin:")) {
-          return 1;
-        }
-        throw new Error(`e2e stub: unhandled command ${cmd}`);
+          messageCount: 6,
+          title: "notify demo",
+          ...(window.__e2eSessionExtra || {}),
+        },
+      ].concat(window.__e2eExtraSessions || []);
+    case "listSkills":
+      return [
+        {
+          name: "reviewer",
+          description: "Reviews code",
+          source: "global",
+          path: "/home/tester/.config/skills/reviewer/SKILL.md",
+        },
+        {
+          name: "deployer",
+          description: "Ships it",
+          source: "workspace",
+          path: "/home/tester/project/.paladin/skills/deployer/SKILL.md",
+        },
+      ];
+    case "listCommands":
+      return [
+        { name: "init", description: "Create or improve AGENTS.md for this project", source: "builtin" },
+        {
+          name: "review",
+          description: "Review the current changes",
+          argumentHint: "[focus]",
+          mode: "plan",
+          source: "builtin",
+        },
+        { name: "ship", description: "Release checklist", argumentHint: "<version>", source: "workspace" },
+      ];
+    case "memoryGet": {
+      window.__e2eMemory = window.__e2eMemory || {};
+      const key = args.target + ":" + (args.cwd || "");
+      const entries = window.__e2eMemory[key] || (args.target === "user" ? ["Prefers terse answers"] : []);
+      const limits = { user: 1500, global: 2500, project: 4000 };
+      return {
+        target: args.target,
+        cwd: args.cwd || undefined,
+        path: `/data/memory/${args.target}.md`,
+        entries,
+        used: entries.join("\n§\n").length,
+        limit: limits[args.target] || 2500,
+      };
     }
-
+    case "memorySet": {
+      window.__e2eMemory = window.__e2eMemory || {};
+      window.__e2eMemorySets = (window.__e2eMemorySets || []).concat([args]);
+      const key = args.target + ":" + (args.cwd || "");
+      window.__e2eMemory[key] = args.entries || [];
+      const limits = { user: 1500, global: 2500, project: 4000 };
+      return {
+        target: args.target,
+        cwd: args.cwd || undefined,
+        path: `/data/memory/${args.target}.md`,
+        entries: args.entries || [],
+        used: (args.entries || []).join("\n§\n").length,
+        limit: limits[args.target] || 2500,
+      };
+    }
+    case "answerApproval": {
+      window.__e2eApprovalAnswers = (window.__e2eApprovalAnswers || []).concat([args]);
+      const waiter = (window.__e2eApprovalWaits || {})[args.callId];
+      if (!waiter) throw new Error("no pending approval " + args.callId);
+      delete window.__e2eApprovalWaits[args.callId];
+      waiter(args.decision);
+      return true;
+    }
+    case "permissionsGet":
+    case "permissionsSet": {
+      const p = (window.__e2ePerms = window.__e2ePerms || { global: [], folders: {}, kind: "seatbelt" });
+      if (cmd === "permissionsSet") {
+        window.__e2ePermSets = (window.__e2ePermSets || []).concat([JSON.parse(JSON.stringify(args))]);
+        if (args.scope === "global") p.global = args.rules || [];
+        else if (args.scope === "folder") {
+          if ((args.rules || []).length) p.folders[args.cwd] = args.rules;
+          else delete p.folders[args.cwd];
+        } else throw new Error("scope must be global or folder");
+      }
+      const cwd = (args && args.cwd) || "/home/tester/project";
+      return {
+        global: p.global,
+        folder: p.folders[cwd] || [],
+        session: [],
+        folders: Object.entries(p.folders).map(([c, rules]) => ({ cwd: c, rules })),
+        sandbox: { kind: p.kind },
+        presets: ["read-only", "auto", "full-access"],
+      };
+    }
+    case "mcpList":
+    case "mcpConfig":
+    case "mcpSetConfig":
+    case "mcpSetEnabled":
+    case "mcpRestart":
+    case "mcpTrust":
+    case "mcpParse":
+    case "mcpAdd":
+      return window.__e2eMcpInvoke(cmd, args || {});
+    case "hooksList":
+    case "hooksSetConfig":
+    case "hooksTrust":
+    case "hooksToggle":
+      return window.__e2eHooksInvoke(cmd, args || {});
+    case "sideQuestion":
+      window.__e2eSideCalls = (window.__e2eSideCalls || []).concat([JSON.parse(JSON.stringify(args || {}))]);
+      if (window.__e2eSideQuestion) return window.__e2eSideQuestion(args || {});
+      return { answer: "Side answer to: " + (args && args.question), model: (args && args.model) || "stub-model" };
+    case "toolsList":
+    case "toolsSet":
+    case "toolsAccept":
+      return window.__e2eToolsInvoke(cmd, args || {});
+    case "memoryProjects":
+      return [{ cwd: "/home/tester/project", key: "project-1234", entries: 1, used: 20, limit: 4000 }];
+    case "memoryRefreshSnapshot":
+      window.__e2eSnapshotRefreshes = (window.__e2eSnapshotRefreshes || 0) + 1;
+      return true;
+    case "gitInfo":
+      return window.__e2eGit || { repo: false, hasCommits: false };
+    case "revertPreview":
+      window.__e2ePreviews = (window.__e2ePreviews || []).concat([args]);
+      return { index: args.index, turns: 1, files: [], conflicts: [], snapshots: true, ...(window.__e2ePreview || {}) };
+    case "revertSession": {
+      window.__e2eReverts = (window.__e2eReverts || []).concat([args]);
+      window.__e2eRevertedAt = args.index;
+      return {
+        index: args.index,
+        message: "run the slow job",
+        restored: [],
+        skipped: [],
+        snapshots: true,
+        ...(window.__e2eRevertResult || {}),
+      };
+    }
+    case "unrevertSession":
+      window.__e2eUnreverts = (window.__e2eUnreverts || 0) + 1;
+      window.__e2eRevertedAt = undefined;
+      return true;
+    case "worktreeStatus":
+      return (
+        window.__e2eWorktreeStatus || {
+          exists: true,
+          changed: 0,
+          ahead: 0,
+          branch: "paladin/demo",
+          into: "main",
+          path: "/wt/demo",
+          repoRoot: "/home/tester/project",
+        }
+      );
+    case "worktreeMerge":
+      window.__e2eMerges = (window.__e2eMerges || []).concat([args]);
+      if (window.__e2eMergeError) throw new Error(window.__e2eMergeError);
+      return (
+        window.__e2eMergeResult || {
+          merged: true,
+          nothingToMerge: false,
+          commit: "abc1234",
+          conflicts: [],
+          into: "main",
+        }
+      );
+    case "deleteSession":
+      window.__e2eDeletes = (window.__e2eDeletes || []).concat([args]);
+      return true;
+    case "forkSession":
+      window.__e2eForks = (window.__e2eForks || []).concat([args]);
+      if (args && args.worktree) {
+        return {
+          sessionId: "sess-wt-1",
+          cwd: "/wt/demo",
+          title: "notify demo (fork)",
+          messageCount: 2,
+          createdAt: Math.floor(Date.now() / 1000),
+          worktree: {
+            repoRoot: "/home/tester/project",
+            path: "/wt/demo",
+            branch: "paladin/demo",
+            baseBranch: "main",
+            origin: "/home/tester/project",
+          },
+        };
+      }
+      return {
+        sessionId: "sess-fork-1",
+        cwd: "/home/tester/project",
+        title: "notify demo (fork)",
+        messageCount: 2,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+    case "renameSession":
+      window.__e2eRenames = (window.__e2eRenames || []).concat([args]);
+      return true;
+    case "openSession":
+      window.__e2eOpens = (window.__e2eOpens || []).concat([args]);
+      return {
+        sessionId: (args && args.sessionId) || "sess-notify-1",
+        cwd: "/home/tester/project",
+        provider: "Opencode Go",
+        model: "openai/gpt-4o",
+        ...((window.__e2eOpenExtra || {})[(args && args.sessionId) || ""] || {}),
+      };
+    case "sessionHistory": {
+      if (window.__e2eHistory) return window.__e2eHistory;
+      const at = Math.floor(Date.now() / 1000);
+      if (window.__e2eRevertedAt === 0) {
+        return [];
+      }
+      return [
+        { role: "user", content: "run the slow job", createdAt: at, index: 0 },
+        { role: "assistant", content: "Starting the slow job.", createdAt: at },
+        {
+          role: "tool",
+          content: '{"job_id":"job-1-1","status":"running"}',
+          createdAt: at,
+          name: "shell",
+          arguments: '{"action":"run","cmd":"sleep 60","background":true,"notify":true}',
+          status: "ok",
+        },
+        { role: "assistant", content: "Meanwhile done.", createdAt: at },
+        {
+          role: "tool",
+          content:
+            '{"notice":"background job finished","job_id":"job-1-1","status":"done","exit_code":0,"output":"hi"}',
+          createdAt: at,
+          name: "shell",
+          arguments: '{"action":"notify","job_id":"job-1-1"}',
+          status: "ok",
+        },
+        { role: "assistant", content: "It printed hi.", createdAt: at },
+      ];
+    }
+    case "sessionUsage":
+      return (
+        window.__e2eUsage || {
+          sessionId: "sess-notify-1",
+          cwd: "/home/tester/project",
+          model: "beam-free",
+          contextWindow: 200000,
+          contextKnown: true,
+          calls: 3,
+          promptTokens: 20000,
+          completionTokens: 5000,
+          reasoningTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 25000,
+          lastInputTokens: 25000,
+          cost: 0.0042,
+          listCost: 0.008,
+          hasCost: true,
+          fillPercent: 12.5,
+          daily: [
+            {
+              date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+              calls: 1,
+              promptTokens: 5000,
+              completionTokens: 1000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 6000,
+              cost: 0.0012,
+              listCost: 0.002,
+              hasCost: true,
+            },
+            {
+              date: new Date().toISOString().slice(0, 10),
+              calls: 2,
+              promptTokens: 15000,
+              completionTokens: 4000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 19000,
+              cost: 0.003,
+              listCost: 0.006,
+              hasCost: true,
+            },
+          ],
+          models: [
+            {
+              model: "beam-free",
+              contextWindow: 200000,
+              contextKnown: true,
+              calls: 2,
+              promptTokens: 15000,
+              completionTokens: 4000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 19000,
+              cost: 0.003,
+              listCost: 0.006,
+              hasCost: true,
+              fillPercent: 9.5,
+            },
+            {
+              model: "kimi-k2.6",
+              contextWindow: 262144,
+              contextKnown: true,
+              calls: 1,
+              promptTokens: 5000,
+              completionTokens: 1000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 6000,
+              cost: 0.0012,
+              listCost: 0.002,
+              hasCost: true,
+              fillPercent: 2.29,
+            },
+          ],
+        }
+      );
+    case "sessionTodos":
+      return (
+        window.__e2eTodos || [
+          { content: "Plan the work", status: "finished" },
+          { content: "Build the hat", status: "in_progress" },
+          { content: "Run the checks", status: "not_started" },
+        ]
+      );
+    case "overallUsage":
+      return (
+        window.__e2eOverall || {
+          sessionCount: 2,
+          sessionsWithUsage: 2,
+          calls: 3,
+          promptTokens: 20000,
+          completionTokens: 5000,
+          reasoningTokens: 400,
+          cacheReadTokens: 1200,
+          cacheWriteTokens: 300,
+          totalTokens: 26900,
+          cost: 0.0042,
+          listCost: 0.008,
+          hasCost: true,
+          updatedAt: Math.floor(Date.now() / 1000),
+          models: [
+            {
+              model: "beam-free",
+              contextWindow: 0,
+              contextKnown: false,
+              calls: 2,
+              promptTokens: 15000,
+              completionTokens: 4000,
+              reasoningTokens: 400,
+              cacheReadTokens: 1200,
+              cacheWriteTokens: 300,
+              totalTokens: 20900,
+              cost: 0.003,
+              listCost: 0.006,
+              hasCost: true,
+            },
+            {
+              model: "kimi-k2.6",
+              contextWindow: 0,
+              contextKnown: false,
+              calls: 1,
+              promptTokens: 5000,
+              completionTokens: 1000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 6000,
+              cost: 0.0012,
+              listCost: 0.002,
+              hasCost: true,
+            },
+          ],
+          sessions: [
+            {
+              sessionId: "sess-notify-1",
+              title: "notify demo",
+              model: "beam-free",
+              createdAt: Math.floor(Date.now() / 1000) - 86400,
+              updatedAt: Math.floor(Date.now() / 1000),
+              calls: 2,
+              promptTokens: 15000,
+              completionTokens: 4000,
+              reasoningTokens: 400,
+              cacheReadTokens: 1200,
+              cacheWriteTokens: 300,
+              totalTokens: 20900,
+              cost: 0.003,
+              listCost: 0.006,
+              hasCost: true,
+            },
+            {
+              sessionId: "sess-other-2",
+              title: "second session",
+              model: "kimi-k2.6",
+              createdAt: Math.floor(Date.now() / 1000) - 172800,
+              updatedAt: Math.floor(Date.now() / 1000) - 86400,
+              calls: 1,
+              promptTokens: 5000,
+              completionTokens: 1000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 6000,
+              cost: 0.0012,
+              listCost: 0.002,
+              hasCost: true,
+            },
+          ],
+          daily: [
+            {
+              date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+              calls: 1,
+              promptTokens: 5000,
+              completionTokens: 1000,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 6000,
+              cost: 0.0012,
+              listCost: 0.002,
+              hasCost: true,
+            },
+            {
+              date: new Date().toISOString().slice(0, 10),
+              calls: 2,
+              promptTokens: 15000,
+              completionTokens: 4000,
+              reasoningTokens: 400,
+              cacheReadTokens: 1200,
+              cacheWriteTokens: 300,
+              totalTokens: 20900,
+              cost: 0.003,
+              listCost: 0.006,
+              hasCost: true,
+            },
+          ],
+        }
+      );
+    case "listProviders":
+      window.__e2eLists = (window.__e2eLists || 0) + 1;
+      if (!window.__e2eProviders) {
+        window.__e2eProviders = [
+          {
+            name: "Opencode Go",
+            apiType: "openai",
+            apiUrl: "https://opencode.ai/inference/go/openai/v1",
+            model: "",
+            models: [],
+            default: true,
+            hasKey: false,
+          },
+          {
+            name: "openrouter",
+            apiType: "openai",
+            apiUrl: "https://openrouter.ai/api/v1",
+            model: "",
+            models: ["openai/gpt-4o"],
+            default: false,
+            hasKey: false,
+          },
+          {
+            name: "local",
+            apiType: "openai",
+            apiUrl: "http://localhost:11434/v1",
+            model: "",
+            models: ["other/llama3.2"],
+            default: false,
+            hasKey: true,
+          },
+        ];
+      }
+      window.__e2eProviders[0].models =
+        window.__e2eLists > 1
+          ? ["anthropic/claude-fable-20990101", "anthropic/claude-3-opus", "openai/gpt-4o"]
+          : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
+      return window.__e2eProviders;
+    case "refreshProviders":
+      if (args && args.name) {
+        return { name: args.name, count: 3, models: [] };
+      }
+      return false;
+    case "run_turn": {
+      const inner = args && args.args ? args.args : args || {};
+      window.__e2eChats = window.__e2eChats || [];
+      window.__e2eChats.push({
+        sessionId: inner.sessionId,
+        message: inner.message,
+        resume: !!inner.resume,
+        skill: inner.skill ?? null,
+        command: inner.command ?? null,
+        mode: inner.mode || "",
+        compact: !!inner.compact,
+      });
+      if (inner.compact) {
+        return { sessionId: inner.sessionId || "sess-notify-1", reply: "", stopped: false };
+      }
+      return {
+        sessionId: inner.sessionId || "sess-notify-1",
+        reply: "Stub reply to: " + (inner.message || ""),
+        stopped: false,
+      };
+    }
+    case "submitChat":
+      return __e2eHub.submit(args || {});
+    case "steerChat":
+      return __e2eHub.steer(args || {});
+    case "thinkingGet":
+    case "thinkingSet": {
+      // Models named like gpt-4o or llama have no adjustable thinking.
+      const store = (window.__e2eThinking = window.__e2eThinking || {});
+      const provider = (args && args.provider) || "Opencode Go";
+      const model = (args && args.model) || "";
+      const levels = /gpt-4o|llama/.test(model) ? [] : ["none", "low", "medium", "high", "xhigh", "max"];
+      const key = provider + "\u0000" + model;
+      if (cmd === "thinkingSet") {
+        window.__e2eThinkingSets = (window.__e2eThinkingSets || []).concat([JSON.parse(JSON.stringify(args))]);
+        if (args.level && !levels.includes(args.level)) throw new Error("unsupported level " + args.level);
+        if (args.level) store[key] = args.level;
+        else delete store[key];
+      }
+      return { provider, model, levels, level: store[key] || "" };
+    }
+    case "budgetGet":
+    case "budgetSet": {
+      const b = (window.__e2eBudget = window.__e2eBudget || {
+        defaultUsd: 0,
+        sessions: {},
+        spentUsd: 0,
+        hasCost: true,
+      });
+      const sid = (args && args.sessionId) || "";
+      if (cmd === "budgetSet") {
+        window.__e2eBudgetSets = (window.__e2eBudgetSets || []).concat([JSON.parse(JSON.stringify(args))]);
+        if (args.scope === "global") b.defaultUsd = args.budgetUsd || 0;
+        else if (args.budgetUsd === null || args.budgetUsd === undefined) delete b.sessions[sid];
+        else b.sessions[sid] = args.budgetUsd;
+      }
+      const own = sid && sid in b.sessions ? b.sessions[sid] : null;
+      return {
+        defaultUsd: b.defaultUsd,
+        sessionUsd: own,
+        effectiveUsd: own ?? b.defaultUsd,
+        spentUsd: sid ? b.spentUsd : 0,
+        hasCost: sid ? b.hasCost : false,
+        calls: sid ? (b.calls ?? 1) : 0,
+      };
+    }
+    case "turns":
+      return __e2eHub.list();
+    case "attach":
+      return __e2eHub.attach(args || {});
+    case "cancelTurn":
+      return __e2eHub.cancel(args && args.turnId);
+    case "stopChat":
+      return __e2eHub.stop(args && args.sessionId);
+    case "setDefaultProvider":
+      for (const p of window.__e2eProviders || []) {
+        p.default = p.name === args.name;
+      }
+      return window.__e2eProviders;
+    case "addProvider":
+      if (!args.apiKey) throw new Error("api key is required");
+      window.__e2eProviders.push({
+        name: args.name,
+        apiType: args.apiType,
+        apiUrl: args.apiUrl,
+        model: "",
+        models: [],
+        default: false,
+        hasKey: true,
+      });
+      return window.__e2eProviders[window.__e2eProviders.length - 1];
+    case "updateProvider":
+      for (const p of window.__e2eProviders || []) {
+        if (p.name === args.name) {
+          p.apiUrl = args.apiUrl;
+          p.apiType = args.apiType;
+          if (args.apiKey) p.hasKey = true;
+          return p;
+        }
+      }
+      throw new Error("provider not found");
+    case "getWorkspace":
+      return window.localStorage.getItem("e2e-workspace") || "";
+    case "setWorkspace":
+      window.localStorage.setItem("e2e-workspace", args.path);
+      return args.path;
+    case "getPrompt":
+      return window.__e2ePrompt || { systemPrompt: "stub system prompt" };
+    case "setPrompt":
+      window.__e2ePrompt = { systemPrompt: args.systemPrompt || "stub system prompt" };
+      return window.__e2ePrompt;
+    case "resetPrompt":
+      window.__e2ePrompt = { systemPrompt: "stub system prompt" };
+      return window.__e2ePrompt;
+    case "fsHome":
+      return "/home/tester";
+    case "fileComplete": {
+      const q = (args && args.query) || "";
+      const all = [
+        {
+          path: "src/main.go",
+          display: "main.go",
+          resolvedPath: "/home/tester/project/src/main.go",
+          outside: false,
+          isDir: false,
+        },
+        {
+          path: "src/server/",
+          display: "server/",
+          resolvedPath: "/home/tester/project/src/server",
+          outside: false,
+          isDir: true,
+        },
+        {
+          path: "src/server/app.go",
+          display: "app.go",
+          resolvedPath: "/home/tester/project/src/server/app.go",
+          outside: false,
+          isDir: false,
+        },
+        {
+          path: "README.md",
+          display: "README.md",
+          resolvedPath: "/home/tester/project/README.md",
+          outside: false,
+          isDir: false,
+        },
+        {
+          path: "../sibling/outside.txt",
+          display: "outside.txt",
+          resolvedPath: "/home/tester/sibling/outside.txt",
+          outside: true,
+          isDir: false,
+        },
+      ];
+      const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+      const want = norm(q).toLowerCase();
+      return all.filter((e) => norm(e.path).toLowerCase().includes(want));
+    }
+    case "fsList": {
+      const at = (args && args.path) || "/home/tester";
+      return {
+        currentPath: at,
+        parentPath: "/home",
+        directories: [
+          { name: ".hidden-dir", path: `${at}/.hidden-dir` },
+          { name: "project", path: `${at}/project` },
+        ],
+        files: [
+          { name: ".env", path: `${at}/.env` },
+          { name: "README.md", path: `${at}/README.md` },
+        ],
+      };
+    }
+    case "resources":
+      return window.__e2eRes || { at: 0, supported: false, self: { cpu: 0, rss: 0, procs: 0 }, sessions: {} };
+    default:
+      if (String(cmd).startsWith("plugin:")) {
+        return 1;
+      }
+      throw new Error(`e2e stub: unhandled command ${cmd}`);
+  }
 }
 
 window.__paladinBaseInvoke = __paladinBaseInvoke;
@@ -594,14 +704,18 @@ window.__e2eMcpInvoke = (cmd, args) => {
       return overview();
     case "mcpConfig": {
       const text = m.configs[args.scope];
-      return { path: args.scope === "global" ? "/data/config/mcp.json" : cwd + "/.paladin/mcp.json", text: text || '{\n  "mcpServers": {}\n}\n', exists: !!text };
+      return {
+        path: args.scope === "global" ? "/data/config/mcp.json" : cwd + "/.paladin/mcp.json",
+        text: text || '{\n  "mcpServers": {}\n}\n',
+        exists: !!text,
+      };
     }
     case "mcpSetConfig": {
       let parsed;
       try {
         parsed = JSON.parse(args.text);
       } catch (err) {
-        throw new Error("invalid JSON: " + err.message);
+        throw new Error("invalid JSON: " + err.message, { cause: err });
       }
       m.configs[args.scope] = args.text;
       m.servers = m.servers.filter((s) => s.scope !== args.scope);
@@ -628,23 +742,43 @@ window.__e2eMcpInvoke = (cmd, args) => {
     }
     case "mcpParse": {
       if (m.parse) return { servers: m.parse };
-      const lines = String(args.text || "").split("\n").map((l) => l.trim()).filter(Boolean);
-      if (!lines.length || lines.some((l) => l.startsWith("{"))) throw new Error("nothing to add: paste a command, URL or mcp.json snippet");
+      const lines = String(args.text || "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (!lines.length || lines.some((l) => l.startsWith("{")))
+        throw new Error("nothing to add: paste a command, URL or mcp.json snippet");
       return {
         servers: lines.map((l) => {
           if (/^https?:\/\//.test(l)) return { name: new URL(l).hostname.split(".")[0], config: { url: l } };
           const [command, ...rest] = l.split(/\s+/);
           const last = rest[rest.length - 1] || command;
-          return { name: last.split("/").pop().replace(/^(mcp-)?server-/, ""), config: { command, args: rest } };
+          return {
+            name: last
+              .split("/")
+              .pop()
+              .replace(/^(mcp-)?server-/, ""),
+            config: { command, args: rest },
+          };
         }),
       };
     }
     case "mcpAdd": {
       for (const n of args.servers) {
         const dup = m.servers.find((s) => s.name === n.name && s.scope === args.scope);
-        if (dup && !args.replace) throw new Error(`a server named "${n.name}" already exists in ${args.scope === "global" ? "/data/config/mcp.json" : cwd + "/.paladin/mcp.json"}`);
+        if (dup && !args.replace)
+          throw new Error(
+            `a server named "${n.name}" already exists in ${args.scope === "global" ? "/data/config/mcp.json" : cwd + "/.paladin/mcp.json"}`,
+          );
         m.servers = m.servers.filter((s) => !(s.name === n.name && s.scope === args.scope));
-        m.servers.push({ name: n.name, scope: args.scope, transport: n.config.url ? "http" : "stdio", state: "ready", restarts: 0, tools: [] });
+        m.servers.push({
+          name: n.name,
+          scope: args.scope,
+          transport: n.config.url ? "http" : "stdio",
+          state: "ready",
+          restarts: 0,
+          tools: [],
+        });
       }
       return overview();
     }
@@ -693,7 +827,8 @@ window.__e2eToolsInvoke = (cmd, args) => {
         if (args.enabled === null || args.enabled === undefined) delete m[n];
         else m[n] = args.enabled;
       }
-      if (args.scope === "session" && args.enabled) t.pending[sid] = (t.pending[sid] || []).filter((n) => !args.names.includes(n));
+      if (args.scope === "session" && args.enabled)
+        t.pending[sid] = (t.pending[sid] || []).filter((n) => !args.names.includes(n));
       return overview();
     }
     case "toolsAccept": {
@@ -748,6 +883,8 @@ const __e2eHub = (() => {
       onApproval: (approval) => chat(turn, "chat/approval", { approval }),
       onBudget: (budget) => chat(turn, "chat/budget", { budget }),
       onHook: (hook) => chat(turn, "chat/hook", { hook }),
+      onReasoning: (reasoning) => chat(turn, "chat/reasoning", { reasoning }),
+      onThinkingDropped: (thinkingDropped) => chat(turn, "chat/thinkingDropped", { thinkingDropped }),
     };
     Promise.resolve()
       .then(() => window.__e2eRunTurn({ ...turn.params }, handlers))
@@ -765,7 +902,7 @@ const __e2eHub = (() => {
     }
   };
   const info = (t) => {
-    const { params, ...rest } = t;
+    const { params: _params, ...rest } = t;
     return copy(rest);
   };
   return {
@@ -860,12 +997,33 @@ window.__e2eHooksInvoke = (cmd, args) => {
   const h = (window.__e2eHooks = window.__e2eHooks || {});
   if (!h.sources) {
     h.sources = [
-      { path: "/data/config/hooks.json", scope: "global", format: "paladin", exists: false, editable: true, trusted: true, text: "", handlers: [] },
-      { path: cwd + "/.paladin/hooks.json", scope: "folder", format: "paladin", exists: false, editable: true, trusted: false, text: "", handlers: [] },
+      {
+        path: "/data/config/hooks.json",
+        scope: "global",
+        format: "paladin",
+        exists: false,
+        editable: true,
+        trusted: true,
+        text: "",
+        handlers: [],
+      },
+      {
+        path: cwd + "/.paladin/hooks.json",
+        scope: "folder",
+        format: "paladin",
+        exists: false,
+        editable: true,
+        trusted: false,
+        text: "",
+        handlers: [],
+      },
     ];
   }
   window.__e2eHooksCalls = (window.__e2eHooksCalls || []).concat([{ cmd, args: JSON.parse(JSON.stringify(args)) }]);
-  const overview = () => ({ sources: JSON.parse(JSON.stringify(h.sources)), events: ["PreToolUse", "PostToolUse", "Stop"] });
+  const overview = () => ({
+    sources: JSON.parse(JSON.stringify(h.sources)),
+    events: ["PreToolUse", "PostToolUse", "Stop"],
+  });
   switch (cmd) {
     case "hooksList":
       return overview();
@@ -879,13 +1037,19 @@ window.__e2eHooksInvoke = (cmd, args) => {
       try {
         parsed = JSON.parse(args.text);
       } catch (e) {
-        throw new Error("invalid JSON: " + e.message);
+        throw new Error("invalid JSON: " + e.message, { cause: e });
       }
       const handlers = [];
       for (const [event, groups] of Object.entries(parsed.hooks || {})) {
         groups.forEach((g, gi) =>
           (g.hooks || []).forEach((x, hi) =>
-            handlers.push({ key: `${src.path}#${event}/${gi}/${hi}`, event, matcher: g.matcher || "", command: x.command, enabled: true }),
+            handlers.push({
+              key: `${src.path}#${event}/${gi}/${hi}`,
+              event,
+              matcher: g.matcher || "",
+              command: x.command,
+              enabled: true,
+            }),
           ),
         );
       }

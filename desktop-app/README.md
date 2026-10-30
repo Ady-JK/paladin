@@ -25,9 +25,18 @@ stderr. See `PROTOCOL.md`.
 ## Run
 
 ```sh
-make dev                # fast loop: sidecar + Electron main/preload, Vite + Electron
-make desktop-dev        # same thing (kept as an alias)
+make app-dev    # quick loop: debug sidecar + Electron main/preload, Vite + Electron
+make test       # Go tests, UI typecheck and the Playwright UI suite
+make fmt        # format Go and UI sources
+make lint       # golangci-lint, deadcode, eslint, knip, prettier --check
+make clean      # remove every build output
 ```
+
+The Makefile works with GNU make on macOS, Linux and Windows. Go lint
+tools are found in `$(go env GOPATH)/bin`; override with
+`GOLANGCI_LINT=…` / `DEADCODE=…`. The UI tests use, in order,
+`PALADIN_E2E_BROWSER`, Brave on Linux, Playwright's own Chromium, then
+the newest headless shell already in the Playwright cache.
 
 Headed Electron needs an X server. Headless smoke (CI-friendly):
 
@@ -72,11 +81,16 @@ transcript so tool follow-up rounds stay valid.
 - Views stay alive when switching to Agent (hidden, never destroyed);
   only the selected view gets bounds. Bounds come from the renderer's
   `#externalHost` rect, one settle move per layout change.
+- Chat mode has no sidebar: pages are browser-style tabs in a fixed-height
+  strip above `#externalHost` (× removes a page, + adds one). A native
+  view always paints above the renderer's HTML, so nothing may float over
+  it; with no sidebar and a fixed strip the page's bounds never change
+  after it is shown. In Agent mode the sidebar is a floating drawer over
+  the full-width main card (closes on an outside click, Escape, a session
+  pick, or clicking the Agent rail button again; there is no separate
+  sidebar button).
 - Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
   ordinary entries and any of them can be removed like a custom page.
-- Views stay alive when switching to Agent (hidden, never destroyed);
-  only the selected view gets bounds. Bounds come from the renderer's
-  `#externalHost` rect, one settle move per layout change.
 - Views drop after 60s idle on the Agent tab to reclaim RAM; logins
   persist in the partition.
 - The window is frameless: the renderer draws the header and the
@@ -87,5 +101,10 @@ transcript so tool follow-up rounds stay valid.
 ## Release
 
 ```sh
-make desktop-build      # release sidecar + vite + electron-builder (deb)
+make app       # clean, then a static stripped sidecar + minified renderer + electron-builder
 ```
+
+`make app` builds the sidecar with `CGO_ENABLED=0 -trimpath -ldflags "-s -w"`
+and packages with maximum compression into `desktop-app/release/`
+(dmg on macOS, NSIS on Windows, deb on Linux). The sidecar ships as
+`agent-host` (`agent-host.exe` on Windows) under the app resources.

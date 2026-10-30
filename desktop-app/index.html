@@ -8,13 +8,14 @@
   </head>
 
   <body class="h-screen">
-    <div class="flex h-screen overflow-hidden">
+    <div class="relative flex h-screen overflow-hidden">
       <!-- ==================== RAIL ==================== -->
       <nav id="rail" class="flex w-14 flex-shrink-0 flex-col items-center gap-1 pb-3 pt-3" aria-label="Views">
-        <div class="brand-mark rail-brand mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-[13px] font-semibold">P</div>
-        <button id="sidebarToggleBtn" class="rail-btn" title="Collapse the sidebar" aria-label="Toggle the sidebar">
-          <span data-icon="rl-sidebar" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
-        </button>
+        <div
+          class="brand-mark rail-brand mb-2 flex h-8 w-8 items-center justify-center rounded-[10px] text-[13px] font-semibold"
+        >
+          P
+        </div>
         <div id="tabsWrap" role="tablist" aria-orientation="vertical" class="mt-1 flex flex-col items-center gap-1">
           <button id="agentTab" role="tab" class="rail-btn" title="Agent: the coding harness">
             <span data-icon="rl-agent" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
@@ -32,15 +33,22 @@
       </nav>
 
       <!-- ==================== SIDEBAR ==================== -->
-      <aside id="sidebar" class="flex w-72 flex-shrink-0 flex-col overflow-hidden">
+      <aside id="sidebar" class="side-drawer flex flex-col overflow-hidden" aria-label="Sessions">
         <!-- Brand -->
         <div id="brandBar" class="sidebar-text flex items-end justify-between gap-2 px-4 pb-3 pt-4">
           <div class="min-w-0">
-            <h1 class="flex items-baseline gap-1.5 text-[17px] font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100">
+            <h1
+              class="flex items-baseline gap-1.5 text-[17px] font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100"
+            >
               paladin
-              <span id="brandVersion" class="font-mono text-[10px] font-normal text-slate-400 dark:text-slate-500">v0.5.0</span>
+              <span id="brandVersion" class="font-mono text-[10px] font-normal text-slate-400 dark:text-slate-500"
+                >v0.5.5</span
+              >
             </h1>
-            <div class="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500" title="Current workspace">
+            <div
+              class="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500"
+              title="Current workspace"
+            >
               <span data-icon="rl-folder" class="[&>svg]:h-3 [&>svg]:w-3"></span>
               <span id="workspaceLabel" class="truncate">workspace</span>
             </div>
@@ -58,8 +66,16 @@
         <!-- Search -->
         <div id="searchWrap" class="sidebar-text px-2 pb-1 pt-1">
           <div class="side-search relative">
-            <span data-icon="search" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></span>
-            <input id="searchInput" type="text" placeholder="Search sessions" class="w-full rounded-lg py-1.5 pl-8 pr-3 text-[13px]" />
+            <span
+              data-icon="search"
+              class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            ></span>
+            <input
+              id="searchInput"
+              type="text"
+              placeholder="Search sessions"
+              class="w-full rounded-lg py-1.5 pl-8 pr-3 text-[13px]"
+            />
           </div>
         </div>
 
@@ -68,17 +84,14 @@
           <p class="px-2 py-1 text-slate-400">no sessions yet</p>
         </div>
 
-        <!-- The external chat pages -->
-        <div id="chatList" class="sidebar-text hidden flex-1 space-y-1 overflow-y-auto p-2 text-xs">
-          <div id="chatEntries" class="space-y-1"></div>
-        </div>
-
         <!-- The daemon and app resources -->
         <div id="daemonWrap" class="sidebar-text px-3 pb-3 pt-2">
           <div class="side-foot flex items-center gap-2 rounded-xl px-2.5 py-2">
             <span id="daemonDot" class="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300 dark:bg-slate-700"></span>
             <div class="min-w-0 flex-1">
-              <div id="daemonLabel" class="truncate text-xs font-medium text-slate-700 dark:text-slate-200">connecting…</div>
+              <div id="daemonLabel" class="truncate text-xs font-medium text-slate-700 dark:text-slate-200">
+                connecting…
+              </div>
               <div id="daemonDetail" class="truncate font-mono text-[10px] text-slate-400">—</div>
             </div>
             <button id="resTotal" class="res-total hidden" title="App CPU and memory">
@@ -180,186 +193,207 @@
           </div>
 
           <!-- The composer -->
-          <footer
-            class="border-0 bg-transparent px-4 pb-4 pt-2"
-          >
-          <div class="mx-auto w-full max-w-3xl">
-            <div
-              class="composer-float relative rounded-3xl"
-            >
-              <div id="skillChipSlot" class="px-4 pt-2"></div>
-              <textarea
-                id="promptInput"
-                rows="3"
-                placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
-                class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
-                spellcheck="false"
-              ></textarea>
+          <footer class="border-0 bg-transparent px-4 pb-4 pt-2">
+            <div class="mx-auto w-full max-w-3xl">
+              <div class="composer-float relative rounded-3xl">
+                <div id="skillChipSlot" class="px-4 pt-2"></div>
+                <textarea
+                  id="promptInput"
+                  rows="3"
+                  placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
+                  class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                  spellcheck="false"
+                ></textarea>
 
-              <div
-                class="flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1"
-              >
-                <button
-                  id="attachBtn"
-                  class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                  title="Attach a file or folder"
-                >
-                  <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
-                </button>
-                <div class="relative min-w-0 flex-1">
+                <div class="flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1">
                   <button
-                    id="modelSelectBtn"
-                    class="flex max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                    title="Pick the provider and the model"
+                    id="attachBtn"
+                    class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                    title="Attach a file or folder"
                   >
-                    <span id="modelSelectLabel" class="truncate">—</span>
-                    <span data-icon="chevron-down" class="flex-shrink-0"></span>
+                    <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
                   </button>
-                  <div
-                    id="modelMenu"
-                    class="absolute bottom-full left-0 z-50 mb-2 hidden w-[42rem] max-w-[92vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
-                  >
-                    <div
-                      class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800"
+                  <div class="relative flex min-w-0 flex-1 items-center gap-1">
+                    <button
+                      id="modelSelectBtn"
+                      class="flex min-w-0 max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                      title="Pick the provider and the model"
                     >
-                      <span data-icon="search" class="flex-shrink-0 text-slate-400"></span>
-                      <input
-                        id="modelSearch"
-                        type="text"
-                        placeholder="Search providers, labs, or models... (Cmd+K)"
-                        spellcheck="false"
-                        class="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
-                      />
-                      <button
-                        id="modelSearchClear"
-                        class="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                        title="Clear the search"
+                      <span id="modelSelectLabel" class="truncate">—</span>
+                      <span data-icon="chevron-down" class="flex-shrink-0"></span>
+                    </button>
+                    <div
+                      id="modelMenu"
+                      class="absolute bottom-full left-0 z-50 mb-2 hidden w-[42rem] max-w-[92vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
+                    >
+                      <div class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+                        <span data-icon="search" class="flex-shrink-0 text-slate-400"></span>
+                        <input
+                          id="modelSearch"
+                          type="text"
+                          placeholder="Search providers, labs, or models... (Cmd+K)"
+                          spellcheck="false"
+                          class="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                        />
+                        <button
+                          id="modelSearchClear"
+                          class="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                          title="Clear the search"
+                        >
+                          <span data-icon="xmark"></span>
+                        </button>
+                      </div>
+                      <div class="grid grid-cols-3 gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+                        <div class="min-w-0">
+                          <div
+                            class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
+                          >
+                            Provider
+                          </div>
+                          <select
+                            id="providerPick"
+                            title="Switch the provider"
+                            class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                          ></select>
+                        </div>
+                        <div class="min-w-0">
+                          <div
+                            class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
+                          >
+                            <span data-icon="flask"></span>
+                            <span>Lab</span>
+                          </div>
+                          <select
+                            id="labPick"
+                            title="Switch the lab"
+                            class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                          ></select>
+                        </div>
+                        <div class="min-w-0">
+                          <div
+                            class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
+                          >
+                            <span data-icon="brain"></span>
+                            <span>Model</span>
+                          </div>
+                          <div
+                            id="modelPill"
+                            class="flex min-w-0 items-center gap-1.5 truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          ></div>
+                        </div>
+                      </div>
+                      <div
+                        id="filterBar"
+                        class="hidden items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 dark:border-slate-800"
                       >
-                        <span data-icon="xmark"></span>
-                      </button>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
-                      <div class="min-w-0">
-                        <div class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                          Provider
-                        </div>
-                        <select
-                          id="providerPick"
-                          title="Switch the provider"
-                          class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
-                        ></select>
-                      </div>
-                      <div class="min-w-0">
-                        <div class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                          <span data-icon="flask"></span>
-                          <span>Lab</span>
-                        </div>
-                        <select
-                          id="labPick"
-                          title="Switch the lab"
-                          class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
-                        ></select>
-                      </div>
-                      <div class="min-w-0">
-                        <div class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                          <span data-icon="brain"></span>
-                          <span>Model</span>
-                        </div>
                         <div
-                          id="modelPill"
-                          class="flex min-w-0 items-center gap-1.5 truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          id="filterLabel"
+                          class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
+                        ></div>
+                        <button
+                          id="filterClearBtn"
+                          class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                          title="Show every provider and lab again"
+                        >
+                          Clear filter
+                        </button>
+                      </div>
+                      <div class="grid grid-cols-[1fr_14rem]">
+                        <div id="modelTree" class="max-h-64 min-h-32 overflow-y-auto p-1.5"></div>
+                        <div
+                          id="modelDetail"
+                          class="min-h-32 border-l border-slate-200 p-3 dark:border-slate-800"
                         ></div>
                       </div>
-                    </div>
-                    <div
-                      id="filterBar"
-                      class="hidden items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 dark:border-slate-800"
-                    >
                       <div
-                        id="filterLabel"
-                        class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
-                      ></div>
-                      <button
-                        id="filterClearBtn"
-                        class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                        title="Show every provider and lab again"
+                        class="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-slate-800"
                       >
-                        Clear filter
-                      </button>
-                    </div>
-                    <div class="grid grid-cols-[1fr_14rem]">
-                      <div id="modelTree" class="max-h-64 min-h-32 overflow-y-auto p-1.5"></div>
-                      <div
-                        id="modelDetail"
-                        class="min-h-32 border-l border-slate-200 p-3 dark:border-slate-800"
-                      ></div>
-                    </div>
-                    <div
-                      class="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-slate-800"
-                    >
-                      <div
-                        id="modelBreadcrumb"
-                        class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
-                      ></div>
-                      <div class="flex flex-shrink-0 gap-2">
-                        <button
-                          id="modelQuickBtn"
-                          class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                          title="Apply the highlighted match"
-                        >
-                          Quick Select (Ctrl+1)
-                        </button>
-                        <button
-                          id="modelAdvancedBtn"
-                          class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                          title="Open the settings"
-                        >
-                          Advanced Config…
-                        </button>
+                        <div
+                          id="modelBreadcrumb"
+                          class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
+                        ></div>
+                        <div class="flex flex-shrink-0 gap-2">
+                          <button
+                            id="modelQuickBtn"
+                            class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                            title="Apply the highlighted match"
+                          >
+                            Quick Select (Ctrl+1)
+                          </button>
+                          <button
+                            id="modelAdvancedBtn"
+                            class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                            title="Open the settings"
+                          >
+                            Advanced Config…
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-                <div class="ml-auto flex flex-shrink-0 items-center gap-2">
-                  <button
-                    id="sendBtn"
-                    class="flex items-center justify-center rounded-lg bg-accent-600 p-2 text-xs font-semibold text-white shadow-accent-600/20 hover:bg-accent-700 disabled:opacity-40"
-                    title="Send"
-                  >
-                    <span data-icon="arrow-up" class="[&>svg]:h-4 [&>svg]:w-4"></span>
-                  </button>
-                  <button
-                    id="pauseBtn"
-                    class="hidden flex items-center justify-center rounded-lg bg-amber-500 p-2 text-xs font-semibold text-white shadow-amber-500/20 hover:bg-amber-600"
-                    title="Pause"
-                  >
-                    <span data-icon="pause"></span>
-                  </button>
-                  <button
-                    id="steerBtn"
-                    class="hidden steer-btn"
-                    title="Steer: add this to the running turn (⌘/Ctrl+Enter)"
-                    aria-label="Steer the running turn"
-                  >
-                    <span data-icon="steer" class="[&>svg]:h-4 [&>svg]:w-4"></span>
-                  </button>
+                  <div class="ml-auto flex flex-shrink-0 items-center gap-2">
+                    <button
+                      id="sendBtn"
+                      class="flex items-center justify-center rounded-lg bg-accent-600 p-2 text-xs font-semibold text-white shadow-accent-600/20 hover:bg-accent-700 disabled:opacity-40"
+                      title="Send"
+                    >
+                      <span data-icon="arrow-up" class="[&>svg]:h-4 [&>svg]:w-4"></span>
+                    </button>
+                    <button
+                      id="pauseBtn"
+                      class="hidden flex items-center justify-center rounded-lg bg-amber-500 p-2 text-xs font-semibold text-white shadow-amber-500/20 hover:bg-amber-600"
+                      title="Pause"
+                    >
+                      <span data-icon="pause"></span>
+                    </button>
+                    <button
+                      id="steerBtn"
+                      class="hidden steer-btn"
+                      title="Steer: add this to the running turn (⌘/Ctrl+Enter)"
+                      aria-label="Steer the running turn"
+                    >
+                      <span data-icon="steer" class="[&>svg]:h-4 [&>svg]:w-4"></span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
           </footer>
         </div>
 
         <!-- The external chat pages -->
         <div id="externalView" class="hidden min-h-0 flex-1 flex-col">
+          <!-- Browser-style tabs: one per chat page. Fixed height, so the
+               native page below is never moved or resized. -->
+          <div id="chatList" class="chat-tabs">
+            <div id="chatEntries" role="tablist" aria-label="Chat pages" class="chat-tabs-list"></div>
+            <button
+              id="chatAddBtn"
+              type="button"
+              class="chat-tabs-btn"
+              title="Add a chat page"
+              aria-label="Add a chat page"
+            >
+              <span data-icon="plus" class="[&>svg]:h-3.5 [&>svg]:w-3.5"></span>
+            </button>
+            <button
+              id="pageOpenBtn"
+              type="button"
+              class="chat-tabs-btn ml-auto"
+              title="Open in the system browser"
+              aria-label="Open in the system browser"
+            >
+              <span data-icon="external" class="[&>svg]:h-3.5 [&>svg]:w-3.5"></span>
+            </button>
+          </div>
           <div id="externalHost" class="relative min-h-0 flex-1 bg-white dark:bg-slate-950">
             <div
               id="externalFallback"
               class="absolute inset-0 hidden flex-col items-center justify-center gap-3 p-6 text-center"
             >
               <p class="max-w-md text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                The embedded page needs the desktop app. The preview runs in a
-                plain browser, so open the page directly instead.
+                The embedded page needs the desktop app. The preview runs in a plain browser, so open the page directly
+                instead.
               </p>
               <a
                 id="externalFallbackLink"
@@ -376,15 +410,14 @@
     </div>
 
     <!-- ==================== SETTINGS ==================== -->
-    <div
-      id="settingsModal"
-      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4"
-    >
+    <div id="settingsModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4">
       <div
         class="modal-card flex h-[90vh] w-[90vw] overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
       >
         <!-- Settings sidebar -->
-        <div class="flex w-48 flex-shrink-0 flex-col gap-1 border-r border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+        <div
+          class="flex w-48 flex-shrink-0 flex-col gap-1 border-r border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60"
+        >
           <div class="px-2 pb-2 pt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
           <button
             id="settingsNavWorkspace"
@@ -499,9 +532,7 @@
           <div class="flex-1 space-y-5 overflow-y-auto p-5 text-xs">
             <div id="settingsPaneWorkspace" class="space-y-5">
               <div>
-                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
-                  Default workspace
-                </label>
+                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> Default workspace </label>
                 <div class="flex gap-2">
                   <input
                     id="settingsDefaultWorkspace"
@@ -548,8 +579,6 @@
                 </div>
                 <p id="settingsWorkspaceError" class="hidden text-[11px] text-agent-rose"></p>
               </div>
-
-
             </div>
 
             <div id="settingsPaneProviders" class="hidden">
@@ -571,15 +600,12 @@
 
             <div id="settingsPanePrompt" class="hidden space-y-4">
               <p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                The agent reads <code class="font-mono">config/SYSTEM_PROMPT.md</code> on every turn.
-                Tool guidance and examples are compiled for this machine's OS and always
-                appended with its details and the session workspace. Edits apply to new
-                turns immediately; a per-message override still wins.
+                The agent reads <code class="font-mono">config/SYSTEM_PROMPT.md</code> on every turn. Tool guidance and
+                examples are compiled for this machine's OS and always appended with its details and the session
+                workspace. Edits apply to new turns immediately; a per-message override still wins.
               </p>
               <div>
-                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
-                  System prompt
-                </label>
+                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> System prompt </label>
                 <textarea
                   id="settingsSystemPrompt"
                   rows="20"
@@ -607,11 +633,16 @@
 
             <div id="settingsPaneConnection" class="hidden space-y-3">
               <div class="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
-                <div class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+                <div
+                  class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60"
+                >
                   <span id="settingsConnDot" class="h-2 w-2 flex-shrink-0 rounded-full bg-slate-300"></span>
                   <span id="settingsConnLabel" class="text-xs font-medium text-slate-700 dark:text-slate-200">—</span>
                 </div>
-                <div id="settingsConnDetail" class="space-y-1.5 px-3 py-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400"></div>
+                <div
+                  id="settingsConnDetail"
+                  class="space-y-1.5 px-3 py-2.5 font-mono text-[11px] text-slate-500 dark:text-slate-400"
+                ></div>
               </div>
             </div>
 
@@ -619,13 +650,29 @@
               <div class="budget-default mb-5 rounded-lg border border-slate-200 px-3 py-3 dark:border-slate-700">
                 <div class="text-xs font-semibold text-slate-800 dark:text-slate-100">Default spend budget</div>
                 <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Per session, in USD. At the limit the agent stops using tools and writes a summary of what's done and what's left. Empty means no limit; sessions can override it from the composer or <code>/budget</code>.
+                  Per session, in USD. A tracked-cost limit, not a guaranteed cap: it counts the cost the provider
+                  reports, so calls with no reported cost aren't counted and spend can go past it, since the call that
+                  crosses it and the closing summary still run. At the limit the agent stops using tools and writes a
+                  summary of what's done and what's left. Empty means no limit; sessions can override it from the
+                  composer or <code>/budget</code>.
                 </p>
                 <div class="mt-2 flex items-center gap-2">
                   <span class="text-xs text-slate-500">$</span>
-                  <input id="settingsBudgetDefault" type="number" min="0" step="0.5" inputmode="decimal" placeholder="no limit"
-                    class="w-28 rounded border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs text-slate-800 outline-none focus:border-accent-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                  <button id="settingsBudgetSaveBtn" class="rounded bg-accent-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-accent-700">Save</button>
+                  <input
+                    id="settingsBudgetDefault"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    inputmode="decimal"
+                    placeholder="no limit"
+                    class="w-28 rounded border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs text-slate-800 outline-none focus:border-accent-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                  <button
+                    id="settingsBudgetSaveBtn"
+                    class="rounded bg-accent-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-accent-700"
+                  >
+                    Save
+                  </button>
                 </div>
               </div>
               <div id="analyticsBody" class="space-y-5"></div>
@@ -639,10 +686,26 @@
                 </p>
               </div>
               <div id="motionOptions" role="radiogroup" class="motion-options">
-                <label class="motion-opt"><input type="radio" name="motion" value="system" /><span><b>System</b><small>Follow the OS reduce-motion setting</small></span></label>
-                <label class="motion-opt"><input type="radio" name="motion" value="full" /><span><b>Full</b><small>Smooth transitions and effects</small></span></label>
-                <label class="motion-opt"><input type="radio" name="motion" value="reduced" /><span><b>Reduced</b><small>Short fades only, no movement</small></span></label>
-                <label class="motion-opt"><input type="radio" name="motion" value="off" /><span><b>Off</b><small>No animation, blur or heavy shadows</small></span></label>
+                <label class="motion-opt"
+                  ><input type="radio" name="motion" value="system" /><span
+                    ><b>System</b><small>Follow the OS reduce-motion setting</small></span
+                  ></label
+                >
+                <label class="motion-opt"
+                  ><input type="radio" name="motion" value="full" /><span
+                    ><b>Full</b><small>Smooth transitions and effects</small></span
+                  ></label
+                >
+                <label class="motion-opt"
+                  ><input type="radio" name="motion" value="reduced" /><span
+                    ><b>Reduced</b><small>Short fades only, no movement</small></span
+                  ></label
+                >
+                <label class="motion-opt"
+                  ><input type="radio" name="motion" value="off" /><span
+                    ><b>Off</b><small>No animation, blur or heavy shadows</small></span
+                  ></label
+                >
               </div>
             </div>
 
@@ -683,10 +746,7 @@
       </div>
 
       <!-- Provider add/connect card -->
-      <div
-        id="providerCard"
-        class="modal-overlay absolute inset-0 z-10 hidden items-center justify-center p-4"
-      >
+      <div id="providerCard" class="modal-overlay absolute inset-0 z-10 hidden items-center justify-center p-4">
         <div
           class="modal-card w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900"
         >
@@ -757,10 +817,7 @@
     </div>
 
     <!-- ==================== NEW SESSION ==================== -->
-    <div
-      id="sessionModal"
-      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4"
-    >
+    <div id="sessionModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4">
       <div
         class="modal-card flex h-[82vh] max-h-[calc(100vh-2rem)] w-[78vw] min-w-[36rem] max-w-[calc(100vw-2rem)] flex-col gap-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
       >
@@ -771,10 +828,7 @@
             <span data-icon="plus" class="text-accent-500"></span>
             New Session
           </h3>
-          <button
-            id="sessionCloseBtn"
-            class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100"
-          >
+          <button id="sessionCloseBtn" class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100">
             <span data-icon="xmark"></span>
           </button>
         </div>
@@ -782,16 +836,14 @@
         <div id="newSessionFolderStep" class="flex min-h-0 flex-1 flex-col gap-3 text-xs">
           <div class="flex min-h-0 flex-1 flex-col gap-2">
             <div class="mb-1 flex flex-shrink-0 items-center justify-between">
-              <label class="block font-medium text-slate-700 dark:text-slate-300">
-                Workspace folder
-              </label>
-              <span id="newSessionModelHint" class="truncate font-mono text-[10px] text-slate-400" title="The session uses the currently selected model"></span>
+              <label class="block font-medium text-slate-700 dark:text-slate-300"> Workspace folder </label>
+              <span
+                id="newSessionModelHint"
+                class="truncate font-mono text-[10px] text-slate-400"
+                title="The session uses the currently selected model"
+              ></span>
             </div>
-            <nav
-              id="newSessionCrumbs"
-              aria-label="Breadcrumb"
-              class="picker-crumbs"
-            ></nav>
+            <nav id="newSessionCrumbs" aria-label="Breadcrumb" class="picker-crumbs"></nav>
             <div class="picker-toolbar">
               <div class="picker-search">
                 <span data-icon="search" class="picker-search-icon"></span>
@@ -813,12 +865,11 @@
               id="newSessionPath"
               class="truncate rounded border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
             ></div>
-            <div
-              id="newSessionList"
-              class="picker-list min-h-0 flex-1"
-            ></div>
+            <div id="newSessionList" class="picker-list min-h-0 flex-1"></div>
           </div>
-          <div class="flex flex-shrink-0 items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+          <div
+            class="flex flex-shrink-0 items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800"
+          >
             <p class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400">
               single click selects · double-click opens
             </p>
@@ -842,10 +893,7 @@
     </div>
 
     <!-- ==================== FILE PICKER ==================== -->
-    <div
-      id="fileModal"
-      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4"
-    >
+    <div id="fileModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4">
       <div
         class="modal-card flex h-[82vh] max-h-[calc(100vh-2rem)] w-[76vw] min-w-[36rem] max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
       >
@@ -856,20 +904,13 @@
             <span data-icon="paperclip" class="text-accent-500 [&>svg]:h-5 [&>svg]:w-5"></span>
             Attach a file or folder
           </h3>
-          <button
-            id="fileCloseBtn"
-            class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100"
-          >
+          <button id="fileCloseBtn" class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100">
             <span data-icon="xmark" class="[&>svg]:h-4 [&>svg]:w-4"></span>
           </button>
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col gap-2">
-          <nav
-            id="fileCrumbs"
-            aria-label="Breadcrumb"
-            class="picker-crumbs flex-shrink-0"
-          ></nav>
+          <nav id="fileCrumbs" aria-label="Breadcrumb" class="picker-crumbs flex-shrink-0"></nav>
           <div class="picker-toolbar">
             <div class="picker-search">
               <span data-icon="search" class="picker-search-icon"></span>
@@ -891,13 +932,12 @@
             id="filePath"
             class="truncate rounded border border-slate-200 bg-slate-100 px-2 py-1.5 font-mono text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
           ></div>
-          <div
-            id="fileList"
-            class="picker-list min-h-0 flex-1"
-          ></div>
+          <div id="fileList" class="picker-list min-h-0 flex-1"></div>
         </div>
 
-        <div class="flex flex-shrink-0 items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+        <div
+          class="flex flex-shrink-0 items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800"
+        >
           <p class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400">
             single click selects · double-click opens
           </p>
@@ -928,33 +968,23 @@
     </div>
 
     <!-- ==================== NEW SITE ==================== -->
-    <div
-      id="siteModal"
-      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4"
-    >
+    <div id="siteModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4">
       <div
         class="modal-card w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
       >
-        <div
-          class="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800"
-        >
+        <div class="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
           <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
             <span data-icon="plus" class="text-accent-500"></span>
             New Site
           </h3>
-          <button
-            id="siteCloseBtn"
-            class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100"
-          >
+          <button id="siteCloseBtn" class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100">
             <span data-icon="xmark"></span>
           </button>
         </div>
 
         <div class="space-y-3 text-xs">
           <div>
-            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
-              Name
-            </label>
+            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> Name </label>
             <input
               id="siteName"
               type="text"
@@ -966,9 +996,7 @@
           </div>
 
           <div>
-            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
-              URL
-            </label>
+            <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> URL </label>
             <input
               id="siteUrl"
               type="text"
@@ -978,8 +1006,8 @@
               class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             />
             <p class="mt-1 text-[10px] text-slate-400">
-              Only secure https addresses are accepted. The sign-in stays in
-              the page itself: the app never sees the password.
+              Only secure https addresses are accepted. The sign-in stays in the page itself: the app never sees the
+              password.
             </p>
           </div>
         </div>
@@ -1002,25 +1030,18 @@
     </div>
 
     <!-- ==================== CONFIRM ==================== -->
-    <div
-      id="confirmModal"
-      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4"
-    >
+    <div id="confirmModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4">
       <div
         class="modal-card w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
       >
         <div class="flex items-center gap-2">
           <span data-icon="trash" class="text-agent-rose"></span>
-          <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            Delete the session?
-          </h3>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Delete the session?</h3>
         </div>
 
         <p class="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
           The conversation
-          <span id="confirmTitle" class="font-medium text-slate-900 dark:text-slate-100"
-            >this session</span
-          >
+          <span id="confirmTitle" class="font-medium text-slate-900 dark:text-slate-100">this session</span>
           is removed from the disk. This cannot be undone.
         </p>
 
@@ -1050,19 +1071,16 @@
       </div>
     </div>
     <!-- ==================== USAGE DASHBOARD ==================== -->
-    <div
-      id="usageModal"
-      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4 sm:p-8"
-    >
+    <div id="usageModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4 sm:p-8">
       <div
         class="modal-card flex h-[90%] w-[90%] max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
       >
-        <div class="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+        <div
+          class="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800"
+        >
           <div class="flex min-w-0 items-center gap-2">
             <span data-icon="microchip" class="flex-shrink-0 text-accent-500"></span>
-            <h3 class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Session analytics
-            </h3>
+            <h3 class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">Session analytics</h3>
             <span id="usageModalSession" class="truncate font-mono text-[11px] text-slate-400"></span>
           </div>
           <div class="flex flex-shrink-0 items-center gap-2">

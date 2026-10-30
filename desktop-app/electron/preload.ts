@@ -43,8 +43,7 @@ contextBridge.exposeInMainWorld("paladin", {
   metrics: (): Promise<{ cpu: number; rss: number; procs: number }> => ipcRenderer.invoke("app:metrics"),
 
   views: {
-    ensure: (name: string, url: string, partition: string) =>
-      ipcRenderer.invoke("views:ensure", name, url, partition),
+    ensure: (name: string, url: string, partition: string) => ipcRenderer.invoke("views:ensure", name, url, partition),
     show: (name: string) => ipcRenderer.invoke("views:show", name),
     setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
       ipcRenderer.invoke("views:setBounds", bounds),
@@ -59,7 +58,6 @@ contextBridge.exposeInMainWorld("paladin", {
   },
 
   dialog: {
-    pickFiles: (defaultPath: string | null) => ipcRenderer.invoke("dialog:pickFiles", defaultPath),
     pickDirectory: (defaultPath: string | null) => ipcRenderer.invoke("dialog:pickDirectory", defaultPath),
   },
 

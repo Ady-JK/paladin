@@ -28,7 +28,7 @@ function broken(over: Record<string, unknown> = {}) {
     scope: "global",
     transport: "stdio",
     state: "failed",
-    error: "exec: \"nope\": executable file not found in $PATH",
+    error: 'exec: "nope": executable file not found in $PATH',
     stderr: "boom: missing token",
     restarts: 0,
     tools: [],
@@ -55,7 +55,10 @@ async function openPane(page: Page) {
 }
 
 async function calls(page: Page, name: string) {
-  return page.evaluate((name) => ((window as any).__e2eMcpCalls || []).filter((c: any) => c.cmd === name).map((c: any) => c.args), name);
+  return page.evaluate(
+    (name) => ((window as any).__e2eMcpCalls || []).filter((c: any) => c.cmd === name).map((c: any) => c.args),
+    name,
+  );
 }
 
 test("Settings → MCP lists servers with state, tools and failures", async ({ page }) => {
@@ -99,7 +102,10 @@ test("an untrusted folder config asks for trust from the chip and the pane", asy
   await seed(page, {
     hasFolderConfig: true,
     trusted: false,
-    servers: [dummy(), dummy({ name: "local", scope: "folder", folder: CWD, state: "untrusted", tools: [], server: null })],
+    servers: [
+      dummy(),
+      dummy({ name: "local", scope: "folder", folder: CWD, state: "untrusted", tools: [], server: null }),
+    ],
   });
   await boot(page);
   const chip = page.locator("#mcpChip");
@@ -124,7 +130,9 @@ test("a global shadowed by a folder server is marked", async ({ page }) => {
   });
   await boot(page);
   await openPane(page);
-  await expect(page.locator('[data-mcp-section="global"] .mcp-server[data-mcp-server="dummy"]')).toContainText(/replaced by this folder/i);
+  await expect(page.locator('[data-mcp-section="global"] .mcp-server[data-mcp-server="dummy"]')).toContainText(
+    /replaced by this folder/i,
+  );
   await expect(page.locator('[data-mcp-section="folder"] .mcp-server[data-mcp-server="dummy"]')).toHaveCount(1);
 });
 
@@ -154,11 +162,14 @@ test("mcp/status events update the pane and raise the failure chip", async ({ pa
   await boot(page);
   await expect(page.locator("#mcpChip")).toBeHidden();
   await openPane(page);
-  await page.evaluate((srv) => {
-    const w = window as any;
-    w.__e2eMcp.servers = [srv];
-    w.__e2eHub.emit({ event: "mcp/status", server: srv });
-  }, broken({ name: "dummy", error: "MCP server crashed" }));
+  await page.evaluate(
+    (srv) => {
+      const w = window as any;
+      w.__e2eMcp.servers = [srv];
+      w.__e2eHub.emit({ event: "mcp/status", server: srv });
+    },
+    broken({ name: "dummy", error: "MCP server crashed" }),
+  );
   const card = page.locator('.mcp-server[data-mcp-server="dummy"]');
   await expect(card).toHaveAttribute("data-state", "failed");
   await expect(card.locator(".mcp-error")).toContainText("crashed");
@@ -208,7 +219,7 @@ test("an MCP approval card shows server, tool and arguments", async ({ page }) =
   await expect(card.locator(".approval-title")).toContainText(/MCP tool/i);
   await expect(card.locator(".approval-mcp-server")).toHaveText("dummy");
   await expect(card.locator(".approval-mcp-tool")).toHaveText("slow");
-  await expect(card.locator('.approval-args .kv-key').first()).toHaveText("ms");
+  await expect(card.locator(".approval-args .kv-key").first()).toHaveText("ms");
   await expect(card.locator(".approval-args")).toContainText("250");
   await expect(card.locator('[data-approve="folder"]')).toContainText("dummy/slow");
   await card.locator('[data-approve="once"]').click();
@@ -220,8 +231,26 @@ test("an MCP tool row names the server and renders args and output", async ({ pa
   await boot(page);
   await page.evaluate(() => {
     (window as any).__e2eChatEvents = [
-      { event: "chat/tool", tool: { id: "t1", name: "mcp__dummy__echo", arguments: JSON.stringify({ text: "hi there" }), result: "", status: "running" } },
-      { event: "chat/tool", tool: { id: "t1", name: "mcp__dummy__echo", arguments: JSON.stringify({ text: "hi there" }), result: "echo: hi there", status: "ok" } },
+      {
+        event: "chat/tool",
+        tool: {
+          id: "t1",
+          name: "mcp__dummy__echo",
+          arguments: JSON.stringify({ text: "hi there" }),
+          result: "",
+          status: "running",
+        },
+      },
+      {
+        event: "chat/tool",
+        tool: {
+          id: "t1",
+          name: "mcp__dummy__echo",
+          arguments: JSON.stringify({ text: "hi there" }),
+          result: "echo: hi there",
+          status: "ok",
+        },
+      },
     ];
   });
   await page.fill("#promptInput", "echo");

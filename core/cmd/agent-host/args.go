@@ -49,12 +49,16 @@ func (a args) num(key string, def int) int {
 }
 
 // decode unmarshals the whole params object into v; empty params leave
-// v untouched.
+// v untouched. Unlike the field accessors it is strict: a malformed
+// object fails the request instead of running on partial input.
 func (a args) decode(v any) error {
 	if len(a.raw) == 0 {
 		return nil
 	}
-	return json.Unmarshal(a.raw, v)
+	if err := json.Unmarshal(a.raw, v); err != nil {
+		return fmt.Errorf("invalid params: %w", err)
+	}
+	return nil
 }
 
 func (a args) openOpts() runtime.OpenOpts {
@@ -97,8 +101,6 @@ func (p ChatParams) request() agent.Request {
 
 func (a args) chat() (ChatParams, error) {
 	var p ChatParams
-	if err := a.decode(&p); err != nil {
-		return p, fmt.Errorf("invalid chat params: %w", err)
-	}
-	return p, nil
+	err := a.decode(&p)
+	return p, err
 }

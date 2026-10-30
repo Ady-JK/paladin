@@ -61,10 +61,7 @@ export function trimNum(n: number): string {
 // cacheHitRate is cache-read share of total input: cache reads hit
 // against the input tokens the calls consumed. Zero when nothing was
 // read.
-export function cacheHitRate(usage: {
-  promptTokens: number;
-  cacheReadTokens: number;
-}): number {
+export function cacheHitRate(usage: { promptTokens: number; cacheReadTokens: number }): number {
   const denom = usage.promptTokens;
   if (denom <= 0) {
     return 0;
@@ -75,7 +72,7 @@ export function cacheHitRate(usage: {
 // pillText is the compact pill body. With a known window it leads with
 // the fill percentage; without one it shows raw tokens instead of a
 // misleading zero.
-export function pillText(usage: SessionUsage): string {
+function pillText(usage: SessionUsage): string {
   const spend = usage.hasCost ? ` · ${formatCost(usage.cost)}` : "";
   if (usage.contextKnown && usage.fillPercent !== undefined) {
     return `${trimNum(roundTo(usage.fillPercent, 1))}%${spend}`;
@@ -85,22 +82,19 @@ export function pillText(usage: SessionUsage): string {
 
 // pillTitle is the hover breakdown: model, last-call input/window,
 // spend, calls. It never shows a percentage for unknown windows.
-export function pillTitle(usage: SessionUsage): string {
+function pillTitle(usage: SessionUsage): string {
   const parts = [usage.model || "unknown model"];
   const input = usage.lastInputTokens ?? usage.totalTokens;
   const tokens = `${input.toLocaleString()} input tokens`;
   if (usage.contextKnown) {
-    const pct =
-      usage.fillPercent !== undefined ? ` (${trimNum(roundTo(usage.fillPercent, 1))}%)` : "";
+    const pct = usage.fillPercent !== undefined ? ` (${trimNum(roundTo(usage.fillPercent, 1))}%)` : "";
     parts.push(`${tokens} / ${usage.contextWindow.toLocaleString()}${pct}`);
   } else {
     parts.push(`${usage.totalTokens.toLocaleString()} tokens (window unknown)`);
   }
   if (usage.hasCost) {
     const spend =
-      usage.listCost > 0
-        ? `${formatCost(usage.cost)} (list ${formatCost(usage.listCost)})`
-        : formatCost(usage.cost);
+      usage.listCost > 0 ? `${formatCost(usage.cost)} (list ${formatCost(usage.listCost)})` : formatCost(usage.cost);
     parts.push(`spent ${spend}`);
   } else {
     parts.push("spend unknown");
@@ -111,7 +105,7 @@ export function pillTitle(usage: SessionUsage): string {
 
 // renderUsage paints the pill from state. Callers fetch first via
 // refreshUsage; direct calls only re-render already-fetched state.
-export function renderUsage(): void {
+function renderUsage(): void {
   const usage = state.usage;
   // The pill shares the session pill's responsive pattern (flex from sm
   // up), so hiding must drop sm:flex too or `hidden` loses to it.
@@ -129,11 +123,7 @@ export function renderUsage(): void {
 }
 
 function knownFillAtLeast(usage: SessionUsage, pct: number): boolean {
-  return (
-    usage.contextKnown &&
-    usage.fillPercent !== undefined &&
-    usage.fillPercent >= pct
-  );
+  return usage.contextKnown && usage.fillPercent !== undefined && usage.fillPercent >= pct;
 }
 
 // refreshUsage fetches the active session's usage and repaints. Failures
@@ -166,7 +156,7 @@ export function clearUsage(): void {
 }
 
 // formatPct renders a fill percentage or an em dash for unknown windows.
-export function formatPct(pct: number | undefined): string {
+function formatPct(pct: number | undefined): string {
   if (pct === undefined) {
     return "—";
   }
@@ -218,7 +208,7 @@ function paintTabs(): void {
 
 // renderDashboard paints the open card from state. With no reading it
 // shows an empty state instead of stale numbers.
-export function renderDashboard(): void {
+function renderDashboard(): void {
   paintTabs();
   const usage = state.usage;
   usageModalSessionEl.textContent = state.sessionId
@@ -228,8 +218,7 @@ export function renderDashboard(): void {
     usageBodyEl.innerHTML = `<p class="py-10 text-center text-sm text-slate-400">No billed usage yet — send a message first.</p>`;
     return;
   }
-  usageBodyEl.innerHTML =
-    activeTab === "models" ? modelsHtml(usage) : overviewHtml(usage);
+  usageBodyEl.innerHTML = activeTab === "models" ? modelsHtml(usage) : overviewHtml(usage);
 }
 
 // Neon palette shared with the fleet dashboard.
@@ -369,11 +358,7 @@ function spendMixCard(usage: SessionUsage): string | null {
 // areaChart renders a hand-rolled SVG time series with a gradient
 // fill. Points with zero span (0-1 entries) return "" so callers show
 // richer cards instead of a flat line.
-export function areaChart(
-  daily: DailyPoint[],
-  metric: "tokens" | "cost",
-  id: string,
-): string {
+export function areaChart(daily: DailyPoint[], metric: "tokens" | "cost", id: string): string {
   const pts = daily.slice(-30);
   if (pts.length < 2) {
     return "";
@@ -385,7 +370,11 @@ export function areaChart(
   const pad = 8;
   const x = (i: number): number => pad + (i / (pts.length - 1)) * (w - pad * 2);
   const y = (v: number): number => h - pad - (v / max) * (h - pad * 2 - 18);
-  const line = pts.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(metric === "cost" ? d.cost : d.totalTokens).toFixed(1)}`).join(" ");
+  const line = pts
+    .map(
+      (d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(metric === "cost" ? d.cost : d.totalTokens).toFixed(1)}`,
+    )
+    .join(" ");
   const fill = `${line} L${x(pts.length - 1).toFixed(1)},${h - pad} L${x(0).toFixed(1)},${h - pad} Z`;
   const dots = pts
     .map((d, i) => {
@@ -426,7 +415,21 @@ export function heatmap(daily: DailyPoint[], id: string): string {
   for (let i = 27; i >= 0; i--) {
     const dt = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - i));
     const key = dt.toISOString().slice(0, 10);
-    days.push(byDate.get(key) ?? { date: key, calls: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0, listCost: 0, hasCost: false });
+    days.push(
+      byDate.get(key) ?? {
+        date: key,
+        calls: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        reasoningTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+        listCost: 0,
+        hasCost: false,
+      },
+    );
   }
   const max = Math.max(...days.map((d) => d.totalTokens), 1);
   const cells = days
@@ -461,10 +464,12 @@ function modelShareBars(usage: SessionUsage): string {
   }
   const total = usage.totalTokens || 1;
   const palette = [NEON.blue, NEON.emerald, NEON.amber, NEON.purple, NEON.rose];
-  const rows = models.slice(0, 5).map((m, i) => {
-    const pct = (m.totalTokens / total) * 100;
-    const color = palette[i % palette.length];
-    return `<div>
+  const rows = models
+    .slice(0, 5)
+    .map((m, i) => {
+      const pct = (m.totalTokens / total) * 100;
+      const color = palette[i % palette.length];
+      return `<div>
       <div class="mb-1 flex items-baseline justify-between gap-2 font-mono text-[11px]">
         <span class="truncate font-medium text-slate-700 dark:text-slate-300">${escapeHtml(m.model)}</span>
         <span class="flex-shrink-0 text-slate-400">${compactTokens(m.totalTokens)} · ${pct.toFixed(1)}%</span>
@@ -473,7 +478,8 @@ function modelShareBars(usage: SessionUsage): string {
         <div class="h-full rounded-full" style="width:${pct.toFixed(2)}%;background:${color}"></div>
       </div>
     </div>`;
-  }).join("");
+    })
+    .join("");
   return `<div class="glass-panel rounded-2xl p-5">
     <div class="mb-3 text-[11px] font-medium uppercase tracking-wider text-slate-400">Share by model</div>
     <div class="space-y-2.5">${rows}</div>
@@ -483,24 +489,35 @@ function modelShareBars(usage: SessionUsage): string {
 // stackedComposition shows per-model token-category splits as
 // horizontal stacked bars (input/output/reasoning/cache-read).
 export function stackedComposition(
-  models: Array<{ model: string; promptTokens: number; completionTokens: number; reasoningTokens: number; cacheReadTokens: number }>,
+  models: Array<{
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    reasoningTokens: number;
+    cacheReadTokens: number;
+  }>,
   title = "Token composition by model",
 ): string {
   if (models.length === 0) {
     return "";
   }
-  const rows = models.slice(0, 5).map((m) => {
-    const total = m.promptTokens + m.completionTokens + m.reasoningTokens + m.cacheReadTokens || 1;
-    const seg = (v: number, color: string, label: string): string =>
-      v > 0 ? `<div class="h-full" style="width:${((v / total) * 100).toFixed(2)}%;background:${color}" title="${label}: ${v.toLocaleString()}"></div>` : "";
-    return `<div>
+  const rows = models
+    .slice(0, 5)
+    .map((m) => {
+      const total = m.promptTokens + m.completionTokens + m.reasoningTokens + m.cacheReadTokens || 1;
+      const seg = (v: number, color: string, label: string): string =>
+        v > 0
+          ? `<div class="h-full" style="width:${((v / total) * 100).toFixed(2)}%;background:${color}" title="${label}: ${v.toLocaleString()}"></div>`
+          : "";
+      return `<div>
       <div class="mb-1 flex items-baseline justify-between gap-2 font-mono text-[11px]">
         <span class="truncate font-medium text-slate-700 dark:text-slate-300">${escapeHtml(m.model)}</span>
         <span class="flex-shrink-0 text-slate-400">${(m.promptTokens + m.completionTokens + m.reasoningTokens + m.cacheReadTokens).toLocaleString()} tok</span>
       </div>
       <div class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">${seg(m.promptTokens, NEON.blue, "Input")}${seg(m.completionTokens, NEON.purple, "Output")}${seg(m.reasoningTokens, NEON.rose, "Reasoning")}${seg(m.cacheReadTokens, NEON.emerald, "Cache read")}</div>
     </div>`;
-  }).join("");
+    })
+    .join("");
   return `<div class="glass-panel rounded-2xl p-5">
     <div class="mb-1 text-sm font-bold text-slate-900 dark:text-white">${escapeHtml(title)}</div>
     <div class="mb-3 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-slate-400">
@@ -518,10 +535,48 @@ function overviewHtml(usage: SessionUsage): string {
   const hit = cacheHitRate(usage);
   const saved = usage.hasCost && usage.listCost > usage.cost ? usage.listCost - usage.cost : 0;
   const heroes = [
-    heroCard({ label: "Est. total cost", value: usage.hasCost ? formatCost(usage.cost) : "—", sub: saved > 0 ? `saved ${formatCost(saved)} vs list` : usage.hasCost ? `avg ${formatCost(avgCost)}/run` : "spend not reported", iconName: "dollar-sign", iconBox: "bg-accent-500/10 text-accent-400 border border-accent-500/20", glow: "blue" }),
-    heroCard({ label: "Total tokens", value: compactTokens(usage.totalTokens), sub: `${usage.totalTokens.toLocaleString()} · ${usage.calls} call${usage.calls === 1 ? "" : "s"}`, iconName: "microchip", iconBox: "bg-purple-500/10 text-purple-400 border border-purple-500/20", glow: "purple" }),
-    heroCard({ label: "Context fill", value: formatPct(usage.fillPercent), sub: usage.contextKnown ? `of ${usage.contextWindow.toLocaleString()} · last call ${compactTokens(usage.lastInputTokens ?? 0)} in` : "window size not listed for this model", iconName: "layers", iconBox: "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20", glow: "emerald" }),
-    heroCard({ label: "Prompt cache hit", value: `${trimNum(roundTo(hit, 1))}%`, sub: usage.cacheReadTokens > 0 ? `${usage.cacheReadTokens.toLocaleString()} read at 90% off` : "no cache hits recorded", iconName: "zap", iconBox: "bg-amber-500/10 text-amber-400 border border-amber-500/20", glow: "amber" }),
+    heroCard({
+      label: "Est. total cost",
+      value: usage.hasCost ? formatCost(usage.cost) : "—",
+      sub:
+        saved > 0
+          ? `saved ${formatCost(saved)} vs list`
+          : usage.hasCost
+            ? `avg ${formatCost(avgCost)}/run`
+            : "spend not reported",
+      iconName: "dollar-sign",
+      iconBox: "bg-accent-500/10 text-accent-400 border border-accent-500/20",
+      glow: "blue",
+    }),
+    heroCard({
+      label: "Total tokens",
+      value: compactTokens(usage.totalTokens),
+      sub: `${usage.totalTokens.toLocaleString()} · ${usage.calls} call${usage.calls === 1 ? "" : "s"}`,
+      iconName: "microchip",
+      iconBox: "bg-purple-500/10 text-purple-400 border border-purple-500/20",
+      glow: "purple",
+    }),
+    heroCard({
+      label: "Context fill",
+      value: formatPct(usage.fillPercent),
+      sub: usage.contextKnown
+        ? `of ${usage.contextWindow.toLocaleString()} · last call ${compactTokens(usage.lastInputTokens ?? 0)} in`
+        : "window size not listed for this model",
+      iconName: "layers",
+      iconBox: "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20",
+      glow: "emerald",
+    }),
+    heroCard({
+      label: "Prompt cache hit",
+      value: `${trimNum(roundTo(hit, 1))}%`,
+      sub:
+        usage.cacheReadTokens > 0
+          ? `${usage.cacheReadTokens.toLocaleString()} read at 90% off`
+          : "no cache hits recorded",
+      iconName: "zap",
+      iconBox: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+      glow: "amber",
+    }),
   ].join("");
   const spend = spendMixCard(usage);
   const charts = spend ? `${tokenMixCard(usage)}${spend}` : tokenMixCard(usage);
@@ -544,9 +599,10 @@ function modelsHtml(usage: SessionUsage): string {
   }
   const rows = models
     .map((m) => {
-      const bar = m.contextKnown && m.fillPercent !== undefined
-        ? `<div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"><div class="h-full rounded-full" style="width:${Math.min(100, m.fillPercent).toFixed(2)}%;background:linear-gradient(90deg,#3b82f6,#a855f7)"></div></div>`
-        : "";
+      const bar =
+        m.contextKnown && m.fillPercent !== undefined
+          ? `<div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"><div class="h-full rounded-full" style="width:${Math.min(100, m.fillPercent).toFixed(2)}%;background:linear-gradient(90deg,#3b82f6,#a855f7)"></div></div>`
+          : "";
       const spend = m.hasCost ? formatCost(m.cost) : "—";
       const hit = cacheHitRate(m);
       return `<div class="glass-panel rounded-2xl p-4">

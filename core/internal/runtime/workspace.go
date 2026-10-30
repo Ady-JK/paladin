@@ -122,7 +122,7 @@ func (r *AgentRuntime) FsList(path string) (FsList, error) {
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return FsList{}, fmt.Errorf("path %q is not valid: %v", target, err)
+			return FsList{}, fmt.Errorf("path %q is not valid: %w", target, err)
 		}
 		abs = filepath.Join(cwd, target)
 	}

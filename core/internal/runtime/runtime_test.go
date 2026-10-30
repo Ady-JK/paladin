@@ -511,13 +511,13 @@ func TestAddUpdateProviderValidation(t *testing.T) {
 		t.Fatal("unknown update accepted")
 	}
 	// Cache eviction: resolve, add provider, resolve again sees the new one.
-	if _, _, _, err := rt.resolveProvider("vault", ""); err != nil {
+	if _, _, err := rt.resolveProvider("vault", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := rt.AddProvider(config.ProviderInput{Name: "second", ApiURL: "https://s/v1", ApiKey: "sk-s", ApiType: "openai"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := rt.resolveProvider("second", ""); err != nil {
+	if _, _, err := rt.resolveProvider("second", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -527,31 +527,31 @@ func TestResolveProviderModelOverrideAndCache(t *testing.T) {
 	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	e1, _, p1, err := rt.resolveProvider("", "model-a")
+	e1, p1, err := rt.resolveProvider("", "model-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if e1.Model != "model-a" {
 		t.Fatalf("override lost: %+v", e1)
 	}
-	_, _, p2, err := rt.resolveProvider("", "model-a")
+	_, p2, err := rt.resolveProvider("", "model-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p1 != p2 {
 		t.Fatal("cache miss for identical key")
 	}
-	_, _, _, err = rt.resolveProvider("", "model-b")
+	_, _, err = rt.resolveProvider("", "model-b")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Unknown provider.
-	if _, _, _, err := rt.resolveProvider("missing", ""); err == nil {
+	if _, _, err := rt.resolveProvider("missing", ""); err == nil {
 		t.Fatal("unknown accepted")
 	}
 	// Placeholder key rejected.
 	rt2, _ := testRuntime(t)
-	if _, _, _, err := rt2.resolveProvider("", ""); err == nil {
+	if _, _, err := rt2.resolveProvider("", ""); err == nil {
 		t.Fatal("placeholder accepted")
 	}
 }
@@ -569,7 +569,7 @@ func TestResolveProviderDefaultModel(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, p, err := rt.resolveProvider("Opencode Go", "")
+	_, p, err := rt.resolveProvider("Opencode Go", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,7 +578,7 @@ func TestResolveProviderDefaultModel(t *testing.T) {
 	if p.Model() != config.OpencodeDefaultModel {
 		t.Fatalf("got %q", p.Model())
 	}
-	_, _, override, err := rt.resolveProvider("Opencode Go", "glm-5.3-flash")
+	_, override, err := rt.resolveProvider("Opencode Go", "glm-5.3-flash")
 	if err != nil || override.Model() != "glm-5.3-flash" {
 		t.Fatalf("override lost: %q %v", override.Model(), err)
 	}
@@ -589,7 +589,7 @@ func TestResolveProviderDefaultModelWithoutCatalog(t *testing.T) {
 	if err := rt.store.Keys.Set("Opencode Go", "sk-live"); err != nil {
 		t.Fatal(err)
 	}
-	_, _, p, err := rt.resolveProvider("", "")
+	_, p, err := rt.resolveProvider("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +611,7 @@ func TestResolveProviderCatalogDefaultForPlainProvider(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, p, err := rt.resolveProvider("", "")
+	_, p, err := rt.resolveProvider("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 	if err := store.SaveProviders(seeded); err != nil {
 		t.Fatal(err)
 	}
-	if err := refreshCatalog(store, nil, networkModelFetcher); err != nil {
+	if _, err := refreshCatalogResults(store, nil, networkModelFetcher); err != nil {
 		t.Fatal(err)
 	}
 	models, err := store.LoadModels()
@@ -823,7 +823,7 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := refreshCatalog(store2, nil, networkModelFetcher); err != nil {
+	if _, err := refreshCatalogResults(store2, nil, networkModelFetcher); err != nil {
 		t.Fatal(err)
 	}
 	m2, err := store2.LoadModels()
@@ -996,10 +996,7 @@ func TestChatAskRoundTripBlocksUntilAnswered(t *testing.T) {
 	}()
 	// The turn blocks inside the ask call until the UI answers.
 	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if rt.ask.Pending(sess.SessionID, "c-ask-1") {
-			break
-		}
+	for !rt.ask.Pending(sess.SessionID, "c-ask-1") {
 		if time.Now().After(deadline) {
 			t.Fatal("ask call never blocked")
 		}
@@ -1069,10 +1066,7 @@ func TestCancelAskStopsTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if rt.ask.Pending(sess.SessionID, "c-ask-9") {
-			break
-		}
+	for !rt.ask.Pending(sess.SessionID, "c-ask-9") {
 		if time.Now().After(deadline) {
 			t.Fatal("ask call never blocked")
 		}

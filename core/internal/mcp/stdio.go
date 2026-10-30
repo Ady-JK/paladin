@@ -180,7 +180,6 @@ func (t *stdioTransport) pid() int {
 }
 
 func (t *stdioTransport) setProtocolVersion(string) {}
-func (t *stdioTransport) sessionID() string         { return "" }
 
 func waitFor(ch <-chan struct{}, d time.Duration) bool {
 	select {

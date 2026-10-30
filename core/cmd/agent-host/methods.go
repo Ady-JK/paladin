@@ -39,12 +39,16 @@ var methods = map[string]handler{
 	},
 	"addProvider": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var input config.ProviderInput
-		_ = a.decode(&input)
+		if err := a.decode(&input); err != nil {
+			return nil, err
+		}
 		return rt.AddProvider(input)
 	},
 	"updateProvider": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var input config.ProviderInput
-		_ = a.decode(&input)
+		if err := a.decode(&input); err != nil {
+			return nil, err
+		}
 		return rt.UpdateProvider(input)
 	},
 
@@ -101,7 +105,9 @@ var methods = map[string]handler{
 			Cwd     string   `json:"cwd"`
 			Entries []string `json:"entries"`
 		}
-		_ = a.decode(&p)
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
 		return rt.MemorySet(p.Target, p.Cwd, p.Entries)
 	},
 	"memoryProjects": func(rt *runtime.AgentRuntime, _ args) (any, error) {
@@ -141,6 +147,12 @@ var methods = map[string]handler{
 			return nil, err
 		}
 		return rt.BudgetSet(p.Scope, p.Cwd, p.SessionID, p.BudgetUsd)
+	},
+	"thinkingGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ThinkingGet(a.str("provider"), a.str("model"))
+	},
+	"thinkingSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ThinkingSet(a.str("provider"), a.str("model"), a.str("level"))
 	},
 	"overallUsage": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.OverallUsage(a.str("cwd"), a.num("limit", 50))
@@ -208,7 +220,9 @@ var methods = map[string]handler{
 			CallID    string            `json:"callId"`
 			Answers   []tools.AskAnswer `json:"answers"`
 		}
-		_ = a.decode(&p)
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
 		return rt.AnswerAsk(p.SessionID, p.CallID, p.Answers)
 	},
 	"cancelAsk": func(rt *runtime.AgentRuntime, a args) (any, error) {

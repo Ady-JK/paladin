@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -171,4 +172,31 @@ func IsContextOverflow(err error) bool {
 		}
 	}
 	return false
+}
+
+const (
+	// maxResponseBody bounds a non-streaming reply or model listing.
+	maxResponseBody = 64 << 20
+	// maxErrorBody is as much of an error reply as is worth reporting.
+	maxErrorBody = 64 << 10
+)
+
+// readBody reads all of r, failing (not truncating) past limit bytes so
+// a runaway reply can't exhaust memory or parse as a cut-off document.
+func readBody(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response larger than %d bytes", limit)
+	}
+	return data, nil
+}
+
+// readErrorBody returns the start of an error reply; read failures just
+// shorten it, since the status code is the real error.
+func readErrorBody(r io.Reader) string {
+	data, _ := io.ReadAll(io.LimitReader(r, maxErrorBody))
+	return string(data)
 }

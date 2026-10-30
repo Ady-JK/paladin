@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
@@ -209,30 +210,7 @@ func saveTodos(sessionDir string, todos []TodoItem) error {
 	if err != nil {
 		return ArgsError(fmt.Sprintf("todo: encode the list: %v", err))
 	}
-	tmp, err := os.CreateTemp(sessionDir, "todos-*.tmp")
-	if err != nil {
-		return ArgsError(fmt.Sprintf("todo: cannot keep the list: %s", syserr.Str(err)))
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return ArgsError(fmt.Sprintf("todo: cannot keep the list: %s", syserr.Str(err)))
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return ArgsError(fmt.Sprintf("todo: cannot keep the list: %s", syserr.Str(err)))
-	}
-	// Sync before the rename so a crash cannot leave a half-written
-	// list behind; the volume is tiny, so the cost is noise.
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return ArgsError(fmt.Sprintf("todo: cannot keep the list: %s", syserr.Str(err)))
-	}
-	if err := tmp.Close(); err != nil {
-		return ArgsError(fmt.Sprintf("todo: cannot keep the list: %s", syserr.Str(err)))
-	}
-	if err := os.Rename(tmpName, todoPath(sessionDir)); err != nil {
+	if err := atomicfile.Write(todoPath(sessionDir), data); err != nil {
 		return ArgsError(fmt.Sprintf("todo: cannot keep the list: %s", syserr.Str(err)))
 	}
 	return nil

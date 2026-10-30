@@ -345,9 +345,8 @@ func (a *Agent) compact(reason string, before int64) error {
 	for _, m := range tail {
 		a.records = append(a.records, replayRecord(m, now))
 	}
-	msgs := make([]inference.LlmMessage, 0, len(tail)+1)
-	msgs = append(msgs, inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)})
-	a.messages = append(msgs, tail...)
+	summaryMsg := inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)}
+	a.messages = append([]inference.LlmMessage{summaryMsg}, tail...)
 	a.promptTokens, a.promptLen = 0, 0
 	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: a.estimateContext()}})
 	post := a.hookInput(hooks.PostCompact)

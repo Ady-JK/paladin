@@ -1,35 +1,54 @@
-# Root Makefile — thin wrappers over go/pnpm.
-.PHONY: help dev desktop-dev desktop-build fmt vet test agent-host agent-host-release clean
+# Paladin build commands. Works with GNU make on macOS, Linux and
+# Windows (cmd.exe or a POSIX shell): recipes only use `cd dir && cmd`,
+# and file removal goes through node instead of rm.
+#
+#   make app      clean, then a fully optimised sidecar + packaged app
+#   make app-dev  quick debug sidecar + Electron against the Vite server
+#   make test     Go tests, UI typecheck and the Playwright UI suite
+#   make fmt      format Go and UI sources
+#   make lint     golangci-lint, deadcode and eslint/knip/prettier
+#   make clean    remove every build output
 
-help:
-	@grep -E '^[a-zA-Z_-]+:' Makefile | cut -d: -f1 | sort
+.PHONY: app app-dev test fmt lint clean
+.DEFAULT_GOAL := app-dev
 
-# Fast loop: compile the sidecar + the Electron main/preload only, then
-# run Vite and Electron. No renderer bundle, no packaging.
-dev: agent-host
+ifeq ($(OS),Windows_NT)
+  EXE := .exe
+else
+  EXE :=
+endif
+
+AGENT_HOST := bin/agent-host$(EXE)
+
+# Go tools installed with `go install` live in GOPATH/bin, which is not
+# always on PATH. Override with e.g. `make lint GOLANGCI_LINT=golangci-lint`.
+GO_TOOLS_BIN := $(shell go env GOPATH)/bin
+GOLANGCI_LINT ?= $(GO_TOOLS_BIN)/golangci-lint
+DEADCODE ?= $(GO_TOOLS_BIN)/deadcode
+
+# Release builds are static and stripped (no cgo is used anywhere).
+app: export CGO_ENABLED := 0
+
+app:
+	$(MAKE) clean
+	cd core && go build -trimpath -buildvcs=false -ldflags "-s -w" -o $(AGENT_HOST) ./cmd/agent-host
+	cd desktop-app && pnpm install --frozen-lockfile --prefer-offline && pnpm build
+
+app-dev:
+	cd core && go build -o $(AGENT_HOST) ./cmd/agent-host
 	cd desktop-app && pnpm install --prefer-offline && pnpm build:electron && pnpm dev
-
-# Build the sidecar first, then run the Electron UI against Vite.
-desktop-dev: dev
-
-# Release: sidecar + renderer + electron packaging.
-desktop: clean agent-host-release
-	cd desktop-app && pnpm install --prefer-offline && pnpm build
-
-agent-host:
-	cd core && go build -o bin/agent-host ./cmd/agent-host
-
-agent-host-release:
-	cd core && go build -trimpath -ldflags "-s -w" -o bin/agent-host ./cmd/agent-host
-
-fmt:
-	cd core && gofmt -l .
-
-vet:
-	cd core && go vet ./...
 
 test:
 	cd core && go test ./...
+	cd desktop-app && pnpm typecheck && pnpm exec tsc --noEmit -p tsconfig.electron.json && pnpm exec playwright test
+
+fmt:
+	cd core && $(GOLANGCI_LINT) fmt ./...
+	cd desktop-app && pnpm -s fmt
+
+lint:
+	cd core && $(GOLANGCI_LINT) run ./... && $(DEADCODE) -test ./...
+	cd desktop-app && pnpm -s lint
 
 clean:
-	rm -rf core/bin desktop-app/dist desktop-app/dist-electron desktop-app/release
+	node -e "for (const p of process.argv.slice(1)) require('fs').rmSync(p, { recursive: true, force: true })" core/bin desktop-app/dist desktop-app/dist-electron desktop-app/release desktop-app/test-results

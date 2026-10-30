@@ -18,7 +18,7 @@ func TestMCPMethods(t *testing.T) {
 
 	resp := callUnary(rt, "1", "mcpConfig", map[string]any{"scope": "global"})
 	mustOK(t, resp)
-	if cfg := resp.Result.(interface{}); !strings.Contains(fmt.Sprint(cfg), "mcpServers") {
+	if cfg := resp.Result; !strings.Contains(fmt.Sprint(cfg), "mcpServers") {
 		t.Fatalf("empty config template: %v", cfg)
 	}
 	mustFail(t, callUnary(rt, "2", "mcpSetConfig", map[string]any{"scope": "global", "text": `{"mcpServers":{"x":{"type":"sse","url":"http://x"}}}`}), "SSE")

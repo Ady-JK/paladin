@@ -10,14 +10,24 @@ const TOOLS = [
   { name: "read_file", description: "Read a file", source: "builtin", readOnly: true },
   { name: "shell", description: "Run a shell command", source: "builtin", destructive: true },
   { name: "web_fetch", description: "Fetch a URL", source: "builtin", readOnly: true },
-  { name: "mcp__dummy__echo", description: "Echo text back", source: "mcp", server: "dummy", tool: "echo", readOnly: true },
+  {
+    name: "mcp__dummy__echo",
+    description: "Echo text back",
+    source: "mcp",
+    server: "dummy",
+    tool: "echo",
+    readOnly: true,
+  },
   { name: "mcp__dummy__crash", source: "mcp", server: "dummy", tool: "crash", destructive: true },
 ];
 
 async function seed(page: Page, tools: Record<string, unknown> = {}) {
-  await page.addInitScript((tools) => {
-    (window as any).__e2eTools = tools;
-  }, { tools: TOOLS, ...tools });
+  await page.addInitScript(
+    (tools) => {
+      (window as any).__e2eTools = tools;
+    },
+    { tools: TOOLS, ...tools },
+  );
 }
 
 async function boot(page: Page) {
@@ -32,11 +42,17 @@ async function openSession(page: Page) {
 }
 
 async function calls(page: Page, name: string) {
-  return page.evaluate((name) => ((window as any).__e2eToolsCalls || []).filter((c: any) => c.cmd === name).map((c: any) => c.args), name);
+  return page.evaluate(
+    (name) => ((window as any).__e2eToolsCalls || []).filter((c: any) => c.cmd === name).map((c: any) => c.args),
+    name,
+  );
 }
 
 async function mcpCalls(page: Page, name: string) {
-  return page.evaluate((name) => ((window as any).__e2eMcpCalls || []).filter((c: any) => c.cmd === name).map((c: any) => c.args), name);
+  return page.evaluate(
+    (name) => ((window as any).__e2eMcpCalls || []).filter((c: any) => c.cmd === name).map((c: any) => c.args),
+    name,
+  );
 }
 
 test("Settings → Tools groups tools and switches them globally", async ({ page }) => {
@@ -127,9 +143,9 @@ test("switches made before the first message apply to the new session", async ({
   await page.keyboard.press("Escape");
   await page.fill("#promptInput", "hello");
   await page.click("#sendBtn");
-  await expect.poll(() => calls(page, "toolsSet")).toEqual([
-    { scope: "session", cwd: CWD, sessionId: expect.any(String), names: ["web_fetch"], enabled: false },
-  ]);
+  await expect
+    .poll(() => calls(page, "toolsSet"))
+    .toEqual([{ scope: "session", cwd: CWD, sessionId: expect.any(String), names: ["web_fetch"], enabled: false }]);
 });
 
 test("new tools raise a banner: Add now accepts them from the next turn", async ({ page }) => {
@@ -145,7 +161,9 @@ test("new tools raise a banner: Add now accepts them from the next turn", async 
   await expect(banner).toBeHidden();
   await expect(page.locator("#toolsPendingChip")).toBeHidden();
   await expect(page.locator("#toastText")).toContainText(/next turn/i);
-  expect(await calls(page, "toolsAccept")).toEqual([{ cwd: CWD, sessionId: SID, names: ["mcp__dummy__echo", "mcp__dummy__crash"] }]);
+  expect(await calls(page, "toolsAccept")).toEqual([
+    { cwd: CWD, sessionId: SID, names: ["mcp__dummy__echo", "mcp__dummy__crash"] },
+  ]);
 });
 
 test("Later hides the banner behind a chip that brings it back", async ({ page }) => {
@@ -203,13 +221,22 @@ test("pasting a command into Settings → MCP previews and adds the server", asy
   await expect(page.locator('.mcp-server[data-mcp-server="gh"]')).toBeVisible();
   await expect(page.locator(".mcp-paste")).toHaveCount(0);
   expect(await mcpCalls(page, "mcpAdd")).toEqual([
-    { scope: "global", cwd: CWD, servers: [{ name: "gh", config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-github"] } }], replace: false },
+    {
+      scope: "global",
+      cwd: CWD,
+      servers: [{ name: "gh", config: { command: "npx", args: ["-y", "@modelcontextprotocol/server-github"] } }],
+      replace: false,
+    },
   ]);
 });
 
 test("adding a server whose name exists offers Replace", async ({ page }) => {
   await page.addInitScript(() => {
-    (window as any).__e2eMcp = { servers: [{ name: "github", scope: "folder", transport: "stdio", state: "ready", restarts: 0, tools: [] }], hasFolderConfig: true, trusted: true };
+    (window as any).__e2eMcp = {
+      servers: [{ name: "github", scope: "folder", transport: "stdio", state: "ready", restarts: 0, tools: [] }],
+      hasFolderConfig: true,
+      trusted: true,
+    };
   });
   await seed(page);
   await boot(page);

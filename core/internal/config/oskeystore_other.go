@@ -19,14 +19,14 @@ func (OsKeyStore) Get(provider string) (string, bool, error) {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("keychain unavailable: %v", err)
+		return "", false, fmt.Errorf("keychain unavailable: %w", err)
 	}
 	return key, true, nil
 }
 
 func (OsKeyStore) Set(provider, key string) error {
 	if err := keyring.Set(KeyringService, provider, key); err != nil {
-		return fmt.Errorf("keychain unavailable: %v", err)
+		return fmt.Errorf("keychain unavailable: %w", err)
 	}
 	return nil
 }
@@ -36,7 +36,7 @@ func (OsKeyStore) Delete(provider string) error {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return nil
 		}
-		return fmt.Errorf("keychain unavailable: %v", err)
+		return fmt.Errorf("keychain unavailable: %w", err)
 	}
 	return nil
 }

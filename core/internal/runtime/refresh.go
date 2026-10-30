@@ -8,6 +8,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -75,7 +76,15 @@ func (r *AgentRuntime) RefreshProviders() bool {
 		defer r.refreshWG.Done()
 		defer r.refreshing.Store(false)
 		store := config.NewStore(r.dataDir, r.store.Keys)
-		_ = refreshCatalog(store, nil, fetch)
+		results, err := refreshCatalogResults(store, nil, fetch)
+		if err != nil {
+			log.Printf("refresh: providers: %v", err)
+		}
+		for _, res := range results {
+			if res.Error != "" {
+				log.Printf("refresh: %s: %s", res.Name, res.Error)
+			}
+		}
 	}()
 	return true
 }
@@ -109,11 +118,6 @@ func (r *AgentRuntime) RefreshProvider(name string) (RefreshResult, error) {
 		return RefreshResult{}, err
 	}
 	return results[0], nil
-}
-
-func refreshCatalog(store *config.Store, names []string, fetch ModelFetcher) error {
-	_, err := refreshCatalogResults(store, names, fetch)
-	return err
 }
 
 // refreshCatalogResults fetches the named providers (all when names is

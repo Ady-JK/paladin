@@ -14,6 +14,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/mcp/mcptest"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 )
 
 // toolModel asks for each call in turn, then answers "finished". It
@@ -84,6 +85,10 @@ func TestTurnUsesMCPTools(t *testing.T) {
 	}
 	ws := t.TempDir()
 	sess, _ := rt.OpenSession("", ws)
+	// readOnlyHint is not trusted; an allow rule is what lets it run.
+	if err := rt.perms.Add(permission.ScopeGlobal, ws, sess.SessionID, permission.Rule{Tool: permission.ToolMCP, Pattern: "dummy/echo", Action: permission.ActionAllow}); err != nil {
+		t.Fatal(err)
+	}
 	out, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: ws})
 	if out.Reply != "finished" {
 		t.Fatalf("outcome %+v", out)
@@ -97,7 +102,7 @@ func TestTurnUsesMCPTools(t *testing.T) {
 	}
 	for _, c := range chunks {
 		if c.Approval != nil {
-			t.Fatalf("read-only MCP tool asked: %+v", c.Approval)
+			t.Fatalf("allowed MCP tool asked: %+v", c.Approval)
 		}
 	}
 	mu.Lock()
@@ -145,15 +150,46 @@ func TestMCPToolNeedsApproval(t *testing.T) {
 	}
 }
 
-func TestPlanModeHidesWritingMCPTools(t *testing.T) {
-	model := newToolModel(t)
+// Plan mode shows every MCP tool but asks once/deny for each call, even
+// for a tool the server calls read-only and an allow rule covers.
+func TestPlanModeAsksForEveryMCPCall(t *testing.T) {
+	model := newToolModel(t, [2]string{"mcp__dummy__echo", `{"text":"planned"}`})
 	rt, _, _ := mcpRuntime(t, model.srv.URL)
 	if _, err := rt.MCPSetConfig(mcp.ScopeGlobal, "", dummyConfig(t)); err != nil {
 		t.Fatal(err)
 	}
 	ws := t.TempDir()
 	sess, _ := rt.OpenSession("", ws)
-	chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "plan", Cwd: ws, Mode: "plan"})
+	if err := rt.perms.Add(permission.ScopeGlobal, ws, sess.SessionID, permission.Rule{Tool: permission.ToolMCP, Pattern: "dummy", Action: permission.ActionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan []agent.ChatChunk, 1)
+	go func() {
+		_, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "plan", Cwd: ws, Mode: "plan"})
+		done <- chunks
+	}()
+	waitApproval(t, rt, sess.SessionID, "c0")
+	if _, err := rt.AnswerApproval(sess.SessionID, "c0", "once"); err != nil {
+		t.Fatal(err)
+	}
+	var chunks []agent.ChatChunk
+	select {
+	case chunks = <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("turn never finished")
+	}
+	var card *permission.Approval
+	for _, c := range chunks {
+		if c.Approval != nil && card == nil {
+			card = c.Approval
+		}
+	}
+	if card == nil || card.Server != "dummy" || card.MCPTool != "echo" || strings.Join(card.Choices, ",") != "once,deny" {
+		t.Fatalf("card %+v", card)
+	}
+	if !strings.Contains(model.body(1), "planned") {
+		t.Fatalf("echo result missing: %s", model.body(1))
+	}
 	var req struct {
 		Tools []struct {
 			Function struct {
@@ -168,7 +204,7 @@ func TestPlanModeHidesWritingMCPTools(t *testing.T) {
 	for _, tl := range req.Tools {
 		names[tl.Function.Name] = true
 	}
-	if !names["mcp__dummy__echo"] || !names["mcp__dummy__add"] || names["mcp__dummy__slow"] || names["mcp__dummy__crash"] {
+	if !names["mcp__dummy__echo"] || !names["mcp__dummy__slow"] || names["write"] {
 		t.Fatalf("plan tools %v", names)
 	}
 }

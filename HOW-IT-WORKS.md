@@ -193,6 +193,12 @@ So you can see what's busy without opening it.
 When the app quits, the kitchen gets "stop". It stops every turn, **saves what it has**, and only then exits.
 Half-finished turns are saved with a note so you can continue later.
 
+### If the kitchen crashes
+
+If the Go sidecar ever dies by surprise, the Electron app notices and starts a new one, waiting a little longer
+after each crash in a row (half a second, then 1s, 2s… up to 30s). The window is told "the kitchen restarted",
+so any turn that was cooking shows an "interrupted" error instead of spinning forever, and you can just send again.
+
 ---
 
 ## 4. Inside one turn (the cook's job)
@@ -232,7 +238,7 @@ flowchart TD
 | **Panic catcher** | A tool crashing doesn't crash the kitchen. It becomes an error result. |
 | **No round cap** | Like Codex and OpenCode, a turn runs until the model answers without asking for a tool, you press stop, or something breaks for good. The guards above keep it from spinning. |
 | **Compaction** | When the conversation gets too long, older parts get summarized so it still fits. If compacting stops freeing space several times in a row, the turn ends with an error instead of looping. |
-| **Spend budget** | Optional dollar limit per session (composer chip, `/budget 2.50`, or a default in Settings → Analytics). When spend crosses it, tools are switched off and the model writes a short "what's done / what's left" summary, then the turn ends. If the provider reports no cost, you get a warning that the budget can't be enforced. |
+| **Spend budget** | Optional dollar limit per session (composer chip, `/budget 2.50`, or a default in Settings → Analytics). When spend crosses it, tools are switched off and the model writes a short "what's done / what's left" summary, then the turn ends. It's a **tracked-cost limit, not a guaranteed cap**: it only counts the cost your provider reports, and the call that crosses it (plus the summary) still runs. If the provider reports no cost, you get a warning that the limit isn't enforced; if the usage record got damaged, spend shown is only "at least" this much. |
 
 **Steering.** While a turn runs, the composer shows a **Steer** button (or press ⌘/Ctrl+Enter). Your message is slipped into the *running* turn: the agent reads it before its next model call, so you can correct course without stopping. Plain Enter still queues a separate follow-up turn.
 
@@ -368,6 +374,9 @@ flowchart TD
 - **"Remember" answers** become rules saved for the session, the folder or globally.
 - **The sandbox** is a fence: inside it, shell commands can only write inside your project folder (plus temp and package caches). They can still read everything.
 - **Opening a gate in the fence:** if a command bumps into the fence, the card names the folder it wanted and offers to open just that one, for the session, the project or everywhere. The command then reruns, still fenced. An "allow writes to `/some/dir`" rule in Settings → Permissions does the same ahead of time (it also covers the write/edit tools). "Rerun without the sandbox" is the one-off "climb over the fence" option.
+- **Peeking outside the kitchen:** the fence doesn't stop *reading*, so the gate does. Reading a file outside your project (with the `read` tool, or a "look-only" command like `cat ~/.ssh/...`) asks first and can remember "reads in this folder". It's best effort: Paladin only looks at the paths written in the command.
+- **No secret-spilling shortcuts:** `env`, `printenv`, `go env` and `git config` are not "safe" and are refused in plan mode, and shell output, errors and logs blur things that look like keys or passwords (pattern-based, so it can miss odd ones).
+- **MCP tools are strangers:** a server saying "this tool is read-only" is just a claim. Paladin still asks (unless you made a rule), runs MCP calls one at a time, and in plan mode asks for every MCP call.
 
 ### Hooks (your own kitchen rules 📋)
 
@@ -493,6 +502,7 @@ flowchart LR
 - Providers live in `<data>/config/providers.json`. Keys are kept in the OS keychain, not in plain text.
 - **OpenRouter and OpenCode are never pinged automatically.** Their model lists only refresh when you press refresh.
 - Each session tracks **tokens, cost and context size**. That's the `12.5% · $0.0042` pill at the top.
+- **Thinking level (how hard the cook thinks 🧠):** the ⚡ chip next to the model button opens a slider: *Default* (the provider decides, nothing is sent), then only the levels that model supports (Off, Minimal, Low, Medium, High, Extra High, Max). The choice is saved **per model for the whole app** in `settings.json` and is sent as `reasoning_effort`. Paladin guesses the supported levels from the model's name, so a model it doesn't recognize gets no chip. If a provider rejects the level, Paladin retries once without it and shows a notice. While the model thinks, a **Thinking** block streams in the chat and folds into **Thought** when the answer starts. The thinking is saved in history but never sent back to the model.
 
 ---
 
@@ -554,6 +564,8 @@ flowchart TB
 
 **`live.ts` is the mail sorter.** Every event has a `sessionId`. If it's for the session on screen, it's drawn right away.
 If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
+
+**The sidebar is a drawer.** In the Agent view it floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The Chat view (ChatGPT, Claude…) has no sidebar at all: those pages are real mini-browsers stuck on top of the window, and nothing can be drawn over them, so you switch between them with tabs along the top, like a browser.
 
 ---
 

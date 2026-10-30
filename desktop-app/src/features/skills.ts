@@ -52,7 +52,7 @@ function ensurePopup(): HTMLElement {
 // `/skill` prefix with the caret at the end: `/skill`, `/skill `,
 // `/skill pre`. Anything with a second token (the message) is not a
 // prefix — the picker stays shut once the user starts typing.
-export function skillPrefix(value: string, caret: number): string | null {
+function skillPrefix(value: string, caret: number): string | null {
   if (caret !== value.length || value.includes("\n")) {
     return null;
   }
@@ -84,11 +84,10 @@ function paintSkill(): void {
   el.classList.remove("hidden");
   el.innerHTML = items
     .map(
-      (s, i) => `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-xs ${
-        i === activeIdx
-          ? "bg-accent-600/10 text-slate-900 dark:text-slate-100"
-          : "text-slate-600 dark:text-slate-300"
-      }"><span class="min-w-0 flex-1 truncate">/${escapeHtml(s.name)}<span class="ml-1.5 text-slate-400">${escapeHtml(s.description || s.source)}</span></span><span class="flex-shrink-0 text-[10px] text-slate-400">${escapeHtml(s.source)}</span></button>`,
+      (s, i) =>
+        `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-xs ${
+          i === activeIdx ? "bg-accent-600/10 text-slate-900 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"
+        }"><span class="min-w-0 flex-1 truncate">/${escapeHtml(s.name)}<span class="ml-1.5 text-slate-400">${escapeHtml(s.description || s.source)}</span></span><span class="flex-shrink-0 text-[10px] text-slate-400">${escapeHtml(s.source)}</span></button>`,
     )
     .join("");
 }
@@ -125,7 +124,7 @@ function scheduleRefresh(filter: string): void {
 
 // acceptSkill attaches the row's skill and rewrites the composer to
 // `/skill <name> ` so the message follows the reference.
-export function acceptSkill(idx: number): boolean {
+function acceptSkill(idx: number): boolean {
   if (!open) {
     return false;
   }
@@ -221,7 +220,7 @@ export function attach(name: string): void {
 }
 
 // detach clears the pending skill and hides the chip.
-export function detach(): void {
+function detach(): void {
   attached = null;
   chipEl?.classList.add("hidden");
   chipEl?.classList.remove("flex");

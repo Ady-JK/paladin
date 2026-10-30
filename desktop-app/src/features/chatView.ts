@@ -119,8 +119,7 @@ export function createTurn(
     textEl.className = "bubble-user whitespace-pre-wrap break-words";
   } else if (isError) {
     wrapper.classList.add("justify-start");
-    textEl.className =
-      "whitespace-pre-wrap break-words text-red-600 dark:text-red-400";
+    textEl.className = "whitespace-pre-wrap break-words text-red-600 dark:text-red-400";
   } else {
     textEl.className = "md agent-text";
   }
@@ -182,9 +181,7 @@ export function followTail(): void {
 // compactionText is the divider label for a compaction event.
 export function compactionText(info: CompactionInfo): string {
   if (info.phase === "start") {
-    return info.reason === "overflow"
-      ? "Context window exceeded — compacting context…"
-      : "Compacting context…";
+    return info.reason === "overflow" ? "Context window exceeded — compacting context…" : "Compacting context…";
   }
   if (info.phase === "failed") {
     return `Compaction failed: ${info.error || "unknown error"}`;

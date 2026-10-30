@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestReadsWithOffsetAndLimit(t *testing.T) {
@@ -150,5 +152,124 @@ func TestReadRejectsNULBeyondBinaryProbe(t *testing.T) {
 	_, err := (ReadTool{}).Call(json.RawMessage(`{"path":"`+path+`"}`), ctx)
 	if err == nil || !strings.Contains(err.Error(), "binary") {
 		t.Fatalf("expected binary-file guidance, got %v", err)
+	}
+}
+
+func readPage(t *testing.T, ctx *ToolCtx, path string, offset, limit int) ReadResponse {
+	t.Helper()
+	args, _ := json.Marshal(map[string]any{"path": path, "offset": offset, "limit": limit})
+	out, err := (ReadTool{}).Call(args, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp ReadResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestReadNextOffsetAndExactBoundaries(t *testing.T) {
+	ctx, ws := testCtx(t)
+	path := filepath.Join(ws, "three.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := readPage(t, ctx, path, 1, 3); r.HasMore || r.NextOffset != 0 || r.EndLine != 3 || r.StopReason != "ok" {
+		t.Fatalf("exact fit: %+v", r)
+	}
+	r := readPage(t, ctx, path, 1, 2)
+	if !r.HasMore || r.NextOffset != 3 || r.EndLine != 2 {
+		t.Fatalf("first page: %+v", r)
+	}
+	if r = readPage(t, ctx, path, r.NextOffset, 2); r.HasMore || r.NextOffset != 0 || r.Content != "c\n" {
+		t.Fatalf("last page: %+v", r)
+	}
+	if r = readPage(t, ctx, path, 4, 2); r.Content != "" || r.HasMore || r.StopReason != "past_end" {
+		t.Fatalf("past end: %+v", r)
+	}
+}
+
+func TestReadPagesHugeFileWithNextOffset(t *testing.T) {
+	ctx, ws := testCtx(t)
+	path := filepath.Join(ws, "huge.txt")
+	var sb strings.Builder
+	for i := 0; i < 50000; i++ {
+		sb.WriteString(strings.Repeat("q", i%120))
+		sb.WriteByte('\n')
+	}
+	want := sb.String()
+	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got strings.Builder
+	offset, pages := 1, 0
+	for {
+		r := readPage(t, ctx, path, offset, 2000)
+		got.WriteString(r.Content)
+		pages++
+		if !r.HasMore {
+			break
+		}
+		if r.NextOffset != r.EndLine+1 {
+			t.Fatalf("next_offset %d after end %d", r.NextOffset, r.EndLine)
+		}
+		offset = r.NextOffset
+	}
+	if got.String() != want {
+		t.Fatalf("paged content differs (%d pages)", pages)
+	}
+	if _, ok := fileVersions.seenHash(ctx.SessionID, path); !ok {
+		t.Fatal("paging to EOF did not count as a full read")
+	}
+}
+
+func TestReadFirstPageOfLargeFileIsBounded(t *testing.T) {
+	ctx, ws := testCtx(t)
+	path := filepath.Join(ws, "large.txt")
+	line := strings.Repeat("x", 99) + "\n"
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200000; i++ { // ~20 MB
+		f.WriteString(line)
+	}
+	f.Close()
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	r := readPage(t, ctx, path, 1, 10)
+	runtime.ReadMemStats(&after)
+	if !r.HasMore || r.NextOffset != 11 {
+		t.Fatalf("got %+v", r)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 4<<20 {
+		t.Fatalf("first page allocated %d bytes; the file is not streamed", grew)
+	}
+}
+
+func TestReadVeryLongLineIsBounded(t *testing.T) {
+	ctx, ws := testCtx(t)
+	path := filepath.Join(ws, "oneline.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("é", 4<<20)+"\nnext\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	r := readPage(t, ctx, path, 1, 1)
+	runtime.ReadMemStats(&after)
+	if !strings.HasSuffix(r.Content, truncatedMarker+"\n") || !r.HasMore || r.NextOffset != 2 {
+		t.Fatalf("got %d bytes, %+v", len(r.Content), r.StopReason)
+	}
+	if !utf8.ValidString(r.Content) {
+		t.Fatal("truncation split a rune")
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 4<<20 {
+		t.Fatalf("long line allocated %d bytes", grew)
+	}
+	if r = readPage(t, ctx, path, 2, 5); r.Content != "next\n" || r.HasMore {
+		t.Fatalf("after long line: %+v", r)
 	}
 }

@@ -193,6 +193,13 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 			})
 			continue
 		}
+		if msg.Role == transcript.RoleAssistant && strings.TrimSpace(msg.Reasoning) != "" {
+			kind := "thinking"
+			out = append(out, HistoryMessage{
+				Role: "assistant", Content: msg.Reasoning,
+				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind,
+			})
+		}
 		if !msg.Visible() {
 			continue
 		}

@@ -1,6 +1,6 @@
 // ask.spec.ts covers the ask-question wizard: one question at a time,
 // arrow navigation, Enter to advance, review screen, submit answers.
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const QUESTIONS = [
   { question: "Deploy where?", options: ["staging", "production"] },
@@ -9,13 +9,13 @@ const QUESTIONS = [
 
 // Installs a stub turn that emits a running ask tool call, then resolves
 // the chat promise once the wizard answers through answerAsk.
-async function stubAskTurn(page: import("@playwright/test").Page, questions: unknown[] = QUESTIONS) {
+async function stubAskTurn(page: Page, questions: unknown[] = QUESTIONS) {
   await page.evaluate((questions) => {
     const w = window as any;
     w.__e2eAskAnswers = null;
     w.__e2eAskCancelled = null;
-    const base = window.__paladinBaseInvoke.bind(window);
-    window.__paladinBaseInvoke = async (cmd: string, args: any) => {
+    const base = w.__paladinBaseInvoke.bind(window);
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
       if (cmd === "answerAsk") {
         w.__e2eAskAnswers = args.answers;
         const handlers = w.__e2eAskHandlers;
@@ -71,9 +71,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
 });
 
-test("the wizard walks one question at a time and submits every answer", async ({
-  page,
-}) => {
+test("the wizard walks one question at a time and submits every answer", async ({ page }) => {
   await stubAskTurn(page);
   await page.fill("#promptInput", "ship it");
   await page.click("#sendBtn");
@@ -155,7 +153,5 @@ test("a multiple-choice question takes several options plus free text", async ({
   await page.keyboard.press("Enter");
   await expect(modal).toBeHidden();
   const answers = await page.evaluate(() => (window as any).__e2eAskAnswers);
-  expect(answers).toEqual([
-    { question: "Which checks?", answer: "lint, bench, fuzz", selected: ["lint", "bench"] },
-  ]);
+  expect(answers).toEqual([{ question: "Which checks?", answer: "lint, bench, fuzz", selected: ["lint", "bench"] }]);
 });

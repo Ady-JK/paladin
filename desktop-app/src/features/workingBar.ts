@@ -16,7 +16,7 @@ export function workingLabel(tool: ToolInfo): string {
   } catch {
     // Streaming arguments may be partial; fall back to the name.
   }
-  const str = (k: string) => (typeof args[k] === "string" ? (args[k] as string) : "");
+  const str = (k: string) => (typeof args[k] === "string" ? args[k] : "");
   const tail = (p: string) => p.split(/[\\/]/).filter(Boolean).slice(-2).join("/") || p;
   switch (tool.name) {
     case "shell":

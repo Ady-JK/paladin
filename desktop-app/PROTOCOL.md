@@ -37,6 +37,8 @@ Electron main spawns it with piped stdio:
 | `sessionUsage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,lastInputTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` is the last call's input tokens over the window, omitted when the model's window is unknown) |
 | `budgetGet` | `{sessionId?,cwd?}` | `BudgetView` (`defaultUsd,sessionUsd,effectiveUsd,spentUsd,hasCost,calls`); `calls` counts model calls that reported usage, so `hasCost:false` with `calls>0` means the provider sends no cost; `sessionUsd` is `null` when the session inherits the default; `effectiveUsd` `0` means no limit. Without `sessionId` only the default is reported |
 | `budgetSet` | `{scope,sessionId?,cwd?,budgetUsd}` | `BudgetView`; `scope` `global` (default in `config/settings.json` as `defaultBudgetUsd`) or `session` (session meta); `budgetUsd` a non-negative USD amount, `0` for a session turns the limit off, `null` clears it (inherit) |
+| `thinkingGet` | `{provider?,model?}` | `ThinkingView` (`provider,model,levels,level`); `levels` are the thinking (reasoning effort) levels the model accepts, weakest first, from `none,minimal,low,medium,high,xhigh,max` — empty when the model has no adjustable thinking; `level` `""` means the provider default (nothing is sent). Empty `provider`/`model` resolve to the default ones |
+| `thinkingSet` | `{provider,model,level}` | `ThinkingView`; stores the level app-wide per model in `config/settings.json` as `thinkingLevels: {provider: {model: level}}`; `""` clears it. A level the model doesn't list is rejected. Applies from the next model call |
 | `overallUsage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
 | `deleteSession` | `{sessionId,cwd?,discardWorktree?}` | `bool`; a worktree session's worktree is removed with its last session if clean, or always with `discardWorktree:true` |
 | `getPrompt` | `{}` | `Prompt` (`systemPrompt` = `config/SYSTEM_PROMPT.md`; a missing/blank file seeds from the built-in default) |
@@ -51,7 +53,7 @@ Electron main spawns it with piped stdio:
 | `memoryRefreshSnapshot` | `{sessionId,cwd?}` | `bool`: the session's next turn re-reads memory instead of its frozen snapshot |
 | `forkSession` | `{sessionId,cwd?,worktree?,name?}` | `SessionInfo` of the copy (title `… (fork)`); `worktree:true` forks into a new worktree, a plain fork stays in the source's folder (and worktree) |
 | `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],conflicts[],snapshots}`: what reverting to the user message at transcript `index` would restore |
-| `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],skipped[],snapshots}`: undo from that user message on (files + conversation); `message` is its text for the composer. Fails while a turn runs |
+| `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],skipped[],failed?[],snapshots}`: undo from that user message on (files + conversation); `message` is its text for the composer. `failed` lists files whose restore errored (also in `skipped`; the others were still restored). Fails while a turn runs |
 | `unrevertSession` | `{sessionId,cwd?}` | same shape: redo the pending revert |
 | `gitInfo` | `{cwd}` | `{repo,root?,branch?,hasCommits}` |
 | `worktreeStatus` | `{sessionId,cwd?}` | `{exists,changed,ahead,branch,baseBranch?,into,path,repoRoot}`: `changed` files in the worktree, commits `ahead` of the repo's checkout (`into`) |
@@ -61,7 +63,7 @@ Electron main spawns it with piped stdio:
 | `cancelAsk` | `{sessionId,callId}` | `bool` |
 | `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder`, `global` or `deny` (must be one of the card's `choices`); unknown calls fail |
 | `permissionsGet` | `{cwd?,sessionId?}` | `{global: Rule[], folder: Rule[], session: Rule[], folders: [{cwd,rules}], sandbox: {kind}, presets}`; `sandbox.kind` is `seatbelt`, `landlock` or `""` (approvals only) |
-| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|mcp, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write patterns absolute directories, mcp patterns `server`, `server/*` or `server/tool`; `*` matches all |
+| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`; `*` matches all |
 | `mcpList` | `{cwd?}` | `MCPOverview`: `{servers: ServerStatus[], globalPath, folderPath?, hasFolderConfig, trusted, errors?: {global?, folder?}}` — global servers plus `cwd`'s own (see MCP servers) |
 | `mcpConfig` | `{scope,cwd?}` | `{path, text, exists}`: one `mcp.json` for editing (`scope` `global` or `folder`; a missing file returns a starter `text`) |
 | `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
@@ -100,14 +102,23 @@ turn going — and echoed as `chat/steer`. A steer the turn never picked
 up (it was already ending) becomes the session's next turn, ahead of
 anything queued later; stopping the turn drops it.
 
-**Budget:** an optional spend limit (`budgetSet`) is checked before every
-model call against the session's gateway-reported spend. Once spent ≥
+**Budget:** an optional tracked-cost limit (`budgetSet`) is checked
+before every model call against the session's gateway-reported spend. It
+is not a guaranteed spending cap: calls without a reported cost are not
+counted, and the call that crosses the limit plus the wrap-up summary
+still run, so spend can end above it. Once spent ≥
 limit, the turn emits `chat/budget` `reached`, the tools are taken away
 and the model is asked for a final done/remaining summary, which ends the
 turn (steers wait for a later turn). A turn that starts already over the
 limit ends at once without a model call. When a budget is set but the
 provider reports no cost, `chat/budget` `unknownCost` warns once per turn
-and the limit is not enforced.
+and the limit is not enforced. `usage.json` is written atomically (temp
+file + fsync + rename). A ledger that does not decode never counts as
+zero spend: the next call renames it to `usage.json.corrupt-<n>` and
+starts a new one with `recoveredFrom` naming it, and while the ledger is
+corrupt or recovered `chat/budget` `spendIncomplete` warns once per turn
+that `spent` is only a lower bound (the limit is still checked against
+it, so real spend may already be past the limit).
 
 **Hooks:** user commands run (outside the sandbox, via `sh -c`) at
 `SessionStart` (first turn of a session in this process: `startup`,
@@ -213,8 +224,18 @@ More streaming events:
 - `chat/budget`: `{"budget": {"state", "spent", "limit", "ended?"}}` —
   `state` `reached` (the turn is wrapping up with a summary; with
   `ended: true` it was over the limit before any model call and ends at
-  once) or `unknownCost` (the provider reports no cost, so the limit
-  cannot be enforced).
+  once), `unknownCost` (the provider reports no cost, so the limit
+  cannot be enforced) or `spendIncomplete` (the usage ledger was
+  corrupt; `spent` is a lower bound).
+- `chat/reasoning`: `{"reasoning": "..."}` — a piece of the model's
+  thinking, streamed apart from the answer. It is saved on the round's
+  assistant message and `sessionHistory` shows it as a
+  `{"role": "assistant", "kind": "thinking", "content": "..."}` row
+  before that message. Thinking is never sent back to the model.
+- `chat/thinkingDropped`: `{"thinkingDropped": "high"}` — the provider
+  rejected the model's thinking level, so the call was retried without
+  it. The level stays off for that model until it is changed or the
+  provider is reconfigured.
 - `chat/hook`: `{"hook": {"event", "command", "outcome", "message?"}}` — a hook ran and did something worth showing:
   `outcome` is `blocked`, `context`, `error`, `stopped` or `message`.
 - Tool calls cut short by stop or a crash settle as `failed` `chat/tool`
@@ -232,8 +253,9 @@ with ", ").
 
 ### Approvals and sandbox
 
-Every `shell`, `write` and `edit` call (and MCP tool call) passes the permission gate
-before it runs. Presets:
+Every `shell`, `write` and `edit` call, every `read` outside the
+workspace and every MCP tool call passes the permission gate before it
+runs. Presets:
 
 - `read-only`: safe read commands run in a read-only OS sandbox; any
   write or other command asks.
@@ -256,9 +278,44 @@ folder (`permissions/folders/<key>.json`), then global
 
 The turn blocks until `answerApproval`; `state` then becomes
 `approved` or `denied` (`decision: "interrupted"` if the turn stopped). `session`,
-`folder` and `global` save `remember` in that scope; write cards (a
-write outside the workspace) also offer `global`. A denied call returns
+`folder` and `global` save `remember` in that scope; write and read
+cards (outside the workspace) also offer `global`. A denied call returns
 an error result telling the model not to retry.
+
+**Reads outside the workspace.** `read` inside the workspace never
+asks. A `read` whose path (after following symlinks) is outside it
+sends a `kind: "read"` card with `path` and a `read` rule for the
+file's folder in `remember` (the file itself when the folder is `/`, a
+top-level folder, home or home's parent), unless a `read` or `write`
+allow rule covers the real path; full access runs it. Read-only shell
+commands (`cat`, `ls`, `grep`, …) that would run without asking are
+checked too: an argument that is absolute, starts with `~`, contains
+`..` or is an existing symlink leading out of the workspace makes the
+call ask (`reasons` name each path, `remember` holds `read` rules); an
+argument that expands a variable (`$HOME`) asks `once`/`deny`. This is
+best effort: it looks only at arguments, so a program that opens other
+paths itself, or a command already allowed by a `shell` rule, is not
+checked. `read` deny rules block both. `/dev/null` and the std streams
+are exempt.
+
+**Plan mode and safe commands** never include environment or config
+dumpers: `env`, `printenv`, `go env`, `git config`, `awk` using
+`ENVIRON` and `jq` using `env`/`$ENV` need approval (and are refused by
+the plan-mode shell).
+
+**Redaction.** Shell output (including job polls and notices), tool
+error results, provider errors and the sidecar log mask likely secrets
+before they leave: known key prefixes (`sk-`, `ghp_`, `AKIA`, `AIza`,
+`xox?-`, `npm_`, …), `Bearer` tokens, `scheme://user:pass@`, secret-named
+`KEY=value` assignments, PEM private keys and every stored provider
+key. It is pattern matching, so unusual secrets can slip through.
+`read` returns file contents unmasked so edits still match.
+
+**What the sandbox does not do.** The OS sandbox confines writes (and,
+in read-only mode, all writes); it does not stop shell commands from
+reading files the user can read, and network access stays on. Read
+protection outside the workspace is the approval gate above, not the
+sandbox. Hooks and `full-access` run unsandboxed.
 
 Allow-write rules double as **sandbox grants**: every absolute folder
 in an effective `write` allow rule is writable by sandboxed shell
@@ -310,10 +367,15 @@ stays `failed` until its config changes or `mcpRestart`; one that dies
 after starting restarts on next use (3 times per 5 minutes).
 
 MCP calls pass the gate as `kind: "mcp"` cards with `server`, `mcpTool`
-and `args`: tools with `readOnlyHint` run without asking, tools with
-`destructiveHint` always ask `once`/`deny`, others ask and remember
-`server/tool`. Full access runs everything; plan mode keeps only
-read-only MCP tools. Server instructions join the system prompt.
+and `args`. Tool annotations come from the server and are not trusted:
+`readOnlyHint` neither skips the question nor lets calls run in
+parallel (MCP calls always run one at a time). Tools with
+`destructiveHint` always ask `once`/`deny`; others run under an
+`mcp` allow rule or ask and can remember `server/tool`. Full access
+runs everything; deny rules win over everything. Plan mode keeps all
+MCP tools but asks `once`/`deny` for every call, even under full
+access, allow rules or a hook's allow. Refusals name `server/tool`.
+Server instructions join the system prompt.
 
 ```json
 {"event": "mcp/status", "server": {"name": "github", "scope": "global", "transport": "stdio", "state": "ready", "tools": [{"name": "search", "exposed": "mcp__github__search", "readOnly": true, "destructive": false}], "server": {"name": "github-mcp", "version": "1.0"}, "stderr": "...", "restarts": 0}}
@@ -364,8 +426,48 @@ another session in the same folder) are `skipped`. The reverted
 messages disappear from `sessionHistory`, and `openSession` /
 `listSessions` report `revert`. `unrevertSession` puts the files back
 (again skipping any changed since). The next message commits the
-revert: the hidden messages and their steps are dropped. Changes made by
-background jobs after their call returned are not tracked.
+revert: the hidden messages and their steps are dropped.
+
+Background shell jobs (`background: true`) time out after 300 s unless
+`timeout_ms` says otherwise (foreground commands default to 10 s). They
+are tracked separately: the
+sidecar snapshots the folder when the job starts, keeps a record in
+`<sessionDir>/jobs/<jobId>.json` (`status` running/done/failed/
+cancelled/timeout, `startedAt`, `endedAt`, `exitCode`, `files`,
+`uncertain`, `finalized`) and, exactly once when the job exits, is
+cancelled or times out, snapshots again and records the changed files
+as a step of the turn that started it. `revertSession` and
+`unrevertSession` fail while one of the session's jobs is still
+running. Files that another call (any session) also changed while the
+job ran are `uncertain`: they are not in the step and a revert reports
+them as `skipped` instead of restoring them. If two jobs overlap in one
+folder, all their files are uncertain. Each record keeps the job's
+process-group `pid`. A record left `running` by an earlier sidecar
+process is checked on revert and redo: while that process group is
+still alive both fail with an error naming the job and pid; once it is
+gone, the revert marks the record `interrupted` (finalized, with a
+`note`), and every file changed since the job started is `uncertain`
+and reported as `skipped`, never restored. A recycled pid can cause a
+false refusal; where process groups cannot be probed (Windows) the job
+is treated as ended. `job_id`, polling, cancel and completion notices are
+unchanged.
+
+File-changing calls (write, edit, foreground shell) and reverts in one
+folder run one at a time across all sessions of this sidecar, so each
+step's before/after snapshots hold only that call's changes. That is
+in-process only: an editor, a background job or another program writing
+during a call is attributed to the call, and a long foreground shell
+command makes other sessions' writes in that folder wait. Sessions that
+need real isolation should use a worktree.
+
+`write` with `overwrite` on an existing file needs this session to have
+read the whole current version (line 1 to EOF, in one read or
+consecutive pages of an unchanged file) or to have written it last;
+otherwise it returns a conflict result (`conflict: true`, `reason`
+`unread`, `stale` or `changed`) and writes nothing. A read that cut a
+long line (`… [truncated]`) does not count: the conflict's `reason` is
+`truncated` and the model is told to use `edit`, which never needs a
+full read.
 
 Worktrees live in `worktrees/<repo>-<hash>/<slug>` on branch
 `paladin/<slug>`, created from the repo's HEAD commit (uncommitted
@@ -404,8 +506,17 @@ never returns content.
 
 ## Electron side
 
-- `main.ts` keeps a `pending` map `id -> {resolve, reject}`.
-- Unary `agent:invoke` resolves on the matching `{id}` line.
+- `sidecar.ts` owns the agent-host process and a `pending` map
+  `id -> {resolve, reject}`; unary `agent:invoke` resolves on the
+  matching `{id}` line.
+- If the sidecar exits unexpectedly, in-flight calls reject with
+  `agent-host exited`, calls made while it is down reject with
+  `agent-host is not running`, and it is restarted with exponential
+  backoff (0.5s doubling to 30s; reset after 60s of uptime). Once the
+  new process is up, the renderer receives
+  `{"event": "host/restarted"}` (no `sessionId`, sent by Electron, not
+  the sidecar): it ends the turns that died with the old process and
+  re-reads `turns`.
 - Every `chat/*` and `turn/*` event is forwarded to the renderer on
   `agent:event`; the renderer routes it by `sessionId`, so any number
   of sessions stream at once and a session keeps updating while it is
@@ -419,6 +530,9 @@ never returns content.
   window boots).
 - Quitting closes the sidecar's stdin and waits up to 8s for it to
   persist and exit before killing it.
+- IPC inputs are validated in main: guest views and
+  `shell:openExternal` accept only `http(s)` URLs (plus `mailto:` for
+  openExternal), and `views:setBounds` needs finite numbers.
 - WebContentsViews (`views:*` IPC) are independent of the agent: one
   shared persistent partition (`persist:paladin-sites`) across chat
   pages so Google SSO cookies carry over, a single live guest (showing

@@ -6,7 +6,7 @@ package inference
 
 import (
 	"context"
-	"sort"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -45,14 +45,21 @@ type ToolResponse struct {
 	// Usage is the call's token/spend footprint; nil when the provider
 	// did not report one.
 	Usage *Usage
+	// Reasoning is the model's visible thinking, when it sends any.
+	Reasoning string
 }
 
 // Chunk is one streamed piece: text, a tool-call notice (name arrived,
 // args still streaming), final tool calls, usage, or an error.
 type Chunk struct {
-	Text       string
-	ToolCalls  []ToolCall
-	ToolNotice *ToolCall
+	Text string
+	// Reasoning is a piece of the model's thinking; never answer text.
+	Reasoning string
+	// EffortDropped names a thinking level the provider rejected; the
+	// call was retried without it, as are later calls.
+	EffortDropped string
+	ToolCalls     []ToolCall
+	ToolNotice    *ToolCall
 	// Usage arrives once per stream (the final usage chunk); the loop
 	// accumulates it and never surfaces it as a delta.
 	Usage *Usage
@@ -103,18 +110,6 @@ func RegisterProviderTemplate(t ProviderTemplate) {
 	providerTemplates[t.ApiType] = t
 }
 
-// ProviderTemplates returns the registered dialects in sorted order.
-func ProviderTemplates() []config.ApiType {
-	providerMu.RLock()
-	defer providerMu.RUnlock()
-	out := make([]config.ApiType, 0, len(providerTemplates))
-	for apiType := range providerTemplates {
-		out = append(out, apiType)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
-
 func providerTemplate(apiType config.ApiType) (ProviderTemplate, bool) {
 	providerMu.RLock()
 	defer providerMu.RUnlock()
@@ -153,10 +148,8 @@ func RequestError(msg string) *ProviderError { return &ProviderError{Kind: "requ
 func ConfigError(msg string) *ProviderError  { return &ProviderError{Kind: "config", Message: msg} }
 func CancelledError() *ProviderError         { return &ProviderError{Kind: "cancelled", Message: "cancelled"} }
 func IsCancelled(err error) bool {
-	if pe, ok := err.(*ProviderError); ok {
-		return pe.Kind == "cancelled"
-	}
-	return false
+	var pe *ProviderError
+	return errors.As(err, &pe) && pe.Kind == "cancelled"
 }
 
 // IsRetryable reports whether err looks transient: rate limits,
@@ -170,7 +163,8 @@ func IsRetryable(err error) bool {
 		return false
 	}
 	var msg string
-	if pe, ok := err.(*ProviderError); ok {
+	var pe *ProviderError
+	if errors.As(err, &pe) {
 		if pe.Kind != "request" {
 			return false
 		}

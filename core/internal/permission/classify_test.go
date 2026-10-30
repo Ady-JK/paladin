@@ -35,7 +35,8 @@ func TestClassifyWrites(t *testing.T) {
 	if !req.Outside {
 		t.Fatal(".. escape not flagged")
 	}
-	for _, name := range []string{"read", "todo", "ask", "memory", "skill", "session_search"} {
+	// read is gated only outside the workspace (see read_test.go).
+	for _, name := range []string{"todo", "ask", "memory", "skill", "session_search"} {
 		if _, gated := Classify(name, args(map[string]any{"path": "/etc/hosts"}), "/ws"); gated {
 			t.Errorf("%s should not be gated", name)
 		}

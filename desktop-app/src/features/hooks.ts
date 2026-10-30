@@ -65,7 +65,8 @@ export async function loadHooks(): Promise<void> {
 function handlerRow(src: HookSource, h: HookHandler): string {
   const pending = busy.has(h.key);
   const live = h.enabled && src.trusted;
-  const matcher = h.matcher && h.matcher !== "*" ? `<code class="hook-matcher" title="Matcher">${escapeHtml(h.matcher)}</code>` : "";
+  const matcher =
+    h.matcher && h.matcher !== "*" ? `<code class="hook-matcher" title="Matcher">${escapeHtml(h.matcher)}</code>` : "";
   const timeout = h.timeout ? `<span class="mcp-meta">${h.timeout}s</span>` : "";
   return (
     `<li class="hook-handler${pending ? " is-busy" : ""}" data-hook-key="${escapeHtml(h.key)}" data-live="${live}">` +
@@ -109,7 +110,9 @@ function sourceCard(src: HookSource): string {
     folder && src.exists && handlers.length && !src.trusted
       ? `<div class="hook-untrusted">${icon("sl-shield", "h-3.5 w-3.5")}<span>These hooks run commands on your machine, outside the sandbox, so they stay off until you trust this file. Trust is pinned to its current content.</span></div>`
       : "";
-  const error = src.error ? `<div class="mcp-config-error">${icon("sl-shield-off", "h-3.5 w-3.5")}<span>${escapeHtml(src.error)}</span></div>` : "";
+  const error = src.error
+    ? `<div class="mcp-config-error">${icon("sl-shield-off", "h-3.5 w-3.5")}<span>${escapeHtml(src.error)}</span></div>`
+    : "";
   const warnings = (src.warnings ?? []).map((w) => `<div class="hook-warning">${escapeHtml(w)}</div>`).join("");
   const body = editor?.scope === src.scope && src.editable ? editorHtml(editor, src.path) : "";
   const list = handlers.length

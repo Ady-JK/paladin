@@ -406,3 +406,58 @@ func TestSessionDirValidation(t *testing.T) {
 		t.Fatal("crafted id")
 	}
 }
+
+func TestLoadTranscriptStreamsLongMessages(t *testing.T) {
+	dir := t.TempDir()
+	s := &Session{Dir: dir}
+	big := strings.Repeat("y", 3<<20)
+	for _, c := range []string{"short", big, "after"} {
+		if err := s.Append(RoleUser, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msgs, err := LoadTranscript(dir)
+	if err != nil || len(msgs) != 3 || msgs[1].Content != big || msgs[2].Content != "after" {
+		t.Fatalf("got %d msgs, %v", len(msgs), err)
+	}
+}
+
+func TestTornTranscriptTailIsDroppedAndRepaired(t *testing.T) {
+	dir := t.TempDir()
+	s := &Session{Dir: dir}
+	if err := s.Append(RoleUser, "kept"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "messages.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"role":"assistant","content":"half`)
+	f.Close()
+	msgs, err := LoadTranscript(dir)
+	if err != nil || len(msgs) != 1 || msgs[0].Content != "kept" {
+		t.Fatalf("torn tail: %d msgs, %v", len(msgs), err)
+	}
+	if err := s.Append(RoleUser, "next"); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err = LoadTranscript(dir)
+	if err != nil || len(msgs) != 2 || msgs[1].Content != "next" {
+		t.Fatalf("after repair: %d msgs, %v", len(msgs), err)
+	}
+}
+
+func TestCorruptMiddleLineStillFails(t *testing.T) {
+	dir := t.TempDir()
+	content := "{bad}\n{\"role\":\"user\",\"content\":\"hi\"}\n"
+	if err := os.WriteFile(filepath.Join(dir, "messages.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadTranscript(dir); err == nil {
+		t.Fatal("a corrupt complete line must not be skipped")
+	}
+}
+
+func AssistantMessage(content string) Message {
+	return Message{Role: RoleAssistant, Content: content, CreatedAt: time.Now().UTC()}
+}

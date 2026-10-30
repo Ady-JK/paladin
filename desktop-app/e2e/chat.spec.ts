@@ -31,8 +31,7 @@ test("agent markdown renders while the user bubble stays plain", async ({ page }
       const out = await prev(params, handlers);
       return {
         ...out,
-        reply:
-          "# Ship it\n\nRun **tests** and *lint*:\n\n- unit\n- e2e\n\n> go fast\n\n[docs](https://example.com)",
+        reply: "# Ship it\n\nRun **tests** and *lint*:\n\n- unit\n- e2e\n\n> go fast\n\n[docs](https://example.com)",
       };
     };
   });

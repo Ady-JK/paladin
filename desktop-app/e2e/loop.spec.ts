@@ -99,7 +99,16 @@ test("budget notices show in the turn", async ({ page }) => {
   await page.evaluate(() =>
     (window as any).__held["spendy"].handlers.onBudget({ state: "unknownCost", spent: 0, limit: 1 }),
   );
-  await expect(page.locator('#messages [data-notice="budget"]')).toContainText("can't be enforced");
+  await expect(page.locator('#messages [data-notice="budget"]')).toContainText("isn't enforced");
+  await page.evaluate(() =>
+    (window as any).__held["spendy"].handlers.onBudget({ state: "spendIncomplete", spent: 0.3, limit: 1 }),
+  );
+  await expect(page.locator('#messages [data-notice="budget"][data-state="spendIncomplete"]')).toContainText(
+    "at least $0.30",
+  );
+  await expect(page.locator('#messages [data-notice="budget"][data-state="spendIncomplete"]')).toContainText(
+    "real spend may be higher",
+  );
   await page.evaluate(() =>
     (window as any).__held["spendy"].handlers.onBudget({ state: "reached", spent: 1.2, limit: 1 }),
   );
@@ -153,6 +162,8 @@ test("the budget chip warns when the provider reports no cost", async ({ page })
   await expect(page.locator("#budgetChip")).toHaveAttribute("data-level", "unknown");
   await page.click("#budgetChip");
   await expect(page.locator("#budgetMenu")).toContainText("no cost");
+  await expect(page.locator("#budgetMenu")).toContainText("not a guaranteed cap");
+  await expect(page.locator("#budgetChip")).toHaveAttribute("title", /isn't tracked/);
 });
 
 test("/budget sets, turns off and resets the session budget", async ({ page }) => {

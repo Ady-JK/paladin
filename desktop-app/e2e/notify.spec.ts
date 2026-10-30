@@ -12,13 +12,7 @@ test("a notify reminder renders in turn order", async ({ page }) => {
 
   const text = (await page.locator("#messages").textContent()) ?? "";
 
-  const order = [
-    "Starting the slow job.",
-    "sleep 60",
-    "Meanwhile done.",
-    "notify job-1-1",
-    "It printed hi.",
-  ];
+  const order = ["Starting the slow job.", "sleep 60", "Meanwhile done.", "notify job-1-1", "It printed hi."];
   let at = -1;
   for (const part of order) {
     const next = text.indexOf(part, at + 1);
@@ -28,9 +22,7 @@ test("a notify reminder renders in turn order", async ({ page }) => {
 
   // No name labels: sides alone say who is talking, so the agent
   // name must not appear as a row header.
-  await expect(
-    page.locator("#messages").getByText("paladin", { exact: true }),
-  ).toHaveCount(0);
+  await expect(page.locator("#messages").getByText("paladin", { exact: true })).toHaveCount(0);
 });
 
 test("expanding a tool row keeps the reading position", async ({ page }) => {

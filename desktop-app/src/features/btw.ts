@@ -32,10 +32,19 @@ export async function askSideQuestion(question: string): Promise<void> {
 
   const body = card.querySelector<HTMLElement>(".btw-body")!;
   try {
-    const res = await api.sideQuestion(sessionId, state.cwd || null, question, state.selectedProvider || null, state.selectedModel || null);
+    const res = await api.sideQuestion(
+      sessionId,
+      state.cwd || null,
+      question,
+      state.selectedProvider || null,
+      state.selectedModel || null,
+    );
     card.dataset.state = "done";
     body.innerHTML = `<div class="btw-answer md">${renderMarkdown(res.answer)}</div>`;
-    if (res.model) card.querySelector(".btw-head")!.insertAdjacentHTML("beforeend", `<span class="btw-model">${escapeHtml(res.model)}</span>`);
+    if (res.model)
+      card
+        .querySelector(".btw-head")!
+        .insertAdjacentHTML("beforeend", `<span class="btw-model">${escapeHtml(res.model)}</span>`);
   } catch (error) {
     card.dataset.state = "error";
     body.innerHTML = `<div class="btw-error">${escapeHtml(String(error instanceof Error ? error.message : error).replace(/^Error:\s*/, ""))}</div>`;

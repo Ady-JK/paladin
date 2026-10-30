@@ -194,9 +194,3 @@ func (t *httpTransport) setProtocolVersion(v string) {
 	t.version = v
 	t.mu.Unlock()
 }
-
-func (t *httpTransport) sessionID() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.session
-}

@@ -3,7 +3,13 @@
 // the Settings → Permissions pane.
 import { test, expect, type Page } from "@playwright/test";
 
-const SHELL = { id: "c1", name: "shell", arguments: JSON.stringify({ cmd: "npm install left-pad" }), result: "", status: "running" };
+const SHELL = {
+  id: "c1",
+  name: "shell",
+  arguments: JSON.stringify({ cmd: "npm install left-pad" }),
+  result: "",
+  status: "running",
+};
 
 function pending(over: Record<string, unknown> = {}) {
   return {
@@ -40,7 +46,14 @@ test("an approval card shows the command and allows it for the folder", async ({
   await script(page, [
     { event: "chat/tool", tool: SHELL },
     { event: "chat/approval", approval: pending() },
-    { event: "chat/tool", tool: { ...SHELL, status: "ok", result: JSON.stringify({ status: "done", exit_code: 0, output: "added 1 package" }) } },
+    {
+      event: "chat/tool",
+      tool: {
+        ...SHELL,
+        status: "ok",
+        result: JSON.stringify({ status: "done", exit_code: 0, output: "added 1 package" }),
+      },
+    },
   ]);
   await send(page);
   const card = page.locator('.approval-card[data-approval="c1"]');
@@ -63,7 +76,16 @@ test("an approval card shows the command and allows it for the folder", async ({
 
 test("Escape denies, and a destructive call only offers once or deny", async ({ page }) => {
   await script(page, [
-    { event: "chat/approval", approval: pending({ command: "rm -rf build", destructive: true, reasons: ["destructive command"], choices: ["once", "deny"], remember: [] }) },
+    {
+      event: "chat/approval",
+      approval: pending({
+        command: "rm -rf build",
+        destructive: true,
+        reasons: ["destructive command"],
+        choices: ["once", "deny"],
+        remember: [],
+      }),
+    },
   ]);
   await send(page, "clean");
   const card = page.locator('.approval-card[data-approval="c1"]');
@@ -79,7 +101,15 @@ test("Escape denies, and a destructive call only offers once or deny", async ({ 
 
 test("an escalation card asks to rerun without the sandbox", async ({ page }) => {
   await script(page, [
-    { event: "chat/approval", approval: pending({ kind: "escalate", reasons: ["the sandbox blocked it"], choices: ["once", "deny"], remember: [] }) },
+    {
+      event: "chat/approval",
+      approval: pending({
+        kind: "escalate",
+        reasons: ["the sandbox blocked it"],
+        choices: ["once", "deny"],
+        remember: [],
+      }),
+    },
   ]);
   await send(page);
   const card = page.locator('.approval-card[data-approval="c1"]');
@@ -125,18 +155,65 @@ test("a write approval from a turn started elsewhere shows up live", async ({ pa
   await expect(page.locator("#messages")).toContainText("Stub reply to: hello");
   await page.evaluate(() => {
     const hub = (window as any).__e2eHub;
-    hub.emit({ event: "turn/start", sessionId: "sess-notify-1", turnId: "t-r", turn: { turnId: "t-r", sessionId: "sess-notify-1", message: "x", state: "running" } });
+    hub.emit({
+      event: "turn/start",
+      sessionId: "sess-notify-1",
+      turnId: "t-r",
+      turn: { turnId: "t-r", sessionId: "sess-notify-1", message: "x", state: "running" },
+    });
     hub.emit({
       event: "chat/approval",
       sessionId: "sess-notify-1",
       turnId: "t-r",
-      approval: { id: "c9", tool: "write", kind: "write", path: "/etc/hosts", reasons: ["outside the workspace"], choices: ["once", "session", "folder", "global", "deny"], remember: [{ tool: "write", pattern: "/etc", action: "allow" }], state: "pending" },
+      approval: {
+        id: "c9",
+        tool: "write",
+        kind: "write",
+        path: "/etc/hosts",
+        reasons: ["outside the workspace"],
+        choices: ["once", "session", "folder", "global", "deny"],
+        remember: [{ tool: "write", pattern: "/etc", action: "allow" }],
+        state: "pending",
+      },
     });
   });
   const card = page.locator('.approval-card[data-approval="c9"]');
   await expect(card).toContainText("/etc/hosts");
   await expect(card.locator('[data-approve="folder"]')).toContainText("/etc");
   await expect(card.locator('[data-approve="global"]')).toContainText(/writes to \/etc everywhere/i);
+});
+
+test("an outside read asks with a read grant", async ({ page }) => {
+  await send(page, "hello");
+  await expect(page.locator("#messages")).toContainText("Stub reply to: hello");
+  await page.evaluate(() => {
+    const hub = (window as any).__e2eHub;
+    hub.emit({
+      event: "turn/start",
+      sessionId: "sess-notify-1",
+      turnId: "t-rd",
+      turn: { turnId: "t-rd", sessionId: "sess-notify-1", message: "x", state: "running" },
+    });
+    hub.emit({
+      event: "chat/approval",
+      sessionId: "sess-notify-1",
+      turnId: "t-rd",
+      approval: {
+        id: "c10",
+        tool: "read",
+        kind: "read",
+        path: "/opt/app/conf.yml",
+        reasons: ["outside the workspace"],
+        choices: ["once", "session", "folder", "global", "deny"],
+        remember: [{ tool: "read", pattern: "/opt/app", action: "allow" }],
+        state: "pending",
+      },
+    });
+  });
+  const card = page.locator('.approval-card[data-approval="c10"]');
+  await expect(card).toContainText(/Read this file\?/);
+  await expect(card).toContainText("/opt/app/conf.yml");
+  await expect(card.locator('[data-approve="global"]')).toContainText(/reads in \/opt\/app everywhere/i);
 });
 
 test("the preset chip switches the session's permissions and is sent with the turn", async ({ page }) => {
@@ -186,7 +263,9 @@ test("settings → permissions edits global and folder rules", async ({ page }) 
   const global = pane.locator('[data-rules="global"]');
   await global.locator("[data-rule-tool]").selectOption("write");
   await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /sandbox/i);
-  await global.locator('[data-rule-tool]').selectOption("shell");
+  await global.locator("[data-rule-tool]").selectOption("read");
+  await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /outside the workspace/i);
+  await global.locator("[data-rule-tool]").selectOption("shell");
   await global.locator("[data-rule-pattern]").fill("npm test");
   await global.locator("[data-rule-action]").selectOption("allow");
   await global.locator("[data-rule-add]").click();

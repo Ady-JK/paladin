@@ -93,7 +93,11 @@ function modelDonut(u: OverallUsage): string {
       return `<div class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full" style="background:${s.color}"></span><span class="truncate text-slate-300">${escapeHtml(s.label)}</span><span class="ml-auto font-bold text-slate-400">${pct}</span></div>`;
     })
     .join("");
-  const center = useTokens ? compactTokens(u.totalTokens) : u.hasCost ? formatCost(u.cost) : compactTokens(u.totalTokens);
+  const center = useTokens
+    ? compactTokens(u.totalTokens)
+    : u.hasCost
+      ? formatCost(u.cost)
+      : compactTokens(u.totalTokens);
   return `<div class="glass-panel flex-1 rounded-2xl p-5">
     <div class="mb-1 flex items-center justify-between">
       <div class="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">${icon("chart", "h-4 w-4 text-purple-400")} Provider &amp; model share</div>
@@ -145,7 +149,12 @@ function sessionsTable(u: OverallUsage, filter: string): string {
 function filtersHtml(u: OverallUsage): string {
   const models = u.models ?? [];
   const opts = [`<option value="all">All models (${models.length})</option>`]
-    .concat(models.map((m) => `<option value="${escapeHtml(m.model)}" ${m.model === modelFilter ? "selected" : ""}>${escapeHtml(m.model)}</option>`))
+    .concat(
+      models.map(
+        (m) =>
+          `<option value="${escapeHtml(m.model)}" ${m.model === modelFilter ? "selected" : ""}>${escapeHtml(m.model)}</option>`,
+      ),
+    )
     .join("");
   const pill = (m: "tokens" | "cost", label: string): string =>
     `<button data-metric="${m}" class="rounded px-2.5 py-1 ${metric === m ? "bg-accent-600 font-medium text-white" : "text-slate-400 hover:text-white"}">${label}</button>`;
@@ -171,13 +180,49 @@ function render(u: OverallUsage): void {
   const hit = cacheHitRate(filtered);
   const saved = filtered.hasCost && filtered.listCost > filtered.cost ? filtered.listCost - filtered.cost : 0;
   const kpis = [
-    hero({ label: "Est. total cost", value: filtered.hasCost ? formatCost(filtered.cost) : "—", sub: saved > 0 ? `saved ${formatCost(saved)} vs list` : filtered.hasCost ? `avg ${formatCost(filtered.calls > 0 ? filtered.cost / filtered.calls : 0)}/run` : `${filtered.sessionCount} sessions`, iconName: "dollar-sign", iconBox: "bg-accent-500/10 text-accent-400 border border-accent-500/20", glow: "blue" }),
-    hero({ label: "Total tokens", value: compactTokens(filtered.totalTokens), sub: `${filtered.totalTokens.toLocaleString()} · ${filtered.calls} calls`, iconName: "microchip", iconBox: "bg-purple-500/10 text-purple-400 border border-purple-500/20", glow: "purple" }),
-    hero({ label: "Sessions", value: `${filtered.sessionsWithUsage}`, sub: `${filtered.sessionCount} total · ${filtered.models?.length ?? 0} models`, iconName: "terminal", iconBox: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20", glow: "emerald" }),
-    hero({ label: "Prompt cache hit", value: `${trimNum(roundTo(hit, 1))}%`, sub: filtered.cacheReadTokens > 0 ? `${compactTokens(filtered.cacheReadTokens)} read · 90% off` : "no cache hits recorded", iconName: "zap", iconBox: "bg-amber-500/10 text-amber-400 border border-amber-500/20", glow: "amber" }),
+    hero({
+      label: "Est. total cost",
+      value: filtered.hasCost ? formatCost(filtered.cost) : "—",
+      sub:
+        saved > 0
+          ? `saved ${formatCost(saved)} vs list`
+          : filtered.hasCost
+            ? `avg ${formatCost(filtered.calls > 0 ? filtered.cost / filtered.calls : 0)}/run`
+            : `${filtered.sessionCount} sessions`,
+      iconName: "dollar-sign",
+      iconBox: "bg-accent-500/10 text-accent-400 border border-accent-500/20",
+      glow: "blue",
+    }),
+    hero({
+      label: "Total tokens",
+      value: compactTokens(filtered.totalTokens),
+      sub: `${filtered.totalTokens.toLocaleString()} · ${filtered.calls} calls`,
+      iconName: "microchip",
+      iconBox: "bg-purple-500/10 text-purple-400 border border-purple-500/20",
+      glow: "purple",
+    }),
+    hero({
+      label: "Sessions",
+      value: `${filtered.sessionsWithUsage}`,
+      sub: `${filtered.sessionCount} total · ${filtered.models?.length ?? 0} models`,
+      iconName: "terminal",
+      iconBox: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+      glow: "emerald",
+    }),
+    hero({
+      label: "Prompt cache hit",
+      value: `${trimNum(roundTo(hit, 1))}%`,
+      sub:
+        filtered.cacheReadTokens > 0
+          ? `${compactTokens(filtered.cacheReadTokens)} read · 90% off`
+          : "no cache hits recorded",
+      iconName: "zap",
+      iconBox: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+      glow: "amber",
+    }),
   ].join("");
   const timeline = areaChart(
-    (modelFilter === "all" ? (u.daily ?? []) : dailyForModel(u, modelFilter)),
+    modelFilter === "all" ? (u.daily ?? []) : dailyForModel(u, modelFilter),
     metric,
     "overall-timeline",
   );
@@ -201,7 +246,8 @@ function dailyForModel(u: OverallUsage, model: string): DailyPoint[] {
   // scaling the fleet series by the model's token share. The table and
   // donuts stay exact — only the filtered timeline is an estimate,
   // labelled as such.
-  const share = u.totalTokens > 0 ? ((u.models ?? []).find((m) => m.model === model)?.totalTokens ?? 0) / u.totalTokens : 0;
+  const share =
+    u.totalTokens > 0 ? ((u.models ?? []).find((m) => m.model === model)?.totalTokens ?? 0) / u.totalTokens : 0;
   return (u.daily ?? []).map((d) => ({ ...d, totalTokens: Math.round(d.totalTokens * share), cost: d.cost * share }));
 }
 
@@ -248,4 +294,3 @@ export async function load(force = false): Promise<void> {
   loading = false;
   render(cache);
 }
-

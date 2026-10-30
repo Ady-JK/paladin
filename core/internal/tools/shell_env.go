@@ -85,9 +85,8 @@ func shellEnv(extra ...string) []string {
 		}
 		rest = append(rest, kv)
 	}
-	path = augmentedPath(path)
-	out := append(rest, "PATH="+path)
-	return append(out, extra...)
+	rest = append(rest, "PATH="+augmentedPath(path))
+	return append(rest, extra...)
 }
 
 // ChildEnv is shellEnv for other packages that launch user tools, such

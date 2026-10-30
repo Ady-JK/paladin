@@ -9,22 +9,39 @@ import { state } from "../core/state";
 import type { PermissionPreset, PermissionRule, PermissionsView } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
+import { claimPopover, registerPopover } from "../ui/popover";
+import { loadText, saveText } from "../core/storage";
 
 const DEFAULT_KEY = "paladin.permissions.default";
 const SESSION_KEY = "paladin.permissions.session.";
 const PRESETS: PermissionPreset[] = ["read-only", "auto", "full-access"];
 
-const INFO: Record<PermissionPreset, { label: string; icon: "sl-eye" | "sl-shield" | "sl-shield-off"; blurb: string }> = {
-  "read-only": { label: "Read-only", icon: "sl-eye", blurb: "Reads and safe commands only. Asks before any change." },
-  auto: { label: "Auto", icon: "sl-shield", blurb: "Works freely in this folder. Asks for new commands and writes outside it." },
-  "full-access": { label: "Full access", icon: "sl-shield-off", blurb: "Runs anything without asking, outside the sandbox." },
-};
+const INFO: Record<PermissionPreset, { label: string; icon: "sl-eye" | "sl-shield" | "sl-shield-off"; blurb: string }> =
+  {
+    "read-only": { label: "Read-only", icon: "sl-eye", blurb: "Reads and safe commands only. Asks before any change." },
+    auto: {
+      label: "Auto",
+      icon: "sl-shield",
+      blurb: "Works freely in this folder. Asks for new commands and writes outside it.",
+    },
+    "full-access": {
+      label: "Full access",
+      icon: "sl-shield-off",
+      blurb: "Runs anything without asking, outside the sandbox.",
+    },
+  };
 
-const RULE_LABEL: Record<PermissionRule["tool"], string> = { shell: "command", write: "write", mcp: "mcp" };
+const RULE_LABEL: Record<PermissionRule["tool"], string> = {
+  shell: "command",
+  write: "write",
+  read: "read",
+  mcp: "mcp",
+};
 
 const RULE_HINT: Record<PermissionRule["tool"], string> = {
   shell: "npm test",
   write: "/abs/dir (sandboxed commands may write here too)",
+  read: "/abs/dir outside the workspace the agent may read",
   mcp: "server/tool   or   server",
 };
 
@@ -42,37 +59,21 @@ function isPreset(v: unknown): v is PermissionPreset {
   return typeof v === "string" && (PRESETS as string[]).includes(v);
 }
 
-function read(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function write(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Storage full or blocked: the choice lasts for this window only.
-  }
-}
-
-export function defaultPreset(): PermissionPreset {
-  const v = read(DEFAULT_KEY);
+function defaultPreset(): PermissionPreset {
+  const v = loadText(DEFAULT_KEY);
   return isPreset(v) ? v : "auto";
 }
 
 // currentPreset is what the visible session's next turn runs under.
 export function currentPreset(): PermissionPreset {
   if (!state.sessionId) return draft ?? defaultPreset();
-  const v = read(SESSION_KEY + state.sessionId);
+  const v = loadText(SESSION_KEY + state.sessionId);
   return isPreset(v) ? v : (draft ?? defaultPreset());
 }
 
 // keepDraftFor pins the preset picked before the session existed.
 export function keepDraftFor(sessionId: string): void {
-  if (draft && sessionId) write(SESSION_KEY + sessionId, draft);
+  if (draft && sessionId) saveText(SESSION_KEY + sessionId, draft);
   draft = null;
 }
 
@@ -83,7 +84,7 @@ export function resetDraft(): void {
 }
 
 function setPreset(p: PermissionPreset): void {
-  if (state.sessionId) write(SESSION_KEY + state.sessionId, p);
+  if (state.sessionId) saveText(SESSION_KEY + state.sessionId, p);
   else draft = p;
   syncPermChip();
 }
@@ -98,6 +99,7 @@ function ensureChip(): HTMLButtonElement {
   modelSelectBtn.parentElement?.after(wrap);
   chip = wrap.querySelector<HTMLButtonElement>("#permChip")!;
   menu = wrap.querySelector<HTMLElement>("#permMenu")!;
+  registerPopover("perm", closeMenu);
   chip.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleMenu();
@@ -152,6 +154,7 @@ function toggleMenu(): void {
     closeMenu();
     return;
   }
+  claimPopover("perm");
   paintMenu();
   menu.classList.remove("hidden");
   chip.setAttribute("aria-expanded", "true");
@@ -170,9 +173,15 @@ export function syncPermChip(): void {
   const info = INFO[p];
   el.dataset.preset = p;
   el.dataset.sandbox = sandboxKind === "" ? "none" : sandboxKind ? sandboxKind : "unknown";
-  const warn = sandboxKind === "" && p !== "full-access" ? `<span class="perm-chip-warn" aria-hidden="true"></span>` : "";
+  const warn =
+    sandboxKind === "" && p !== "full-access" ? `<span class="perm-chip-warn" aria-hidden="true"></span>` : "";
   el.innerHTML = `${icon(info.icon, "h-3.5 w-3.5")}<span>${info.label}</span>${warn}${icon("chevron-down", "h-3 w-3")}`;
-  const where = sandboxKind === "" ? "no OS sandbox on this platform — approvals only" : sandboxKind ? SANDBOX[sandboxKind] ?? sandboxKind : "";
+  const where =
+    sandboxKind === ""
+      ? "no OS sandbox on this platform — approvals only"
+      : sandboxKind
+        ? (SANDBOX[sandboxKind] ?? sandboxKind)
+        : "";
   el.title = `Permissions: ${info.label} — ${info.blurb}${where ? ` (${where})` : ""}`;
   if (menu && !menu.classList.contains("hidden")) paintMenu();
 }
@@ -237,7 +246,7 @@ function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): stri
     `<div class="mem-head"><div>${head}</div></div>` +
     `<ul class="mem-list">${rows}</ul>` +
     `<div class="perm-add">` +
-    `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option><option value="mcp">mcp</option></select>` +
+    `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option><option value="read">read</option><option value="mcp">mcp</option></select>` +
     `<input data-rule-pattern type="text" spellcheck="false" placeholder="${RULE_HINT.shell}" aria-label="Pattern" />` +
     `<select data-rule-action aria-label="Action"><option value="allow">allow</option><option value="deny">deny</option></select>` +
     `<button type="button" class="perm-add-btn" data-rule-add>Add</button>` +
@@ -269,7 +278,10 @@ function paintPane(): void {
     : "";
   const session = view.session.length
     ? `<section class="mem-section"><div class="mem-title">This session</div><div class="mem-blurb">Allowed from approval cards; forgotten when the app quits.</div><ul class="mem-list">${view.session
-        .map((r) => `<li class="perm-rule"><span class="perm-rule-tool">${RULE_LABEL[r.tool] ?? r.tool}</span><code class="perm-rule-pattern">${escapeHtml(r.pattern)}</code><span class="perm-rule-action is-${r.action}">${r.action}</span></li>`)
+        .map(
+          (r) =>
+            `<li class="perm-rule"><span class="perm-rule-tool">${RULE_LABEL[r.tool] ?? r.tool}</span><code class="perm-rule-pattern">${escapeHtml(r.pattern)}</code><span class="perm-rule-action is-${r.action}">${r.action}</span></li>`,
+        )
         .join("")}</ul></section>`
     : "";
   permBodyEl.innerHTML =
@@ -317,7 +329,7 @@ export function initPermissionsPane(): void {
     const t = event.target as HTMLElement;
     const preset = t.closest<HTMLElement>("[data-default-preset]")?.dataset.defaultPreset;
     if (isPreset(preset)) {
-      write(DEFAULT_KEY, preset);
+      saveText(DEFAULT_KEY, preset);
       paintPane();
       syncPermChip();
       return;
@@ -330,7 +342,9 @@ export function initPermissionsPane(): void {
     const remove = t.closest<HTMLElement>("[data-rule-remove]");
     if (section && remove && view) {
       const scope = section.dataset.rules as "global" | "folder";
-      const rules = (scope === "global" ? view.global : view.folder).filter((_, i) => i !== Number(remove.dataset.ruleRemove));
+      const rules = (scope === "global" ? view.global : view.folder).filter(
+        (_, i) => i !== Number(remove.dataset.ruleRemove),
+      );
       void save(scope, rules);
       return;
     }

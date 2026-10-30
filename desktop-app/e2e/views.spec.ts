@@ -12,9 +12,11 @@ test("chat tab swaps the sidebar and the main view", async ({ page }) => {
 
   await page.click("#chatTab");
 
+  // Chat has no sidebar: the pages are browser-style tabs on top.
+  await expect(page.locator("#sidebar")).toBeHidden();
   await expect(page.locator("#sessionList")).toBeHidden();
   await expect(page.locator("#searchWrap")).toBeHidden();
-  await expect(page.locator("#chatList")).toBeVisible();
+  await expect(page.locator("#externalView #chatList")).toBeVisible();
   await expect(page.locator('[data-pick="site:Gemini"]')).toBeVisible();
   await expect(page.locator('[data-pick="site:ChatGPT"]')).toBeVisible();
   await expect(page.locator('[data-pick="site:Claude"]')).toBeVisible();
@@ -30,12 +32,14 @@ test("chat tab swaps the sidebar and the main view", async ({ page }) => {
   await expect(page.locator("#headerTitle")).toHaveText("ChatGPT");
 
   await expect(page.locator("#pageReloadBtn")).toBeVisible();
-  await expect(page.locator('[data-open="site:Gemini"]')).toBeVisible();
-  await expect(page.locator('[data-open="site:ChatGPT"]')).toBeVisible();
+  await expect(page.locator('[data-pick="site:ChatGPT"]')).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator('[data-pick="site:Gemini"]')).toHaveAttribute("aria-selected", "false");
+  await expect(page.locator('#pageOpenBtn[data-open="site:ChatGPT"]')).toBeVisible();
 
   await page.click("#agentTab");
   await expect(page.locator("#agentView")).toBeVisible();
   await expect(page.locator("#externalView")).toBeHidden();
+  // Coming back to Agent opens the drawer.
   await expect(page.locator("#sessionList")).toBeVisible();
   await expect(page.locator("#pageReloadBtn")).toBeHidden();
   await expect(page.locator("#headerTitle")).toHaveText("Agent Chat");
@@ -60,10 +64,7 @@ test("an existing profile gains the defaults without losing its pages", async ({
   // Simulate a profile from before the defaults were seeded: one custom
   // page, no seeded flag, and an old built-in page id selected.
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "paladin.sites",
-      JSON.stringify([{ name: "Mine", url: "https://example.com/" }]),
-    );
+    localStorage.setItem("paladin.sites", JSON.stringify([{ name: "Mine", url: "https://example.com/" }]));
     localStorage.removeItem("paladin.sites.seeded");
     localStorage.setItem("paladin.view", JSON.stringify({ view: "chat", page: "gemini" }));
   });
@@ -101,12 +102,8 @@ test("window buttons fill the top-right corner", async ({ page }) => {
   expect(minimize).toBeTruthy();
   expect(close).toBeTruthy();
   expect(Math.abs(header!.y - minimize!.y)).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs(header!.x + header!.width - (close!.x + close!.width)),
-  ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs(header!.y + header!.height - (close!.y + close!.height)),
-  ).toBeLessThanOrEqual(2);
+  expect(Math.abs(header!.x + header!.width - (close!.x + close!.width))).toBeLessThanOrEqual(1);
+  expect(Math.abs(header!.y + header!.height - (close!.y + close!.height))).toBeLessThanOrEqual(2);
   expect(Math.abs(minimize!.height - close!.height)).toBeLessThanOrEqual(1);
 });
 
@@ -120,24 +117,28 @@ test("the picked side survives a reload", async ({ page }) => {
   await expect(page.locator("#headerTitle")).toHaveText("Gemini");
 });
 
-test("sidebar stays fixed open in chat mode", async ({ page }) => {
+test("chat mode has no sidebar, only the page tabs", async ({ page }) => {
   await page.click("#chatTab");
   await page.click('[data-pick="site:Gemini"]');
 
-  await expect(page.locator("#sidebarToggleBtn")).toBeDisabled();
-  // Clicking the locked toggle is a no-op: the page list stays put.
-  await page.click("#sidebarToggleBtn", { force: true });
-  await expect(page.locator("#chatList")).toBeVisible();
-  await expect(page.locator("#sessionList")).toBeHidden();
-  await expect(page.locator("#searchWrap")).toBeHidden();
+  await expect(page.locator("#sidebar")).toBeHidden();
+  // Clicking Chat again never brings a sidebar.
+  await page.click("#chatTab");
+  await expect(page.locator("#sidebar")).toBeHidden();
+  await expect(page.locator("#chatList [data-pick]")).toHaveCount(4);
   await expect(page.locator("#externalView")).toBeVisible();
   await expect(page.locator("#headerTitle")).toHaveText("Gemini");
+  // The tab strip spans the whole card: the page is never narrowed.
+  const strip = await page.locator("#chatList").boundingBox();
+  const host = await page.locator("#externalHost").boundingBox();
+  expect(Math.abs(strip!.width - host!.width)).toBeLessThanOrEqual(1);
+  expect(strip!.y + strip!.height).toBeLessThanOrEqual(host!.y + 1);
 });
 
 test("collapsing in agent keeps the sessions and hides the chats", async ({ page }) => {
-  await page.click("#sidebarToggleBtn");
+  await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeHidden();
-  await page.click("#sidebarToggleBtn");
+  await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeVisible();
   await expect(page.locator("#searchWrap")).toBeVisible();
   await expect(page.locator("#chatList")).toBeHidden();
@@ -145,14 +146,14 @@ test("collapsing in agent keeps the sessions and hides the chats", async ({ page
 });
 
 test("collapse, expand, then switch sides stays clean", async ({ page }) => {
-  await page.click("#sidebarToggleBtn");
+  await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeHidden();
-  await page.click("#sidebarToggleBtn");
+  await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeVisible();
 
   await page.click("#chatTab");
   await page.click('[data-pick="site:ChatGPT"]');
-  await expect(page.locator("#sidebarToggleBtn")).toBeDisabled();
+  await expect(page.locator("#sidebar")).toBeHidden();
 
   await page.click("#agentTab");
   await expect(page.locator("#agentView")).toBeVisible();
@@ -165,7 +166,8 @@ test("collapse, expand, then switch sides stays clean", async ({ page }) => {
   await expect(page.locator("#headerTitle")).toHaveText("ChatGPT");
 });
 
-test("rapid tab switching ends in one clean side", async ({ page }) => {  await page.click("#chatTab");
+test("rapid tab switching ends in one clean side", async ({ page }) => {
+  await page.click("#chatTab");
   await page.click("#agentTab");
   await page.click("#chatTab");
   await page.click('[data-pick="site:ChatGPT"]');
@@ -185,9 +187,7 @@ test("a visible chat page freezes the shell compositing", async ({ page }) => {
   await page.click('[data-pick="site:ChatGPT"]');
   await expect(page.locator("#externalView")).toBeVisible();
 
-  await expect
-    .poll(() => page.evaluate(() => document.body.classList.contains("guest-visible")))
-    .toBe(true);
+  await expect.poll(() => page.evaluate(() => document.body.classList.contains("guest-visible"))).toBe(true);
 
   const styles = await page.evaluate(() => {
     const pulse = getComputedStyle(document.getElementById("headerPulse")!);
@@ -200,31 +200,29 @@ test("a visible chat page freezes the shell compositing", async ({ page }) => {
   expect(styles.blur === "none" || styles.blur === "").toBe(true);
 
   await page.click("#agentTab");
-  await expect
-    .poll(() => page.evaluate(() => document.body.classList.contains("guest-visible")))
-    .toBe(false);
+  await expect.poll(() => page.evaluate(() => document.body.classList.contains("guest-visible"))).toBe(false);
 });
 
 test("chat mode never moves the page", async ({ page }) => {
+  const hostBox = () => page.locator("#externalHost").boundingBox();
   await page.click("#chatTab");
   await page.click('[data-pick="site:Gemini"]');
-  // Let the initial show settle first: the show itself moves once.
-  await page.waitForTimeout(900);
+  const first = await hostBox();
 
-  await page.evaluate(() => {
-    window.__e2eMoves = 0;
-  });
-  // The toggle is locked in chat mode: fixed sidebar, zero moves.
-  await page.click("#sidebarToggleBtn", { force: true });
-  await page.waitForTimeout(900);
-  const moves = await page.evaluate(() => window.__e2eMoves || 0);
-  expect(moves).toBe(0);
+  await page.click('[data-pick="site:Claude"]');
+  expect(await hostBox()).toEqual(first);
+
+  // Opening the drawer in agent, then coming back, leaves it unchanged.
+  await page.click("#agentTab");
+  await page.click("#agentTab");
+  await page.click("#chatTab");
+  expect(await hostBox()).toEqual(first);
 });
 
 test("a site can be added, kept, and removed", async ({ page }) => {
   await page.click("#chatTab");
 
-  await page.click("#newSessionBtn");
+  await page.click("#chatAddBtn");
   await expect(page.locator("#siteModal")).toBeVisible();
   await page.fill("#siteName", "Docs");
   await page.fill("#siteUrl", "example.com");
@@ -233,7 +231,7 @@ test("a site can be added, kept, and removed", async ({ page }) => {
   const entry = page.locator('[data-pick="site:Docs"]');
   await expect(entry).toBeVisible();
   await expect(page.locator("#headerTitle")).toHaveText("Docs");
-  await expect(entry).toContainText("example.com");
+  await expect(entry).toHaveAttribute("title", /example\.com/);
 
   await page.reload();
   await expect(page.locator('[data-pick="site:Docs"]')).toBeVisible();
@@ -249,7 +247,7 @@ test("a deleted default can be added back by hand", async ({ page }) => {
   await page.locator('[data-del="site:Claude"]').click();
   await expect(page.locator('[data-pick="site:Claude"]')).toBeHidden();
 
-  await page.click("#newSessionBtn");
+  await page.click("#chatAddBtn");
   await page.fill("#siteName", "Claude");
   await page.fill("#siteUrl", "https://claude.ai");
   await page.click("#siteAddBtn");
@@ -267,7 +265,7 @@ test("a site can be added after deleting every default", async ({ page }) => {
   }
   await expect(page.locator("#chatEntries")).toContainText("no pages yet");
 
-  await page.click("#newSessionBtn");
+  await page.click("#chatAddBtn");
   await page.fill("#siteName", "Docs");
   await page.fill("#siteUrl", "https://example.com");
   await page.click("#siteAddBtn");
@@ -280,7 +278,7 @@ test("a site can be added after deleting every default", async ({ page }) => {
 
 test("bad site URLs are rejected", async ({ page }) => {
   await page.click("#chatTab");
-  await page.click("#newSessionBtn");
+  await page.click("#chatAddBtn");
 
   await page.fill("#siteName", "Evil");
   await page.fill("#siteUrl", "javascript:alert(1)");
@@ -305,13 +303,11 @@ test("bad site URLs are rejected", async ({ page }) => {
   await expect(page.locator("#siteModal")).toBeHidden();
 });
 
-test("the action button reads New Site in chat, New Session in agent", async ({ page }) => {
+test("+ in the tab strip adds a site; the sidebar button starts a session", async ({ page }) => {
   await expect(page.locator("#newSessionBtnLabel")).toHaveText("New Session");
 
   await page.click("#chatTab");
-  await expect(page.locator("#newSessionBtnLabel")).toHaveText("New Site");
-
-  await page.click("#newSessionBtn");
+  await page.click("#chatAddBtn");
   await expect(page.locator("#siteModal")).toBeVisible();
   await page.keyboard.press("Escape");
 

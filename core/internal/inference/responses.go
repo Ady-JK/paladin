@@ -73,7 +73,7 @@ func toResponsesTools(tools []ToolDefinition) []responses.ToolUnionParam {
 
 func (p *OpenAIProvider) newResponsesParams(system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) responses.ResponseNewParams {
 	params := responses.ResponseNewParams{
-		Model: shared.ResponsesModel(p.model),
+		Model: p.model,
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: toResponsesInput(messages),
 		},
@@ -83,6 +83,9 @@ func (p *OpenAIProvider) newResponsesParams(system string, messages []LlmMessage
 	}
 	if len(tools) > 0 {
 		params.Tools = toResponsesTools(tools)
+	}
+	if p.effort != "" {
+		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(p.effort), Summary: shared.ReasoningSummaryAuto}
 	}
 	if p.isOpencode {
 		if id := strings.TrimSpace(sessionID); id != "" {
@@ -229,15 +232,15 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 			}
 		case "response.reasoning_summary_text.delta":
 			// Reasoning models think before they answer. Forward the
-			// summary stream so the UI shows progress instead of
-			// minutes of silence; it is not answer text, so it must
-			// not mark sentText (the completed envelope still carries
-			// the real answer below).
+			// summary stream as reasoning so the UI shows progress
+			// instead of minutes of silence; it is not answer text, so
+			// it must not mark sentText (the completed envelope still
+			// carries the real answer below).
 			text := ev.Delta.OfString
 			if text == "" {
 				continue
 			}
-			if err := send(TextChunk(text)); err != nil {
+			if err := send(Chunk{Reasoning: text}); err != nil {
 				return CancelledError()
 			}
 		case "response.output_item.added":

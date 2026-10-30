@@ -16,19 +16,19 @@ import {
 } from "../core/dom";
 import { escapeAttr, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
-import type { SessionInfo, ToolInfo } from "../core/types";
+import type { MessageInfo, SessionInfo, ToolInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { addTurn, createCompactionDivider, renderGreeting, scrollToBottom } from "./chatView";
+import { createThinkingBlock } from "./turnView";
 import { ToolRun } from "./toolRun";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { syncModelSelects } from "./models";
 import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
-import type { MessageInfo } from "../core/types";
 import { refreshExternalVisibility } from "./sites";
 import { forkSessionById, renameSessionById } from "./sessionActions";
 import { resetDraft, syncPermChip } from "./permissions";
@@ -37,6 +37,7 @@ import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
 import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
+import { loadJson, saveJson } from "../core/storage";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -58,12 +59,8 @@ let renaming: { id: string; draft: string } | null = null;
 const RECENT_COUNT = 5;
 
 function loadFolded(): Set<string> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(FOLD_KEY) ?? "[]");
-    return new Set(Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
+  const raw = loadJson(FOLD_KEY);
+  return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
 }
 
 const folded = loadFolded();
@@ -72,10 +69,7 @@ function toggleFold(cwd: string): void {
   if (!folded.delete(cwd)) {
     folded.add(cwd);
   }
-  try {
-    localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
-  } catch {
-  }
+  saveJson(FOLD_KEY, [...folded]);
 }
 
 function sessionRow(session: SessionInfo): string {
@@ -108,9 +102,7 @@ function sessionRow(session: SessionInfo): string {
 export function renderSessions(): void {
   const filter = searchInputEl.value.trim().toLowerCase();
 
-  const visible = filter
-    ? state.sessions.filter((s) => s.title.toLowerCase().includes(filter))
-    : state.sessions;
+  const visible = filter ? state.sessions.filter((s) => s.title.toLowerCase().includes(filter)) : state.sessions;
 
   if (visible.length === 0) {
     sessionListEl.innerHTML = `<p class="px-2 py-1 text-slate-400">${
@@ -161,7 +153,8 @@ export function renderSessions(): void {
     html += `</div></div>`;
   }
 
-  const focused = document.activeElement instanceof HTMLInputElement && document.activeElement.matches(".session-rename");
+  const focused =
+    document.activeElement instanceof HTMLInputElement && document.activeElement.matches(".session-rename");
   sessionListEl.innerHTML = html;
   if (renaming) {
     const input = sessionListEl.querySelector<HTMLInputElement>(`input[data-rename="${CSS.escape(renaming.id)}"]`);
@@ -227,7 +220,12 @@ function openRowMenu(id: string, anchor: HTMLElement): void {
   menu.className = "row-menu";
   const item = (act: string, label: string, ic: Parameters<typeof icon>[0], danger = false) =>
     `<button type="button" role="menuitem" data-row-act="${act}" class="row-menu-item${danger ? " is-danger" : ""}">${icon(ic, "h-3.5 w-3.5")}<span>${label}</span></button>`;
-  menu.innerHTML = item("rename", "Rename", "tl-pencil") + item("fork", "Fork", "sl-fork") + item("fork-wt", "Fork into worktree", "code-branch") + `<div class="row-menu-sep"></div>` + item("delete", "Delete", "trash", true);
+  menu.innerHTML =
+    item("rename", "Rename", "tl-pencil") +
+    item("fork", "Fork", "sl-fork") +
+    item("fork-wt", "Fork into worktree", "code-branch") +
+    `<div class="row-menu-sep"></div>` +
+    item("delete", "Delete", "trash", true);
   document.body.append(menu);
   const r = anchor.getBoundingClientRect();
   const w = menu.offsetWidth;
@@ -290,7 +288,8 @@ function askDelete(id: string): void {
       .then((st) => {
         if (state.pendingDelete !== id || !st.exists || st.changed === 0) return;
         const n = st.changed;
-        confirmModalEl.querySelector("#confirmDiscardCount")!.textContent = `${n} uncommitted ${n === 1 ? "change" : "changes"}`;
+        confirmModalEl.querySelector("#confirmDiscardCount")!.textContent =
+          `${n} uncommitted ${n === 1 ? "change" : "changes"}`;
         confirmModalEl.querySelector("#confirmDiscardBranch")!.textContent = wt.branch;
         wrap.classList.remove("hidden");
       })
@@ -304,7 +303,7 @@ export function closeConfirm(): void {
   void refreshExternalVisibility();
 }
 
-export async function deleteSession(id: string, discardWorktree = false): Promise<void> {
+async function deleteSession(id: string, discardWorktree = false): Promise<void> {
   if (!id) {
     return;
   }
@@ -465,6 +464,12 @@ function renderHistory(history: MessageInfo[]): void {
       agentBody = null;
       run = null;
       addTurn("user", message.content, { index: message.index, revertable: message.index !== undefined });
+    } else if (message.role === "assistant" && message.kind === "thinking") {
+      if (!agentBody) {
+        openAgent("");
+      }
+      run = null;
+      agentBody!.append(createThinkingBlock(message.content, false));
     } else if (message.role === "assistant") {
       pushAgentText(message.content);
     } else if (message.role === "system" && message.kind === "compaction") {
@@ -526,7 +531,11 @@ export function initSessions(): void {
   });
 
   document.addEventListener("mousedown", (event) => {
-    if (rowMenu && !rowMenu.contains(event.target as Node) && !(event.target as HTMLElement).closest("[data-row-menu]")) {
+    if (
+      rowMenu &&
+      !rowMenu.contains(event.target as Node) &&
+      !(event.target as HTMLElement).closest("[data-row-menu]")
+    ) {
       closeRowMenu();
     }
   });

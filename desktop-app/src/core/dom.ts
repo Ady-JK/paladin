@@ -2,11 +2,10 @@
 // It holds the element lookups and the icon painter so feature modules
 // share one set of references.
 
-import { icon, type IconName } from "../icons";
+import { icon } from "../icons";
 import { state } from "./state";
 
-export const $ = <T extends HTMLElement>(selector: string): T =>
-  document.querySelector<T>(selector)!;
+export const $ = <T extends HTMLElement>(selector: string): T => document.querySelector<T>(selector)!;
 
 export const sidebarEl = $("#sidebar");
 export const messagesEl = $("#messages");
@@ -46,14 +45,9 @@ export const filePathEl = $("#filePath");
 export const fileListEl = $("#fileList");
 export const headerTitleEl = $("#headerTitle");
 export const pageReloadBtnEl = $<HTMLButtonElement>("#pageReloadBtn");
-export const workspaceWrapEl = $("#workspaceWrap");
-export const statusWrapEl = $("#daemonWrap");
 export const agentTabEl = $<HTMLButtonElement>("#agentTab");
 export const chatTabEl = $<HTMLButtonElement>("#chatTab");
-export const searchWrapEl = $("#searchWrap");
-export const chatListEl = $("#chatList");
 export const chatEntriesEl = $("#chatEntries");
-export const newSessionBtnLabelEl = $("#newSessionBtnLabel");
 export const siteModalEl = $("#siteModal");
 export const siteNameEl = $<HTMLInputElement>("#siteName");
 export const siteUrlEl = $<HTMLInputElement>("#siteUrl");
@@ -170,7 +164,7 @@ export const newSessionShowHiddenEl = $<HTMLInputElement>("#newSessionShowHidden
 // only run once at startup. Hot paths pass their own container.
 export function paintIcons(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>("[data-icon]").forEach((holder) => {
-    const name = holder.dataset.icon as IconName | undefined;
+    const name = holder.dataset.icon;
     if (!name) {
       return;
     }
@@ -178,9 +172,7 @@ export function paintIcons(root: ParentNode = document): void {
     holder.innerHTML = icon(name);
   });
 
-  const themeHolder = document.querySelector<HTMLElement>(
-    "#themeToggleBtn [data-icon]",
-  );
+  const themeHolder = document.querySelector<HTMLElement>("#themeToggleBtn [data-icon]");
   if (themeHolder) {
     themeHolder.innerHTML = icon(state.dark ? "moon" : "sun");
   }

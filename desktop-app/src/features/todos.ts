@@ -36,23 +36,22 @@ function statusMark(status: string): string {
 // has not started, yellow while it runs, green when it is done; a
 // cancelled step shows grey.
 function statusPill(status: string): string {
-  const base =
-    "flex-shrink-0 rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold whitespace-nowrap";
+  const base = "flex-shrink-0 rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold whitespace-nowrap";
   switch (status) {
     case "in_progress":
-      return `<span class="${base} border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-700/60 dark:bg-amber-950/60 dark:text-amber-300\">in_progress</span>`;
+      return `<span class="${base} border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-700/60 dark:bg-amber-950/60 dark:text-amber-300">in_progress</span>`;
     case "finished":
-      return `<span class="${base} border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/60 dark:text-emerald-300\">finished</span>`;
+      return `<span class="${base} border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-700/60 dark:bg-emerald-950/60 dark:text-emerald-300">finished</span>`;
     case "cancelled":
-      return `<span class="${base} border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400\">cancelled</span>`;
+      return `<span class="${base} border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">cancelled</span>`;
     default:
-      return `<span class="${base} border-orange-300 bg-orange-100 text-orange-700 dark:border-orange-700/60 dark:bg-orange-950/60 dark:text-orange-300\">not_started</span>`;
+      return `<span class="${base} border-orange-300 bg-orange-100 text-orange-700 dark:border-orange-700/60 dark:bg-orange-950/60 dark:text-orange-300">not_started</span>`;
   }
 }
 
 // parseTodoResult reads the todos out of a settled todo tool result.
 // Null means the result is not a todo list (or is malformed).
-export function parseTodoResult(raw: string): TodoEntry[] | null {
+function parseTodoResult(raw: string): TodoEntry[] | null {
   let args: unknown;
   try {
     args = JSON.parse(raw);
@@ -121,7 +120,7 @@ function paint(): void {
 }
 
 // setTodos replaces the list and repaints. Exported for tests.
-export function setTodos(next: TodoEntry[]): void {
+function setTodos(next: TodoEntry[]): void {
   todos = next;
   paint();
 }
@@ -179,7 +178,7 @@ export function dropFinishedPanel(): void {
 }
 
 // toggleTodos opens or closes the hat list. Exported for tests.
-export function toggleTodos(): void {
+function toggleTodos(): void {
   open = !open;
   paint();
 }

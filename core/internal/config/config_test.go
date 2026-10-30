@@ -299,7 +299,7 @@ func TestAtomicWriteRoundTripAndPerms(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".tmp-") {
+		if strings.HasSuffix(e.Name(), ".tmp") {
 			t.Fatalf("temp file left: %s", e.Name())
 		}
 	}

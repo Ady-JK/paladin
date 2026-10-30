@@ -8,15 +8,16 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
 });
 
-test("the /skill picker lists skills and attaches one to the turn", async ({
-  page,
-}) => {
+test("the /skill picker lists skills and attaches one to the turn", async ({ page }) => {
   await page.fill("#promptInput", "/skill ");
   await expect(page.locator("#skillPopup")).toBeVisible();
   await expect(page.locator("#skillPopup")).toContainText("reviewer");
   await expect(page.locator("#skillPopup")).toContainText("deployer");
 
-  await page.locator("#skillPopup").getByRole("button", { name: /reviewer/ }).click();
+  await page
+    .locator("#skillPopup")
+    .getByRole("button", { name: /reviewer/ })
+    .click();
   await expect(page.locator("#promptInput")).toHaveValue("/skill reviewer ");
   await expect(page.locator("#skillChipName")).toHaveText("/reviewer");
 

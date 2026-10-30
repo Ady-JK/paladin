@@ -114,7 +114,7 @@ func serversFromMap(doc map[string]json.RawMessage) ([]NamedServer, error) {
 	for _, n := range names {
 		var cfg ServerConfig
 		if err := json.Unmarshal(doc[n], &cfg); err != nil {
-			return nil, fmt.Errorf("server %q: %v", n, err)
+			return nil, fmt.Errorf("server %q: %w", n, err)
 		}
 		out = append(out, NamedServer{Name: n, Config: cfg})
 	}

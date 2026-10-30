@@ -3,12 +3,13 @@
 // render the same Finder/Explorer shape: clickable breadcrumbs on top,
 // a search box plus a "show hidden" checkbox, a single-select list, and
 // explicit Select/Cancel buttons at the bottom. The checkbox defaults
-// off and persists across opens via localStorage.
+// off and persists across opens.
 
 import { escapeHtml } from "../core/format";
 import type { FsList } from "../core/types";
+import { loadText, saveText } from "../core/storage";
 
-export type PickerKind = "file" | "folder";
+type PickerKind = "file" | "folder";
 
 export type PickerSelection = {
   path: string;
@@ -21,23 +22,15 @@ const SHOW_HIDDEN_KEY = "paladin.showHidden";
 // dotfolders stay hidden unless the user opted in; anything unparseable
 // falls back to the default off.
 export function getShowHidden(): boolean {
-  try {
-    return window.localStorage.getItem(SHOW_HIDDEN_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return loadText(SHOW_HIDDEN_KEY) === "1";
 }
 
 // setShowHidden persists the hidden-file toggle for both pickers.
 export function setShowHidden(show: boolean): void {
-  try {
-    window.localStorage.setItem(SHOW_HIDDEN_KEY, show ? "1" : "0");
-  } catch {
-    // Private mode: the current open still respects the choice.
-  }
+  saveText(SHOW_HIDDEN_KEY, show ? "1" : "0");
 }
 
-export type CrumbSegment = {
+type CrumbSegment = {
   label: string;
   path: string;
 };
@@ -45,7 +38,7 @@ export type CrumbSegment = {
 // splitCrumbs breaks an absolute path into clickable breadcrumb
 // segments. "/" yields a single root segment; every segment carries the
 // absolute prefix it navigates to so clicks never rebuild paths by hand.
-export function splitCrumbs(currentPath: string): CrumbSegment[] {
+function splitCrumbs(currentPath: string): CrumbSegment[] {
   const raw = (currentPath || "").replace(/\\/g, "/");
   if (!raw || raw === "/") {
     return [{ label: "/", path: "/" }];
@@ -66,18 +59,14 @@ export function splitCrumbs(currentPath: string): CrumbSegment[] {
 }
 
 // isHiddenName reports dotfiles and dotfolders (".git", ".env").
-export function isHiddenName(name: string): boolean {
+function isHiddenName(name: string): boolean {
   return name.startsWith(".") && name !== "." && name !== "..";
 }
 
 // filterEntries applies the hidden toggle plus a case-insensitive
 // substring search over the current directory only. Folders sort before
 // files, each alphabetically, so the list feels stable while typing.
-export function filterEntries(
-  list: FsList,
-  showHidden: boolean,
-  query: string,
-): Pick<FsList, "directories" | "files"> {
+export function filterEntries(list: FsList, showHidden: boolean, query: string): Pick<FsList, "directories" | "files"> {
   const needle = query.trim().toLowerCase();
   const keep = (name: string): boolean => {
     if (!showHidden && isHiddenName(name)) {

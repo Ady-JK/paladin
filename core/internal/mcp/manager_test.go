@@ -120,8 +120,9 @@ func TestManagerGlobalToolsAndStatus(t *testing.T) {
 	if info.Server != "dummy" || info.Tool != "echo" || !info.ReadOnly {
 		t.Fatalf("info %+v", info)
 	}
-	if p, ok := echo.(tools.ParallelSafe); !ok || !p.ParallelSafe() {
-		t.Fatal("read-only MCP tools may run in parallel")
+	// readOnlyHint is the server's claim; it never makes calls parallel.
+	if p, ok := echo.(tools.ParallelSafe); ok && p.ParallelSafe() {
+		t.Fatal("a readOnly hint made an MCP tool parallel-safe")
 	}
 	if def := find(t, ts, "mcp__dummy__fail").Definition(); def.Parameters.(map[string]any)["type"] != "object" {
 		t.Fatalf("schema not sanitized: %+v", def.Parameters)
@@ -403,4 +404,19 @@ func TestManagerCrashBudget(t *testing.T) {
 	if out, err := runTool(t, find(t, ts, "mcp__dummy__echo"), `{"text":"x"}`); err != nil || out != "x" {
 		t.Fatalf("manual restart clears the budget: %q %v", out, err)
 	}
+}
+
+func (m *Manager) pid(scope, folder, name string) int {
+	m.mu.Lock()
+	s := m.servers[serverKey{scope, cleanFolder(folder), name}]
+	m.mu.Unlock()
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client == nil {
+		return 0
+	}
+	return s.client.PID()
 }

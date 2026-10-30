@@ -23,6 +23,7 @@ function title(ap: Approval): string {
   if (ap.kind === "mcp") return ap.destructive ? "Call a destructive MCP tool?" : "Call this MCP tool?";
   if (ap.destructive) return "Run a destructive command?";
   if (ap.tool === "shell") return "Run this command?";
+  if (ap.kind === "read") return "Read this file?";
   return ap.tool === "edit" ? "Edit this file?" : "Write this file?";
 }
 
@@ -45,16 +46,17 @@ const GRANT_LABEL: Record<ApprovalDecision, string> = {
 function choiceLabel(ap: Approval, choice: ApprovalDecision): string {
   if (ap.kind === "escalate" && ap.path) return GRANT_LABEL[choice];
   const what = patterns(ap.remember);
-  const writes = ap.remember?.[0]?.tool === "write";
+  const ruleTool = ap.remember?.[0]?.tool;
+  const prefix = ruleTool === "write" ? "writes to " : ruleTool === "read" ? "reads in " : "";
   switch (choice) {
     case "once":
       return ap.kind === "escalate" ? "Rerun without the sandbox" : "Allow once";
     case "session":
-      return what ? `Allow ${writes ? "writes to " : ""}${what} for this session` : "Allow for this session";
+      return what ? `Allow ${prefix}${what} for this session` : "Allow for this session";
     case "folder":
-      return what ? `Always allow ${writes ? "writes to " : ""}${what} in this folder` : "Always allow in this folder";
+      return what ? `Always allow ${prefix}${what} in this folder` : "Always allow in this folder";
     case "global":
-      return what ? `Always allow ${writes ? "writes to " : ""}${what} everywhere` : "Always allow everywhere";
+      return what ? `Always allow ${prefix}${what} everywhere` : "Always allow everywhere";
     case "deny":
       return "Deny";
   }
@@ -94,9 +96,7 @@ function grantHtml(ap: Approval): string {
 
 function pendingHtml(ap: Approval): string {
   const choices = ap.choices?.length ? ap.choices : (["once", "deny"] as ApprovalDecision[]);
-  const reasons = (ap.reasons ?? [])
-    .map((r) => `<span class="approval-reason">${escapeHtml(r)}</span>`)
-    .join("");
+  const reasons = (ap.reasons ?? []).map((r) => `<span class="approval-reason">${escapeHtml(r)}</span>`).join("");
   const buttons = choices
     .map((c, i) => {
       const cls = c === "deny" ? "approval-btn is-deny" : i === 0 ? "approval-btn is-primary" : "approval-btn";
@@ -104,7 +104,8 @@ function pendingHtml(ap: Approval): string {
       return `<button type="button" class="${cls}" data-approve="${c}"><span>${choiceLabel(ap, c)}</span>${key}</button>`;
     })
     .join("");
-  const kindIcon = ap.destructive || ap.kind === "escalate" ? "sl-shield-off" : ap.kind === "mcp" ? "sl-plug" : "sl-shield";
+  const kindIcon =
+    ap.destructive || ap.kind === "escalate" ? "sl-shield-off" : ap.kind === "mcp" ? "sl-plug" : "sl-shield";
   const body =
     ap.kind === "mcp"
       ? `<div class="approval-mcp"><span class="approval-mcp-server">${escapeHtml(ap.server ?? "")}</span>` +

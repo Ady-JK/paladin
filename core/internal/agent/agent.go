@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -15,6 +16,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/permission"
+	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -27,7 +29,7 @@ type ApiError struct {
 }
 
 func NewApiError(code, message string) *ApiError {
-	return &ApiError{Code: code, Message: message}
+	return &ApiError{Code: code, Message: redact.String(message)}
 }
 
 // Request is one turn request. The JSON shape is the wire contract with
@@ -108,6 +110,12 @@ type ChatChunk struct {
 	Budget *BudgetNotice `json:"budget,omitempty"`
 	// Hook reports a hook that blocked, added context, failed or stopped.
 	Hook *hooks.Note `json:"hook,omitempty"`
+	// Reasoning is a piece of the model's thinking, streamed apart from
+	// the answer (Delta).
+	Reasoning string `json:"reasoning,omitempty"`
+	// ThinkingDropped names a thinking level the provider rejected; the
+	// call went on without it.
+	ThinkingDropped string `json:"thinkingDropped,omitempty"`
 }
 
 // ToolGate decides whether a tool call may run, and under which
@@ -121,7 +129,7 @@ type ToolGate interface {
 // workspace snapshots for undo. It must call run exactly once and return
 // its result; recording is best-effort and must never fail the call.
 type StepRecorder interface {
-	Track(callID, name string, run func() tools.ToolResult) tools.ToolResult
+	Track(ctx context.Context, callID, name string, run func() tools.ToolResult) tools.ToolResult
 }
 
 // ChatOutcome is the summary returned when a turn finishes.
@@ -200,13 +208,14 @@ type Agent struct {
 	budget func() float64
 	// budgetChecked: the turn's first budget check ran; budgetWrapUp:
 	// the limit was hit and the final no-tools summary round is running;
-	// costWarned: the unknown-cost warning went out.
-	budgetChecked, budgetWrapUp, costWarned bool
-	system                                  string
-	history                                 []transcript.Message
-	toolDefs                                []inference.ToolDefinition
-	phase                                   phase
-	round                                   uint32
+	// costWarned: the unknown-cost warning went out; spendWarned: the
+	// incomplete-spend warning went out.
+	budgetChecked, budgetWrapUp, costWarned, spendWarned bool
+	system                                               string
+	history                                              []transcript.Message
+	toolDefs                                             []inference.ToolDefinition
+	phase                                                phase
+	round                                                uint32
 	// emptyRounds counts consecutive rounds that produced neither text
 	// nor tool calls; three in a row ends the turn (done with progress,
 	// failed without) instead of spinning on a dead gateway.
@@ -237,6 +246,9 @@ type Agent struct {
 	messages     []inference.LlmMessage
 	records      []transcript.Message
 	reply        strings.Builder
+	// thinking is the current round's visible reasoning, saved with
+	// its assistant record.
+	thinking strings.Builder
 	// turnUsage accumulates every LLM call's Usage for the turn, across
 	// all rounds and both streaming and fallback paths.
 	turnUsage inference.Usage
@@ -328,17 +340,10 @@ func (a *Agent) Run() (ChatOutcome, error) {
 
 	err := a.safeLoop()
 	a.settleNotices(nil)
-	stopped := false
-	switch e := err.(type) {
-	case nil:
-	case turnStop:
-		stopped = true
-	case turnFailed:
+	stopped := errors.As(err, new(turnStop))
+	if err != nil && !stopped {
 		_ = a.save()
-		return ChatOutcome{}, e
-	default:
-		_ = a.save()
-		return ChatOutcome{}, e
+		return ChatOutcome{}, err
 	}
 	a.finalize(stopped)
 	if perr := a.save(); perr != nil {
@@ -364,7 +369,7 @@ func (a *Agent) safeLoop() (err error) {
 	err = a.runLoop()
 	// A failure observed after the user pressed stop (e.g. a backoff
 	// cut short) is a stop, not an error.
-	if _, failed := err.(turnFailed); failed && a.stopRequested() {
+	if errors.As(err, new(turnFailed)) && a.stopRequested() {
 		return turnStop{}
 	}
 	return err
@@ -466,6 +471,28 @@ func (a *Agent) emit(chunk ChatChunk) error {
 
 func (a *Agent) appendDelta(text string) { a.reply.WriteString(text) }
 
+// noteThinking forwards a provider's thinking or dropped-level notice;
+// thinking is kept for the round's assistant record.
+func (a *Agent) noteThinking(c inference.Chunk) error {
+	if c.EffortDropped != "" {
+		if err := a.emit(ChatChunk{ThinkingDropped: c.EffortDropped}); err != nil {
+			return err
+		}
+	}
+	if c.Reasoning == "" {
+		return nil
+	}
+	a.thinking.WriteString(c.Reasoning)
+	return a.emit(ChatChunk{Reasoning: c.Reasoning})
+}
+
+// takeThinking hands over the current round's thinking for its record.
+func (a *Agent) takeThinking() string {
+	s := a.thinking.String()
+	a.thinking.Reset()
+	return s
+}
+
 // publishLive hands a copy of the conversation to the live observer
 // (/btw): before each model round, and as tool calls start and finish.
 func (a *Agent) publishLive() {
@@ -492,6 +519,7 @@ func (a *Agent) appendAssistant(content string, calls []inference.ToolCall) {
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
 		ToolCalls: &stored,
+		Reasoning: a.takeThinking(),
 	})
 }
 

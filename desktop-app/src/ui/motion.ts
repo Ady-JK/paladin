@@ -2,8 +2,10 @@
 // the OS reduce-motion setting), Full, Reduced or Off; the effective
 // level lands on <html data-motion> and every animation rule keys off it.
 
+import { loadText, saveText } from "../core/storage";
+
 export type MotionPref = "system" | "full" | "reduced" | "off";
-export type MotionLevel = "full" | "reduced" | "off";
+type MotionLevel = "full" | "reduced" | "off";
 
 const KEY = "paladin.motion";
 const PREFS: MotionPref[] = ["system", "full", "reduced", "off"];
@@ -11,15 +13,11 @@ const PREFS: MotionPref[] = ["system", "full", "reduced", "off"];
 const osReduce = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 
 export function motionPref(): MotionPref {
-  try {
-    const raw = localStorage.getItem(KEY) as MotionPref | null;
-    return raw && PREFS.includes(raw) ? raw : "system";
-  } catch {
-    return "system";
-  }
+  const raw = loadText(KEY) as MotionPref | null;
+  return raw && PREFS.includes(raw) ? raw : "system";
 }
 
-export function motionLevel(): MotionLevel {
+function motionLevel(): MotionLevel {
   const pref = motionPref();
   if (pref !== "system") {
     return pref;
@@ -27,15 +25,12 @@ export function motionLevel(): MotionLevel {
   return osReduce?.matches ? "reduced" : "full";
 }
 
-export function applyMotion(): void {
+function applyMotion(): void {
   document.documentElement.dataset.motion = motionLevel();
 }
 
 export function setMotionPref(pref: MotionPref): void {
-  try {
-    localStorage.setItem(KEY, pref);
-  } catch {
-  }
+  saveText(KEY, pref);
   applyMotion();
 }
 

@@ -2,24 +2,20 @@
 // Renderer never touches the sidecar directly; it goes through ipcHandler
 // channels exposed by preload. stdout stays pure JSONL; logs go to stderr.
 
-import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, shell, WebContentsView } from "electron";
-import readline from "node:readline";
 import { noteFor } from "./turnNotify";
+import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
 
-type Json = any;
+type ViewBounds = { x: number; y: number; width: number; height: number };
 
 // Match Chrome's wheel behaviour: interpolate ticks instead of snapping.
 // (Harmless if the platform already defaults to smooth scrolling.)
 app.commandLine.appendSwitch("enable-smooth-scrolling");
 
 let win: BrowserWindow | null = null;
-let agent: ChildProcess | null = null;
-let nextId = 1;
 // CJS (tsconfig.electron): __dirname is the dist-electron dir.
 const HERE = __dirname;
-const pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 type ViewEntry = {
   view: WebContentsView;
   url: string;
@@ -29,7 +25,7 @@ type ViewEntry = {
 
 const views = new Map<string, ViewEntry>();
 let visibleView: string | null = null;
-let lastBounds: { x: number; y: number; width: number; height: number } | null = null;
+let lastBounds: ViewBounds | null = null;
 // A notification click while the window was closed: the fresh renderer
 // asks for it once it has booted.
 let pendingOpenSession: string | null = null;
@@ -75,73 +71,43 @@ function applyTheme(theme: AppTheme): void {
 function agentBin(): string {
   // Dev: go build output next to the repo. Prod: bundled resource.
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, "agent-host", "agent-host");
+    return path.join(process.resourcesPath, "agent-host", agentHostFile());
   }
-  return path.join(HERE, "..", "..", "core", "bin", "agent-host");
+  return path.join(HERE, "..", "..", "core", "bin", agentHostFile());
 }
 
-function sendLine(obj: Json): void {
-  if (!agent?.stdin) throw new Error("agent-host is not running");
-  agent.stdin.write(JSON.stringify(obj) + "\n");
+const agent = new Sidecar({
+  command: agentBin(),
+  onEvent: forwardEvent,
+  // Turns that were running died with the old host: the renderer ends
+  // them and re-reads state.
+  onRestart: () => liveWindow()?.webContents.send("agent:event", { event: "host/restarted" }),
+});
+
+// isWebUrl admits only http(s) URLs: guest views and the OS browser
+// must never be handed file:, javascript: or custom-scheme URLs.
+function isWebUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
-function invokeAgent(method: string, params: Json = {}): Promise<any> {
-  const id = `m${nextId++}`;
-  return new Promise((resolve, reject) => {
-    pending.set(String(id), { resolve, reject });
-    try {
-      sendLine({ id, method, params });
-    } catch (e) {
-      pending.delete(String(id));
-      reject(e as Error);
-    }
-  });
-}
-
-function startAgent(): void {
-  const bin = agentBin();
-  agent = spawn(bin, [], { stdio: ["pipe", "pipe", "inherit"] });
-  agent.on("error", (e) => {
-    console.error(`[agent-host] spawn failed (${bin}):`, e.message);
-  });
-  agent.on("exit", (code) => {
-    console.error(`[agent-host] exited with code ${code}`);
-    for (const { reject } of pending.values()) reject(new Error("agent-host exited"));
-    pending.clear();
-  });
-  const rl = readline.createInterface({ input: agent.stdout! });
-  rl.on("line", (line) => {
-    if (!line.trim()) return;
-    let msg: Json;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      console.error("[agent-host] non-JSON line:", line.slice(0, 200));
-      return;
-    }
-    // Every turn event (chat/* and turn/*) goes to the renderer, which
-    // routes it by sessionId. Turns keep running with no window at all;
-    // the renderer re-attaches when it comes back.
-    if (typeof msg.event === "string") {
-      forwardEvent(msg);
-      return;
-    }
-    if (msg.id !== undefined) {
-      const key = String(msg.id);
-      const p = pending.get(key);
-      if (!p) return;
-      pending.delete(key);
-      if (msg.ok) p.resolve(msg.result);
-      else p.reject(new Error(typeof msg.error === "string" ? msg.error : "agent error"));
-    }
-  });
+function isViewBounds(value: unknown): value is ViewBounds {
+  if (typeof value !== "object" || value === null) return false;
+  const { x, y, width, height } = value as Record<string, unknown>;
+  const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  return finite(x) && finite(y) && finite(width) && finite(height) && width >= 0 && height >= 0;
 }
 
 function liveWindow(): BrowserWindow | null {
   return win && !win.isDestroyed() ? win : null;
 }
 
-function forwardEvent(msg: Json): void {
+function forwardEvent(msg: HostMessage): void {
   const w = liveWindow();
   if (w) {
     try {
@@ -159,7 +125,7 @@ function forwardEvent(msg: Json): void {
 }
 
 function openSessionFromNotification(sessionId: string): void {
-  let w = liveWindow();
+  const w = liveWindow();
   if (!w) {
     pendingOpenSession = sessionId;
     createWindow();
@@ -203,7 +169,7 @@ function dropView(name: string): void {
     }
   }
   try {
-    (entry.view.webContents as any).destroy?.();
+    (entry.view.webContents as { destroy?: () => void }).destroy?.();
   } catch {
     // Ignore.
   }
@@ -299,13 +265,7 @@ function layoutVisible(): void {
   const prev = entry.applied;
   // setBounds recreates the guest surface: skip no-ops so resizes and
   // repeat shows don't stutter an already-placed page.
-  if (
-    prev &&
-    prev.x === next.x &&
-    prev.y === next.y &&
-    prev.width === next.width &&
-    prev.height === next.height
-  ) {
+  if (prev && prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) {
     return;
   }
   try {
@@ -398,7 +358,7 @@ function createWindow(): void {
   } else if (!app.isPackaged) {
     win.loadURL("http://localhost:5173").catch(console.error);
   } else {
-    win.loadFile(path.join(HERE, "..", "dist", "index.html"));
+    win.loadFile(path.join(HERE, "..", "dist", "index.html")).catch(console.error);
   }
 
   win.on("resized", layoutVisible);
@@ -432,144 +392,153 @@ function createWindow(): void {
   win.contentView.on("bounds-changed", layoutVisible);
 }
 
-app.whenReady().then(() => {
-  nativeTheme.themeSource = appTheme;
-  startAgent();
+app
+  .whenReady()
+  .then(() => {
+    nativeTheme.themeSource = appTheme;
+    agent.start();
 
-  ipcMain.handle("agent:invoke", (_e, method: string, params: Json) => invokeAgent(method, params));
-  ipcMain.handle("app:metrics", () => {
-    let cpu = 0;
-    let rss = 0;
-    const procs = app.getAppMetrics();
-    for (const m of procs) {
-      cpu += m.cpu?.percentCPUUsage ?? 0;
-      rss += (m.memory?.workingSetSize ?? 0) * 1024;
-    }
-    return { cpu, rss, procs: procs.length };
-  });
-  ipcMain.handle("app:takePendingOpen", () => {
-    const id = pendingOpenSession;
-    pendingOpenSession = null;
-    return id;
-  });
-
-  // Native OS pickers: files for attach, a directory for workspace
-  // selection. Null means the user cancelled (or no window yet).
-  ipcMain.handle("dialog:pickFiles", async (_e, defaultPath: string | null) => {
-    if (!win) return null;
-    const res = await dialog.showOpenDialog(win, {
-      properties: ["openFile", "openDirectory", "multiSelections"],
-      ...(defaultPath ? { defaultPath } : {}),
+    ipcMain.handle("agent:invoke", (_e, method: unknown, params: unknown) => {
+      if (typeof method !== "string" || !method) throw new Error("agent:invoke needs a method name");
+      return agent.invoke(method, params);
     });
-    return res.canceled ? null : res.filePaths;
-  });
-
-  ipcMain.handle("dialog:pickDirectory", async (_e, defaultPath: string | null) => {
-    if (!win) return null;
-    const res = await dialog.showOpenDialog(win, {
-      properties: ["openDirectory"],
-      ...(defaultPath ? { defaultPath } : {}),
+    ipcMain.handle("app:metrics", () => {
+      let cpu = 0;
+      let rss = 0;
+      const procs = app.getAppMetrics();
+      for (const m of procs) {
+        cpu += m.cpu?.percentCPUUsage ?? 0;
+        rss += (m.memory?.workingSetSize ?? 0) * 1024;
+      }
+      return { cpu, rss, procs: procs.length };
     });
-    return res.canceled ? null : (res.filePaths[0] ?? null);
-  });
-
-  ipcMain.handle("views:ensure", (_e, name: string, url: string, partition: string) => {
-    if (!win) return false;
-    ensureView(name, url, partition);
-    return true;
-  });
-  ipcMain.handle("views:show", (_e, name: string) => {
-    showOnly(name);
-    return true;
-  });
-  ipcMain.handle("views:setBounds", (_e, bounds: Json) => {
-    lastBounds = bounds;
-    layoutVisible();
-    return true;
-  });
-  ipcMain.handle("views:navigate", (_e, name: string, url: string) => {
-    const entry = views.get(name);
-    if (!entry) return false;
-    entry.url = url;
-    entry.view.webContents.loadURL(url).catch(() => undefined);
-    return true;
-  });
-  ipcMain.handle("views:reload", (_e, name: string) => {
-    views.get(name)?.view.webContents.reload();
-    return true;
-  });
-  ipcMain.handle("shell:openExternal", (_e, url: string) => shell.openExternal(url));
-
-  ipcMain.handle("window:minimize", () => win?.minimize());
-  ipcMain.handle("window:toggleMaximize", () => {
-    if (!win) return;
-    if (win.isMaximized()) win.unmaximize();
-    else win.maximize();
-  });
-  ipcMain.handle("window:close", () => win?.close());
-  ipcMain.handle("window:isMaximized", () => win?.isMaximized() ?? false);
-
-  ipcMain.handle("views:setTheme", (_e, theme: string) => {
-    applyTheme(theme === "light" ? "light" : "dark");
-    return true;
-  });
-  ipcMain.handle("views:drop", (_e, name: string) => {
-    dropView(name);
-    return true;
-  });
-
-  createWindow();
-  // Headless smoke: --smoke-test loads the window, pings the sidecar
-  // over JSONL, reports, and exits (non-zero on any failure).
-  if (process.argv.includes("--smoke-test")) {
-    const fail = (msg: string): never => {
-      console.error(`[smoke] FAIL: ${msg}`);
-      process.exit(1);
-    };
-    win!.webContents.on("did-fail-load", (_e, code, desc) => fail(`renderer load failed ${code}: ${desc}`));
-    win!.webContents.on("console-message", (_e, _level, message) => {
-      if (/preload bridge missing|Uncaught/.test(message)) fail(`renderer console: ${message}`);
+    ipcMain.handle("app:takePendingOpen", () => {
+      const id = pendingOpenSession;
+      pendingOpenSession = null;
+      return id;
     });
-    const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
-    win!.webContents.on("did-finish-load", () => {
-      // The frame can be momentarily undisposed-ready right after load
-      // (worse headless); poll briefly instead of failing on one shot.
-      const probeBridge = (tries: number): void => {
-        win!.webContents
-          .executeJavaScript("typeof window.paladin")
-          .then((t) => {
-            if (t !== "object") {
+
+    // Native OS folder picker for workspace selection. Null means the
+    // user cancelled (or no window yet).
+    ipcMain.handle("dialog:pickDirectory", async (_e, defaultPath: string | null) => {
+      if (!win) return null;
+      const res = await dialog.showOpenDialog(win, {
+        properties: ["openDirectory"],
+        ...(defaultPath ? { defaultPath } : {}),
+      });
+      return res.canceled ? null : (res.filePaths[0] ?? null);
+    });
+
+    ipcMain.handle("views:ensure", (_e, name: string, url: unknown, partition: string) => {
+      if (!win || !isWebUrl(url)) return false;
+      ensureView(name, url, partition);
+      return true;
+    });
+    ipcMain.handle("views:show", (_e, name: string) => {
+      showOnly(name);
+      return true;
+    });
+    ipcMain.handle("views:setBounds", (_e, bounds: unknown) => {
+      if (!isViewBounds(bounds)) return false;
+      lastBounds = bounds;
+      layoutVisible();
+      return true;
+    });
+    ipcMain.handle("views:navigate", (_e, name: string, url: unknown) => {
+      const entry = views.get(name);
+      if (!entry || !isWebUrl(url)) return false;
+      entry.url = url;
+      entry.view.webContents.loadURL(url).catch(() => undefined);
+      return true;
+    });
+    ipcMain.handle("views:reload", (_e, name: string) => {
+      views.get(name)?.view.webContents.reload();
+      return true;
+    });
+    ipcMain.handle("shell:openExternal", (_e, url: unknown) => {
+      if (!isWebUrl(url) && !(typeof url === "string" && url.startsWith("mailto:"))) {
+        throw new Error("openExternal only opens web and mailto links");
+      }
+      return shell.openExternal(url);
+    });
+
+    ipcMain.handle("window:minimize", () => win?.minimize());
+    ipcMain.handle("window:toggleMaximize", () => {
+      if (!win) return;
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+    });
+    ipcMain.handle("window:close", () => win?.close());
+    ipcMain.handle("window:isMaximized", () => win?.isMaximized() ?? false);
+
+    ipcMain.handle("views:setTheme", (_e, theme: string) => {
+      applyTheme(theme === "light" ? "light" : "dark");
+      return true;
+    });
+    ipcMain.handle("views:drop", (_e, name: string) => {
+      dropView(name);
+      return true;
+    });
+
+    createWindow();
+    // Headless smoke: --smoke-test loads the window, pings the sidecar
+    // over JSONL, reports, and exits (non-zero on any failure).
+    if (process.argv.includes("--smoke-test")) {
+      const fail = (msg: string): never => {
+        console.error(`[smoke] FAIL: ${msg}`);
+        process.exit(1);
+      };
+      win!.webContents.on("did-fail-load", (_e, code, desc) => fail(`renderer load failed ${code}: ${desc}`));
+      win!.webContents.on("console-message", (_e, _level, message) => {
+        if (/preload bridge missing|Uncaught/.test(message)) fail(`renderer console: ${message}`);
+      });
+      const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
+      win!.webContents.on("did-finish-load", () => {
+        // The frame can be momentarily undisposed-ready right after load
+        // (worse headless); poll briefly instead of failing on one shot.
+        const probeBridge = (tries: number): void => {
+          win!.webContents
+            .executeJavaScript("typeof window.paladin")
+            .then((t) => {
+              if (t !== "object") {
+                if (tries > 0) {
+                  setTimeout(() => probeBridge(tries - 1), 250);
+                } else {
+                  fail(`window.paladin is ${String(t)} (preload bridge missing)`);
+                }
+              }
+            })
+            .catch((e) => {
               if (tries > 0) {
                 setTimeout(() => probeBridge(tries - 1), 250);
               } else {
-                fail(`window.paladin is ${String(t)} (preload bridge missing)`);
+                fail(`bridge probe failed: ${e.message}`);
               }
-            }
+            });
+        };
+        probeBridge(12);
+        agent
+          .invoke("ping")
+          .then((r) => {
+            clearTimeout(timer);
+            if ((r as { ok?: unknown } | null)?.ok === true) {
+              console.log("[smoke] PASS: renderer loaded, agent-host ping ok");
+              process.exit(0);
+            } else fail(`unexpected ping result: ${JSON.stringify(r)}`);
           })
-          .catch((e) => {
-            if (tries > 0) {
-              setTimeout(() => probeBridge(tries - 1), 250);
-            } else {
-              fail(`bridge probe failed: ${e.message}`);
-            }
-          });
-      };
-      probeBridge(12);
-      invokeAgent("ping")
-        .then((r) => {
-          clearTimeout(timer);
-          if (r?.ok === true) {
-            console.log("[smoke] PASS: renderer loaded, agent-host ping ok");
-            process.exit(0);
-          } else fail(`unexpected ping result: ${JSON.stringify(r)}`);
-        })
-        .catch((e) => fail(`ping failed: ${e.message}`));
+          .catch((e) => fail(`ping failed: ${e.message}`));
+      });
+    }
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
-  }
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  })
+  .catch((error: unknown) => {
+    // Startup failed before a usable window existed: quit instead of
+    // leaving an invisible app running.
+    console.error("[startup] failed:", error);
+    app.quit();
   });
-});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
@@ -578,24 +547,8 @@ app.on("window-all-closed", () => {
 // Quit closes the sidecar's stdin: it stops every turn, persists what
 // they did, and exits. A sidecar that hangs is killed after a grace.
 app.on("before-quit", (event) => {
-  if (quitting || !agent || agent.exitCode !== null) return;
+  if (quitting || !agent.running) return;
   quitting = true;
   event.preventDefault();
-  const child = agent;
-  const hard = setTimeout(() => {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // Ignore.
-    }
-  }, 8000);
-  child.once("exit", () => {
-    clearTimeout(hard);
-    app.quit();
-  });
-  try {
-    child.stdin?.end();
-  } catch {
-    child.kill();
-  }
+  void agent.stop(8000).then(() => app.quit());
 });

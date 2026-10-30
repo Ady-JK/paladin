@@ -10,6 +10,7 @@ import { state } from "../core/state";
 import type { ToolSwitch, ToolsOverview } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
+import { claimPopover, registerPopover } from "../ui/popover";
 
 type Choice = "inherit" | "on" | "off";
 
@@ -106,7 +107,10 @@ const shortName = (t: ToolSwitch) => (t.source === "mcp" && t.tool ? t.tool : t.
 
 function badges(t: ToolSwitch): string {
   const b: string[] = [];
-  if (t.readOnly) b.push(`<span class="tsw-badge is-ro">read-only</span>`);
+  if (t.readOnly)
+    b.push(
+      `<span class="tsw-badge is-ro" title="The server's claim; Paladin still asks before running it">says read-only</span>`,
+    );
   if (t.destructive) b.push(`<span class="tsw-badge is-risky">destructive</span>`);
   return b.join("");
 }
@@ -141,37 +145,42 @@ function paintPane(): void {
     host.innerHTML = `<div class="mem-empty">Loading tools…</div>`;
     return;
   }
-  host.innerHTML = groups(overview.tools)
-    .map((g) => {
-      const on = g.tools.filter((t) => t.global !== false).length;
-      const all = on === g.tools.length;
-      const head =
-        `<div class="tsw-group-head">` +
-        `<span class="tsw-group-ico">${icon(g.id === "builtin" ? "tl-tools" : "sl-plug", "h-3.5 w-3.5")}</span>` +
-        `<span class="tsw-group-name">${escapeHtml(g.label)}</span>` +
-        `<span class="tsw-group-count">${on} of ${g.tools.length} on</span>` +
-        switchHtml(all, "data-tsw-group-toggle", `${all ? "Switch off" : "Switch on"} every ${g.label} tool`) +
-        `</div>`;
-      const rows = g.tools
-        .map((t) => {
-          const globalOn = t.global !== false;
-          const sess =
-            t.session !== undefined && state.sessionId
-              ? `<span class="tsw-badge is-session" title="This session's switch wins">this session: ${t.session ? "on" : "off"}</span>`
-              : "";
-          return (
-            `<li class="tsw-row" data-tool="${escapeHtml(t.name)}" data-enabled="${globalOn}" title="${escapeHtml(t.name)}">` +
-            `<div class="tsw-text"><div class="tsw-line"><span class="tsw-name">${escapeHtml(shortName(t))}</span>${badges(t)}${sess}</div>` +
-            (t.description ? `<div class="tsw-desc">${escapeHtml(t.description)}</div>` : "") +
-            `</div>` +
-            switchHtml(globalOn, "data-tsw-global", `${globalOn ? "Switch off" : "Switch on"} ${shortName(t)} everywhere`) +
-            `</li>`
-          );
-        })
-        .join("");
-      return `<section class="tsw-group" data-group="${escapeHtml(g.id)}">${head}<ul class="tsw-list">${rows}</ul></section>`;
-    })
-    .join("") || `<div class="mem-none">No tools.</div>`;
+  host.innerHTML =
+    groups(overview.tools)
+      .map((g) => {
+        const on = g.tools.filter((t) => t.global !== false).length;
+        const all = on === g.tools.length;
+        const head =
+          `<div class="tsw-group-head">` +
+          `<span class="tsw-group-ico">${icon(g.id === "builtin" ? "tl-tools" : "sl-plug", "h-3.5 w-3.5")}</span>` +
+          `<span class="tsw-group-name">${escapeHtml(g.label)}</span>` +
+          `<span class="tsw-group-count">${on} of ${g.tools.length} on</span>` +
+          switchHtml(all, "data-tsw-group-toggle", `${all ? "Switch off" : "Switch on"} every ${g.label} tool`) +
+          `</div>`;
+        const rows = g.tools
+          .map((t) => {
+            const globalOn = t.global !== false;
+            const sess =
+              t.session !== undefined && state.sessionId
+                ? `<span class="tsw-badge is-session" title="This session's switch wins">this session: ${t.session ? "on" : "off"}</span>`
+                : "";
+            return (
+              `<li class="tsw-row" data-tool="${escapeHtml(t.name)}" data-enabled="${globalOn}" title="${escapeHtml(t.name)}">` +
+              `<div class="tsw-text"><div class="tsw-line"><span class="tsw-name">${escapeHtml(shortName(t))}</span>${badges(t)}${sess}</div>` +
+              (t.description ? `<div class="tsw-desc">${escapeHtml(t.description)}</div>` : "") +
+              `</div>` +
+              switchHtml(
+                globalOn,
+                "data-tsw-global",
+                `${globalOn ? "Switch off" : "Switch on"} ${shortName(t)} everywhere`,
+              ) +
+              `</li>`
+            );
+          })
+          .join("");
+        return `<section class="tsw-group" data-group="${escapeHtml(g.id)}">${head}<ul class="tsw-list">${rows}</ul></section>`;
+      })
+      .join("") || `<div class="mem-none">No tools.</div>`;
   filterPane();
 }
 
@@ -234,6 +243,7 @@ function ensureChip(): void {
   chip = wrap.querySelector<HTMLButtonElement>("#toolsChip")!;
   pendingChip = wrap.querySelector<HTMLButtonElement>("#toolsPendingChip")!;
   menu = wrap.querySelector<HTMLElement>("#toolsMenu")!;
+  registerPopover("tools", closeMenu);
   chip.addEventListener("click", (event) => {
     event.stopPropagation();
     if (menu!.classList.contains("hidden")) openToolsMenu();
@@ -275,7 +285,9 @@ function paintChip(): void {
   const off = offCount();
   const total = overview?.tools.length ?? 0;
   chip!.innerHTML = `${icon("tl-tools", "h-3.5 w-3.5")}<span>Tools</span>${off ? `<span class="tools-chip-count">${off}</span>` : ""}`;
-  chip!.title = off ? `${off} of ${total} tools switched off for this session` : "Tools: switch them on or off for this session";
+  chip!.title = off
+    ? `${off} of ${total} tools switched off for this session`
+    : "Tools: switch them on or off for this session";
   chip!.dataset.off = String(off > 0);
   const pending = visiblePending();
   const deferred = !!state.sessionId && later.has(state.sessionId) && pending.length > 0;
@@ -350,6 +362,7 @@ function filterMenu(): void {
 // openToolsMenu shows the composer's Tools popover (also /tools).
 export function openToolsMenu(): void {
   ensureChip();
+  claimPopover("tools");
   paintMenu();
   menu!.classList.remove("hidden");
   chip!.setAttribute("aria-expanded", "true");
@@ -445,8 +458,12 @@ function paintBanner(): void {
   }
   if (put) later.delete(sid);
   const tools = overview?.tools.filter((t) => pending.includes(t.name)) ?? [];
-  const servers = [...new Set(tools.map((t) => (t.source === "mcp" ? t.server ?? "MCP" : "built-in")))];
-  const names = tools.slice(0, 4).map((t) => `<code>${escapeHtml(shortName(t))}</code>`).join(", ") + (tools.length > 4 ? ` +${tools.length - 4}` : "");
+  const servers = [...new Set(tools.map((t) => (t.source === "mcp" ? (t.server ?? "MCP") : "built-in")))];
+  const names =
+    tools
+      .slice(0, 4)
+      .map((t) => `<code>${escapeHtml(shortName(t))}</code>`)
+      .join(", ") + (tools.length > 4 ? ` +${tools.length - 4}` : "");
   const n = pending.length;
   el.innerHTML =
     `<span class="tools-banner-ico">${icon("sl-sparkles", "h-4 w-4")}</span>` +

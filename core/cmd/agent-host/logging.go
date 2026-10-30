@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 var logger *logWriter
@@ -20,7 +22,7 @@ type logWriter struct {
 func (l *logWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	line := fmt.Sprintf("%s %s", time.Now().UTC().Format(time.RFC3339), p)
+	line := fmt.Sprintf("%s %s", time.Now().UTC().Format(time.RFC3339), redact.String(string(p)))
 	if _, err := os.Stderr.WriteString(line); err != nil {
 		return 0, err
 	}

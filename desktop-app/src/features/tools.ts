@@ -6,19 +6,17 @@ import type { DiffRow, MatchSpan, ToolInfo, ToolView } from "../core/types";
 import { icon, type IconName } from "../icons";
 import { relPath, toolBodyHtml } from "./toolBodies";
 
-export function toolSummary(name: string, raw: string): string {
-  const short = (text: string) =>
-    text.length > 120 ? `${text.slice(0, 120)}…` : text;
+function toolSummary(name: string, raw: string): string {
+  const short = (text: string) => (text.length > 120 ? `${text.slice(0, 120)}…` : text);
 
-  try {
-    const args = JSON.parse(raw) as Record<string, unknown>;
+  const args = tryParseJson(raw);
+  if (args) {
     if (name === "ask") {
       const questions = args.questions;
       if (Array.isArray(questions) && questions.length > 0) {
-        const first = questions[0] as Record<string, unknown>;
-        const text = typeof first.question === "string" ? first.question : "";
-        const extra =
-          questions.length > 1 ? ` (+${questions.length - 1} more)` : "";
+        const first = questions[0] as Record<string, unknown> | null;
+        const text = typeof first?.question === "string" ? first.question : "";
+        const extra = questions.length > 1 ? ` (+${questions.length - 1} more)` : "";
         return short(text + extra) || `ask${extra}`;
       }
       return "ask";
@@ -27,10 +25,8 @@ export function toolSummary(name: string, raw: string): string {
       if (typeof args.cmd === "string" && args.cmd.trim()) {
         return short(args.cmd.trim());
       }
-      const action =
-        typeof args.action === "string" && args.action ? args.action : "run";
-      const job =
-        typeof args.job_id === "string" && args.job_id ? ` ${args.job_id}` : "";
+      const action = typeof args.action === "string" && args.action ? args.action : "run";
+      const job = typeof args.job_id === "string" && args.job_id ? ` ${args.job_id}` : "";
       return `${action}${job}`;
     }
     if (typeof args.path === "string") {
@@ -41,7 +37,6 @@ export function toolSummary(name: string, raw: string): string {
         return value;
       }
     }
-  } catch {
   }
   return short(raw);
 }
@@ -49,7 +44,7 @@ export function toolSummary(name: string, raw: string): string {
 // lineDiff diffs old lines against new lines with longest-common-subsequence.
 // Big inputs skip the O(n*m) table and fall back to whole-block replace:
 // a collapsed-by-default card never needs a perfect diff at 60Hz.
-export function lineDiff(oldLines: string[], newLines: string[]): DiffRow[] {
+function lineDiff(oldLines: string[], newLines: string[]): DiffRow[] {
   const n = oldLines.length;
   const m = newLines.length;
   if (n > 400 || m > 400 || n * m > 250000) {
@@ -155,11 +150,11 @@ function sideBySideDiffHtml(rows: DiffRow[]): string {
     const dels: DiffRow[] = [];
     const adds: DiffRow[] = [];
     while (i < rows.length && rows[i]?.kind === "del") {
-      dels.push(rows[i] as DiffRow);
+      dels.push(rows[i]);
       i++;
     }
     while (i < rows.length && rows[i]?.kind === "add") {
-      adds.push(rows[i] as DiffRow);
+      adds.push(rows[i]);
       i++;
     }
     const pairs = Math.max(dels.length, adds.length);
@@ -197,8 +192,7 @@ function richWriteHtml(tool: ToolInfo): string | null {
   const result = tool.status === "running" ? null : tryParseJson(tool.result);
   const chips: string[] = [];
   if (tool.status === "failed") {
-    const message =
-      result && typeof result.error === "string" ? result.error : "write failed";
+    const message = result && typeof result.error === "string" ? result.error : "write failed";
     return (
       `<div data-fileview="write" class="overflow-hidden rounded-md border border-red-200/70 dark:border-red-800/50">` +
       `<div class="border-b border-red-200/70 bg-red-50 px-2 py-1.5 font-mono text-[10px] text-red-700 dark:border-red-800/50 dark:bg-red-950/40 dark:text-red-300">${escapeHtml(message)}</div></div>`
@@ -220,14 +214,14 @@ function richWriteHtml(tool: ToolInfo): string | null {
   } else if (tool.status === "running") {
     chips.push("writing…");
   }
-  const content = args.content as string;
+  const content = args.content;
   const body = content
     ? fileLinesHtml(splitLines(content))
     : '<div class="px-2 py-1 text-slate-400">(empty file)</div>';
   return (
     `<div data-fileview="write" class="overflow-hidden rounded-md border border-slate-200/70 dark:border-slate-700/70">` +
     `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +
-    `<span class="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(args.path as string)}</span>` +
+    `<span class="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(args.path)}</span>` +
     chips
       .map(
         (chip) =>
@@ -265,7 +259,7 @@ function matchSpans(result: Record<string, unknown> | null): MatchSpan[] {
       if (typeof span.start_line === "number") {
         spans.push({
           start: span.start_line,
-          end: typeof span.end_line === "number" ? (span.end_line as number) : span.start_line,
+          end: typeof span.end_line === "number" ? span.end_line : span.start_line,
         });
       }
     }
@@ -274,9 +268,8 @@ function matchSpans(result: Record<string, unknown> | null): MatchSpan[] {
     }
   }
   if (result && typeof result.match_start_line === "number") {
-    const start = result.match_start_line as number;
-    const end =
-      typeof result.match_end_line === "number" ? (result.match_end_line as number) : start;
+    const start = result.match_start_line;
+    const end = typeof result.match_end_line === "number" ? result.match_end_line : start;
     return [{ start, end }];
   }
   return [{ start: 1, end: 1 }];
@@ -289,14 +282,12 @@ function richEditHtml(tool: ToolInfo): string | null {
   if (!args || typeof args.old_string !== "string" || typeof args.path !== "string") {
     return null;
   }
-  const oldText = args.old_string as string;
-  const newText = typeof args.new_string === "string" ? (args.new_string as string) : "";
+  const oldText = args.old_string;
+  const newText = typeof args.new_string === "string" ? args.new_string : "";
   const result = tool.status === "running" ? null : tryParseJson(tool.result);
   const chips: string[] = [];
   if (result && typeof result.replacements === "number") {
-    chips.push(
-      result.replacements === 1 ? "1 replacement" : `${result.replacements} replacements`,
-    );
+    chips.push(result.replacements === 1 ? "1 replacement" : `${result.replacements} replacements`);
   }
   if (args.replace_all === true) {
     chips.push("replace all");
@@ -323,26 +314,22 @@ function richEditHtml(tool: ToolInfo): string | null {
         const occ = item as Record<string, unknown>;
         const before = occ.before as Record<string, unknown> | null;
         const after = occ.after as Record<string, unknown> | null;
-        const plain = (text: string) =>
-          `<div class="px-2 py-px">${escapeHtml(text) || " "}</div>`;
-        let block =
-          `<div class="px-2 pb-0.5 pt-2 font-semibold">${ordinal(index + 1)} match</div>`;
+        const plain = (text: string) => `<div class="px-2 py-px">${escapeHtml(text) || " "}</div>`;
+        let block = `<div class="px-2 pb-0.5 pt-2 font-semibold">${ordinal(index + 1)} match</div>`;
         if (before && typeof before.text === "string") {
-          block += plain(before.text as string);
+          block += plain(before.text);
         }
         for (const line of matchLines) {
-          block +=
-            `<div class="mx-1 rounded bg-emerald-500/15 px-1 py-px text-emerald-800 dark:text-emerald-200">${escapeHtml(line) || " "}</div>`;
+          block += `<div class="mx-1 rounded bg-emerald-500/15 px-1 py-px text-emerald-800 dark:text-emerald-200">${escapeHtml(line) || " "}</div>`;
         }
         if (after && typeof after.text === "string") {
-          block += plain(after.text as string);
+          block += plain(after.text);
         }
         return `<div class="pb-1">${block}</div>`;
       })
       .join("");
     if (items) {
-      const count =
-        typeof result.count === "number" ? result.count : result.occurrences.length;
+      const count = typeof result.count === "number" ? result.count : result.occurrences.length;
       extra =
         `<div class="border-t border-amber-200/70 bg-amber-50/60 px-1 py-1 text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-300">` +
         `<div class="px-2 py-0.5 font-semibold">${count} matches — retry with more context</div>${items}</div>`;
@@ -356,16 +343,13 @@ function richEditHtml(tool: ToolInfo): string | null {
         spans.length > 1
           ? `<div class="px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">lines ${span.start}–${span.end}</div>`
           : "";
-      return (
-        label +
-        sideBySideDiffHtml(offsetDiffRows(base, span.start - 1))
-      );
+      return label + sideBySideDiffHtml(offsetDiffRows(base, span.start - 1));
     })
     .join("");
   return (
     `<div data-filediff="edit" class="overflow-hidden rounded-md border border-slate-200/70 dark:border-slate-700/70">` +
     `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +
-    `<span class="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(args.path as string)}</span>` +
+    `<span class="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold text-slate-600 dark:text-slate-300">${escapeHtml(args.path)}</span>` +
     chips
       .map(
         (chip) =>
@@ -381,7 +365,7 @@ function richEditHtml(tool: ToolInfo): string | null {
 export type ToolLabel = { verb: string; detail: string; chip: string; server?: string };
 
 // mcpName splits an exposed MCP tool name (mcp__server__tool).
-export function mcpName(name: string): { server: string; tool: string } | null {
+function mcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith("mcp__")) return null;
   const rest = name.slice(5);
   const at = rest.indexOf("__");
@@ -403,7 +387,12 @@ const KINDS: Record<string, ToolKind> = {
   write: { icon: "tl-file-plus", past: "Wrote", now: "Writing", noun: plural("file", "files") },
   edit: { icon: "tl-pencil", past: "Edited", now: "Editing", noun: plural("file", "files") },
   ask: { icon: "tl-ask", past: "Asked", now: "Asking", noun: plural("question", "questions") },
-  todo: { icon: "tl-list", past: "Updated", now: "Updating", noun: (n) => (n === 1 ? "the plan" : `the plan ${n} times`) },
+  todo: {
+    icon: "tl-list",
+    past: "Updated",
+    now: "Updating",
+    noun: (n) => (n === 1 ? "the plan" : `the plan ${n} times`),
+  },
 };
 
 const OTHER: ToolKind = { icon: "tl-tools", past: "Called", now: "Calling", noun: plural("tool", "tools") };
@@ -415,7 +404,7 @@ function kindOf(name: string): ToolKind {
 
 function parseArgs(raw: string): Record<string, unknown> {
   const parsed = tryParseJson(raw);
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
 // toolLabel reads one call the way a person would narrate it.
@@ -444,7 +433,12 @@ export function toolLabel(tool: ToolInfo): ToolLabel {
     default: {
       const mcp = mcpName(tool.name);
       if (mcp) {
-        return { verb, detail: mcp.tool, chip: summary && summary !== tool.arguments ? summary : "", server: mcp.server };
+        return {
+          verb,
+          detail: mcp.tool,
+          chip: summary && summary !== tool.arguments ? summary : "",
+          server: mcp.server,
+        };
       }
       return { verb, detail: tool.name, chip: summary && summary !== tool.name ? summary : "" };
     }
@@ -478,7 +472,7 @@ export function runLabel(tools: ToolInfo[]): string {
 }
 
 // toolIcon is the glyph for a kind of call.
-export function toolIcon(name: string): IconName {
+function toolIcon(name: string): IconName {
   return kindOf(name).icon;
 }
 

@@ -7,18 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/shared"
-
-	"github.com/Ady-JK/paladin/core/internal/config"
 )
 
 const (
@@ -53,6 +52,11 @@ type OpenAIProvider struct {
 	isOpencode bool
 	protocol   string
 	client     *openai.Client
+	// effort is the reasoning effort sent with every call; empty sends
+	// none and leaves the provider's default.
+	effort string
+	// effortDropped is set once the provider rejected effort.
+	effortDropped *atomic.Bool
 }
 
 func NewOpenAIProvider(name, model, baseURL, apiKey string) *OpenAIProvider {
@@ -206,7 +210,7 @@ func toSDKTools(tools []ToolDefinition) []openai.ChatCompletionToolParam {
 
 func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(p.model),
+		Model:    p.model,
 		Messages: toSDKMessages(messages),
 		// The usage-bearing final chunk only arrives when asked for; it is
 		// a standard field, harmless on plain OpenAI endpoints too.
@@ -220,6 +224,9 @@ func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools [
 	}
 	if len(tools) > 0 {
 		params.Tools = toSDKTools(tools)
+	}
+	if p.effort != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(p.effort)
 	}
 	// OpenCode forwards this to the upstream provider. Pairing the stable
 	// conversation id with the x-opencode-session header keeps the
@@ -245,7 +252,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: chat completion returned no choices", p.name))
 	}
 	msg := res.Choices[0].Message
-	out := ToolResponse{Content: msg.Content}
+	out := ToolResponse{Content: msg.Content, Reasoning: deltaReasoning(msg.RawJSON())}
 	for _, call := range msg.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, ToolCall{
 			ID:        call.ID,
@@ -319,6 +326,11 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 			usage.Add(*u)
 		}
 		for _, choice := range chunk.Choices {
+			if r := deltaReasoning(choice.Delta.RawJSON()); r != "" {
+				if err := send(Chunk{Reasoning: r}); err != nil {
+					return CancelledError()
+				}
+			}
 			if choice.Delta.Content != "" {
 				if err := send(TextChunk(choice.Delta.Content)); err != nil {
 					return CancelledError()
@@ -491,7 +503,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
 func (p *OpenAIProvider) listOpencodeCatalog(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", p.catalogURL(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.catalogURL(), nil)
 	if err != nil {
 		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
@@ -509,7 +521,7 @@ func (p *OpenAIProvider) listOpencodeCatalog(ctx context.Context) ([]string, err
 		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBody(resp.Body, maxResponseBody)
 	if err != nil {
 		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}

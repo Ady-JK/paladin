@@ -59,7 +59,7 @@ export function isModalOpen(el: HTMLElement): boolean {
 }
 
 // openMenu pops a dropdown/picker into view.
-export function openMenu(el: HTMLElement): void {
+function openMenu(el: HTMLElement): void {
   clearTimer(el);
   el.classList.remove("hidden");
   requestAnimationFrame(() => {

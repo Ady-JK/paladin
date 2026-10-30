@@ -12,6 +12,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/prompt"
 	"github.com/Ady-JK/paladin/core/internal/skills"
 	"github.com/Ady-JK/paladin/core/internal/tools"
@@ -206,9 +207,15 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		}
 	}
 
+	gate := d.Gate
 	if mode == ModePlan {
 		registry, shell = planRegistry(registry, shell)
 		system += "\n\n" + prompt.PlanMode
+		if g, ok := gate.(*permission.Gate); ok && g != nil {
+			planned := *g
+			planned.Plan = true
+			gate = &planned
+		}
 	}
 
 	return newAgent(runConfig{
@@ -224,7 +231,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		tx:          d.Tx,
 		done:        d.Done,
 		persistGate: d.PersistGate,
-		gate:        d.Gate,
+		gate:        gate,
 		steps:       d.Steps,
 		steer:       req.Steer,
 		budget:      req.Budget,
@@ -333,10 +340,10 @@ func (r *Registry) Default() (Template, bool) {
 // planWriteTools are dropped in plan mode.
 var planWriteTools = map[string]bool{"write": true, "edit": true}
 
-// planRegistry is the read-only view of a registry: no file writers,
-// no MCP tools without a readOnly hint,
-// and a shell that refuses anything but inspection commands. The real
-// shell stays as the agent's job-notice source.
+// planRegistry is the read-only view of a registry: no file writers and
+// a shell that refuses anything but inspection commands. MCP tools stay;
+// the plan-mode gate asks for each call. The real shell stays as the
+// agent's job-notice source.
 func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *tools.ShellTool) {
 	out := tools.NewRegistry()
 	for _, name := range r.Names() {
@@ -344,9 +351,6 @@ func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *
 			continue
 		}
 		t, _ := r.Get(name)
-		if m, ok := t.(tools.MCPTool); ok && !m.MCPInfo().ReadOnly {
-			continue
-		}
 		if name == "shell" {
 			sh, ok := t.(*tools.ShellTool)
 			if !ok {

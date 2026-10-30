@@ -5,20 +5,21 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/Ady-JK/paladin/core/internal/memory"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
+	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
@@ -34,12 +35,14 @@ type Settings struct {
 	// DefaultBudgetUsd is the spend limit for sessions without their
 	// own; 0 means none.
 	DefaultBudgetUsd float64 `json:"defaultBudgetUsd,omitempty"`
+	// ThinkingLevels is each model's reasoning effort, by provider then
+	// model; absent means the provider default.
+	ThinkingLevels map[string]map[string]string `json:"thinkingLevels,omitempty"`
 }
 
 type AgentRuntime struct {
 	dataDir       string
 	config        config.Config
-	configMu      sync.RWMutex
 	settingsMu    sync.Mutex
 	store         *config.Store
 	transcripts   *transcript.Store
@@ -55,12 +58,16 @@ type AgentRuntime struct {
 	snaps         *snapshot.Store
 	worktrees     *worktree.Manager
 	undoMu        sync.Mutex
+	jobs          *jobBook
 	providersMu   sync.Mutex
 	refreshing    atomic.Bool
 	refreshWG     sync.WaitGroup
 	fetchMu       sync.RWMutex
 	fetchModels   ModelFetcher
 	providerCache map[string]inference.Provider
+	// thinkingCache holds providers with a thinking level applied, so a
+	// level the provider rejected stays dropped across turns.
+	thinkingCache map[string]inference.Provider
 	cacheMu       sync.Mutex
 	mcp           *mcp.Manager
 	mcpSink       atomic.Pointer[mcpSink]
@@ -113,12 +120,17 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		snaps:         snapshotStore(dataDir),
 		worktrees:     worktree.New(filepath.Join(dataDir, "worktrees")),
 		providerCache: map[string]inference.Provider{},
+		thinkingCache: map[string]inference.Provider{},
 		fetchModels:   networkModelFetcher,
 		hooks:         hooks.NewManager(dataDir),
 		started:       map[string]bool{},
 		live:          map[string][]inference.LlmMessage{},
 	}
 	r.sideCtx, r.sideCancel = context.WithCancel(context.Background())
+	r.jobs = newJobBook(r)
+	if shellTool != nil {
+		shellTool.Observe(r.jobs)
+	}
 	r.mcp = newMCPManager(dataDir, &r.mcpSink)
 	r.registerKnowledgeTools()
 	r.hub = NewHub(r.runTurn, r.maxConcurrentTurns)
@@ -293,4 +305,48 @@ func (r *AgentRuntime) CancelAsk(sessionID, callID string) bool {
 	}
 	r.hub.StopRunning(sessionID)
 	return true
+}
+
+// updateSettings rewrites settings.json through edit, keeping keys this
+// build does not know. Writes are atomic and serialized.
+func (r *AgentRuntime) updateSettings(edit func(*Settings)) error {
+	r.settingsMu.Lock()
+	defer r.settingsMu.Unlock()
+	raw := map[string]json.RawMessage{}
+	var s Settings
+	data, err := os.ReadFile(r.settingsPath())
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("settings.json is not valid JSON: %w", err)
+		}
+		if err := json.Unmarshal(data, &s); err != nil {
+			return fmt.Errorf("settings.json: %w", err)
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	edit(&s)
+	known := map[string]json.RawMessage{}
+	b, _ := json.Marshal(s)
+	_ = json.Unmarshal(b, &known)
+	st := reflect.TypeOf(s)
+	for i := 0; i < st.NumField(); i++ {
+		delete(raw, strings.Split(st.Field(i).Tag.Get("json"), ",")[0])
+	}
+	for k, v := range known {
+		raw[k] = v
+	}
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(r.settingsPath()), 0o755); err != nil {
+		return err
+	}
+	tmp := r.settingsPath() + ".tmp"
+	if err := os.WriteFile(tmp, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.settingsPath())
 }

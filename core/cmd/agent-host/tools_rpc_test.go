@@ -35,7 +35,7 @@ func TestToolsMethods(t *testing.T) {
 	if len(ov.Tools) == 0 || ov.Pending == nil {
 		t.Fatalf("%+v", ov)
 	}
-	ov = decodeAs[runtime.ToolsOverview](t, callUnary(rt, "2", "toolsSet", map[string]any{"scope": "global", "cwd": ws, "names": []string{"shell"}, "enabled": false}))
+	_ = decodeAs[runtime.ToolsOverview](t, callUnary(rt, "2", "toolsSet", map[string]any{"scope": "global", "cwd": ws, "names": []string{"shell"}, "enabled": false}))
 	ov = decodeAs[runtime.ToolsOverview](t, callUnary(rt, "3", "toolsSet", map[string]any{"scope": "session", "cwd": ws, "sessionId": sess.SessionID, "names": []string{"shell"}, "enabled": true}))
 	for _, ti := range ov.Tools {
 		if ti.Name == "shell" && (!ti.Enabled || ti.Global == nil || *ti.Global) {

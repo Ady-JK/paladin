@@ -1,6 +1,7 @@
 // live.spec.ts covers async, multi-session turns: sessions stream at the
 // same time, keep updating while hidden, queue follow-ups, surface
 // background completion and questions, and re-attach after a reload.
+import { showSidebar } from "./drawer";
 import { test, expect, type Page } from "@playwright/test";
 
 const SESSIONS = ["sess-a", "sess-b"];
@@ -34,14 +35,14 @@ async function setup(page: Page): Promise<void> {
         w.__held[params.message] = { handlers, resolve };
         handlers.onDelta(`started ${params.message}`);
       });
-    w.__release = (message: string, reply = "") =>
-      w.__held[message].resolve({ sessionId: "", reply, stopped: false });
+    w.__release = (message: string, reply = "") => w.__held[message].resolve({ sessionId: "", reply, stopped: false });
   }, SESSIONS);
   await page.goto("/");
   await expect(page.locator('[data-session="sess-b"]')).toBeVisible();
 }
 
 async function sendIn(page: Page, session: string, text: string): Promise<void> {
+  await showSidebar(page);
   await page.click(`[data-session="${session}"]`);
   await expect(page.locator("#sessionLabel")).toHaveText(session.slice(0, 8));
   await page.fill("#promptInput", text);
@@ -70,6 +71,7 @@ test("two sessions stream at once and keep their own transcripts", async ({ page
   await expect(page.locator("#messages")).not.toContainText("more-a");
 
   // Back on sess-a mid-turn: everything it streamed is there, live.
+  await showSidebar(page);
   await page.click('[data-session="sess-a"]');
   await expect(page.locator("#messages")).toContainText("started alpha more-a");
   await expect(page.locator("#pauseBtn")).toBeVisible();
@@ -87,6 +89,7 @@ test("two sessions stream at once and keep their own transcripts", async ({ page
   await expect(row(page, "sess-a")).not.toHaveAttribute("data-live", /.+/);
 
   // Opening sess-b clears its badge.
+  await showSidebar(page);
   await page.click('[data-session="sess-b"]');
   await expect(row(page, "sess-b")).not.toHaveAttribute("data-live", /.+/);
 });
@@ -134,10 +137,32 @@ test("stop drops the queue and ends the running turn", async ({ page }) => {
   expect(await page.evaluate(() => (window as any).__ran)).toEqual(["one"]);
 });
 
+test("a restarted agent host ends the turns that died with it", async ({ page }) => {
+  await setup(page);
+  await sendIn(page, "sess-a", "one");
+  await expect(page.locator("#messages")).toContainText("started one");
+  await page.fill("#promptInput", "two");
+  await page.click("#sendBtn");
+  await expect(page.locator("#messages [data-queued]")).toHaveCount(1);
+
+  // The replacement host starts empty: no running or queued turns.
+  await page.evaluate(() => {
+    const w = window as any;
+    const base = w.__paladinBaseInvoke;
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => (cmd === "turns" ? [] : base(cmd, args));
+    w.__e2eHub.emit({ event: "host/restarted" });
+  });
+  await expect(page.locator("#messages [data-queued]")).toHaveCount(0);
+  await expect(page.locator("#messages")).toContainText("agent host restarted");
+  await expect(page.locator("#pauseBtn")).toBeHidden();
+  await expect(row(page, "sess-a")).not.toHaveAttribute("data-live", "running");
+});
+
 test("a question from a background session waits until it is opened", async ({ page }) => {
   await setup(page);
   await sendIn(page, "sess-a", "deploy");
   await expect(page.locator("#messages")).toContainText("started deploy");
+  await showSidebar(page);
   await page.click('[data-session="sess-b"]');
   await page.evaluate(() =>
     (window as any).__held.deploy.handlers.onTool({
@@ -151,6 +176,7 @@ test("a question from a background session waits until it is opened", async ({ p
   await expect(row(page, "sess-a")).toHaveAttribute("data-live", "input");
   await expect(page.locator("#askModal")).toHaveCount(0);
 
+  await showSidebar(page);
   await page.click('[data-session="sess-a"]');
   await expect(page.locator("#askModal")).toBeVisible();
   await expect(page.locator("#askModal")).toContainText("Which env?");

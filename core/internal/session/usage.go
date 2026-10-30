@@ -61,7 +61,14 @@ type UsageTotals struct {
 	// so dashboards can render activity timelines and heatmaps without
 	// scanning transcripts.
 	Daily map[string]*Counters `json:"daily,omitempty"`
+	// RecoveredFrom names the corrupt ledger this one replaced (kept
+	// beside it); spend counted here is then only a lower bound.
+	RecoveredFrom string `json:"recoveredFrom,omitempty"`
 }
+
+// SpendIncomplete reports that earlier spend was lost to a corrupt
+// ledger, so Cost undercounts.
+func (t UsageTotals) SpendIncomplete() bool { return t.RecoveredFrom != "" }
 
 // ModelUsage is one model's slice of a session's ledger.
 type ModelUsage struct {

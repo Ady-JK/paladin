@@ -16,7 +16,7 @@ func lastToolStatus(chunks []ChatChunk, id string) string {
 	status := ""
 	for _, c := range chunks {
 		if c.Tool != nil && c.Tool.ID == id {
-			status = string(c.Tool.Status)
+			status = c.Tool.Status
 		}
 	}
 	return status
@@ -87,7 +87,7 @@ func TestNoticedCallThatRunsIsNotDoubleSettled(t *testing.T) {
 	var statuses []string
 	for _, c := range drainChunks(tx) {
 		if c.Tool != nil && c.Tool.ID == "c1" {
-			statuses = append(statuses, string(c.Tool.Status))
+			statuses = append(statuses, c.Tool.Status)
 		}
 	}
 	if statuses[len(statuses)-1] == string(session.ToolRunning) || len(statuses) > 3 {

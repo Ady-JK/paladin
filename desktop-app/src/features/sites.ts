@@ -7,19 +7,14 @@ import {
   agentTabEl,
   agentViewEl,
   chatEntriesEl,
-  chatListEl,
   chatTabEl,
-  statusWrapEl,
   externalFallbackEl,
   externalFallbackLink,
   externalHostEl,
   externalViewEl,
   headerTitleEl,
   inputEl,
-  newSessionBtnLabelEl,
   pageReloadBtnEl,
-  searchWrapEl,
-  sessionListEl,
   sessionModalEl,
   settingsModalEl,
   confirmModalEl,
@@ -27,7 +22,6 @@ import {
   siteModalEl,
   siteNameEl,
   siteUrlEl,
-  workspaceWrapEl,
   paintIcons,
   $,
 } from "../core/dom";
@@ -37,6 +31,7 @@ import { hasBridge } from "../core/bridge";
 import type { ChatEntry, SideView } from "../core/types";
 import { toast } from "../ui/toast";
 import { icon } from "../icons";
+import { loadJson, loadText, saveJson, saveText } from "../core/storage";
 
 const VIEW_KEY = "paladin.view";
 
@@ -73,29 +68,18 @@ function chatEntries(): ChatEntry[] {
 }
 
 function restoreSites(): void {
-  try {
-    const saved = JSON.parse(localStorage.getItem(SITES_KEY) ?? "null") as {
-      name?: string;
-      url?: string;
-    }[] | null;
-    if (Array.isArray(saved)) {
-      state.customSites = saved
-        .filter((s) => typeof s?.name === "string" && typeof s?.url === "string")
-        .map((s) => ({ name: s.name!.trim(), url: s.url!.trim() }))
-        .filter((s) => s.name && s.url.toLowerCase().startsWith("https://"));
-    }
-  } catch {
+  const saved = loadJson(SITES_KEY);
+  if (Array.isArray(saved)) {
+    state.customSites = (saved as ({ name?: unknown; url?: unknown } | null)[])
+      .filter((s) => typeof s?.name === "string" && typeof s?.url === "string")
+      .map((s) => ({ name: (s!.name as string).trim(), url: (s!.url as string).trim() }))
+      .filter((s) => s.name && s.url.toLowerCase().startsWith("https://"));
   }
 
   // Seed once. An existing profile keeps its own pages and gains any
   // default it is missing; a profile where the user deleted defaults keeps
   // them deleted because the flag is already set.
-  let seeded = false;
-  try {
-    seeded = localStorage.getItem(SEEDED_KEY) === "1";
-  } catch {
-  }
-  if (seeded) {
+  if (loadText(SEEDED_KEY) === "1") {
     return;
   }
 
@@ -115,17 +99,11 @@ function restoreSites(): void {
   if (added) {
     persistSites();
   }
-  try {
-    localStorage.setItem(SEEDED_KEY, "1");
-  } catch {
-  }
+  saveText(SEEDED_KEY, "1");
 }
 
 function persistSites(): void {
-  try {
-    localStorage.setItem(SITES_KEY, JSON.stringify(state.customSites));
-  } catch {
-  }
+  saveJson(SITES_KEY, state.customSites);
 }
 
 function paintSideTabs(): void {
@@ -135,48 +113,48 @@ function paintSideTabs(): void {
   chatTabEl.setAttribute("aria-selected", String(state.sideView === "chat"));
 }
 
-export function paintChatList(): void {
+// paintChatList paints the chat pages as browser-style tabs above the
+// embedded page. × removes a page; the strip's + adds one.
+function paintChatList(): void {
   let html = "";
   for (const entry of chatEntries()) {
     const picked = entry.id === state.chatPage;
     html += `
-      <div class="pick-row flex items-center gap-1">
+      <div class="chat-tab${picked ? " is-active" : ""}">
         <button
+          type="button"
+          role="tab"
+          aria-selected="${picked}"
           data-pick="${escapeAttr(entry.id)}"
-          class="pick-btn min-w-0 flex-1 rounded-md p-1.5 text-left${picked ? " is-active" : ""}"
-          title="${escapeAttr(entry.url)}"
+          class="chat-tab-pick"
+          title="${escapeAttr(entry.title)} \u00b7 ${escapeAttr(hostOf(entry.url))}"
         >
-          <span class="flex items-center gap-2">
-            <span class="flex-shrink-0 text-accent-500">${icon("globe", "h-3.5 w-3.5")}</span>
-            <span class="min-w-0 flex-1">
-              <span class="block truncate font-medium text-slate-700 dark:text-slate-300">${escapeHtml(entry.title)}</span>
-              <span class="block truncate text-[10px] text-slate-400">${escapeHtml(hostOf(entry.url))}</span>
-            </span>
-          </span>
+          <span class="flex-shrink-0 text-slate-400">${icon("globe", "h-3.5 w-3.5")}</span>
+          <span class="truncate">${escapeHtml(entry.title)}</span>
         </button>
         <button
-          data-open="${escapeAttr(entry.id)}"
-          class="flex-shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-          title="Open ${escapeAttr(entry.title)} in the system browser"
-        >
-          ${icon("external")}
-        </button>
-        <button
+          type="button"
           data-del="${escapeAttr(entry.id)}"
-          class="flex-shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-agent-rose/10 hover:text-agent-rose"
+          class="chat-tab-close"
           title="Remove ${escapeAttr(entry.title)}"
+          aria-label="Remove ${escapeAttr(entry.title)}"
         >
-          ${icon("trash")}
+          ${icon("xmark", "h-3 w-3")}
         </button>
       </div>`;
   }
 
   if (chatEntries().length === 0) {
-    html = `<p class="px-2 py-1 text-slate-400">no pages yet</p>`;
+    html = `<p class="chat-tabs-empty">no pages yet</p>`;
   }
 
   chatEntriesEl.innerHTML = html;
   paintIcons(chatEntriesEl);
+  const open = $("#pageOpenBtn");
+  const page = currentChatPage();
+  open.classList.toggle("hidden", !page);
+  if (page) open.dataset.open = page.id;
+  else delete open.dataset.open;
 }
 
 function hostOf(url: string): string {
@@ -187,15 +165,12 @@ function hostOf(url: string): string {
   }
 }
 
-export function currentChatPage(): ChatEntry | null {
+function currentChatPage(): ChatEntry | null {
   return chatEntries().find((e) => e.id === state.chatPage) ?? null;
 }
 
 function persistView(): void {
-  try {
-    localStorage.setItem(VIEW_KEY, JSON.stringify({ view: state.sideView, page: state.chatPage }));
-  } catch {
-  }
+  saveJson(VIEW_KEY, { view: state.sideView, page: state.chatPage });
 }
 
 // LEGACY_PAGE_IDS maps the old hard-coded page ids to the seeded site
@@ -206,21 +181,15 @@ const LEGACY_PAGE_IDS: Record<string, string> = {
 };
 
 function restoreView(): void {
-  try {
-    const saved = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as {
-      view?: SideView;
-      page?: string;
-    } | null;
-    if (saved?.view === "chat") {
-      state.sideView = "chat";
+  const saved = loadJson(VIEW_KEY) as { view?: unknown; page?: unknown } | null | undefined;
+  if (saved?.view === "chat") {
+    state.sideView = "chat";
+  }
+  if (typeof saved?.page === "string") {
+    const page = LEGACY_PAGE_IDS[saved.page] ?? saved.page;
+    if (chatEntries().some((e) => e.id === page)) {
+      state.chatPage = page;
     }
-    if (typeof saved?.page === "string") {
-      const page = LEGACY_PAGE_IDS[saved.page] ?? saved.page;
-      if (chatEntries().some((e) => e.id === page)) {
-        state.chatPage = page;
-      }
-    }
-  } catch {
   }
 }
 
@@ -281,48 +250,28 @@ export async function refreshExternalVisibility(): Promise<void> {
   armPageDrop();
   try {
     await api.hideExternalPage();
-  } catch {
+  } catch (error) {
+    console.warn(`hide page failed: ${String(error)}`);
   }
 }
 
+// paintSideVisibility shows the floating session drawer in agent mode
+// only. Chat mode has no sidebar: its pages are tabs above the page.
 export function paintSideVisibility(): void {
   const agent = state.sideView === "agent";
-  workspaceWrapEl.classList.toggle("hidden", state.collapsed);
-  searchWrapEl.classList.toggle("hidden", state.collapsed || !agent);
-  sessionListEl.classList.toggle("hidden", state.collapsed || !agent);
-  chatListEl.classList.toggle("hidden", state.collapsed || agent);
-  statusWrapEl.classList.toggle("hidden", state.collapsed);
+  const open = agent && !state.collapsed;
+  sidebarEl.classList.toggle("hidden", !agent);
+  sidebarEl.classList.toggle("is-closed", !open);
+  sidebarEl.inert = !open;
+  agentTabEl.setAttribute("aria-expanded", String(open));
+  agentTabEl.title = !agent
+    ? "Agent: the coding harness"
+    : open
+      ? "Agent: hide the sessions"
+      : "Agent: show the sessions";
 }
 
-// In chat mode the embedded page is positioned once and never
-// resized afterwards, so the sidebar is forced open and its toggle
-// locked: any width change would move the native view mid-scroll.
-function lockSidebarForChat(): void {
-  if (state.collapsed) {
-    state.collapsed = false;
-    sidebarEl.classList.remove("w-0");
-    sidebarEl.classList.add("w-72");
-  }
-  const btn = $("#sidebarToggleBtn") as HTMLButtonElement | null;
-  if (btn) {
-    btn.disabled = true;
-    btn.classList.add("opacity-30");
-    btn.title = "Sidebar is fixed while a chat page is open";
-  }
-  paintSideVisibility();
-}
-
-// unlockSidebarForAgent restores the collapse toggle when leaving chat.
-function unlockSidebarForAgent(): void {
-  const btn = $("#sidebarToggleBtn") as HTMLButtonElement | null;
-  if (btn) {
-    btn.disabled = false;
-    btn.classList.remove("opacity-30");
-    btn.title = "Collapse the sidebar";
-  }
-}
-
-export function setSideView(view: SideView): void {
+function setSideView(view: SideView): void {
   state.sideView = view;
   persistView();
   paintSideTabs();
@@ -338,13 +287,9 @@ export function setSideView(view: SideView): void {
   headerTitleEl.textContent = agent ? "Agent Chat" : (currentChatPage()?.title ?? "Chat");
   pageReloadBtnEl.classList.toggle("hidden", agent || !hasBridge());
 
-  newSessionBtnLabelEl.textContent = agent ? "New Session" : "New Site";
-  $("#newSessionBtn").title = agent ? "Start a new session" : "Add another chat page";
   if (!agent) {
-    lockSidebarForChat();
     paintChatList();
   } else {
-    unlockSidebarForAgent();
     inputEl.focus();
   }
 
@@ -378,7 +323,7 @@ function defusePageDrop(): void {
   window.clearTimeout(dropTimer);
 }
 
-export function selectChatEntry(id: string): void {
+function selectChatEntry(id: string): void {
   const picked = chatEntries().find((e) => e.id === id);
   if (!picked) {
     return;
@@ -406,7 +351,7 @@ export function closeNewSite(): void {
   void refreshExternalVisibility();
 }
 
-export function addSite(): void {
+function addSite(): void {
   const name = siteNameEl.value.trim();
   let raw = siteUrlEl.value.trim();
 
@@ -436,9 +381,7 @@ export function addSite(): void {
   }
 
   const normalized = url.toString();
-  const taken = chatEntries().some(
-    (e) => e.title.toLowerCase() === name.toLowerCase() || e.url === normalized,
-  );
+  const taken = chatEntries().some((e) => e.title.toLowerCase() === name.toLowerCase() || e.url === normalized);
   if (taken) {
     toast("A page with that name or URL is already listed.", "error");
     return;
@@ -452,7 +395,7 @@ export function addSite(): void {
   toast(`Added ${name}`);
 }
 
-export function deleteSite(id: string): void {
+function deleteSite(id: string): void {
   const entry = chatEntries().find((e) => e.id === id);
   if (!entry) {
     return;
@@ -487,7 +430,7 @@ export function deleteSite(id: string): void {
 // trackExternalFlight re-syncs the native page rect once, on the next
 // frame. Layout changes are instant now (no sidebar animation), so a
 // 600ms/60fps IPC storm is pure waste: one move per settle is enough.
-export function trackExternalFlight(): void {
+function trackExternalFlight(): void {
   if (!hasBridge()) {
     return;
   }
@@ -505,14 +448,12 @@ export function trackExternalFlight(): void {
 }
 
 // reloadCurrentPage reloads the embedded chat page.
-export function reloadCurrentPage(): void {
+function reloadCurrentPage(): void {
   const page = currentChatPage();
   if (!page) {
     return;
   }
-  api.reloadExternalPage(page.id).catch((error) =>
-    toast(String(error), "error"),
-  );
+  api.reloadExternalPage(page.id).catch((error) => toast(String(error), "error"));
 }
 
 // initSites restores the side view and wires its controls.
@@ -520,7 +461,17 @@ export function initSites(): void {
   restoreSites();
   restoreView();
 
-  agentTabEl.addEventListener("click", () => setSideView("agent"));
+  // There is no separate sidebar button: Agent opens its drawer when
+  // switching in, and toggles it when already there.
+  agentTabEl.addEventListener("click", () => {
+    if (state.sideView === "agent") {
+      state.collapsed = !state.collapsed;
+      paintSideVisibility();
+      return;
+    }
+    state.collapsed = false;
+    setSideView("agent");
+  });
   chatTabEl.addEventListener("click", () => setSideView("chat"));
 
   chatEntriesEl.addEventListener("click", (event) => {
@@ -530,17 +481,17 @@ export function initSites(): void {
       selectChatEntry(pick.dataset.pick);
       return;
     }
-    const open = target.closest<HTMLElement>("[data-open]");
-    if (open?.dataset.open) {
-      const entry = chatEntries().find((e) => e.id === open.dataset.open);
-      if (entry) {
-        void api.openExternalPage(entry.url).catch((error) => toast(String(error), "error"));
-      }
-      return;
-    }
     const del = target.closest<HTMLElement>("[data-del]");
     if (del?.dataset.del) {
       deleteSite(del.dataset.del);
+    }
+  });
+
+  $("#chatAddBtn").addEventListener("click", openNewSite);
+  $("#pageOpenBtn").addEventListener("click", () => {
+    const page = currentChatPage();
+    if (page) {
+      void api.openExternalPage(page.url).catch((error) => toast(String(error), "error"));
     }
   });
 
@@ -573,8 +524,8 @@ export function initSites(): void {
   const nudgeExternal = (): void => {
     window.clearTimeout(externalMoveTimer);
     externalMoveTimer = window.setTimeout(() => {
-      // Deduped by lastSentRect: with the sidebar locked in chat
-      // mode this is a no-op unless the outer window moved.
+      // Deduped by lastSentRect: chat mode has no sidebar, so this is
+      // a no-op unless the outer window moved.
       trackExternalFlight();
     }, 120);
   };

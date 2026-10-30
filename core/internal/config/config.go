@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/prompt"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
@@ -164,6 +165,9 @@ type Store struct {
 }
 
 func NewStore(dataDir string, keys KeyStore) *Store {
+	if keys != nil {
+		keys = redactingKeys{keys}
+	}
 	return &Store{dataDir: dataDir, Keys: keys}
 }
 
@@ -518,30 +522,10 @@ func IsOpencodeEndpoint(apiURL string) bool {
 // 0700 dirs and 0600 files on unix.
 func AtomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if dir == "." || dir == "" {
-		dir = "."
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("io: %s: %s", dir, syserr.Str(err))
 	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("io: temp file in %s: %s", dir, syserr.Str(err))
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("io: %s: %s", path, syserr.Str(err))
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return fmt.Errorf("io: %s: %s", path, syserr.Str(err))
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("io: %s: %s", path, syserr.Str(err))
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := atomicfile.Write(path, data); err != nil {
 		return fmt.Errorf("io: %s: %s", path, syserr.Str(err))
 	}
 	return nil

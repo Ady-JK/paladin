@@ -359,3 +359,23 @@ func TestStdioBudgetGetAndSet(t *testing.T) {
 		t.Fatalf("negative budget accepted: %v", bad)
 	}
 }
+
+func TestStdioThinkingGetAndSet(t *testing.T) {
+	h, free, _ := setupLiveHost(t)
+	defer free()
+	set := h.call("thinkingSet", map[string]any{"provider": "mock", "model": "claude-sonnet-5", "level": "high"})["result"].(map[string]any)
+	if set["level"] != "high" || len(set["levels"].([]any)) == 0 {
+		t.Fatalf("thinkingSet %v", set)
+	}
+	got := h.call("thinkingGet", map[string]any{"provider": "mock", "model": "claude-sonnet-5"})["result"].(map[string]any)
+	if got["level"] != "high" || got["provider"] != "mock" {
+		t.Fatalf("thinkingGet %v", got)
+	}
+	if bad := h.callRaw("thinkingSet", map[string]any{"provider": "mock", "model": "claude-sonnet-5", "level": "ultra"}); bad["ok"] == true {
+		t.Fatalf("unsupported level accepted: %v", bad)
+	}
+	plain := h.call("thinkingGet", map[string]any{"provider": "mock", "model": "some-local-model"})["result"].(map[string]any)
+	if len(plain["levels"].([]any)) != 0 || plain["level"] != "" {
+		t.Fatalf("unknown model should have no levels: %v", plain)
+	}
+}

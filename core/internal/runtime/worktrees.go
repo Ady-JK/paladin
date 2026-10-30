@@ -51,7 +51,7 @@ func (r *AgentRuntime) OpenSessionWith(sessionID, cwd string, opts OpenOpts) (Se
 	if strings.TrimSpace(cwd) == "" {
 		return Session{}, fmt.Errorf("cwd is required to create a session")
 	}
-	entry, _, provider, err := r.resolveProvider("", "")
+	entry, provider, err := r.resolveProvider("", "")
 	if err != nil {
 		return Session{}, err
 	}

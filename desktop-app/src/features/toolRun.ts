@@ -8,7 +8,7 @@ import { createToolActivity, runLabel, toolLabel } from "./tools";
 
 // setGlyph swaps the icon slot only when its kind changes, so a live
 // spinner keeps rotating across updates instead of restarting.
-export function setGlyph(slot: HTMLElement, kind: string, html: () => string): void {
+function setGlyph(slot: HTMLElement, kind: string, html: () => string): void {
   if (slot.dataset.glyph === kind) {
     return;
   }

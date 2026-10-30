@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,8 @@ import (
 
 const MaxFileBytes = 10 << 20
 
-// Engine is the shared file-operation engine (stateless).
+// Engine is the shared write/edit engine. Its per-file locks and
+// per-session version table are process-wide (see filestate.go).
 type Engine struct{}
 
 func NewEngine() Engine { return Engine{} }
@@ -71,11 +73,47 @@ type EngineError struct {
 	Scope         string
 	Count         int
 	Occurrences   []Occurrence
+	// Reason qualifies a "conflict": ConflictUnread, ConflictStale or
+	// ConflictChanged.
+	Reason string
 }
 
 func (e *EngineError) Error() string { return e.Message }
 
-func (eng Engine) Write(workspace, requestedPath, content string, overwrite bool) (WriteResult, error) {
+func conflict(tool, reason, requested, resolved, scope string) *EngineError {
+	var why string
+	switch reason {
+	case ConflictUnread:
+		why = "already exists and this session has not read all of its current content"
+	case ConflictStale:
+		why = "changed since this session last read or wrote it (another session, a shell command or an external program)"
+	case ConflictTruncated:
+		return &EngineError{
+			Kind:   "conflict",
+			Reason: reason,
+			Message: fmt.Sprintf("%s: %s has lines longer than read shows (marked \"%s\"), so this session has not seen all of it and cannot replace it whole; nothing was written. "+
+				"Change it with the edit tool instead", tool, resolved, strings.TrimSpace(truncatedMarker)),
+			RequestedPath: requested,
+			ResolvedPath:  resolved,
+			Scope:         scope,
+		}
+	default:
+		why = "changed while this call was preparing its write"
+	}
+	return &EngineError{
+		Kind:          "conflict",
+		Reason:        reason,
+		Message:       fmt.Sprintf("%s: %s %s; nothing was written. Read the current file (every page), merge your changes, and retry", tool, resolved, why),
+		RequestedPath: requested,
+		ResolvedPath:  resolved,
+		Scope:         scope,
+	}
+}
+
+// Write creates or (with overwrite) replaces a file. Replacing requires
+// that the session has read the whole current version (see notePage) or
+// wrote it last; otherwise it returns a conflict and writes nothing.
+func (eng Engine) Write(session, workspace, requestedPath, content string, overwrite bool) (WriteResult, error) {
 	if strings.TrimSpace(requestedPath) == "" {
 		return WriteResult{}, &EngineError{Kind: "message", Message: "write: path is required"}
 	}
@@ -83,8 +121,13 @@ func (eng Engine) Write(workspace, requestedPath, content string, overwrite bool
 	if err != nil {
 		return WriteResult{}, &EngineError{Kind: "message", Message: err.Error()}
 	}
+	unlock := lockPath(resolved)
+	defer unlock()
+	perm := os.FileMode(0o644)
+	current := ""
 	info, statErr := os.Stat(resolved)
-	if statErr == nil {
+	existed := statErr == nil
+	if existed {
 		if info.IsDir() {
 			return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: path %q is a directory, not a file", requestedPath)}
 		}
@@ -97,33 +140,59 @@ func (eng Engine) Write(workspace, requestedPath, content string, overwrite bool
 				Scope:         scope,
 			}
 		}
+		if p := info.Mode().Perm(); p != 0 {
+			perm = p
+		}
+		if current, err = hashFile(resolved); err != nil {
+			return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: path %q cannot be read: %s", requestedPath, syserr.Str(err))}
+		}
+		seen, ok := fileVersions.seenHash(session, resolved)
+		if !ok {
+			if h, clipped := fileVersions.clippedHash(session, resolved); clipped && h == current {
+				return WriteResult{}, conflict("write", ConflictTruncated, requestedPath, resolved, scope)
+			}
+			return WriteResult{}, conflict("write", ConflictUnread, requestedPath, resolved, scope)
+		}
+		if seen != current {
+			return WriteResult{}, conflict("write", ConflictStale, requestedPath, resolved, scope)
+		}
 	} else if !os.IsNotExist(statErr) {
 		return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: path %q cannot be used: %s", requestedPath, syserr.Str(statErr))}
 	}
-	if parent := filepath.Dir(resolved); parent != "" {
-		if err := os.MkdirAll(parent, 0o755); err != nil {
-			return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: create parent directories: %s", syserr.Str(err))}
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: create parent directories: %s", syserr.Str(err))}
+	}
+	data := []byte(content)
+	err = atomicReplace(resolved, data, perm, func() error {
+		now, err := hashFile(resolved)
+		if err != nil || now != current {
+			return errChanged
 		}
+		return nil
+	})
+	if errors.Is(err, errChanged) {
+		fileVersions.forget(session, resolved)
+		return WriteResult{}, conflict("write", ConflictChanged, requestedPath, resolved, scope)
 	}
-	if err := atomicWriteFile(resolved, []byte(content), 0o644); err != nil {
-		return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: %s", syserr.Str(err))}
+	if err != nil {
+		return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: %s; the file was not changed", syserr.Str(err))}
 	}
-	overwritten := false
-	if _, err := os.Stat(resolved); err == nil {
-		overwritten = overwrite
-	}
+	fileVersions.record(session, resolved, hashBytes(data))
 	return WriteResult{
 		RequestedPath: requestedPath,
 		ResolvedPath:  resolved,
 		Scope:         scope,
-		Created:       !overwrite,
-		Overwritten:   overwritten,
+		Created:       !existed,
+		Overwritten:   existed,
 		Bytes:         len(content),
 		Lines:         CountLines(content),
 	}, nil
 }
 
-func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replaceAll bool) (EditResult, error) {
+// Edit replaces old text in a file. It needs no prior read (old_string
+// anchors it), but it re-checks the file just before committing and
+// returns a conflict if anything changed after its own read.
+func (eng Engine) Edit(session, workspace, requestedPath, oldText, newText string, replaceAll bool) (EditResult, error) {
 	if strings.TrimSpace(requestedPath) == "" {
 		return EditResult{}, &EngineError{Kind: "message", Message: "edit: path is required"}
 	}
@@ -137,12 +206,14 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 	if err != nil {
 		return EditResult{}, &EngineError{Kind: "message", Message: err.Error()}
 	}
+	unlock := lockPath(resolved)
+	defer unlock()
 	info, statErr := os.Stat(resolved)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
 			return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: path %q does not exist", requestedPath)}
 		}
-		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: path %q cannot be read: %v", requestedPath, statErr)}
+		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: path %q cannot be read: %s", requestedPath, syserr.Str(statErr))}
 	}
 	if info.IsDir() {
 		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: path %q is a directory, not a file", requestedPath)}
@@ -205,8 +276,25 @@ func (eng Engine) Edit(workspace, requestedPath, oldText, newText string, replac
 	if info.Mode().Perm() != 0 {
 		perm = info.Mode().Perm()
 	}
-	if err := atomicWriteMode(resolved, []byte(updated), perm); err != nil {
-		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: %s", syserr.Str(err))}
+	before := hashBytes(raw)
+	err = atomicReplace(resolved, []byte(updated), perm, func() error {
+		if now, err := hashFile(resolved); err != nil || now != before {
+			return errChanged
+		}
+		return nil
+	})
+	if errors.Is(err, errChanged) {
+		fileVersions.forget(session, resolved)
+		return EditResult{}, conflict("edit", ConflictChanged, requestedPath, resolved, scope)
+	}
+	if err != nil {
+		return EditResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("edit: %s; the file was not changed", syserr.Str(err))}
+	}
+	// The session knows the new content only if it knew the old.
+	if seen, ok := fileVersions.seenHash(session, resolved); ok && seen == before {
+		fileVersions.record(session, resolved, hashBytes([]byte(updated)))
+	} else {
+		fileVersions.forget(session, resolved)
 	}
 	shown := spanOccurrences(content, spans)
 	matches := make([]MatchSpan, 0, len(shown))
@@ -321,39 +409,4 @@ func hasNul(b []byte) bool {
 		}
 	}
 	return false
-}
-
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if dir == "" {
-		dir = "."
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	return nil
-}
-
-func atomicWriteMode(path string, data []byte, perm os.FileMode) error {
-	if atomicWriteFile(path, data, perm) == nil {
-		return nil
-	}
-	return os.WriteFile(path, data, perm)
 }

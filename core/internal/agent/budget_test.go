@@ -140,3 +140,60 @@ func TestNoBudgetMeansNoNotices(t *testing.T) {
 		t.Fatalf("no budget set: notices=%+v calls=%d", got, prov.calls)
 	}
 }
+
+func TestBudgetWarnsWhenTheLedgerWasRecovered(t *testing.T) {
+	prov := &mockProvider{streams: []streamScript{
+		costly(callRound("c1", "read", `{"path":"/nope"}`), 0.1),
+		costly(streamScript{chunks: []inference.Chunk{inference.TextChunk("ok")}}, 0.1),
+	}}
+	a, sess, tx, done := testAgent(t, prov)
+	defer close(done)
+	if err := os.WriteFile(sess.UsagePath(), []byte(`{"cost":0.2,"hasCost":true,"recoveredFrom":"usage.json.corrupt-1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.budget = func() float64 { return 5 }
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	got := budgetChunks(drainChunks(tx))
+	if len(got) != 1 || got[0].State != BudgetSpendIncomplete || got[0].Spent != 0.2 {
+		t.Fatalf("want one spendIncomplete warning, got %+v", got)
+	}
+}
+
+func TestBudgetCorruptLedgerIsNotZeroSpend(t *testing.T) {
+	prov := &mockProvider{streams: []streamScript{costly(streamScript{chunks: []inference.Chunk{inference.TextChunk("ok")}}, 0.1)}}
+	a, sess, tx, done := testAgent(t, prov)
+	defer close(done)
+	if err := os.WriteFile(sess.UsagePath(), []byte(`{"cost":9`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.budget = func() float64 { return 1 }
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	got := budgetChunks(drainChunks(tx))
+	if len(got) == 0 || got[0].State != BudgetSpendIncomplete {
+		t.Fatalf("a corrupt ledger must warn, got %+v", got)
+	}
+}
+
+func TestBudgetLowerBoundStillEnforcesTheLimit(t *testing.T) {
+	prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{inference.TextChunk("x")}}}}
+	a, sess, tx, done := testAgent(t, prov)
+	defer close(done)
+	if err := os.WriteFile(sess.UsagePath(), []byte(`{"cost":2,"hasCost":true,"recoveredFrom":"usage.json.corrupt-1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.budget = func() float64 { return 1 }
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 0 {
+		t.Fatalf("spend past the limit must still stop: %d calls", prov.calls)
+	}
+	got := budgetChunks(drainChunks(tx))
+	if len(got) != 1 || got[0].State != BudgetReached || !got[0].Ended {
+		t.Fatalf("budget notices %+v", got)
+	}
+}

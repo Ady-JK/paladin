@@ -24,14 +24,14 @@ function interval(): number {
   return typeof override === "number" && override > 0 ? override : DEFAULT_INTERVAL;
 }
 
-export function fmtCpu(pct: number): string {
+function fmtCpu(pct: number): string {
   if (!Number.isFinite(pct) || pct <= 0) {
     return "0%";
   }
   return pct < 10 ? `${Number(pct.toFixed(1))}%` : `${Math.round(pct)}%`;
 }
 
-export function fmtBytes(bytes: number): string {
+function fmtBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   if (mb >= 1024) {
     return `${Number((mb / 1024).toFixed(1))} GB`;
@@ -141,7 +141,7 @@ function paintFooter(): void {
 }
 
 // paintPane fills Settings > Resources when it is open.
-export function paintPane(): void {
+function paintPane(): void {
   const body = document.getElementById("resourcesBody");
   if (!body || body.closest(".hidden")) {
     return;
@@ -227,4 +227,3 @@ export function initResources(): void {
   });
   refreshResources();
 }
-

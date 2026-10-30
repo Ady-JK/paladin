@@ -48,6 +48,22 @@ func scopeOf(cleaned, workspace string) string {
 	return ScopeOutside
 }
 
+// Within reports whether path lies lexically under workspace (no
+// symlinks followed).
+func Within(path, workspace string) bool {
+	return workspace != "" && !escapes(path, workspace)
+}
+
+// RealPath is an absolute path with symlinks resolved as far as it
+// exists (a missing tail is kept), or the cleaned path if nothing does.
+func RealPath(path string) string {
+	cleaned := cleanPath(path)
+	if real, ok := resolveExisting(cleaned); ok {
+		return real
+	}
+	return cleaned
+}
+
 func cleanPath(path string) string {
 	abs := path
 	vol := filepath.VolumeName(abs)

@@ -30,15 +30,19 @@ function renderBrowser(list: FsList): void {
   workspaceBrowserList.innerHTML = folderRows(list);
   workspaceBrowser.classList.remove("hidden");
 
-  wireFolderList(workspaceBrowserList, (path) => void browseWorkspace(path), (path) => {
-    workspaceInputEl.value = path;
-    settingsWorkspaceErrorEl.textContent = "";
-    settingsWorkspaceErrorEl.classList.add("hidden");
-    workspaceBrowser.classList.add("hidden");
-  });
+  wireFolderList(
+    workspaceBrowserList,
+    (path) => void browseWorkspace(path),
+    (path) => {
+      workspaceInputEl.value = path;
+      settingsWorkspaceErrorEl.textContent = "";
+      settingsWorkspaceErrorEl.classList.add("hidden");
+      workspaceBrowser.classList.add("hidden");
+    },
+  );
 }
 
-export function folderRows(list: FsList): string {
+function folderRows(list: FsList): string {
   const rows: string[] = [];
 
   rows.push(`
@@ -82,11 +86,7 @@ export function folderRows(list: FsList): string {
   return rows.join("");
 }
 
-export function wireFolderList(
-  listEl: HTMLElement,
-  onBrowse: (path: string) => void,
-  onPick: (path: string) => void,
-): void {
+function wireFolderList(listEl: HTMLElement, onBrowse: (path: string) => void, onPick: (path: string) => void): void {
   paintIcons(listEl);
 
   listEl.querySelectorAll<HTMLButtonElement>("button[data-browse]").forEach((button) => {

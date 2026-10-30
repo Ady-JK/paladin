@@ -22,7 +22,7 @@ const ProtocolVersion = "2025-06-18"
 var supportedVersions = map[string]bool{"2025-06-18": true, "2025-03-26": true, "2024-11-05": true}
 
 // ClientVersion is reported to servers in clientInfo.
-var ClientVersion = "0.4"
+var ClientVersion = "0.5"
 
 // ErrClosed is the connection error after Close.
 var ErrClosed = errors.New("connection closed")
@@ -125,7 +125,6 @@ type transport interface {
 	close() error
 	pid() int
 	setProtocolVersion(v string)
-	sessionID() string
 }
 
 type response struct {
@@ -234,8 +233,6 @@ func (c *Client) Stderr() string { return c.stderr.String() }
 
 // PID is the stdio server's process id; 0 for HTTP.
 func (c *Client) PID() int { return c.tr.pid() }
-
-func (c *Client) sessionID() string { return c.tr.sessionID() }
 
 // Close ends the connection and stops a stdio server's process group.
 func (c *Client) Close() error {

@@ -3,13 +3,32 @@
 // screen keeps building its transcript and shows it intact on return.
 
 import { escapeHtml, renderMarkdown, renderText } from "../core/format";
-import type { Approval, BudgetNotice, HookNote, CompactionInfo, RetryInfo, SteerInfo, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
+import type {
+  Approval,
+  BudgetNotice,
+  HookNote,
+  CompactionInfo,
+  RetryInfo,
+  SteerInfo,
+  ToolInfo,
+  TurnEvent,
+  TurnInfo,
+} from "../core/types";
 import { setStatus } from "../ui/status";
-import { compactionText, createCompactionDivider, createRetryNotice, createTurn, followTail, retryText, setDividerLabel } from "./chatView";
+import {
+  compactionText,
+  createCompactionDivider,
+  createRetryNotice,
+  createTurn,
+  followTail,
+  retryText,
+  setDividerLabel,
+} from "./chatView";
 import { ToolRun } from "./toolRun";
 import { createApprovalCard, focusApproval, paintApproval } from "./approvals";
 import { formatUsd } from "./usage";
 import { icon } from "../icons";
+import { thinkingLabel } from "./thinking";
 
 export interface TurnViewHooks {
   // visible reports whether this turn's session is on screen.
@@ -39,6 +58,8 @@ export class TurnView {
   private paintQueued = false;
   private readonly approvals = new Map<string, HTMLElement>();
   private readonly approvalState = new Map<string, Approval>();
+  // think is the open thinking block; answer text or a tool closes it.
+  private think: { el: HTMLDetailsElement; text: string; started: number; queued: boolean } | null = null;
 
   constructor(private readonly hooks: TurnViewHooks) {
     const { wrapper, textEl } = createTurn("agent", "");
@@ -59,6 +80,12 @@ export class TurnView {
     switch (ev.event) {
       case "chat/delta":
         if (typeof ev.delta === "string") this.delta(ev.delta);
+        break;
+      case "chat/reasoning":
+        if (typeof ev.reasoning === "string") this.reasoning(ev.reasoning);
+        break;
+      case "chat/thinkingDropped":
+        if (ev.thinkingDropped) this.thinkingDropped(ev.thinkingDropped);
         break;
       case "chat/tool":
         if (ev.tool) this.tool(ev.tool);
@@ -132,6 +159,9 @@ export class TurnView {
 
   private delta(text: string): void {
     this.clearRetry();
+    if (text.trim()) {
+      this.endThinking();
+    }
     this.reply += text;
     this.segment += text;
     if (this.segment.trim()) {
@@ -159,6 +189,7 @@ export class TurnView {
 
   private tool(tool: ToolInfo): void {
     this.clearRetry();
+    this.endThinking();
     this.hooks.tool(tool);
     const owner = this.tools.get(tool.id);
     if (owner) {
@@ -183,6 +214,7 @@ export class TurnView {
   // end of the text so far) and later updates it in place.
   private approval(ap: Approval): void {
     this.clearRetry();
+    this.endThinking();
     this.approvalState.set(ap.id, ap);
     let card = this.approvals.get(ap.id);
     if (card) {
@@ -211,12 +243,55 @@ export class TurnView {
   // rows stream below it.
   private insertBlock(el: HTMLElement): void {
     this.clearRetry();
+    this.endThinking();
     this.flushSegment();
     this.run = null;
     this.container.insertBefore(el, this.segEl.nextSibling);
     this.segment = "";
     this.segEl = this.newSegment(el);
     this.tail();
+  }
+
+  // reasoning streams the model's thinking into an open block; the first
+  // piece after answer text or a tool starts a new one.
+  private reasoning(text: string): void {
+    if (!this.think) {
+      const el = createThinkingBlock("", true);
+      this.insertBlock(el);
+      this.think = { el, text: "", started: Date.now(), queued: false };
+    }
+    const think = this.think;
+    think.text += text;
+    if (!this.wrapper.isConnected) {
+      paintThinking(think.el, think.text);
+      return;
+    }
+    if (think.queued) return;
+    think.queued = true;
+    requestAnimationFrame(() => {
+      think.queued = false;
+      if (this.think === think) {
+        paintThinking(think.el, think.text);
+        this.tail();
+      }
+    });
+  }
+
+  // endThinking folds the open block away once the model moves on.
+  private endThinking(): void {
+    const think = this.think;
+    if (!think) return;
+    this.think = null;
+    settleThinking(think.el, think.text, Date.now() - think.started);
+  }
+
+  private thinkingDropped(level: string): void {
+    const el = document.createElement("div");
+    el.className = "chat-notice think-notice";
+    el.dataset.notice = "thinking";
+    el.setAttribute("role", "status");
+    el.textContent = `The provider rejected the "${thinkingLabel(level)}" thinking level, so this model runs with its default thinking. Pick another level to try again.`;
+    this.insertBlock(el);
   }
 
   // A steer is the user's own message joining the running turn.
@@ -286,6 +361,7 @@ export class TurnView {
   // caller can place an error row after it.
   finish(turn: TurnInfo): string | null {
     this.dropRetry();
+    this.endThinking();
     // A finished turn cannot still be waiting on the user.
     for (const [id, ap] of this.approvalState) {
       const card = this.approvals.get(id);
@@ -312,6 +388,39 @@ export class TurnView {
   }
 }
 
+// createThinkingBlock builds a "Thinking" disclosure: open while it
+// streams, folded once settled (history rows start settled).
+export function createThinkingBlock(text: string, streaming: boolean): HTMLDetailsElement {
+  const el = document.createElement("details");
+  el.className = "think-block";
+  el.innerHTML =
+    `<summary><span class="think-block-ico">${icon("zap-line", "h-3 w-3")}</span>` +
+    `<span class="think-title"></span><span class="think-time"></span>` +
+    `<span class="think-caret">${icon("chevron-right", "h-3 w-3")}</span></summary>` +
+    `<div class="think-body"></div>`;
+  if (streaming) {
+    el.open = true;
+    el.dataset.state = "streaming";
+    el.querySelector(".think-title")!.textContent = "Thinking";
+    paintThinking(el, text);
+  } else {
+    settleThinking(el, text, 0);
+  }
+  return el;
+}
+
+function paintThinking(el: HTMLElement, text: string): void {
+  el.querySelector(".think-body")!.textContent = text;
+}
+
+function settleThinking(el: HTMLDetailsElement, text: string, ms: number): void {
+  el.dataset.state = "done";
+  el.open = false;
+  el.querySelector(".think-title")!.textContent = "Thought";
+  const secs = Math.round(ms / 1000);
+  el.querySelector(".think-time")!.textContent = secs >= 1 ? `for ${secs}s` : "";
+  el.querySelector(".think-body")!.innerHTML = renderMarkdown(text);
+}
 
 const HOOK_VERB: Record<string, string> = {
   blocked: "blocked",
@@ -322,12 +431,15 @@ const HOOK_VERB: Record<string, string> = {
 };
 
 // budgetText words a chat/budget notice.
-export function budgetText(b: BudgetNotice): string {
+function budgetText(b: BudgetNotice): string {
   if (b.state === "unknownCost") {
-    return `The ${formatUsd(b.limit)} budget can't be enforced: this provider reports no cost.`;
+    return `The ${formatUsd(b.limit)} limit counts tracked cost only, and this provider reports none, so it isn't enforced; the agent keeps going.`;
+  }
+  if (b.state === "spendIncomplete") {
+    return `This session's usage record was damaged, so tracked spend is at least ${formatUsd(b.spent)} of ${formatUsd(b.limit)}; earlier calls may be missing. The limit is checked against that lower bound, so real spend may be higher.`;
   }
   if (b.ended) {
-    return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} spent, so this message was not sent to the model. Raise the budget to continue.`;
+    return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} tracked spend, so this message was not sent to the model. Raise the budget to continue.`;
   }
-  return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} spent. Tools are off; the agent is writing a summary of what's done and what's left.`;
+  return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} tracked spend. Tools are off; the agent is writing a summary of what's done and what's left.`;
 }

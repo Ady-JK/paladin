@@ -4,6 +4,7 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -28,7 +29,9 @@ func (WriteTool) Definition() ToolDefinition {
 			"absolute path; bare relative paths are rejected. " +
 			"Missing parent directories are created. " +
 			"When the file already exists the call fails unless overwrite is true, " +
-			"in which case the file is replaced wholesale. Writes outside the " +
+			"in which case the file is replaced wholesale; replacing requires that you read " +
+			"the whole current file first (every page) in this session, and fails with a conflict " +
+			"if it changed since, so re-read, merge and retry. Writes outside the " +
 			"workspace are allowed but reported as outside. Read the file first " +
 			"when replacing one, and prefer edit for small changes to an existing file.",
 		Parameters: map[string]any{
@@ -55,9 +58,14 @@ func (w *WriteTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	if strings.TrimSpace(args.Path) == "" {
 		return "", ArgsError("write: path is required")
 	}
-	res, err := w.engine.Write(ctx.Workspace, args.Path, args.Content, args.Overwrite)
+	res, err := w.engine.Write(ctx.SessionID, ctx.Workspace, args.Path, args.Content, args.Overwrite)
 	if err != nil {
-		if eeng, ok := err.(*EngineError); ok && eeng.Kind == "exists" {
+		var eeng *EngineError
+		isEngineErr := errors.As(err, &eeng)
+		if isEngineErr && eeng.Kind == "conflict" {
+			return "", conflictError(eeng)
+		}
+		if isEngineErr && eeng.Kind == "exists" {
 			msg := fmt.Sprintf("write: path %q already exists; pass overwrite to replace it", eeng.RequestedPath)
 			content, _ := jsonx.Marshal(map[string]any{
 				"error":          msg,
@@ -75,4 +83,18 @@ func (w *WriteTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		return "", ArgsError(fmt.Sprintf("write: encode the result: %v", merr))
 	}
 	return string(data), nil
+}
+
+// conflictError is the model-facing payload for a stale or racing
+// write: nothing was written and the file must be re-read.
+func conflictError(e *EngineError) *ToolError {
+	content, _ := jsonx.Marshal(map[string]any{
+		"error":          e.Message,
+		"conflict":       true,
+		"reason":         e.Reason,
+		"requested_path": e.RequestedPath,
+		"resolved_path":  e.ResolvedPath,
+		"scope":          e.Scope,
+	})
+	return WithContent(string(content), e.Message)
 }

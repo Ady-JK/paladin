@@ -1,0 +1,396 @@
+/* thinking.css: the composer's thinking chip, its slider card (a
+   blue-to-purple flowing track whose motion grows with the level) and
+   the "Thinking" blocks in a turn. --think-i is 0..1 along the slider. */
+
+.think-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.think-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.think-chip.hidden,
+.think-card.hidden {
+  display: none;
+}
+.think-chip:hover,
+.think-chip[aria-expanded="true"] {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .think-chip {
+  color: var(--color-slate-400);
+}
+.dark .think-chip:hover,
+.dark .think-chip[aria-expanded="true"] {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.think-chip:not([data-level="default"]) {
+  color: #7c3aed;
+}
+.dark .think-chip:not([data-level="default"]) {
+  color: #b79cff;
+}
+
+/* The card. */
+.think-card {
+  --think-i: 0;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 50;
+  width: 300px;
+  max-width: 92vw;
+  padding: 14px 16px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  color: var(--color-slate-700);
+  box-shadow: 0 18px 40px -12px rgb(15 23 42 / 0.25);
+  animation: think-pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.dark .think-card {
+  border-color: rgb(255 255 255 / 0.08);
+  background: #2a2a2e;
+  color: var(--color-slate-200);
+  box-shadow: 0 18px 40px -12px rgb(0 0 0 / 0.6);
+}
+@keyframes think-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+}
+
+.think-head {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: start;
+  gap: 4px;
+}
+.think-bolt,
+.think-reset {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  color: var(--color-slate-400);
+}
+.think-reset {
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    transform 300ms ease;
+}
+.think-reset:hover:not(:disabled) {
+  color: var(--color-slate-700);
+  background: var(--color-slate-100);
+  transform: rotate(-60deg);
+}
+.dark .think-reset:hover:not(:disabled) {
+  color: var(--color-slate-100);
+  background: rgb(255 255 255 / 0.08);
+}
+.think-reset:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.think-titles {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+}
+.think-level {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  background: linear-gradient(90deg, #5b6cf0, #a46bff, #c08cff, #5b6cf0);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: think-flow calc(9s - 6s * var(--think-i)) linear infinite;
+}
+.think-card[data-level="default"] .think-level {
+  background: none;
+  color: var(--color-slate-500);
+}
+.dark .think-card[data-level="default"] .think-level {
+  color: var(--color-slate-300);
+}
+.think-model {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 2px;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 14px;
+  color: var(--color-slate-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.think-model:hover {
+  color: var(--color-slate-800);
+  background: var(--color-slate-100);
+}
+.dark .think-model {
+  color: var(--color-slate-400);
+}
+.dark .think-model:hover {
+  color: var(--color-slate-100);
+  background: rgb(255 255 255 / 0.06);
+}
+
+/* The track: the input sits on top, transparent apart from its thumb. */
+.think-track {
+  position: relative;
+  height: 32px;
+  margin-top: 12px;
+  border-radius: 9999px;
+  background: var(--color-slate-100);
+  overflow: hidden;
+}
+.dark .think-track {
+  background: rgb(255 255 255 / 0.06);
+}
+.think-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  /* Reach the thumb's centre: a 28px thumb inset 2px each side. */
+  width: calc(30px + (100% - 32px) * var(--think-i));
+  border-radius: inherit;
+  overflow: hidden;
+  transition: width 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.think-flow {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    #3d4fd6 0%,
+    #6c5ce7 25%,
+    #b48cff 45%,
+    #d8b4fe 52%,
+    #8b5cf6 65%,
+    #4c3ab8 85%,
+    #3d4fd6 100%
+  );
+  background-size: 250% 100%;
+  animation: think-flow calc(8s - 5.5s * var(--think-i)) linear infinite;
+  filter: saturate(calc(0.75 + 0.5 * var(--think-i)));
+}
+@keyframes think-flow {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: -250% 50%;
+  }
+}
+.think-sparkles {
+  position: absolute;
+  inset: 0;
+  opacity: calc(0.25 + 0.75 * var(--think-i));
+}
+.think-sparkles span {
+  position: absolute;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 0 4px rgb(255 255 255 / 0.9);
+  animation:
+    think-twinkle 2.4s ease-in-out infinite,
+    think-drift calc(7s - 4s * var(--think-i)) linear infinite;
+}
+@keyframes think-twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes think-drift {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 40px -3px;
+  }
+}
+
+.think-track input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.think-track input[type="range"]:focus {
+  outline: none;
+}
+.think-track input[type="range"]::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+.think-track input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow:
+    0 1px 3px rgb(15 23 42 / 0.35),
+    0 0 0 calc(4px * var(--think-i)) rgb(180 140 255 / 0.25);
+  transition:
+    transform 150ms ease,
+    box-shadow 200ms ease;
+}
+.think-track input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(0.94);
+}
+.think-track input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 1px 3px rgb(15 23 42 / 0.35),
+    0 0 0 3px #a78bfa;
+}
+/* Keep the thumb inside the rounded ends. */
+.think-track input[type="range"] {
+  padding: 0 2px;
+  box-sizing: border-box;
+}
+
+.think-foot {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--color-slate-400);
+}
+.dark .think-foot {
+  color: var(--color-slate-500);
+}
+
+/* Thinking blocks inside a turn. */
+.think-block {
+  margin: 6px 0;
+  font-size: 13px;
+}
+.think-block > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 4px;
+  border-radius: 8px;
+  color: var(--color-slate-500);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.think-block > summary::-webkit-details-marker {
+  display: none;
+}
+.think-block > summary:hover {
+  color: var(--color-slate-700);
+  background: var(--color-slate-100);
+}
+.dark .think-block > summary {
+  color: var(--color-slate-400);
+}
+.dark .think-block > summary:hover {
+  color: var(--color-slate-200);
+  background: rgb(255 255 255 / 0.05);
+}
+.think-block-ico {
+  display: grid;
+  place-items: center;
+  color: #8b5cf6;
+}
+.think-time {
+  color: var(--color-slate-400);
+}
+.think-caret {
+  display: grid;
+  place-items: center;
+  transition: transform 150ms ease;
+}
+.think-block[open] .think-caret {
+  transform: rotate(90deg);
+}
+.think-block[data-state="streaming"] .think-title {
+  background: linear-gradient(90deg, #64748b 0%, #8b5cf6 40%, #c4b5fd 50%, #8b5cf6 60%, #64748b 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: think-flow 2.2s linear infinite;
+}
+.think-block[data-state="streaming"] .think-block-ico {
+  animation: think-pulse 1.4s ease-in-out infinite;
+}
+@keyframes think-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+.think-body {
+  margin: 4px 0 2px 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid rgb(139 92 246 / 0.35);
+  max-height: 22rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--color-slate-500);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.think-block[data-state="done"] .think-body {
+  white-space: normal;
+}
+.dark .think-body {
+  color: var(--color-slate-400);
+}
+.think-body > :first-child {
+  margin-top: 0;
+}
+.think-body > :last-child {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .think-card,
+  .think-level,
+  .think-flow,
+  .think-sparkles span,
+  .think-block[data-state="streaming"] .think-title,
+  .think-block[data-state="streaming"] .think-block-ico {
+    animation: none;
+  }
+  .think-fill {
+    transition: none;
+  }
+}

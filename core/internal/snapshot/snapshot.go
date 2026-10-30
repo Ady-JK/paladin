@@ -116,6 +116,8 @@ func (s *Store) Repo(cwd string) (*Repo, error) {
 		limit:    DefaultLimit,
 		maxFiles: DefaultMaxFiles,
 		binary:   map[string]stamp{},
+
+		exclusive: make(chan struct{}, 1),
 	}
 	s.repos[work] = r
 	return r, nil
@@ -194,6 +196,23 @@ type Repo struct {
 	// leave out (too large or binary), so "present but not captured"
 	// never reads as absent.
 	marker string
+	// exclusive serialises whole snapshot → mutation → snapshot
+	// brackets (and reverts) for this folder; see Exclusive.
+	exclusive chan struct{}
+}
+
+// Exclusive waits for sole use of the folder's mutation bracket. Store
+// shares one Repo per canonical folder, so this is a workspace-keyed
+// lock: brackets in one folder run one at a time while other folders
+// (including worktrees) proceed. It is in-process only; editors and
+// other programs are not held back.
+func (r *Repo) Exclusive(ctx context.Context) (release func(), err error) {
+	select {
+	case r.exclusive <- struct{}{}:
+		return func() { <-r.exclusive }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // markerBody is the placeholder content of files left out of snapshots.
@@ -237,7 +256,7 @@ func (r *Repo) git(ctx context.Context, stdin []byte, args ...string) ([]byte, e
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("snapshot: git %s: %v: %s", args[0], err, strings.TrimSpace(errb.String()))
+		return nil, fmt.Errorf("snapshot: git %s: %w: %s", args[0], err, strings.TrimSpace(errb.String()))
 	}
 	return out.Bytes(), nil
 }
@@ -435,8 +454,11 @@ func (r *Repo) safeParents(rel string) error {
 	for _, part := range parts[:len(parts)-1] {
 		dir = filepath.Join(dir, part)
 		st, err := os.Lstat(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // the restore creates the rest of the path
+		}
 		if err != nil {
-			return nil
+			return fmt.Errorf("snapshot: %s: %w", rel, err)
 		}
 		if st.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("snapshot: %s is behind a symlink", rel)

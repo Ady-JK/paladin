@@ -22,7 +22,11 @@ test("adding a global hooks.json lists its handlers and toggles one off", async 
   await global.locator("[data-hook-edit]").click();
   const area = global.locator(".hook-editor textarea");
   await expect(area).toHaveValue(/PreToolUse/);
-  await area.fill(JSON.stringify({ hooks: { PreToolUse: [{ matcher: "shell", hooks: [{ type: "command", command: "./guard.sh" }] }] } }));
+  await area.fill(
+    JSON.stringify({
+      hooks: { PreToolUse: [{ matcher: "shell", hooks: [{ type: "command", command: "./guard.sh" }] }] },
+    }),
+  );
   await global.locator("[data-hook-save]").click();
 
   const row = global.locator(".hook-handler");
@@ -54,9 +58,36 @@ test("a folder's Claude hooks stay off until trusted", async ({ page }) => {
     const cwd = "/home/tester/project";
     (window as any).__e2eHooks = {
       sources: [
-        { path: "/data/config/hooks.json", scope: "global", format: "paladin", exists: false, editable: true, trusted: true, text: "", handlers: [] },
-        { path: cwd + "/.paladin/hooks.json", scope: "folder", format: "paladin", exists: false, editable: true, trusted: false, text: "", handlers: [] },
-        { path: cwd + "/.codex/hooks.json", scope: "folder", format: "codex", exists: false, editable: false, trusted: false, text: "", handlers: [] },
+        {
+          path: "/data/config/hooks.json",
+          scope: "global",
+          format: "paladin",
+          exists: false,
+          editable: true,
+          trusted: true,
+          text: "",
+          handlers: [],
+        },
+        {
+          path: cwd + "/.paladin/hooks.json",
+          scope: "folder",
+          format: "paladin",
+          exists: false,
+          editable: true,
+          trusted: false,
+          text: "",
+          handlers: [],
+        },
+        {
+          path: cwd + "/.codex/hooks.json",
+          scope: "folder",
+          format: "codex",
+          exists: false,
+          editable: false,
+          trusted: false,
+          text: "",
+          handlers: [],
+        },
         {
           path: cwd + "/.claude/settings.json",
           scope: "folder",
@@ -96,7 +127,10 @@ test("a folder's Claude hooks stay off until trusted", async ({ page }) => {
 test("a turn shows a quiet row when a hook acts", async ({ page }) => {
   await page.addInitScript(() => {
     (window as any).__e2eChatEvents = [
-      { event: "chat/hook", hook: { event: "PreToolUse", command: "./guard.sh", outcome: "blocked", message: "no rm -rf here" } },
+      {
+        event: "chat/hook",
+        hook: { event: "PreToolUse", command: "./guard.sh", outcome: "blocked", message: "no rm -rf here" },
+      },
       { event: "chat/hook", hook: { event: "PostToolUse", command: "./lint.sh", outcome: "context" } },
       { event: "chat/delta", delta: "done" },
     ];

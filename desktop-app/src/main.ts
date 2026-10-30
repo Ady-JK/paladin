@@ -21,29 +21,14 @@ import { state } from "./core/state";
 import { setStatus } from "./ui/status";
 import { closeMenu } from "./ui/anim";
 import { initChat } from "./features/chat";
-import { initTodos } from "./features/todos";
+import { clearTodos, initTodos } from "./features/todos";
 import { renderGreeting } from "./features/chatView";
 import { initModelPicker, loadProviders } from "./features/models";
 import { syncPermChip } from "./features/permissions";
-import {
-  closeConfirm,
-  initSessions,
-  openSession,
-  refreshSessions,
-} from "./features/sessions";
-import {
-  closeNewSession,
-  initSessionDialog,
-  openNewSession,
-} from "./features/sessionDialog";
-import {
-  closeNewSite,
-  initSites,
-  openNewSite,
-  refreshExternalVisibility,
-} from "./features/sites";
+import { closeConfirm, initSessions, openSession, refreshSessions } from "./features/sessions";
+import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
+import { closeNewSite, initSites, openNewSite, refreshExternalVisibility } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
-import { clearTodos } from "./features/todos";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initMemory } from "./features/memory";
 import { initFilePicker, closeFilePicker } from "./features/filePicker";
@@ -58,6 +43,7 @@ import { bootLive, initLive, openPendingSession, syncComposer } from "./features
 import { syncMcp } from "./features/mcp";
 import { syncTools } from "./features/toolSwitches";
 import { syncBudget } from "./features/budget";
+import { initThinking, syncThinking } from "./features/thinking";
 
 async function connect(): Promise<void> {
   setStatus("connecting…", "busy");
@@ -82,6 +68,7 @@ async function connect(): Promise<void> {
     syncMcp();
     syncTools();
     void syncBudget();
+    void syncThinking();
     sessionLabelEl.textContent = "—";
     clearUsage();
     clearTodos();
@@ -120,6 +107,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSlash();
   initSkills();
   initModelPicker();
+  initThinking();
   initSites();
   initSessionDialog();
   initSettings(connect);

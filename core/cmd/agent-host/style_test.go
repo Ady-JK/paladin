@@ -23,7 +23,7 @@ var snakeAllowed = []string{
 	"internal/tools/",
 	"internal/inference/",
 	"internal/memory/memory.go",   // Op is the memory tool's input
-	"internal/agent/loop.go",      // parses the shell tool's receipt
+	"internal/agent/toolcalls.go", // parses the shell tool's receipt
 	"internal/session/session.go", // rebuilds shell tool arguments
 	"internal/hooks/input.go",     // hook stdin is the Claude/Codex contract
 }

@@ -4,8 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeCompleteFixture(t *testing.T) string {
@@ -314,5 +316,29 @@ func TestCompleteFuzzyMatching(t *testing.T) {
 	}
 	if len(got) == 0 || got[0].Path != "src/server/app.go" {
 		t.Fatalf("basename should lead, got %v", completePaths(got))
+	}
+}
+
+// Stopping early must not strand a producer goroutine: gitignore
+// matching does it for every ignored path in a walk.
+func TestParentSegmentsEarlyStopDoesNotLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+	for range 50 {
+		for parent := range parentSegments("a/b/c/d/e/f/g/h/i/file.go") {
+			if parent == "a/b/c/d/e/f/g/h/i" {
+				break
+			}
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if after := runtime.NumGoroutine(); after > before+5 {
+		t.Fatalf("goroutines grew from %d to %d", before, after)
+	}
+	var got []string
+	for parent := range parentSegments("a/b/c") {
+		got = append(got, parent)
+	}
+	if strings.Join(got, ",") != "a/b,a" {
+		t.Fatalf("parents = %v", got)
 	}
 }

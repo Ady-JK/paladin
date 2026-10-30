@@ -5,63 +5,20 @@
 // the row (or completes it when it needs arguments); Tab completes;
 // Esc dismisses.
 
-import * as api from "../core/api";
-import { inputEl, messagesEl, modelSelectBtn } from "../core/dom";
+import { inputEl } from "../core/dom";
 import { escapeHtml } from "../core/format";
-import { state } from "../core/state";
-import type { CommandEntry, SkillEntry } from "../core/types";
 import { icon, type IconName } from "../icons";
-import { toast } from "../ui/toast";
-import { addTurn, renderGreeting } from "./chatView";
-import { clearLanded } from "./live";
-import { setMode } from "./mode";
-import { newSession } from "./sessions";
-import { undoLast } from "./undo";
-import { forkSessionById, renameSessionById } from "./sessionActions";
-import { openSettings } from "./settings";
-import { attach as attachSkill, loadSkills, parseSkillLine, skillsSnapshot } from "./skills";
-import { openToolsMenu } from "./toolSwitches";
-import { openUsageDashboard } from "./usage";
-import { askSideQuestion } from "./btw";
-import { openBudgetMenu, parseBudget, setSessionBudget } from "./budget";
-
-type Args = "none" | "optional" | "required";
-
-export type SlashCommand = {
-  name: string;
-  label: string;
-  desc: string;
-  hint: string;
-  icon: IconName;
-  args: Args;
-  // chevron marks rows that open something (a picker, a pane).
-  chevron?: boolean;
-};
-
-export const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "new", label: "New chat", desc: "Start a fresh session", hint: "/new [first message]", icon: "sl-new", args: "optional" },
-  { name: "compact", label: "Compact", desc: "Summarize the conversation to free up context", hint: "/compact", icon: "sl-compact", args: "none" },
-  { name: "plan", label: "Plan mode", desc: "Read-only: explore, then propose a plan", hint: "/plan [task]", icon: "sl-plan", args: "optional" },
-  { name: "build", label: "Build mode", desc: "Let the agent edit files and run commands", hint: "/build", icon: "sl-build", args: "none" },
-  { name: "undo", label: "Undo", desc: "Revert the last message: its file changes and the reply", hint: "/undo", icon: "tl-undo", args: "none" },
-  { name: "fork", label: "Fork", desc: "Branch this conversation into a new session", hint: "/fork", icon: "sl-fork", args: "none" },
-  { name: "btw", label: "By the way", desc: "Ask a side question; the answer is not added to the chat", hint: "/btw <question>", icon: "comments", args: "required" },
-  { name: "rename", label: "Rename", desc: "Rename this session", hint: "/rename <title>", icon: "tl-pencil", args: "required" },
-  { name: "memories", label: "Memories", desc: "View and edit what Paladin remembers", hint: "/memories", icon: "sl-memory", args: "none", chevron: true },
-  { name: "skill", label: "Skill", desc: "Attach a skill to this turn", hint: "/skill <name> [message]", icon: "sl-skill", args: "required", chevron: true },
-  { name: "mcp", label: "MCP servers", desc: "Server status, tools and mcp.json", hint: "/mcp", icon: "sl-plug", args: "none", chevron: true },
-  { name: "tools", label: "Tools", desc: "Switch tools on or off for this session", hint: "/tools", icon: "tl-tools", args: "none", chevron: true },
-  { name: "models", label: "Model", desc: "Switch the provider and model", hint: "/models", icon: "sl-model", args: "none", chevron: true },
-  { name: "budget", label: "Budget", desc: "Set this session's spend limit", hint: "/budget [usd|off|default]", icon: "sl-budget", args: "optional" },
-  { name: "usage", label: "Usage", desc: "Tokens, cost and context for this session", hint: "/usage", icon: "sl-usage", args: "none", chevron: true },
-  { name: "settings", label: "Settings", desc: "Open settings", hint: "/settings", icon: "rl-gear", args: "none", chevron: true },
-  { name: "config", label: "Providers", desc: "Configure providers and API keys", hint: "/config", icon: "sl-sliders", args: "none", chevron: true },
-  { name: "clear", label: "Clear view", desc: "Clear the conversation view (history stays)", hint: "/clear", icon: "sl-clear", args: "none" },
-  { name: "help", label: "Help", desc: "List every command", hint: "/help", icon: "sl-help", args: "none" },
-];
-
-const PROMPT_LABELS: Record<string, string> = { review: "Code review", init: "Init AGENTS.md" };
-const PROMPT_ICONS: Record<string, IconName> = { review: "sl-review", init: "sl-init" };
+import { attach as attachSkill, loadSkills, skillsSnapshot } from "./skills";
+import {
+  type Args,
+  SLASH_COMMANDS,
+  PROMPT_ICONS,
+  cachedPrompts,
+  loadPrompts,
+  promptLabel,
+  promptArgs,
+  setComposer,
+} from "./slashCommands";
 
 type Kind = "command" | "prompt" | "skill";
 
@@ -76,54 +33,17 @@ type Item = {
   tag: string;
 };
 
-// AgentRoute is a slash line that still goes to the agent, with the
-// extra submit fields it needs.
-export type AgentRoute = {
-  message: string;
-  display: string;
-  command?: string;
-  compact?: boolean;
-  mode?: "build" | "plan";
-  skill?: string;
-};
-
 let popup: HTMLElement | null = null;
 let filtered: Item[] = [];
 let activeIdx = 0;
 let open = false;
 let debounce = 0;
-let prompts: CommandEntry[] | null = null;
-let promptsCwd = "";
 let runner: () => void = () => {};
 
 // setSlashRunner lets the composer run a completed slash line (chat.ts
 // owns send; importing it here would be a cycle).
 export function setSlashRunner(run: () => void): void {
   runner = run;
-}
-
-// loadPrompts fetches the prompt commands for the working folder once.
-export async function loadPrompts(force = false): Promise<CommandEntry[]> {
-  if (!force && prompts && promptsCwd === state.cwd) {
-    return prompts;
-  }
-  try {
-    prompts = await api.listCommands(state.cwd || null);
-    promptsCwd = state.cwd;
-  } catch {
-    prompts = prompts ?? [];
-  }
-  return prompts;
-}
-
-function promptLabel(name: string): string {
-  return PROMPT_LABELS[name] ?? name.replace(/[-_.]+/g, " ").replace(/^./, (c) => c.toUpperCase());
-}
-
-function promptArgs(c: CommandEntry): Args {
-  const hint = (c.argumentHint || "").trim();
-  if (!hint) return "optional";
-  return hint.startsWith("<") ? "required" : "optional";
 }
 
 function items(): Item[] {
@@ -138,7 +58,7 @@ function items(): Item[] {
     tag: c.hint,
   }));
   const local = new Set(out.map((i) => i.name));
-  for (const c of prompts ?? []) {
+  for (const c of cachedPrompts()) {
     if (local.has(c.name)) continue;
     out.push({
       kind: "prompt",
@@ -169,7 +89,7 @@ function items(): Item[] {
 // score ranks a row for the filter; -1 hides it. Name prefix beats a
 // label word prefix, which beats a substring, which beats a fuzzy
 // subsequence of the name.
-export function score(q: string, name: string, label: string): number {
+function score(q: string, name: string, label: string): number {
   if (!q) return 0;
   const n = name.toLowerCase();
   const l = label.toLowerCase();
@@ -238,7 +158,7 @@ function ensurePopup(): HTMLElement {
 
 // slashPrefix returns the command filter when the whole composer is
 // a `/` prefix with the caret at the end.
-export function slashPrefix(value: string, caret: number): string | null {
+function slashPrefix(value: string, caret: number): string | null {
   if (caret !== value.length || value.includes("\n")) {
     return null;
   }
@@ -308,14 +228,6 @@ function currentPrefix(): string | null {
   return slashPrefix(inputEl.value, inputEl.selectionStart ?? inputEl.value.length);
 }
 
-function setComposer(text: string): void {
-  inputEl.value = text;
-  inputEl.selectionStart = inputEl.value.length;
-  inputEl.selectionEnd = inputEl.value.length;
-  inputEl.dispatchEvent(new Event("input"));
-  inputEl.focus();
-}
-
 // complete writes the row into the composer for its arguments.
 function complete(it: Item): void {
   closeSlash();
@@ -340,16 +252,6 @@ function runActive(run: boolean): void {
   closeSlash();
   inputEl.value = `/${it.name}`;
   runner();
-}
-
-// acceptSlash completes the row into the composer.
-export function acceptSlash(idx: number): boolean {
-  if (!open || filtered.length === 0) {
-    return false;
-  }
-  activeIdx = idx;
-  runActive(false);
-  return true;
 }
 
 // handleSlashKey consumes popup navigation keys. Returns true when
@@ -401,210 +303,6 @@ export function handleSlashKey(event: KeyboardEvent): boolean {
     return true;
   }
   return false;
-}
-
-// slashHelp lists every command, prompt and skill.
-function slashHelp(): string {
-  const lines = ["Commands:", ...SLASH_COMMANDS.map((c) => `  ${c.hint} — ${c.desc}`)];
-  if (prompts?.length) {
-    lines.push("", "Prompts:", ...prompts.map((c) => `  /${c.name}${c.argumentHint ? ` ${c.argumentHint}` : ""} — ${c.description}`));
-  }
-  const skills = skillsSnapshot();
-  if (skills.length) {
-    lines.push("", "Skills (/skill <name> or /<name>):", ...skills.map((s: SkillEntry) => `  ${s.name} — ${s.description || s.source}`));
-  }
-  return lines.join("\n");
-}
-
-function needSession(what: string): boolean {
-  if (!state.sessionId) {
-    toast(`Open a session to ${what}`, "error");
-    return false;
-  }
-  return true;
-}
-
-async function forkCurrent(): Promise<void> {
-  if (!needSession("fork it")) return;
-  await forkSessionById(state.sessionId);
-}
-
-async function renameCurrent(title: string): Promise<void> {
-  if (!needSession("rename it")) return;
-  await renameSessionById(state.sessionId, title);
-}
-
-// routeSlash handles a `/` line. "local" means it ran here and must
-// not reach the agent; "none" means it is not a slash line; an object
-// is a turn for the agent with extra submit fields.
-export async function routeSlash(message: string): Promise<"local" | "none" | AgentRoute> {
-  const parsed = parseSlashLine(message);
-  if (!parsed) {
-    return "none";
-  }
-  const { trimmed, name, rest } = parsed;
-  const clear = () => {
-    inputEl.value = "";
-  };
-  switch (name) {
-    case "skill":
-      // chat.ts splits `/skill <name> [message]` and sends the name
-      // separately. A bare `/skill` names nothing: hint instead.
-      if (!parseSkillLine(message)) {
-        setComposer("/skill ");
-        toast("Usage: /skill <name> [message] — pick one from the list", "error");
-        return "local";
-      }
-      return "none";
-    case "new":
-      newSession();
-      inputEl.value = rest;
-      toast(rest ? "New session started" : "New session");
-      return "local";
-    case "compact":
-      if (!needSession("compact it")) return "local";
-      clear();
-      return { message: "", display: "/compact", compact: true };
-    case "plan":
-      setMode("plan");
-      clear();
-      if (!rest) {
-        toast("Plan mode — the agent stays read-only");
-        return "local";
-      }
-      return { message: rest, display: rest, mode: "plan" };
-    case "build":
-      setMode("build");
-      clear();
-      toast("Build mode");
-      return "local";
-    case "fork":
-      clear();
-      void forkCurrent();
-      return "local";
-    case "undo":
-      clear();
-      void undoLast();
-      return "local";
-    case "btw":
-      clear();
-      if (!rest) {
-        setComposer("/btw ");
-        toast("Usage: /btw <question>", "error");
-        return "local";
-      }
-      if (!needSession("ask a side question")) return "local";
-      void askSideQuestion(rest);
-      return "local";
-    case "rename":
-      clear();
-      if (!rest) {
-        setComposer("/rename ");
-        toast("Usage: /rename <title>", "error");
-        return "local";
-      }
-      void renameCurrent(rest);
-      return "local";
-    case "memories":
-    case "memory":
-      clear();
-      openSettings("memory");
-      return "local";
-    case "mcp":
-      clear();
-      openSettings("mcp");
-      return "local";
-    case "tools":
-      clear();
-      openToolsMenu();
-      return "local";
-    case "models":
-      clear();
-      modelSelectBtn.click();
-      return "local";
-    case "settings":
-      clear();
-      openSettings("workspace");
-      return "local";
-    case "config":
-      clear();
-      openSettings("providers");
-      return "local";
-    case "budget": {
-      clear();
-      if (!rest) {
-        openBudgetMenu();
-        return "local";
-      }
-      const v = parseBudget(rest);
-      if (v === undefined) {
-        setComposer("/budget ");
-        toast("Usage: /budget <usd> | off | default", "error");
-        return "local";
-      }
-      void setSessionBudget(v);
-      return "local";
-    }
-    case "usage":
-      clear();
-      void openUsageDashboard();
-      return "local";
-    case "clear":
-      clear();
-      messagesEl.innerHTML = "";
-      clearLanded(state.sessionId);
-      renderGreeting();
-      return "local";
-    case "help":
-      clear();
-      await loadPrompts();
-      addTurn("user", message.trim(), { revertable: false });
-      addTurn("agent", slashHelp());
-      return "local";
-  }
-  return routeSidecarCommand(name, rest, trimmed);
-}
-
-// parseSlashLine splits a `/name args` line. Arguments keep later
-// lines: `/review\nfocus on auth` passes both.
-function parseSlashLine(message: string): { trimmed: string; name: string; rest: string } | null {
-  const trimmed = message.trimStart();
-  if (!trimmed.startsWith("/")) {
-    return null;
-  }
-  const firstLine = trimmed.split("\n", 1)[0];
-  const space = firstLine.search(/\s/);
-  const name = (space < 0 ? firstLine : firstLine.slice(0, space)).slice(1).toLowerCase();
-  const rest = (space < 0 ? trimmed.slice(firstLine.length) : trimmed.slice(space)).trim();
-  return { trimmed, name, rest };
-}
-
-// routeSidecarCommand resolves a name that is not built in: a prompt
-// command or a skill from the sidecar. The prompt list refreshes once
-// before the name is called unknown.
-async function routeSidecarCommand(name: string, rest: string, trimmed: string): Promise<"local" | AgentRoute> {
-  let prompt = (await loadPrompts()).find((c) => c.name.toLowerCase() === name);
-  if (!prompt) {
-    prompt = (await loadPrompts(true)).find((c) => c.name.toLowerCase() === name);
-  }
-  if (prompt) {
-    if (promptArgs(prompt) === "required" && !rest) {
-      setComposer(`/${prompt.name} `);
-      toast(`Usage: /${prompt.name} ${prompt.argumentHint}`, "error");
-      return "local";
-    }
-    inputEl.value = "";
-    const route: AgentRoute = { message: rest, display: trimmed, command: prompt.name };
-    if (state.mode === "plan") route.mode = "plan";
-    return route;
-  }
-  const skill = (await loadSkills()).find((s) => s.name.toLowerCase() === name);
-  if (skill) {
-    inputEl.value = "";
-    return { message: rest, display: rest || `/skill ${skill.name}`, skill: skill.name };
-  }
-  toast(`Unknown command /${name} — try /help`, "error");
-  return "local";
 }
 
 function onInput(): void {

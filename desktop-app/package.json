@@ -1,6 +1,6 @@
 {
   "name": "paladin-desktop",
-  "version": "0.5.0",
+  "version": "0.5.5",
   "private": true,
   "description": "Paladin desktop (Electron + agent-host sidecar)",
   "author": "paladin",
@@ -14,7 +14,9 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "dist": "electron-builder -c electron-builder.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
+    "lint": "eslint . && knip && prettier --check .",
+    "fmt": "prettier --write .",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -22,14 +24,20 @@
     "@fontsource/jetbrains-mono": "^5.3.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.7.0",
     "concurrently": "^9.0.0",
     "electron": "^45.0.0",
     "electron-builder": "^25.1.8",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "knip": "^6.43.0",
+    "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.6.0",
+    "typescript-eslint": "^8.72.0",
     "vite": "8.3.4",
     "wait-on": "^7.2.0"
   }

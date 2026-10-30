@@ -100,9 +100,9 @@ func opencodeProtocol(model string) string {
 	}
 }
 
-// CompleteTools dispatches to the protocol OpenCode exposes for this
+// completeVia dispatches to the protocol OpenCode exposes for this
 // model. Non-OpenCode providers always use chat completions.
-func (p *OpenAIProvider) CompleteTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
+func (p *OpenAIProvider) completeVia(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	switch p.protocol {
 	case protocolResponses:
 		return p.completeResponses(ctx, system, messages, tools, sessionID)
@@ -115,8 +115,8 @@ func (p *OpenAIProvider) CompleteTools(ctx context.Context, system string, messa
 	}
 }
 
-// StreamTools is the streaming counterpart of CompleteTools.
-func (p *OpenAIProvider) StreamTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
+// streamVia is the streaming counterpart of completeVia.
+func (p *OpenAIProvider) streamVia(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
 	switch p.protocol {
 	case protocolResponses:
 		return p.streamResponses(ctx, system, messages, tools, sessionID, tx, done)

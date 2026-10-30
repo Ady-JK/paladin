@@ -1,3 +1,4 @@
+import { showSidebar } from "./drawer";
 import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -29,7 +30,7 @@ test("composer picker stays open while toggling and picking", async ({ page }) =
   await expect(menu).toBeVisible();
   await expect(page.locator("#modelSelectLabel")).toHaveText("local/llama3.2");
 
-  await page.click("#sidebar h1");
+  await page.click("#headerTitle");
   await expect(menu).toBeHidden();
 });
 
@@ -53,9 +54,7 @@ test("the picked model survives a catalog refresh", async ({ page }) => {
   await page.click("#settingsBtn");
   await page.click("#settingsNavProviders");
   await page.locator('[data-refresh="Opencode Go"]').click();
-  await expect(page.locator("#modelSelectLabel")).toHaveText(
-    "Opencode Go/claude-fable-20990101",
-  );
+  await expect(page.locator("#modelSelectLabel")).toHaveText("Opencode Go/claude-fable-20990101");
 });
 
 test("picker groups the ~ labs and shows no tilde", async ({ page }) => {
@@ -90,6 +89,7 @@ test("dropdowns filter the tree and clear shows everything", async ({ page }) =>
 });
 
 test("new session is a single folder step that starts with the current model", async ({ page }) => {
+  await showSidebar(page);
   await page.click("#newSessionBtn");
   const dialog = page.locator("#sessionModal");
   await expect(dialog).toBeVisible();
@@ -108,7 +108,7 @@ test("new session is a single folder step that starts with the current model", a
   // The Hidden checkbox reveals them and remembers the choice.
   await page.locator("#newSessionShowHidden").check();
   await expect(page.locator("#newSessionList")).toContainText(".hidden-dir");
-  await expect(await page.evaluate(() => window.localStorage.getItem("paladin.showHidden"))).toBe("1");
+  expect(await page.evaluate(() => window.localStorage.getItem("paladin.showHidden"))).toBe("1");
 
   // Search filters the current folder.
   await page.fill("#newSessionFolderSearch", "hidden");

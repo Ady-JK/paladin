@@ -1,0 +1,49 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+  settings:
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF1001"]
+    errcheck:
+      # Best-effort cleanup on the way out has nowhere useful to report to.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*os.Process).Kill
+        - os.Remove
+        - os.RemoveAll
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+        - singleCaseSwitch
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [errcheck, unparam, gocritic, errorlint]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

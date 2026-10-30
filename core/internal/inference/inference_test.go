@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestStreamAssemblesFragmentedToolCalls(t *testing.T) {
 
 func TestMapsHTTPErrorsWithoutLeakingKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(401)
+		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, "bad key")
 	}))
 	defer server.Close()
@@ -324,7 +325,7 @@ func TestCompleteToolsErrorPaths(t *testing.T) {
 func TestStreamErrorPaths(t *testing.T) {
 	// HTTP error on stream.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "broken")
 	}))
 	defer srv.Close()
@@ -391,7 +392,7 @@ func TestStreamMultipleToolCallsOrdered(t *testing.T) {
 
 func TestListModelsErrorPaths(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(403)
+		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, "denied")
 	}))
 	defer srv.Close()
@@ -493,7 +494,7 @@ func TestMapErrorShapes(t *testing.T) {
 }
 
 func TestProviderTemplateRegistry(t *testing.T) {
-	types := ProviderTemplates()
+	types := registeredTemplates()
 	want := map[config.ApiType]bool{
 		config.ApiTypeOpenai: false, config.ApiTypeAnthropic: false, config.ApiTypeGoogle: false,
 	}
@@ -516,10 +517,10 @@ func TestProviderTemplateRegistry(t *testing.T) {
 	}
 
 	// Invalid templates are ignored instead of creating dead entries.
-	before := len(ProviderTemplates())
+	before := len(registeredTemplates())
 	RegisterProviderTemplate(ProviderTemplate{})
 	RegisterProviderTemplate(ProviderTemplate{ApiType: "no-factory"})
-	if got := len(ProviderTemplates()); got != before {
+	if got := len(registeredTemplates()); got != before {
 		t.Fatalf("invalid template registered: %d -> %d", before, got)
 	}
 
@@ -559,4 +560,16 @@ func TestProviderTemplateRegistry(t *testing.T) {
 	if _, err := BuildProvider("unknown-dialect", "p", "m", "https://x/v1", "sk-real"); err == nil || !strings.Contains(err.Error(), "unknown api type unknown-dialect") {
 		t.Fatalf("got %v", err)
 	}
+}
+
+// registeredTemplates returns the registered dialects in sorted order.
+func registeredTemplates() []config.ApiType {
+	providerMu.RLock()
+	defer providerMu.RUnlock()
+	out := make([]config.ApiType, 0, len(providerTemplates))
+	for apiType := range providerTemplates {
+		out = append(out, apiType)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }

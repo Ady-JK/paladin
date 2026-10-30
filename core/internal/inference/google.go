@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -154,7 +153,7 @@ func (p *OpenAIProvider) completeGoogle(ctx context.Context, system string, mess
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: google: %v", p.name, err))
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := readBody(resp.Body, maxResponseBody)
 	if err != nil {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: google: %v", p.name, err))
 	}
@@ -313,8 +312,7 @@ func (p *OpenAIProvider) streamGoogle(ctx context.Context, system string, messag
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(resp.Body)
-		return statusErrorFrom(p.name, "google", resp, string(data))
+		return statusErrorFrom(p.name, "google", resp, readErrorBody(resp.Body))
 	}
 
 	send := func(c Chunk) error {

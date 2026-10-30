@@ -7,15 +7,16 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
 	"sort"
 	"strings"
 
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
-
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/redact"
+	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
 // ToolCtx is per-turn tool context.
@@ -280,11 +281,12 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 	}()
 	content, err := tool.Call(args, ctxWithCall(ctx, call.ID))
 	if err != nil {
-		if terr, ok := err.(*ToolError); ok {
+		if terr := (*ToolError)(nil); errors.As(err, &terr) {
 			result.Content = terr.ResultContent()
 		} else {
 			result.Content = string(jsonx.MustMarshal(map[string]string{"error": err.Error()}))
 		}
+		result.Content = redact.String(result.Content)
 		result.IsError = true
 		return result
 	}

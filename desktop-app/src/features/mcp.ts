@@ -3,7 +3,7 @@
 // flags failed or untrusted servers, and live mcp/status updates.
 
 import * as api from "../core/api";
-import { mcpBodyEl, modelSelectBtn, settingsNavMcpEl, settingsPaneMcpEl } from "../core/dom";
+import { mcpBodyEl, modelSelectBtn, settingsNavMcpEl } from "../core/dom";
 import { escapeHtml, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { MCPNamedServer, MCPOverview, MCPScope, MCPServerStatus, MCPState } from "../core/types";
@@ -23,7 +23,14 @@ const STATE_LABEL: Record<MCPState, string> = {
 type Editor = { scope: MCPScope; path: string; text: string; error: string; saving: boolean };
 // Paste is the "Add server" box: pasted text, then an editable preview
 // of what mcpParse made of it.
-type Paste = { text: string; servers: MCPNamedServer[] | null; scope: MCPScope; error: string; exists: boolean; busy: boolean };
+type Paste = {
+  text: string;
+  servers: MCPNamedServer[] | null;
+  scope: MCPScope;
+  error: string;
+  exists: boolean;
+  busy: boolean;
+};
 
 let overview: MCPOverview | null = null;
 let loadedCwd = "";
@@ -131,7 +138,9 @@ function pasteHtml(p: Paste): string {
         `<li class="mcp-preview" data-index="${i}">` +
         `<div class="mcp-preview-head"><input data-field="name" value="${escapeHtml(srv.name)}" aria-label="Server name" spellcheck="false" autocomplete="off" />` +
         `<span class="mcp-badge">${srv.config.url ? "http" : "stdio"}</span>` +
-        (p.servers!.length > 1 ? `<button type="button" class="mcp-icon-btn" data-mcp-drop title="Leave out" aria-label="Leave out ${escapeHtml(srv.name)}">${icon("xmark", "h-3 w-3")}</button>` : "") +
+        (p.servers!.length > 1
+          ? `<button type="button" class="mcp-icon-btn" data-mcp-drop title="Leave out" aria-label="Leave out ${escapeHtml(srv.name)}">${icon("xmark", "h-3 w-3")}</button>`
+          : "") +
         `</div>` +
         `<code class="mcp-preview-cmd">${escapeHtml(commandLine(srv.config))}</code>` +
         env +
@@ -139,7 +148,9 @@ function pasteHtml(p: Paste): string {
       );
     })
     .join("");
-  const folderOpt = loadedCwd ? `<option value="folder"${p.scope === "folder" ? " selected" : ""}>This folder (${escapeHtml(shortPath(loadedCwd))})</option>` : "";
+  const folderOpt = loadedCwd
+    ? `<option value="folder"${p.scope === "folder" ? " selected" : ""}>This folder (${escapeHtml(shortPath(loadedCwd))})</option>`
+    : "";
   return (
     `<div class="mcp-paste mcp-editor">` +
     `<div class="mcp-paste-title">${icon("sl-plug", "h-3.5 w-3.5")}Add ${p.servers.length} MCP ${p.servers.length === 1 ? "server" : "servers"}</div>` +
@@ -157,7 +168,11 @@ function toolChips(s: MCPServerStatus): string {
   if (!s.tools.length) return "";
   const chips = s.tools
     .map((t) => {
-      const mark = t.destructive ? "destructive" : t.readOnly ? "read-only" : "asks first";
+      const mark = t.destructive
+        ? "destructive, always asks"
+        : t.readOnly
+          ? "server says read-only; still asks"
+          : "asks first";
       const title = `${t.exposed}${t.description ? ` — ${t.description}` : ""} (${mark})`;
       return `<span class="mcp-tool" data-ro="${t.readOnly}" data-destructive="${t.destructive}" title="${escapeHtml(title)}">${escapeHtml(t.name)}</span>`;
     })
@@ -219,7 +234,7 @@ function editorHtml(e: Editor): string {
 
 function section(scope: MCPScope, o: MCPOverview): string {
   const servers = o.servers.filter((s) => s.scope === scope);
-  const path = scope === "global" ? o.globalPath : o.folderPath ?? "";
+  const path = scope === "global" ? o.globalPath : (o.folderPath ?? "");
   const title =
     scope === "global"
       ? `<div class="mem-title">Everywhere</div><div class="mem-blurb">Servers from <code>${escapeHtml(shortPath(path))}</code>, available in every folder.</div>`
@@ -230,7 +245,9 @@ function section(scope: MCPScope, o: MCPOverview): string {
       ? `<button type="button" class="mcp-trusted" data-mcp-revoke title="Stop trusting this folder's mcp.json">${icon("sl-shield-check", "h-3.5 w-3.5")}Trusted</button>`
       : "";
   const edit = `<button type="button" class="mem-refresh" data-mcp-edit="${scope}">${icon("tl-pencil", "h-3.5 w-3.5")}${scope === "folder" && !o.hasFolderConfig ? "Add" : "Edit"} mcp.json</button>`;
-  const err = o.errors?.[scope] ? `<div class="mcp-config-error">${icon("sl-shield-off", "h-3.5 w-3.5")}<span>${escapeHtml(o.errors[scope]!)}</span></div>` : "";
+  const err = o.errors?.[scope]
+    ? `<div class="mcp-config-error">${icon("sl-shield-off", "h-3.5 w-3.5")}<span>${escapeHtml(o.errors[scope])}</span></div>`
+    : "";
   const body = editor?.scope === scope ? editorHtml(editor) : "";
   const list = servers.length
     ? `<ul class="mcp-list">${servers.map(serverCard).join("")}</ul>`
@@ -267,7 +284,11 @@ function paintPane(): void {
   const focused = !!area && document.activeElement === area;
   const sel = area ? [area.selectionStart, area.selectionEnd, area.scrollTop] : null;
   const pasteFocus = focusKey();
-  const opened = new Set(Array.from(mcpBodyEl.querySelectorAll<HTMLElement>(".mcp-server")).filter((el) => el.querySelector<HTMLDetailsElement>(".mcp-log")?.open).map((el) => `${el.dataset.scope}:${el.dataset.mcpServer}`));
+  const opened = new Set(
+    Array.from(mcpBodyEl.querySelectorAll<HTMLElement>(".mcp-server"))
+      .filter((el) => el.querySelector<HTMLDetailsElement>(".mcp-log")?.open)
+      .map((el) => `${el.dataset.scope}:${el.dataset.mcpServer}`),
+  );
   mcpBodyEl.innerHTML =
     `<div class="mem-intro"><span>Model Context Protocol servers add tools the agent can call. Read-only tools run freely; others ask first.</span>` +
     `<span class="mcp-head-actions"><button type="button" class="mem-refresh" data-mcp-paste>${icon("plus", "h-3.5 w-3.5")}Add server</button>` +
@@ -277,7 +298,8 @@ function paintPane(): void {
     section("global", overview) +
     (loadedCwd ? section("folder", overview) : "");
   mcpBodyEl.querySelectorAll<HTMLElement>(".mcp-server").forEach((el) => {
-    if (opened.has(`${el.dataset.scope}:${el.dataset.mcpServer}`)) el.querySelector(".mcp-log")?.setAttribute("open", "");
+    if (opened.has(`${el.dataset.scope}:${el.dataset.mcpServer}`))
+      el.querySelector(".mcp-log")?.setAttribute("open", "");
   });
   if (pasteFocus) restoreFocus(pasteFocus);
   const next = mcpBodyEl.querySelector<HTMLTextAreaElement>(".mcp-editor:not(.mcp-paste) textarea");
@@ -586,9 +608,4 @@ export function initMcp(open: () => void): void {
   });
   ensureChip();
   void loadMcp();
-}
-
-// mcpPaneVisible reports whether Settings → MCP is on screen.
-export function mcpPaneVisible(): boolean {
-  return !settingsPaneMcpEl.classList.contains("hidden");
 }

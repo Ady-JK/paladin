@@ -44,10 +44,7 @@ function ensurePopup(): HTMLElement {
 
 // mentionTokenAt finds the `@token` under the caret: an `@` preceded
 // by start/whitespace, running to the caret with no spaces.
-export function mentionTokenAt(
-  value: string,
-  caret: number,
-): { start: number; query: string } | null {
+function mentionTokenAt(value: string, caret: number): { start: number; query: string } | null {
   const before = value.slice(0, caret);
   const m = /(?:^|\s)@([^\s@]*)$/.exec(before);
   if (!m) {
@@ -78,9 +75,7 @@ function paintMention(): void {
           ? `<span class="flex-shrink-0 font-mono text-[10px] text-slate-400">out</span>`
           : "";
       return `<button data-idx="${i}" class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-xs ${
-        i === activeIdx
-          ? "bg-accent-600/10 text-slate-900 dark:text-slate-100"
-          : "text-slate-600 dark:text-slate-300"
+        i === activeIdx ? "bg-accent-600/10 text-slate-900 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"
       }"><span class="min-w-0 flex-1 truncate">${escapeHtml(entry.display)}<span class="ml-1.5 text-slate-400">${escapeHtml(entry.path)}</span></span>${badge}</button>`;
     })
     .join("");
@@ -107,7 +102,7 @@ function scheduleRefresh(query: string): void {
 }
 
 // acceptMention swaps the `@token` for the row's OS-specific path.
-export function acceptMention(idx: number): boolean {
+function acceptMention(idx: number): boolean {
   if (!open || items.length === 0) {
     return false;
   }
@@ -180,7 +175,7 @@ function onInput(): void {
 
 // normMentionPath compares chat paths loosely: separators unified,
 // one trailing slash ignored.
-export function normMentionPath(p: string): string {
+function normMentionPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
@@ -212,9 +207,7 @@ export async function expandMentions(text: string): Promise<string> {
     if (!hit) {
       continue;
     }
-    out = out
-      .split(`@${token}`)
-      .join(hit.resolvedPath);
+    out = out.split(`@${token}`).join(hit.resolvedPath);
   }
   return out;
 }

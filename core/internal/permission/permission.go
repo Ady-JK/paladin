@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
+	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 // Preset is a session's baseline permission level.
@@ -40,14 +41,16 @@ const (
 	ToolShell    = "shell"
 	ToolWrite    = "write"
 	ToolMCP      = "mcp"
+	ToolRead     = "read"
 	ActionAllow  = "allow"
 	ActionDeny   = "deny"
 	matchAnyRule = "*"
 )
 
 // Rule allows or denies shell commands by word prefix ("npm test"),
-// writes by directory ("/etc") or MCP tools by "server" / "server/*" /
-// "server/tool". "*" matches everything of that tool.
+// writes or outside-workspace reads by directory ("/etc") or MCP tools
+// by "server" / "server/*" / "server/tool". "*" matches everything of
+// that tool. An allow-write rule also allows reading there.
 type Rule struct {
 	Tool    string `json:"tool"`
 	Pattern string `json:"pattern"`
@@ -56,9 +59,9 @@ type Rule struct {
 
 func (r Rule) validate() error {
 	switch r.Tool {
-	case ToolShell, ToolWrite, ToolMCP:
+	case ToolShell, ToolWrite, ToolMCP, ToolRead:
 	default:
-		return fmt.Errorf("rule tool must be %q, %q or %q, got %q", ToolShell, ToolWrite, ToolMCP, r.Tool)
+		return fmt.Errorf("rule tool must be %q, %q, %q or %q, got %q", ToolShell, ToolWrite, ToolRead, ToolMCP, r.Tool)
 	}
 	if r.Action != ActionAllow && r.Action != ActionDeny {
 		return fmt.Errorf("rule action must be %q or %q, got %q", ActionAllow, ActionDeny, r.Action)
@@ -67,8 +70,8 @@ func (r Rule) validate() error {
 	if p == "" {
 		return fmt.Errorf("rule pattern is required")
 	}
-	if r.Tool == ToolWrite && p != matchAnyRule && !filepath.IsAbs(p) {
-		return fmt.Errorf("write rule pattern must be an absolute directory, got %q", p)
+	if (r.Tool == ToolWrite || r.Tool == ToolRead) && p != matchAnyRule && !filepath.IsAbs(p) {
+		return fmt.Errorf("%s rule pattern must be an absolute directory, got %q", r.Tool, p)
 	}
 	if r.Tool == ToolMCP && p != matchAnyRule {
 		server, tool, hasTool := strings.Cut(p, "/")
@@ -141,13 +144,84 @@ func Decide(p Preset, req Request, rules []Rule) Decision {
 		return decideShell(p, req, rules)
 	case KindMCP:
 		return decideMCP(p, req, rules)
+	case KindRead:
+		return decideRead(req, rules)
 	}
 	return Decision{Verdict: Allow}
 }
 
-// decideMCP: allow rules and the server's readOnly hint run the call;
-// destructive tools always ask once; anything else asks and can be
-// remembered per tool.
+// decideRead: a read outside the workspace runs under a read or write
+// allow rule for its real (symlink-resolved) path, else asks with a
+// grant for its folder.
+func decideRead(req Request, rules []Rule) Decision {
+	if r := allowingRead(req.readTarget(), rules); r != nil {
+		return Decision{Verdict: Allow, Rule: r}
+	}
+	return Decision{Verdict: Ask, Reasons: []string{"outside the workspace"},
+		Remember: []Rule{readGrant(req.readTarget())}, Choices: writeChoices()}
+}
+
+// readGrant is the narrowest useful read rule for t: its folder, or the
+// file itself when that folder is too broad to hand out.
+// The path is kept as written unless it is a workspace symlink.
+func readGrant(t readTarget) Rule {
+	path := t.path
+	if t.linked {
+		path = t.real
+	}
+	return Rule{Tool: ToolRead, Pattern: narrowFolder(path), Action: ActionAllow}
+}
+
+func (req Request) readTarget() readTarget {
+	return readTarget{path: req.Path, real: req.Real, linked: req.Linked}
+}
+
+// narrowFolder is path's parent unless that is /, a top-level folder,
+// the home folder or its parent; then path itself.
+func narrowFolder(path string) string {
+	dir := filepath.Dir(path)
+	home, _ := homeDir()
+	broad := dir == "/" || filepath.Dir(dir) == "/"
+	if home != "" {
+		for _, h := range []string{filepath.Clean(home), tools.RealPath(home)} {
+			broad = broad || dir == h || dir == filepath.Dir(h)
+		}
+	}
+	if broad {
+		return path
+	}
+	return dir
+}
+
+// allowingRead matches allow-read and allow-write rules against the
+// real path, so a symlink cannot borrow another folder's grant.
+func allowingRead(t readTarget, rules []Rule) *Rule {
+	for i := range rules {
+		r := &rules[i]
+		if (r.Tool != ToolRead && r.Tool != ToolWrite) || r.Action != ActionAllow {
+			continue
+		}
+		if pathMatches(r.Pattern, t.real) || (r.Pattern != matchAnyRule && pathMatches(tools.RealPath(r.Pattern), t.real)) {
+			return r
+		}
+	}
+	return nil
+}
+
+// deniesRead matches deny-read rules against either spelling of t.
+func deniesRead(r *Rule, t readTarget) bool {
+	if r.Tool != ToolRead || r.Action != ActionDeny {
+		return false
+	}
+	if pathMatches(r.Pattern, t.path) || pathMatches(r.Pattern, t.real) {
+		return true
+	}
+	return r.Pattern != matchAnyRule && pathMatches(tools.RealPath(r.Pattern), t.real)
+}
+
+// decideMCP: allow rules run the call; destructive tools always ask
+// once; anything else asks and can be remembered per tool. A server's
+// readOnly hint is not trusted, so it allows nothing.
 func decideMCP(p Preset, req Request, rules []Rule) Decision {
 	if req.Destructive {
 		return Decision{Verdict: Ask, Destructive: true, Reasons: []string{"the server marks this tool destructive"},
@@ -155,9 +229,6 @@ func decideMCP(p Preset, req Request, rules []Rule) Decision {
 	}
 	if r := allowingMCP(req, rules); r != nil {
 		return Decision{Verdict: Allow, Rule: r}
-	}
-	if req.Safe {
-		return Decision{Verdict: Allow}
 	}
 	reason := "MCP tool that may make changes"
 	if p == ReadOnly {
@@ -214,12 +285,28 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 		return Decision{Verdict: Ask, Destructive: true, Reasons: []string{"destructive command"},
 			Sandbox: sandbox.ModeWorkspaceWrite, Choices: []string{ReplyOnce, ReplyDeny}}
 	}
-	if req.Safe {
-		return Decision{Verdict: Allow, Sandbox: safeMode}
-	}
 	if req.Unparsed {
 		return Decision{Verdict: Ask, Reasons: []string{"uses shell substitution"},
 			Sandbox: sandbox.ModeWorkspaceWrite, Choices: []string{ReplyOnce, ReplyDeny}}
+	}
+	if req.VarRead {
+		return Decision{Verdict: Ask, Reasons: []string{"expands a variable, which may read outside the workspace"},
+			Sandbox: safeMode, Choices: []string{ReplyOnce, ReplyDeny}}
+	}
+	var reads []Rule
+	var readReasons []string
+	for _, t := range req.Reads {
+		if allowingRead(t, rules) != nil {
+			continue
+		}
+		g := readGrant(t)
+		if !containsRule(reads, g) {
+			reads = append(reads, g)
+		}
+		readReasons = append(readReasons, "reads "+t.path+" outside the workspace")
+	}
+	if req.Safe && len(reads) == 0 {
+		return Decision{Verdict: Allow, Sandbox: safeMode}
 	}
 	var missing []Rule
 	seen := map[string]bool{}
@@ -238,11 +325,30 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 			missing = append(missing, Rule{Tool: ToolShell, Pattern: prefix, Action: ActionAllow})
 		}
 	}
-	if len(missing) == 0 {
-		return Decision{Verdict: Allow, Sandbox: sandbox.ModeWorkspaceWrite, Rule: matched}
+	mode := sandbox.ModeWorkspaceWrite
+	if req.Safe {
+		mode = safeMode
 	}
-	return Decision{Verdict: Ask, Reasons: []string{"not on the safe list"}, Sandbox: sandbox.ModeWorkspaceWrite,
-		Remember: missing, Choices: allChoices()}
+	if len(missing) == 0 && len(reads) == 0 {
+		return Decision{Verdict: Allow, Sandbox: mode, Rule: matched}
+	}
+	var reasons []string
+	choices := writeChoices()
+	if len(missing) > 0 {
+		reasons = append(reasons, "not on the safe list")
+		choices = allChoices()
+	}
+	return Decision{Verdict: Ask, Reasons: append(reasons, readReasons...), Sandbox: mode,
+		Remember: append(missing, reads...), Choices: choices}
+}
+
+func containsRule(rules []Rule, r Rule) bool {
+	for _, x := range rules {
+		if x == r {
+			return true
+		}
+	}
+	return false
 }
 
 func allChoices() []string { return []string{ReplyOnce, ReplySession, ReplyFolder, ReplyDeny} }
@@ -268,7 +374,16 @@ func denyingRule(req Request, rules []Rule) *Rule {
 			if r.Tool == ToolMCP && mcpMatches(r.Pattern, req.Server, req.MCPTool) {
 				return r
 			}
+		case KindRead:
+			if deniesRead(r, req.readTarget()) {
+				return r
+			}
 		case KindShell:
+			for _, t := range req.Reads {
+				if deniesRead(r, t) {
+					return r
+				}
+			}
 			if r.Tool != ToolShell {
 				continue
 			}

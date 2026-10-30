@@ -2,6 +2,7 @@
 // message (preview, banner, redo, /undo), the new-session worktree
 // toggle, fork into a worktree, the branch badge, merge back, and the
 // discard confirm when deleting a dirty worktree session.
+import { showSidebar } from "./drawer";
 import { test, expect, type Page } from "@playwright/test";
 
 const WT = {
@@ -114,11 +115,13 @@ test("the worktree toggle starts a new session in its own worktree", async ({ pa
   await expect(chip).toHaveAttribute("aria-pressed", "true");
   await page.fill("#promptInput", "Add a cache layer");
   await page.click("#sendBtn");
-  await expect.poll(async () => (await get(page, "__e2eOpens"))?.find((o: any) => o.worktree)).toMatchObject({
-    sessionId: null,
-    worktree: true,
-    name: "Add a cache layer",
-  });
+  await expect
+    .poll(async () => (await get(page, "__e2eOpens"))?.find((o: any) => o.worktree))
+    .toMatchObject({
+      sessionId: null,
+      worktree: true,
+      name: "Add a cache layer",
+    });
 });
 
 test("the worktree toggle hides outside a git repository", async ({ page }) => {
@@ -132,16 +135,35 @@ test("the row menu forks into a worktree", async ({ page }) => {
   await row.hover();
   await row.locator('[data-row-menu="sess-notify-1"]').click();
   await page.locator("#sessionRowMenu").getByRole("menuitem", { name: "Fork into worktree" }).click();
-  await expect.poll(async () => (await get(page, "__e2eForks"))?.[0]).toMatchObject({ sessionId: "sess-notify-1", worktree: true });
+  await expect
+    .poll(async () => (await get(page, "__e2eForks"))?.[0])
+    .toMatchObject({ sessionId: "sess-notify-1", worktree: true });
 });
 
 test("worktree sessions show their branch under the origin folder and merge back", async ({ page }) => {
   await boot(page, {
     __e2eExtraSessions: [
-      { sessionId: "sess-wt-1", cwd: "/wt/demo", createdAt: 1, provider: "", model: "", messageCount: 2, title: "cache work", worktree: WT },
+      {
+        sessionId: "sess-wt-1",
+        cwd: "/wt/demo",
+        createdAt: 1,
+        provider: "",
+        model: "",
+        messageCount: 2,
+        title: "cache work",
+        worktree: WT,
+      },
     ],
     __e2eOpenExtra: { "sess-wt-1": { cwd: "/wt/demo", worktree: WT } },
-    __e2eWorktreeStatus: { exists: true, changed: 3, ahead: 1, branch: "paladin/demo", into: "main", path: "/wt/demo", repoRoot: "/home/tester/project" },
+    __e2eWorktreeStatus: {
+      exists: true,
+      changed: 3,
+      ahead: 1,
+      branch: "paladin/demo",
+      into: "main",
+      path: "/wt/demo",
+      repoRoot: "/home/tester/project",
+    },
   });
   const project = page.locator('#sessionList .project[data-cwd="/home/tester/project"]');
   const wtRow = project.locator('.session-row:has([data-session="sess-wt-1"])');
@@ -159,7 +181,9 @@ test("worktree sessions show their branch under the origin folder and merge back
   await expect.poll(async () => (await get(page, "__e2eMerges"))?.[0]).toMatchObject({ sessionId: "sess-wt-1" });
   await expect(page.locator("#toastText")).toContainText(/Merged into main/);
 
-  await set(page, { __e2eMergeResult: { merged: false, nothingToMerge: false, conflicts: ["src/a.ts"], into: "main" } });
+  await set(page, {
+    __e2eMergeResult: { merged: false, nothingToMerge: false, conflicts: ["src/a.ts"], into: "main" },
+  });
   await bar.locator("#mergeBtn").click();
   await expect(page.locator("#toastText")).toContainText(/conflict/i);
   await expect(page.locator("#toastText")).toContainText("src/a.ts");
@@ -172,9 +196,18 @@ test("worktree sessions show their branch under the origin folder and merge back
 test("deleting a dirty worktree session asks before discarding its changes", async ({ page }) => {
   await boot(page, {
     __e2eSessionExtra: { worktree: WT },
-    __e2eWorktreeStatus: { exists: true, changed: 2, ahead: 0, branch: "paladin/demo", into: "main", path: "/wt/demo", repoRoot: "/home/tester/project" },
+    __e2eWorktreeStatus: {
+      exists: true,
+      changed: 2,
+      ahead: 0,
+      branch: "paladin/demo",
+      into: "main",
+      path: "/wt/demo",
+      repoRoot: "/home/tester/project",
+    },
   });
   await openDemo(page);
+  await showSidebar(page);
   const row = page.locator('#sessionList .session-row:has([data-session="sess-notify-1"])').first();
   await row.hover();
   await row.locator('[data-row-menu="sess-notify-1"]').click();
@@ -184,5 +217,7 @@ test("deleting a dirty worktree session asks before discarding its changes", asy
   await expect(page.locator("#confirmModal")).toContainText("2 uncommitted");
   await discard.check();
   await page.click("#confirmDeleteBtn");
-  await expect.poll(async () => (await get(page, "__e2eDeletes"))?.[0]).toMatchObject({ sessionId: "sess-notify-1", discardWorktree: true });
+  await expect
+    .poll(async () => (await get(page, "__e2eDeletes"))?.[0])
+    .toMatchObject({ sessionId: "sess-notify-1", discardWorktree: true });
 });

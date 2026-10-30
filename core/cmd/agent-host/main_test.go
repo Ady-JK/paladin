@@ -352,12 +352,13 @@ func captureStdout(t *testing.T, fn func()) string {
 	fn()
 	_ = w.Close()
 	os.Stdout = old
-	data, _ := readAllPipe(r)
+	data := readAllPipe(r)
 	_ = r.Close()
 	return string(data)
 }
 
-func readAllPipe(r *os.File) ([]byte, error) {
+// readAllPipe drains r until any read error, including EOF.
+func readAllPipe(r *os.File) []byte {
 	var out []byte
 	tmp := make([]byte, 4096)
 	for {
@@ -366,10 +367,9 @@ func readAllPipe(r *os.File) ([]byte, error) {
 			out = append(out, tmp[:n]...)
 		}
 		if err != nil {
-			break
+			return out
 		}
 	}
-	return out, nil
 }
 
 // buildHost compiles the agent-host binary for end-to-end stdio tests.
@@ -556,7 +556,7 @@ func TestEndToEndChatOverStdio(t *testing.T) {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	var sawDelta, sawFinal bool
-	for !(sawDelta && sawFinal) {
+	for !sawDelta || !sawFinal {
 		if time.Now().After(deadline) {
 			t.Fatalf("chat timed out (delta=%v final=%v)", sawDelta, sawFinal)
 		}
@@ -594,4 +594,26 @@ func TestSessionUsageMethod(t *testing.T) {
 	rt := testRuntime(t)
 	mustFail(t, callUnary(rt, "1", "sessionUsage", map[string]string{"sessionId": "", "cwd": "/tmp/p"}), "required")
 	mustFail(t, callUnary(rt, "2", "sessionUsage", map[string]string{"sessionId": "nope", "cwd": "/tmp/p"}), "not found")
+}
+
+// Every method that decodes a params object must reject a malformed one
+// rather than run with the fields that happened to decode.
+func TestMalformedParamsRejected(t *testing.T) {
+	rt := testRuntime(t)
+	t.Cleanup(func() { rt.ShutdownTurns(3 * time.Second) })
+	ws := t.TempDir()
+	cases := map[string]string{
+		"addProvider":    `{"name": "mock", "apiUrl": "http://127.0.0.1:1", "apiType": "openai", "apiKey": 7}`,
+		"updateProvider": `{"name": "mock", "apiUrl": "http://127.0.0.1:2", "apiType": "openai", "apiKey": 7}`,
+		"memorySet":      `{"target": "user", "cwd": "` + ws + `", "entries": ["kept", 5]}`,
+		"answerAsk":      `{"sessionId": "s", "callId": "c", "answers": 3}`,
+	}
+	for _, method := range []string{"addProvider", "updateProvider", "memorySet", "answerAsk"} {
+		resp := runUnary(rt, &Request{ID: json.RawMessage(`"x"`), Method: method, Params: json.RawMessage(cases[method])})
+		if resp.Error == nil {
+			t.Errorf("%s accepted malformed params", method)
+		} else if !strings.Contains(*resp.Error, "invalid params") {
+			t.Errorf("%s error = %q, want an invalid params error", method, *resp.Error)
+		}
+	}
 }

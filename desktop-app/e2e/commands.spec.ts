@@ -102,14 +102,10 @@ test("/fork and /rename manage the current session", async ({ page }) => {
   await page.fill("#promptInput", "/rename Cache redesign");
   await page.keyboard.press("Escape");
   await page.click("#sendBtn");
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__e2eRenames?.[0]?.title))
-    .toBe("Cache redesign");
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eRenames?.[0]?.title)).toBe("Cache redesign");
   await page.fill("#promptInput", "/fork");
   await page.keyboard.press("Enter");
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__e2eForks?.[0]?.sessionId))
-    .toBe("sess-notify-1");
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eForks?.[0]?.sessionId)).toBe("sess-notify-1");
   await expect(page.locator("#sessionLabel")).toHaveText("sess-for");
 });
 
@@ -134,7 +130,10 @@ test("/memories opens the memory pane and saves edits", async ({ page }) => {
 test("a running turn shows the working bar with elapsed time", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eChatEvents = [
-      { event: "chat/tool", tool: { id: "t1", name: "shell", arguments: '{"cmd":"make test"}', result: "", status: "running" } },
+      {
+        event: "chat/tool",
+        tool: { id: "t1", name: "shell", arguments: '{"cmd":"make test"}', result: "", status: "running" },
+      },
       { event: "chat/delta", delta: "done", waitMs: 1600 },
     ];
   });
@@ -167,7 +166,5 @@ test("the sidebar row menu renames inline and forks", async ({ page }) => {
   await row.hover();
   await row.locator('[data-row-menu="sess-notify-1"]').click();
   await menu.getByRole("menuitem", { name: "Fork", exact: true }).click();
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__e2eForks?.[0]?.sessionId))
-    .toBe("sess-notify-1");
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eForks?.[0]?.sessionId)).toBe("sess-notify-1");
 });
