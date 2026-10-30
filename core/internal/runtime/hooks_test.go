@@ -115,9 +115,9 @@ func TestSessionStartHookRunsOnceAndHookEventsReachTheHub(t *testing.T) {
 }
 
 func TestHubPublishesHookNotes(t *testing.T) {
-	run := func(_ context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
+	run := func(_ context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
 		tx <- agent.ChatChunk{SessionID: req.SessionID, Hook: &hooks.Note{Event: hooks.PreToolUse, Command: "x", Outcome: hooks.NoteBlocked, Message: "no"}}
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{SessionID: req.SessionID}, nil
 	}
 	h, log := steerHub(t, run)

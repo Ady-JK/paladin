@@ -30,7 +30,7 @@ func TestSteerNeedsARunningTurn(t *testing.T) {
 
 func TestSteerReachesTheRunningTurn(t *testing.T) {
 	got := make(chan agent.SteerMessage, 1)
-	run := func(ctx context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
+	run := func(ctx context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
 		for {
 			if msgs := req.Steer(); len(msgs) > 0 {
 				tx <- agent.ChatChunk{SessionID: req.SessionID, Steer: &msgs[0]}
@@ -43,7 +43,7 @@ func TestSteerReachesTheRunningTurn(t *testing.T) {
 			case <-time.After(5 * time.Millisecond):
 			}
 		}
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{SessionID: req.SessionID}, nil
 	}
 	h, log := steerHub(t, run)

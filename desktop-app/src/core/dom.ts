@@ -10,6 +10,9 @@ export const $ = <T extends HTMLElement>(selector: string): T => document.queryS
 export const sidebarEl = $("#sidebar");
 export const messagesEl = $("#messages");
 export const chatViewEl = $("#chatView");
+export const parentBarEl = $("#parentBar");
+export const sidePaneEl = $("#sidePane");
+export const sidePaneBtn = $<HTMLButtonElement>("#sidePaneBtn");
 export const inputEl = $<HTMLTextAreaElement>("#promptInput");
 // Tags a file or folder from the composer.
 export const attachBtnEl = $<HTMLButtonElement>("#attachBtn");

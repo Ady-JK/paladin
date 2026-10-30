@@ -10,6 +10,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 // sideQuestionTimeout caps one /btw answer.
@@ -19,11 +20,14 @@ type SideQuestionRequest struct {
 	SessionID string `json:"sessionId"`
 	Cwd       string `json:"cwd"`
 	Question  string `json:"question"`
-	Provider  string `json:"provider,omitempty"`
-	Model     string `json:"model,omitempty"`
+	// ChatID continues a saved side chat; empty starts a new one.
+	ChatID   string `json:"chatId,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 type SideAnswer struct {
+	ChatID string `json:"chatId"`
 	Answer string `json:"answer"`
 	Model  string `json:"model"`
 }
@@ -40,8 +44,11 @@ func sideQuestionPrompt(question string) string {
 
 // SideQuestion answers a /btw question about a session without adding
 // it to the transcript. It sees the running turn's conversation when
-// one is live, else the saved history; it gets no tools and is billed
-// to the session like any other call.
+// one is live, else the saved history, plus the side chat's earlier
+// exchanges; it gets no tools and is billed to the session like any
+// other call. The exchange is saved to the side chat (a new one when
+// req.ChatID is empty) only once the answer arrives, so a failed first
+// question leaves nothing behind. One question per chat runs at a time.
 func (r *AgentRuntime) SideQuestion(ctx context.Context, req SideQuestionRequest) (SideAnswer, error) {
 	question := strings.TrimSpace(req.Question)
 	if question == "" {
@@ -51,6 +58,16 @@ func (r *AgentRuntime) SideQuestion(ctx context.Context, req SideQuestionRequest
 	if err != nil {
 		return SideAnswer{}, err
 	}
+	chat := transcript.NewSideChat(question)
+	if req.ChatID != "" {
+		if chat, err = transcript.LoadSideChat(sess.Dir, req.ChatID); err != nil {
+			return SideAnswer{}, err
+		}
+	}
+	if !r.claimSideChat(chat.ID) {
+		return SideAnswer{}, errors.New("side chat is busy: wait for its answer first")
+	}
+	defer r.releaseSideChat(chat.ID)
 	provider, err := runtimeProviders{r}.ResolveProvider(req.Provider, req.Model)
 	if err != nil {
 		return SideAnswer{}, err
@@ -62,6 +79,13 @@ func (r *AgentRuntime) SideQuestion(ctx context.Context, req SideQuestionRequest
 			return SideAnswer{}, err
 		}
 		messages = agent.LlmMessages(history, true)
+	}
+	for _, m := range chat.Messages {
+		content := m.Content
+		if m.Role == transcript.RoleUser {
+			content = sideQuestionPrompt(content)
+		}
+		messages = append(messages, inference.LlmMessage{Role: string(m.Role), Content: content})
 	}
 	messages = append(messages, inference.LlmMessage{Role: "user", Content: sideQuestionPrompt(question)})
 	system := agent.ComposeSystem(r.systemPrompt(""), sess, runtimeSections{r})
@@ -80,7 +104,59 @@ func (r *AgentRuntime) SideQuestion(ctx context.Context, req SideQuestionRequest
 	if answer == "" {
 		return SideAnswer{}, errors.New("the model returned no answer")
 	}
-	return SideAnswer{Answer: answer, Model: provider.Model()}, nil
+	// Reload so a delete during the call is not undone by this save.
+	if req.ChatID != "" {
+		if chat, err = transcript.LoadSideChat(sess.Dir, req.ChatID); err != nil {
+			return SideAnswer{}, err
+		}
+	}
+	chat.Add(transcript.RoleUser, question, "")
+	chat.Add(transcript.RoleAssistant, answer, provider.Model())
+	if err := transcript.SaveSideChat(sess.Dir, chat); err != nil {
+		return SideAnswer{}, err
+	}
+	return SideAnswer{ChatID: chat.ID, Answer: answer, Model: provider.Model()}, nil
+}
+
+func (r *AgentRuntime) claimSideChat(id string) bool {
+	r.liveMu.Lock()
+	defer r.liveMu.Unlock()
+	if r.sideBusy[id] {
+		return false
+	}
+	r.sideBusy[id] = true
+	return true
+}
+
+func (r *AgentRuntime) releaseSideChat(id string) {
+	r.liveMu.Lock()
+	defer r.liveMu.Unlock()
+	delete(r.sideBusy, id)
+}
+
+// ListSideChats lists a session's saved side chats, newest first.
+func (r *AgentRuntime) ListSideChats(sessionID, cwd string) ([]transcript.SideChatInfo, error) {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return transcript.ListSideChats(sess.Dir)
+}
+
+func (r *AgentRuntime) LoadSideChat(sessionID, cwd, chatID string) (transcript.SideChat, error) {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return transcript.SideChat{}, err
+	}
+	return transcript.LoadSideChat(sess.Dir, chatID)
+}
+
+func (r *AgentRuntime) DeleteSideChat(sessionID, cwd, chatID string) error {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return err
+	}
+	return transcript.DeleteSideChat(sess.Dir, chatID)
 }
 
 func (r *AgentRuntime) setLiveConversation(sessionID string, messages []inference.LlmMessage) {

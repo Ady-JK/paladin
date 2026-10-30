@@ -87,6 +87,40 @@ type Meta struct {
 	// BudgetUsd is the session's spend limit: nil inherits the app
 	// default, 0 turns the limit off.
 	BudgetUsd *float64 `json:"budgetUsd,omitempty"`
+	// Subagent is set on a session an agent spawned: its parent link
+	// and last known status.
+	Subagent *Subagent `json:"subagent,omitempty"`
+	// Children are the subagent sessions this session spawned, oldest
+	// first.
+	Children []string `json:"children,omitempty"`
+}
+
+// Subagent ties a child session to the parent that spawned it. A child
+// lives in its own session folder beside the parent's; this link (and
+// the parent's Children list) is what rebuilds the tree after a restart.
+type Subagent struct {
+	ParentID     string `json:"parentId"`
+	ParentTurnID string `json:"parentTurnId,omitempty"`
+	SpawnCallID  string `json:"spawnCallId,omitempty"`
+	// Type is the subagent template ("explore", "reviewer").
+	Type string `json:"type"`
+	Name string `json:"name"`
+	// Task is the assignment the child was spawned with.
+	Task string `json:"task,omitempty"`
+	// ForkTurns is "none" (task only) or "all" (parent history copied).
+	ForkTurns string `json:"forkTurns,omitempty"`
+	// Status is queued, running, completed, failed or interrupted.
+	Status string `json:"status"`
+	// Result is the last turn's final reply; Error its failure.
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// Reported is set once the parent received the latest result.
+	Reported bool `json:"reported,omitempty"`
+	// CompletionID names the latest result (<child id>#<child turn id>).
+	// The parent's transcript holds it once that result is saved there,
+	// which is how a restart tells a delivered result from a lost one.
+	CompletionID string    `json:"completionId,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // Worktree ties a session to a managed git worktree.
@@ -203,9 +237,66 @@ func (s *Session) Append(role Role, content string) error {
 }
 
 func (s *Session) AppendMessage(msg Message) error {
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now().UTC()
+	return s.appendMessages([]Message{msg})
+}
+
+// turnLine is how a whole turn is stored: one JSONL line, so a crash or
+// a failed write leaves all of the turn or none of it. Older
+// transcripts hold one message per line; readers accept both.
+type turnLine struct {
+	Turn turnBody `json:"turn"`
+}
+
+type turnBody struct {
+	Messages []Message `json:"messages"`
+}
+
+// AppendTurn appends a turn's messages as one line.
+func (s *Session) AppendTurn(msgs []Message) error {
+	if len(msgs) == 0 {
+		return nil
 	}
+	stamped := make([]Message, len(msgs))
+	for i, m := range msgs {
+		stamped[i] = stampTime(m)
+	}
+	line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: stamped}})
+	if err != nil {
+		return fmt.Errorf("io: encode turn: %s", syserr.Str(err))
+	}
+	return s.appendLines(append(line, '\n'))
+}
+
+// appendMessages appends msgs one per line in a single write.
+func (s *Session) appendMessages(msgs []Message) error {
+	var buf []byte
+	for _, m := range msgs {
+		line, err := jsonx.Marshal(stampTime(m))
+		if err != nil {
+			return fmt.Errorf("io: encode message: %s", syserr.Str(err))
+		}
+		buf = append(append(buf, line...), '\n')
+	}
+	if len(buf) == 0 {
+		return nil
+	}
+	return s.appendLines(buf)
+}
+
+func stampTime(m Message) Message {
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = time.Now().UTC()
+	}
+	return m
+}
+
+// syncFile is replaced in tests to simulate a failing disk.
+var syncFile = (*os.File).Sync
+
+// appendLines writes complete lines and syncs them. On failure the file
+// is cut back to its previous size, so an error never leaves a partial
+// write behind for a retry to duplicate.
+func (s *Session) appendLines(data []byte) error {
 	f, err := os.OpenFile(filepath.Join(s.Dir, "messages.jsonl"), os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("io: open transcript: %s", syserr.Str(err))
@@ -214,17 +305,23 @@ func (s *Session) AppendMessage(msg Message) error {
 	if err := dropTornTail(f); err != nil {
 		return fmt.Errorf("io: repair transcript: %s", syserr.Str(err))
 	}
-	line, err := jsonx.Marshal(msg)
+	st, err := f.Stat()
 	if err != nil {
-		return fmt.Errorf("io: encode message: %s", syserr.Str(err))
+		return fmt.Errorf("io: stat transcript: %s", syserr.Str(err))
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("io: write message: %s", syserr.Str(err))
+	rollback := func(cause error, what string) error {
+		if terr := f.Truncate(st.Size()); terr != nil {
+			return fmt.Errorf("io: %s: %s (rollback failed: %s)", what, syserr.Str(cause), syserr.Str(terr))
+		}
+		return fmt.Errorf("io: %s: %s", what, syserr.Str(cause))
 	}
-	// Sync each append so a crash cannot silently drop the tail of the
-	// transcript; message volume is low enough that the cost is noise.
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("io: sync message: %s", syserr.Str(err))
+	if _, err := f.Write(data); err != nil {
+		return rollback(err, "write transcript")
+	}
+	// Sync so a crash cannot silently drop the tail of the transcript;
+	// turn volume is low enough that the cost is noise.
+	if err := syncFile(f); err != nil {
+		return rollback(err, "sync transcript")
 	}
 	return nil
 }
@@ -243,6 +340,12 @@ func (s *Session) Truncate(n int) error {
 	if n < 0 || n >= len(msgs) {
 		return nil
 	}
+	// The list summary covers the old bytes; drop it on both sides of
+	// the rewrite so a list in between cannot cache the old file.
+	if err := dropSummary(s.Dir); err != nil {
+		return err
+	}
+	defer func() { _ = dropSummary(s.Dir) }()
 	var buf []byte
 	for _, m := range msgs[:n] {
 		line, err := jsonx.Marshal(m)

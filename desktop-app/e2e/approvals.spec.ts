@@ -2,6 +2,7 @@
 // the composer's preset chip, the sidebar/working-bar waiting state and
 // the Settings → Permissions pane.
 import { test, expect, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 const SHELL = {
   id: "c1",
@@ -39,7 +40,7 @@ async function send(page: Page, text = "install it") {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("an approval card shows the command and allows it for the folder", async ({ page }) => {
@@ -234,6 +235,7 @@ test("the preset chip switches the session's permissions and is sent with the tu
   // The choice sticks to the session across reloads.
   await page.reload();
   await expect(page.locator("#permChip")).toContainText("Auto");
+  await showSidebar(page);
   await page.locator('button.session-pick[data-session="sess-notify-1"]').click();
   await expect(page.locator("#permChip")).toContainText("Full access");
 });

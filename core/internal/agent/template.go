@@ -33,6 +33,11 @@ type Template struct {
 	// Tools selects a subset by name. Empty means every tool in the
 	// runtime registry.
 	Tools []string `json:"tools,omitempty"`
+	// ReadOnly drops the file writers and swaps in the inspection-only
+	// shell, as plan mode does.
+	ReadOnly bool `json:"readOnly,omitempty"`
+	// Prompt is appended to the system prompt (a subagent's role).
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // DefaultTemplate is the built-in single agent.
@@ -101,7 +106,7 @@ type Deps struct {
 	Tx        chan<- ChatChunk
 	Done      <-chan struct{}
 	// PersistGate, when set, wraps the end-of-turn transcript write.
-	PersistGate func(persist func())
+	PersistGate func(persist func() error)
 	// Gate, when set, authorizes and sandboxes each tool call.
 	Gate ToolGate
 	// Steps, when set, records each file-changing tool run for undo.
@@ -208,14 +213,19 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	}
 
 	gate := d.Gate
-	if mode == ModePlan {
+	if mode == ModePlan || t.ReadOnly {
 		registry, shell = planRegistry(registry, shell)
-		system += "\n\n" + prompt.PlanMode
+		if !t.ReadOnly {
+			system += "\n\n" + prompt.PlanMode
+		}
 		if g, ok := gate.(*permission.Gate); ok && g != nil {
 			planned := *g
 			planned.Plan = true
 			gate = &planned
 		}
+	}
+	if role := strings.TrimSpace(t.Prompt); role != "" {
+		system += "\n\n" + role
 	}
 
 	return newAgent(runConfig{
@@ -235,6 +245,8 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		steps:       d.Steps,
 		steer:       req.Steer,
 		budget:      req.Budget,
+		notices:     req.Notices,
+		ledgers:     req.SpendLedgers,
 		message:     message,
 		display:     display,
 		resume:      req.Resume,

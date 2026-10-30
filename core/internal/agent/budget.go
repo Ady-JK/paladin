@@ -51,12 +51,25 @@ type spendState struct {
 	known, incomplete bool
 }
 
+// sessionSpend sums every ledger the budget covers. An unreadable one
+// makes the total a lower bound.
 func (a *Agent) sessionSpend() spendState {
-	totals, err := session.ReadLedger(a.session.UsagePath())
-	if err != nil {
-		return spendState{incomplete: true}
+	paths := []string{a.session.UsagePath()}
+	if a.spendLedgers != nil {
+		paths = a.spendLedgers()
 	}
-	return spendState{spent: totals.Cost, known: totals.HasCost, incomplete: totals.SpendIncomplete()}
+	var st spendState
+	for _, path := range paths {
+		totals, err := session.ReadLedger(path)
+		if err != nil {
+			st.incomplete = true
+			continue
+		}
+		st.spent += totals.Cost
+		st.known = st.known || totals.HasCost
+		st.incomplete = st.incomplete || totals.SpendIncomplete()
+	}
+	return st
 }
 
 // checkBudget runs before each round. It reports end=true when the turn

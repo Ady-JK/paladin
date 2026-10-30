@@ -20,7 +20,7 @@ test.beforeEach(async ({ page }) => {
     };
   });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 const refreshCalls = (page: any) => page.evaluate(() => (window as any).__e2eRefreshCalls);

@@ -144,9 +144,9 @@ func TestBudgetEndsARealTurnWithASummary(t *testing.T) {
 }
 
 func TestHubPublishesBudgetNotices(t *testing.T) {
-	run := func(ctx context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
+	run := func(ctx context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
 		tx <- agent.ChatChunk{SessionID: req.SessionID, Budget: &agent.BudgetNotice{State: agent.BudgetReached, Spent: 1, Limit: 1}}
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{SessionID: req.SessionID}, nil
 	}
 	h, log := steerHub(t, run)

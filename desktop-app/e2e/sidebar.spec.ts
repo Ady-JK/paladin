@@ -2,6 +2,7 @@
 // the views and settings, and a panel that nests sessions under their
 // project folder plus a short Recents list.
 import { test, expect, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 const now = Math.floor(Date.now() / 1000);
 const SESSIONS = [
@@ -44,6 +45,7 @@ async function setup(page: Page): Promise<void> {
     };
   }, SESSIONS);
   await page.goto("/");
+  await showSidebar(page);
   await expect(page.locator('[data-session="s-api-2"]')).toBeVisible();
 }
 
@@ -74,6 +76,7 @@ test("a project folds and stays folded after a reload", async ({ page }) => {
   await expect(api.locator('[data-session="s-api-2"]')).toBeHidden();
   await expect(api.locator(".project-head")).toHaveAttribute("aria-expanded", "false");
   await page.reload();
+  await showSidebar(page);
   await expect(page.locator('[data-session="s-web-1"]')).toBeVisible();
   await expect(page.locator('.project[data-cwd="/work/api"] [data-session="s-api-2"]')).toBeHidden();
   await page.locator('.project[data-cwd="/work/api"] .project-head').click();
@@ -85,6 +88,7 @@ test("recents lists the five newest sessions and opens them", async ({ page }) =
   const recents = page.locator("#recentList [data-recent]");
   await expect(recents).toHaveCount(5);
   await expect(recents.first()).toHaveText(/fix the auth bug/);
+  await showSidebar(page);
   await page.locator('[data-recent="s-cli-1"]').click();
   await expect(page.locator("#sessionLabel")).toHaveText("s-cli-1".slice(0, 8));
   await expect(page.locator('.session-row:has([data-session="s-cli-1"])')).toHaveClass(/is-active/);
@@ -93,12 +97,24 @@ test("recents lists the five newest sessions and opens them", async ({ page }) =
 
 test("search filters projects and hides recents", async ({ page }) => {
   await setup(page);
+  await showSidebar(page);
   await page.fill("#searchInput", "dark");
   await expect(page.locator("#sessionList [data-session]")).toHaveCount(1);
   await expect(page.locator("#sessionList .project")).toHaveCount(1);
   await expect(page.locator("#recentWrap")).toBeHidden();
+  await showSidebar(page);
   await page.fill("#searchInput", "");
   await expect(page.locator("#recentWrap")).toBeVisible();
+});
+
+test("the app starts with the drawer closed", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.goto("/");
+  await expect(page.locator("#promptInput")).toBeVisible();
+  await expect(page.locator("#sidebar")).toBeHidden();
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "false");
+  await page.click("#agentTab");
+  await expect(page.locator("#sessionList")).toBeVisible();
 });
 
 test("the Agent button opens and closes the drawer", async ({ page }) => {
@@ -146,6 +162,7 @@ test("the drawer closes on an outside click, Escape, and a session pick", async 
   await expect(side).toBeHidden();
 
   await page.click("#agentTab");
+  await expect(side).toBeVisible();
   await page.locator('[data-recent="s-cli-1"]').click();
   await expect(side).toBeHidden();
   await expect(page.locator("#sessionLabel")).toHaveText("s-cli-1".slice(0, 8));

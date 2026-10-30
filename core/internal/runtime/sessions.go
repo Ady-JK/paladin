@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ type Session struct {
 	Revert *session.RevertInfo `json:"revert,omitempty"`
 	// Worktree is set for sessions working in a managed git worktree.
 	Worktree *session.WorktreeInfo `json:"worktree,omitempty"`
+	// Subagent is set when the session is a subagent's child session.
+	Subagent *session.SubagentInfo `json:"subagent,omitempty"`
 }
 
 // runtimeSessions adapts the transcript store to agent.SessionSource.
@@ -46,7 +49,13 @@ func (r *AgentRuntime) OpenSession(sessionID, cwd string) (Session, error) {
 		if sess.Meta.Model != nil {
 			model = *sess.Meta.Model
 		}
-		return Session{SessionID: sess.Meta.SessionID, Cwd: sess.Meta.Cwd, Provider: provider, Model: model, Revert: session.RevertView(sess.Meta.Revert), Worktree: session.WorktreeView(sess.Meta.Worktree)}, nil
+		opened := Session{SessionID: sess.Meta.SessionID, Cwd: sess.Meta.Cwd, Provider: provider, Model: model,
+			Revert: session.RevertView(sess.Meta.Revert), Worktree: session.WorktreeView(sess.Meta.Worktree),
+			Subagent: session.SubagentView(sess.Meta.Subagent)}
+		if opened.Subagent != nil {
+			opened.Subagent.Status = r.subagents.status(opened.SessionID, opened.Subagent.Status)
+		}
+		return opened, nil
 	}
 	if strings.TrimSpace(cwd) == "" {
 		return Session{}, fmt.Errorf("cwd is required to create a session")
@@ -72,7 +81,12 @@ func (r *AgentRuntime) ListSessions(cwd string, limit int) ([]session.SessionInf
 	}
 	out := make([]session.SessionInfo, 0, len(infos))
 	for _, info := range infos {
-		out = append(out, session.InfoFrom(info.Meta, info.MessageCount, info.Title))
+		view := session.InfoFrom(info.Meta, info.MessageCount, info.Title)
+		view.Damaged = info.Damaged
+		if view.Subagent != nil {
+			view.Subagent.Status = r.subagents.status(view.SessionID, view.Subagent.Status)
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -153,12 +167,31 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("session id is required")
 	}
+	// Forget it first so a finishing child cannot wake it again, then
+	// delete its children before stopping it.
+	r.subagents.forget(sessionID)
+	sess, loadErr := r.transcripts.Load(cwd, sessionID)
+	if loadErr == nil {
+		if err := r.subagents.deleteChildren(sess); err != nil {
+			return false, err
+		}
+	}
 	// A running turn would re-create the transcript when it persists:
 	// stop it (and its queue) and let it land before deleting.
 	if r.hub.Busy(sessionID) {
 		r.hub.StopSession(sessionID, "")
 		if !r.hub.WaitIdle(sessionID, 15*time.Second) {
 			return false, fmt.Errorf("session %q is still stopping; try again", sessionID)
+		}
+	}
+	// A finished turn's done callback may still be recording its end.
+	r.hub.SettleDone(5 * time.Second)
+	if loadErr == nil {
+		if sa := sess.Meta.Subagent; sa != nil {
+			_ = r.transcripts.UpdateMeta(sess.Meta.Cwd, sa.ParentID, func(m *transcript.Meta) error {
+				m.Children = slices.DeleteFunc(m.Children, func(id string) bool { return id == sessionID })
+				return nil
+			})
 		}
 	}
 	if err := r.transcripts.Delete(cwd, sessionID); err != nil {

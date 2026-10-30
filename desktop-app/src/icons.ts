@@ -6,6 +6,10 @@ type Icon = {
 
 const ICONS: Record<string, Icon> = {
   bolt: { d: "M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5Z" },
+  warning: {
+    d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0ZM12 9v4M12 17h.01",
+    line: true,
+  },
   comments: { d: "M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z" },
   code: { d: "m16 18 6-6-6-6M8 6l-6 6 6 6", line: true },
   folder: { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" },

@@ -246,13 +246,30 @@ var methods = map[string]handler{
 		return rt.PermissionsSet(p.Scope, p.Cwd, p.Rules)
 	},
 
-	// Side questions (/btw); asynchronous, see asyncMethods.
+	// Subagents
+	"listAgents": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ListAgents(a.str("sessionId"))
+	},
+	"interruptAgent": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.InterruptAgent(a.str("sessionId"), a.str("agentId"))
+	},
+
+	// Side questions (/btw); they run on the long pool, see methodClass.
 	"sideQuestion": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var req runtime.SideQuestionRequest
 		if err := a.decode(&req); err != nil {
 			return nil, err
 		}
 		return rt.SideQuestion(context.Background(), req)
+	},
+	"listSideChats": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ListSideChats(a.str("sessionId"), a.str("cwd"))
+	},
+	"loadSideChat": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.LoadSideChat(a.str("sessionId"), a.str("cwd"), a.str("chatId"))
+	},
+	"deleteSideChat": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return nil, rt.DeleteSideChat(a.str("sessionId"), a.str("cwd"), a.str("chatId"))
 	},
 
 	// Hooks

@@ -1,6 +1,7 @@
 // filetools.spec.ts covers the write/edit rich tool views.
 // It stubs a demo session and checks file view, diff, and matches.
 import { test, expect } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 const SESSION = "sess-filetools-1";
 
@@ -143,7 +144,8 @@ test.beforeEach(async ({ page }) => {
     };
   });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
+  await showSidebar(page);
   await page.click(`[data-session="${SESSION}"]`);
   await expect(page.locator("#messages")).toContainText("Port bumped");
   // Consecutive calls fold into summary groups; open them all.

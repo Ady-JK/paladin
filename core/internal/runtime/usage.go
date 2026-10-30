@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -54,6 +55,7 @@ func (r *AgentRuntime) OverallUsage(cwd string, limit int) (session.OverallUsage
 	if err != nil {
 		return session.OverallUsage{}, err
 	}
+	infos = slices.DeleteFunc(infos, func(info transcript.Info) bool { return info.Damaged != "" })
 	out := session.OverallUsage{SessionCount: int64(len(infos))}
 	byModel := map[string]*session.ModelUsageView{}
 	byDay := map[string]*session.Counters{}

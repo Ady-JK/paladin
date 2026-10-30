@@ -22,6 +22,7 @@ async function get<T = any>(page: Page, key: string): Promise<T> {
 }
 
 async function openDemo(page: Page) {
+  await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
   await expect(page.locator("#messages .bubble-user")).toHaveCount(1);
 }
@@ -32,7 +33,7 @@ async function boot(page: Page, values: Record<string, unknown> = {}) {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript((values) => Object.assign(window as any, values), values);
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 }
 
 test("Revert to here previews, reverts files and conversation, then redoes", async ({ page }) => {
@@ -102,6 +103,7 @@ test("opening a session with a pending revert restores the banner", async ({ pag
     __e2eOpenExtra: { "sess-notify-1": { revert: { index: 0, restored: ["x.go"], skipped: [], snapshots: true } } },
     __e2eRevertedAt: 0,
   });
+  await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
   await expect(page.locator("#revertBanner")).toContainText("1 file restored");
 });
@@ -132,6 +134,7 @@ test("the worktree toggle hides outside a git repository", async ({ page }) => {
 test("the row menu forks into a worktree", async ({ page }) => {
   await boot(page);
   const row = page.locator('#sessionList .session-row:has([data-session="sess-notify-1"])').first();
+  await showSidebar(page);
   await row.hover();
   await row.locator('[data-row-menu="sess-notify-1"]').click();
   await page.locator("#sessionRowMenu").getByRole("menuitem", { name: "Fork into worktree" }).click();
@@ -165,6 +168,7 @@ test("worktree sessions show their branch under the origin folder and merge back
       repoRoot: "/home/tester/project",
     },
   });
+  await showSidebar(page);
   const project = page.locator('#sessionList .project[data-cwd="/home/tester/project"]');
   const wtRow = project.locator('.session-row:has([data-session="sess-wt-1"])');
   await expect(wtRow).toBeVisible();
@@ -209,6 +213,7 @@ test("deleting a dirty worktree session asks before discarding its changes", asy
   await openDemo(page);
   await showSidebar(page);
   const row = page.locator('#sessionList .session-row:has([data-session="sess-notify-1"])').first();
+  await showSidebar(page);
   await row.hover();
   await row.locator('[data-row-menu="sess-notify-1"]').click();
   await page.locator("#sessionRowMenu").getByRole("menuitem", { name: "Delete" }).click();

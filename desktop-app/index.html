@@ -42,7 +42,7 @@
             >
               paladin
               <span id="brandVersion" class="font-mono text-[10px] font-normal text-slate-400 dark:text-slate-500"
-                >v0.5.6</span
+                >v0.6.0</span
               >
             </h1>
             <div
@@ -144,6 +144,15 @@
               <span id="resPillLabel">idle</span>
             </button>
             <button
+              id="sidePaneBtn"
+              class="rounded-md p-1.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+              title="Side chats"
+              aria-label="Toggle the side pane"
+              aria-pressed="false"
+            >
+              <span data-icon="comments"></span>
+            </button>
+            <button
               id="themeToggleBtn"
               class="rounded-md p-1.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
               title="Toggle the theme"
@@ -187,178 +196,231 @@
 
         <!-- The agent -->
         <div id="agentView" class="flex min-h-0 flex-1 flex-col">
-          <!-- The conversation -->
-          <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
-            <div id="messages" class="mx-auto max-w-3xl"></div>
-          </div>
+          <div id="agentSplit" class="flex min-h-0 flex-1">
+            <div id="agentMain" class="flex min-h-0 min-w-0 flex-1 flex-col">
+              <!-- Shown while the open session is a subagent: the way back. -->
+              <div id="parentBar" class="parent-bar" hidden>
+                <button id="parentBackBtn" type="button" class="parent-back">
+                  <span data-icon="angles-left"></span><span>Back to <span id="parentBarTitle"></span></span>
+                </button>
+                <span class="parent-sep" aria-hidden="true">/</span>
+                <span id="parentBarAgent" class="parent-agent"></span>
+                <span class="parent-note">Driven by its parent agent</span>
+              </div>
+              <!-- The conversation -->
+              <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
+                <div id="messages" class="mx-auto max-w-3xl"></div>
+              </div>
 
-          <!-- The composer -->
-          <footer class="border-0 bg-transparent px-4 pb-4 pt-2">
-            <div class="mx-auto w-full max-w-3xl">
-              <div class="composer-float relative rounded-3xl">
-                <div id="skillChipSlot" class="px-4 pt-2"></div>
-                <textarea
-                  id="promptInput"
-                  rows="3"
-                  placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
-                  class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
-                  spellcheck="false"
-                ></textarea>
+              <!-- The composer -->
+              <footer class="border-0 bg-transparent px-4 pb-4 pt-2">
+                <div class="mx-auto w-full max-w-3xl">
+                  <div class="composer-float relative rounded-3xl">
+                    <div id="skillChipSlot" class="px-4 pt-2"></div>
+                    <textarea
+                      id="promptInput"
+                      rows="3"
+                      placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
+                      class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                      spellcheck="false"
+                    ></textarea>
 
-                <div class="flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1">
-                  <button
-                    id="attachBtn"
-                    class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                    title="Attach a file or folder"
-                  >
-                    <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
-                  </button>
-                  <div class="relative flex min-w-0 flex-1 items-center gap-1">
-                    <button
-                      id="modelSelectBtn"
-                      class="flex min-w-0 max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                      title="Pick the provider and the model"
-                    >
-                      <span id="modelSelectLabel" class="truncate">—</span>
-                      <span data-icon="chevron-down" class="flex-shrink-0"></span>
-                    </button>
-                    <div
-                      id="modelMenu"
-                      class="absolute bottom-full left-0 z-50 mb-2 hidden w-[42rem] max-w-[92vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
-                    >
-                      <div class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
-                        <span data-icon="search" class="flex-shrink-0 text-slate-400"></span>
-                        <input
-                          id="modelSearch"
-                          type="text"
-                          placeholder="Search providers, labs, or models... (Cmd+K)"
-                          spellcheck="false"
-                          class="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
-                        />
-                        <button
-                          id="modelSearchClear"
-                          class="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                          title="Clear the search"
-                        >
-                          <span data-icon="xmark"></span>
-                        </button>
-                      </div>
-                      <div class="grid grid-cols-3 gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
-                        <div class="min-w-0">
-                          <div
-                            class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
-                          >
-                            Provider
-                          </div>
-                          <select
-                            id="providerPick"
-                            title="Switch the provider"
-                            class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
-                          ></select>
-                        </div>
-                        <div class="min-w-0">
-                          <div
-                            class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
-                          >
-                            <span data-icon="flask"></span>
-                            <span>Lab</span>
-                          </div>
-                          <select
-                            id="labPick"
-                            title="Switch the lab"
-                            class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
-                          ></select>
-                        </div>
-                        <div class="min-w-0">
-                          <div
-                            class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
-                          >
-                            <span data-icon="brain"></span>
-                            <span>Model</span>
-                          </div>
-                          <div
-                            id="modelPill"
-                            class="flex min-w-0 items-center gap-1.5 truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                          ></div>
-                        </div>
-                      </div>
-                      <div
-                        id="filterBar"
-                        class="hidden items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 dark:border-slate-800"
+                    <div class="flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1">
+                      <button
+                        id="attachBtn"
+                        class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                        title="Attach a file or folder"
                       >
-                        <div
-                          id="filterLabel"
-                          class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
-                        ></div>
+                        <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
+                      </button>
+                      <div class="relative flex min-w-0 flex-1 items-center gap-1">
                         <button
-                          id="filterClearBtn"
-                          class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                          title="Show every provider and lab again"
+                          id="modelSelectBtn"
+                          class="flex min-w-0 max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                          title="Pick the provider and the model"
                         >
-                          Clear filter
+                          <span id="modelSelectLabel" class="truncate">—</span>
+                          <span data-icon="chevron-down" class="flex-shrink-0"></span>
                         </button>
-                      </div>
-                      <div class="grid grid-cols-[1fr_14rem]">
-                        <div id="modelTree" class="max-h-64 min-h-32 overflow-y-auto p-1.5"></div>
                         <div
-                          id="modelDetail"
-                          class="min-h-32 border-l border-slate-200 p-3 dark:border-slate-800"
-                        ></div>
-                      </div>
-                      <div
-                        class="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-slate-800"
-                      >
-                        <div
-                          id="modelBreadcrumb"
-                          class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
-                        ></div>
-                        <div class="flex flex-shrink-0 gap-2">
-                          <button
-                            id="modelQuickBtn"
-                            class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                            title="Apply the highlighted match"
+                          id="modelMenu"
+                          class="absolute bottom-full left-0 z-50 mb-2 hidden w-[42rem] max-w-[92vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
+                        >
+                          <div
+                            class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800"
                           >
-                            Quick Select (Ctrl+1)
-                          </button>
-                          <button
-                            id="modelAdvancedBtn"
-                            class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                            title="Open the settings"
+                            <span data-icon="search" class="flex-shrink-0 text-slate-400"></span>
+                            <input
+                              id="modelSearch"
+                              type="text"
+                              placeholder="Search providers, labs, or models... (Cmd+K)"
+                              spellcheck="false"
+                              class="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
+                            />
+                            <button
+                              id="modelSearchClear"
+                              class="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                              title="Clear the search"
+                            >
+                              <span data-icon="xmark"></span>
+                            </button>
+                          </div>
+                          <div class="grid grid-cols-3 gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+                            <div class="min-w-0">
+                              <div
+                                class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
+                              >
+                                Provider
+                              </div>
+                              <select
+                                id="providerPick"
+                                title="Switch the provider"
+                                class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                              ></select>
+                            </div>
+                            <div class="min-w-0">
+                              <div
+                                class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
+                              >
+                                <span data-icon="flask"></span>
+                                <span>Lab</span>
+                              </div>
+                              <select
+                                id="labPick"
+                                title="Switch the lab"
+                                class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                              ></select>
+                            </div>
+                            <div class="min-w-0">
+                              <div
+                                class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
+                              >
+                                <span data-icon="brain"></span>
+                                <span>Model</span>
+                              </div>
+                              <div
+                                id="modelPill"
+                                class="flex min-w-0 items-center gap-1.5 truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                              ></div>
+                            </div>
+                          </div>
+                          <div
+                            id="filterBar"
+                            class="hidden items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 dark:border-slate-800"
                           >
-                            Advanced Config…
-                          </button>
+                            <div
+                              id="filterLabel"
+                              class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
+                            ></div>
+                            <button
+                              id="filterClearBtn"
+                              class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                              title="Show every provider and lab again"
+                            >
+                              Clear filter
+                            </button>
+                          </div>
+                          <div class="grid grid-cols-[1fr_14rem]">
+                            <div id="modelTree" class="max-h-64 min-h-32 overflow-y-auto p-1.5"></div>
+                            <div
+                              id="modelDetail"
+                              class="min-h-32 border-l border-slate-200 p-3 dark:border-slate-800"
+                            ></div>
+                          </div>
+                          <div
+                            class="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-slate-800"
+                          >
+                            <div
+                              id="modelBreadcrumb"
+                              class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
+                            ></div>
+                            <div class="flex flex-shrink-0 gap-2">
+                              <button
+                                id="modelQuickBtn"
+                                class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                title="Apply the highlighted match"
+                              >
+                                Quick Select (Ctrl+1)
+                              </button>
+                              <button
+                                id="modelAdvancedBtn"
+                                class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                                title="Open the settings"
+                              >
+                                Advanced Config…
+                              </button>
+                            </div>
+                          </div>
                         </div>
+                      </div>
+                      <div class="ml-auto flex flex-shrink-0 items-center gap-2">
+                        <button
+                          id="sendBtn"
+                          class="flex items-center justify-center rounded-lg bg-accent-600 p-2 text-xs font-semibold text-white shadow-accent-600/20 hover:bg-accent-700 disabled:opacity-40"
+                          title="Send"
+                        >
+                          <span data-icon="arrow-up" class="[&>svg]:h-4 [&>svg]:w-4"></span>
+                        </button>
+                        <button
+                          id="pauseBtn"
+                          class="hidden flex items-center justify-center rounded-lg bg-amber-500 p-2 text-xs font-semibold text-white shadow-amber-500/20 hover:bg-amber-600"
+                          title="Pause"
+                        >
+                          <span data-icon="pause"></span>
+                        </button>
+                        <button
+                          id="steerBtn"
+                          class="hidden steer-btn"
+                          title="Steer: add this to the running turn (⌘/Ctrl+Enter)"
+                          aria-label="Steer the running turn"
+                        >
+                          <span data-icon="steer" class="[&>svg]:h-4 [&>svg]:w-4"></span>
+                        </button>
                       </div>
                     </div>
                   </div>
-                  <div class="ml-auto flex flex-shrink-0 items-center gap-2">
-                    <button
-                      id="sendBtn"
-                      class="flex items-center justify-center rounded-lg bg-accent-600 p-2 text-xs font-semibold text-white shadow-accent-600/20 hover:bg-accent-700 disabled:opacity-40"
-                      title="Send"
-                    >
-                      <span data-icon="arrow-up" class="[&>svg]:h-4 [&>svg]:w-4"></span>
-                    </button>
-                    <button
-                      id="pauseBtn"
-                      class="hidden flex items-center justify-center rounded-lg bg-amber-500 p-2 text-xs font-semibold text-white shadow-amber-500/20 hover:bg-amber-600"
-                      title="Pause"
-                    >
-                      <span data-icon="pause"></span>
-                    </button>
-                    <button
-                      id="steerBtn"
-                      class="hidden steer-btn"
-                      title="Steer: add this to the running turn (⌘/Ctrl+Enter)"
-                      aria-label="Steer the running turn"
-                    >
-                      <span data-icon="steer" class="[&>svg]:h-4 [&>svg]:w-4"></span>
-                    </button>
-                  </div>
                 </div>
-              </div>
+              </footer>
             </div>
-          </footer>
+
+            <!-- Side pane: /btw side chats and live subagent tabs. -->
+            <aside id="sidePane" class="side-pane" hidden aria-label="Side chats and subagents">
+              <div class="pane-strip">
+                <div id="paneTabs" class="pane-tabs" role="tablist" aria-label="Side tabs"></div>
+                <button
+                  id="paneNewChatBtn"
+                  type="button"
+                  class="pane-btn"
+                  title="New side chat"
+                  aria-label="New side chat"
+                >
+                  <span data-icon="plus"></span>
+                </button>
+                <button
+                  id="paneHistoryBtn"
+                  type="button"
+                  class="pane-btn"
+                  title="Saved side chats"
+                  aria-label="Saved side chats"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  <span data-icon="rotate-ccw"></span>
+                </button>
+                <button
+                  id="paneCloseBtn"
+                  type="button"
+                  class="pane-btn"
+                  title="Close the side pane"
+                  aria-label="Close the side pane"
+                >
+                  <span data-icon="xmark"></span>
+                </button>
+              </div>
+              <div id="paneHistoryMenu" class="pane-menu" role="menu" hidden></div>
+              <div id="paneBody" class="pane-body"></div>
+            </aside>
+          </div>
         </div>
 
         <!-- The external chat pages -->

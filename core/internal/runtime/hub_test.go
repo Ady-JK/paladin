@@ -20,11 +20,11 @@ type fakeRuns struct {
 	mu       sync.Mutex
 	started  []string
 	release  map[string]chan struct{}
-	behavior map[string]func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error)
+	behavior map[string]func(ctx context.Context, gate func(func() error), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error)
 }
 
 func newFakeRuns() *fakeRuns {
-	return &fakeRuns{release: map[string]chan struct{}{}, behavior: map[string]func(context.Context, func(func()), chan<- agent.ChatChunk) (agent.ChatOutcome, error){}}
+	return &fakeRuns{release: map[string]chan struct{}{}, behavior: map[string]func(context.Context, func(func() error), chan<- agent.ChatChunk) (agent.ChatOutcome, error){}}
 }
 
 func (f *fakeRuns) gateFor(msg string) chan struct{} {
@@ -46,7 +46,7 @@ func (f *fakeRuns) startedList() []string {
 	return append([]string(nil), f.started...)
 }
 
-func (f *fakeRuns) run(ctx context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
+func (f *fakeRuns) run(ctx context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
 	f.mu.Lock()
 	f.started = append(f.started, req.Message)
 	b := f.behavior[req.Message]
@@ -58,10 +58,10 @@ func (f *fakeRuns) run(ctx context.Context, req agent.Request, gate func(func())
 	select {
 	case <-f.gateFor(req.Message):
 	case <-ctx.Done():
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{SessionID: req.SessionID, Stopped: true}, nil
 	}
-	gate(func() {})
+	gate(func() error { return nil })
 	return agent.ChatOutcome{SessionID: req.SessionID, Reply: "reply to " + req.Message}, nil
 }
 
@@ -200,9 +200,7 @@ func TestHubQueuesSameSessionInOrder(t *testing.T) {
 	if second.State != TurnQueued || third.State != TurnQueued {
 		t.Fatalf("same-session follow-ups must queue: %s %s", second.State, third.State)
 	}
-	if !hasEvent(log.all(), "turn/queued", "second") {
-		t.Fatalf("no turn/queued event: %s", describe(log.all()))
-	}
+	log.waitFor(t, "turn/queued", func(evs []TurnEvent) bool { return hasEvent(evs, "turn/queued", "second") })
 	runs.finish("first")
 	runs.waitStarted(t, "first,second")
 	runs.finish("second")
@@ -294,14 +292,14 @@ func TestHubCancelQueuedTurnOnly(t *testing.T) {
 func TestHubAttachReplaysCoalescedEvents(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
 	step := make(chan struct{})
-	runs.behavior["m"] = func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+	runs.behavior["m"] = func(ctx context.Context, gate func(func() error), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		tx <- agent.ChatChunk{Delta: "hel"}
 		tx <- agent.ChatChunk{Delta: "lo"}
 		tx <- agent.ChatChunk{Tool: &agent.ToolActivity{ID: "t1", Name: "read", Status: session.ToolRunning}}
 		tx <- agent.ChatChunk{Tool: &agent.ToolActivity{ID: "t1", Name: "read", Status: session.ToolOK, Result: "x"}}
 		tx <- agent.ChatChunk{Delta: " after"}
 		<-step
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{Reply: "hello after"}, nil
 	}
 	info, _ := submit(t, h, "A", "m")
@@ -335,6 +333,7 @@ func TestHubAttachReplaysCoalescedEvents(t *testing.T) {
 	if got := strings.Join(kinds, "|"); got != "d:hello|t:ok|d: after" {
 		t.Fatalf("replay %s", got)
 	}
+	h.events.flush(time.Second)
 	last := log.all()[len(log.all())-1]
 	if att.Seq != last.Seq {
 		t.Fatalf("attach seq %d, last live seq %d", att.Seq, last.Seq)
@@ -352,9 +351,9 @@ func TestHubAttachAfterPersistSkipsReplay(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
 	hold := make(chan struct{})
 	persisted := make(chan struct{})
-	runs.behavior["m"] = func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+	runs.behavior["m"] = func(ctx context.Context, gate func(func() error), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		tx <- agent.ChatChunk{Delta: "text"}
-		gate(func() {})
+		gate(func() error { return nil })
 		close(persisted)
 		<-hold
 		return agent.ChatOutcome{Reply: "text"}, nil
@@ -389,7 +388,7 @@ func TestHubAttachListsQueuedTurns(t *testing.T) {
 
 func TestHubSurvivesPanickingRun(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
-	runs.behavior["boom"] = func(context.Context, func(func()), chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+	runs.behavior["boom"] = func(context.Context, func(func() error), chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		panic("kaboom")
 	}
 	_, done := submit(t, h, "A", "boom")
@@ -404,12 +403,31 @@ func TestHubSurvivesPanickingRun(t *testing.T) {
 
 func TestHubReportsRunErrors(t *testing.T) {
 	h, runs, _ := newTestHub(t, 4)
-	runs.behavior["bad"] = func(context.Context, func(func()), chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+	runs.behavior["bad"] = func(context.Context, func(func() error), chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		return agent.ChatOutcome{}, errors.New("provider exploded")
 	}
 	_, done := submit(t, h, "A", "bad")
 	if final := <-done; final.Error != "provider exploded" || final.State != TurnDone {
 		t.Fatalf("got %+v", final)
+	}
+}
+
+// Only a transcript write that succeeded marks the turn persisted.
+func TestHubPersistedOnlyWhenTheWriteSucceeds(t *testing.T) {
+	h, runs, _ := newTestHub(t, 4)
+	for msg, writeErr := range map[string]error{"saved": nil, "lost": errors.New("disk full")} {
+		runs.behavior[msg] = func(_ context.Context, gate func(func() error), _ chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+			gate(func() error { return writeErr })
+			return agent.ChatOutcome{}, writeErr
+		}
+	}
+	_, saved := submit(t, h, "A", "saved")
+	if info := <-saved; !info.Persisted {
+		t.Fatalf("saved turn: %+v", info)
+	}
+	_, lost := submit(t, h, "B", "lost")
+	if info := <-lost; info.Persisted {
+		t.Fatalf("a failed write reported persisted: %+v", info)
 	}
 }
 
@@ -424,6 +442,7 @@ func TestHubEventsAreSequencedAndTagged(t *testing.T) {
 	if final.Reply != "reply to m" || final.Display != "shown" {
 		t.Fatalf("final %+v", final)
 	}
+	h.events.flush(time.Second)
 	var prev uint64
 	for _, e := range log.all() {
 		if e.Seq <= prev {
@@ -467,12 +486,12 @@ func TestHubApprovalEventsReplayAndFlagTheTurn(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
 	step := make(chan struct{})
 	resolved := make(chan struct{})
-	runs.behavior["m"] = func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+	runs.behavior["m"] = func(ctx context.Context, gate func(func() error), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		tx <- agent.ChatChunk{Approval: &permission.Approval{ID: "c1", Tool: "shell", Command: "npm i", State: permission.StatePending}}
 		<-step
 		tx <- agent.ChatChunk{Approval: &permission.Approval{ID: "c1", Tool: "shell", Command: "npm i", State: permission.StateApproved, Decision: "once"}}
 		<-resolved
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{Reply: "ok"}, nil
 	}
 	submit(t, h, "A", "m")
@@ -511,13 +530,13 @@ func TestHubApprovalEventsReplayAndFlagTheTurn(t *testing.T) {
 func TestHubStreamsAndReplaysThinking(t *testing.T) {
 	h, runs, log := newTestHub(t, 4)
 	step := make(chan struct{})
-	runs.behavior["m"] = func(ctx context.Context, gate func(func()), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
+	runs.behavior["m"] = func(ctx context.Context, gate func(func() error), tx chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		tx <- agent.ChatChunk{ThinkingDropped: "max"}
 		tx <- agent.ChatChunk{Reasoning: "let me "}
 		tx <- agent.ChatChunk{Reasoning: "think"}
 		tx <- agent.ChatChunk{Delta: "ok"}
 		<-step
-		gate(func() {})
+		gate(func() error { return nil })
 		return agent.ChatOutcome{Reply: "ok"}, nil
 	}
 	submit(t, h, "A", "m")

@@ -158,6 +158,27 @@ test("a restarted agent host ends the turns that died with it", async ({ page })
   await expect(row(page, "sess-a")).not.toHaveAttribute("data-live", "running");
 });
 
+test("a resync from a lagging host re-attaches the open session and keeps its turn", async ({ page }) => {
+  await setup(page);
+  await sendIn(page, "sess-a", "one");
+  await expect(page.locator("#messages")).toContainText("started one");
+  await page.evaluate(() => {
+    const w = window as any;
+    const base = w.__paladinBaseInvoke;
+    w.__attaches = [];
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "attach") w.__attaches.push(args.sessionId);
+      return base(cmd, args);
+    };
+    w.__e2eHub.emit({ event: "host/resync", seq: 999 });
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).__attaches)).toContain("sess-a");
+  await expect(page.locator("#pauseBtn")).toBeVisible();
+  await expect(page.locator("#messages")).not.toContainText("agent host restarted");
+  await page.evaluate(() => (window as any).__release("one", ""));
+  await expect(page.locator("#pauseBtn")).toBeHidden();
+});
+
 test("a question from a background session waits until it is opened", async ({ page }) => {
   await setup(page);
   await sendIn(page, "sess-a", "deploy");
@@ -221,6 +242,7 @@ test("after a reload a running turn is re-attached and keeps streaming", async (
   await page.goto("/");
   await expect(row(page, "sess-notify-1")).toHaveAttribute("data-live", "running");
 
+  await showSidebar(page);
   await page.click('[data-session="sess-notify-1"]');
   const msgs = page.locator("#messages");
   await expect(msgs).toContainText("Earlier answer.");

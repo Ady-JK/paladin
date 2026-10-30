@@ -24,7 +24,7 @@ async function setup(page: Page): Promise<void> {
       });
   });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
   await page.fill("#promptInput", "go");
   await page.click("#sendBtn");
   await page.waitForFunction(() => Boolean((window as any).__h));

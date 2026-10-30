@@ -78,3 +78,10 @@
 #sessionList .session-row.is-active .session-count {
   opacity: 1;
 }
+
+/* A session the host could not read; the title carries the reason. */
+#sessionList .session-damaged {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-agent-rose);
+}

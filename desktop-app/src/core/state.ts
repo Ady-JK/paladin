@@ -1,11 +1,13 @@
 // state.ts holds the shared mutable frontend state.
 // Features read and write one object so modules stay free of cycles.
 
-import type { ProviderInfo, SessionInfo, SessionUsage, SideView } from "./types";
+import type { ProviderInfo, SessionInfo, SessionUsage, SideView, SubagentLink } from "./types";
 
 // state is the single mutable store the feature modules share.
 export const state = {
   sessionId: "",
+  // subagent is set while the open session is a subagent's child.
+  subagent: null as SubagentLink | null,
   usage: null as SessionUsage | null,
   escArmedAt: 0,
   busy: false,
@@ -19,7 +21,7 @@ export const state = {
   selectedModel: "",
   pendingDelete: "",
   dark: true,
-  collapsed: false,
+  collapsed: true,
   highlightedModel: "",
   treeFilter: null as { provider: string; lab: string } | null,
   sideView: "agent" as SideView,

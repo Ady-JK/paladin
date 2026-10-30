@@ -45,6 +45,45 @@ export type SessionInfo = {
   title: string;
   revert?: RevertInfo;
   worktree?: WorktreeInfo;
+  // subagent is set on a subagent's child session.
+  subagent?: SubagentLink;
+  // children lists the subagent sessions this session spawned.
+  children?: string[];
+  // damaged says why the host could not read this session.
+  damaged?: string;
+};
+
+export type AgentStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+
+// SubagentLink ties a child session to the parent that spawned it.
+export type SubagentLink = {
+  parentId: string;
+  spawnCallId?: string;
+  type: string;
+  name: string;
+  task?: string;
+  forkTurns?: string;
+  status: AgentStatus;
+  error?: string;
+  // completionId names the latest result; see PROTOCOL.md Subagents.
+  completionId?: string;
+  updatedAt: number;
+};
+
+// AgentInfo is listAgents/interruptAgent and the agents/changed payload.
+export type AgentInfo = {
+  agentId: string;
+  parentSessionId: string;
+  name: string;
+  type: string;
+  task?: string;
+  forkTurns?: string;
+  status: AgentStatus;
+  result?: string;
+  error?: string;
+  // completionId names the latest result; see PROTOCOL.md Subagents.
+  completionId?: string;
+  updatedAt: number;
 };
 
 // RevertInfo is a session's pending undo: the transcript is hidden from
@@ -115,6 +154,7 @@ export type OpenedSession = {
   model: string;
   revert?: RevertInfo;
   worktree?: WorktreeInfo;
+  subagent?: SubagentLink;
 };
 
 // UsageModel is one model's slice of a session's usage. FillPercent is
@@ -389,6 +429,8 @@ export type TurnInfo = {
   mode?: string;
   compact?: boolean;
   resume?: boolean;
+  // parentSessionId is set on a subagent's turn.
+  parentSessionId?: string;
   state: TurnState;
   persisted?: boolean;
   reply?: string;
@@ -425,6 +467,9 @@ export type TurnEvent = {
   budget?: BudgetNotice;
   hook?: HookNote;
   turn?: TurnInfo;
+  // agents/changed only (it has no sessionId).
+  parentSessionId?: string;
+  agent?: AgentInfo;
 };
 
 // HookNote is chat/hook: a user hook ran and did something worth showing.
@@ -457,7 +502,12 @@ export type HookSource = {
 export type HooksOverview = { sources: HookSource[]; events: string[] };
 
 // SideAnswer is a /btw answer (sideQuestion).
-export type SideAnswer = { answer: string; model: string };
+export type SideAnswer = { chatId: string; answer: string; model: string };
+
+// SideChat is a saved /btw side chat; SideChatInfo is its list entry.
+export type SideChatMessage = { role: "user" | "assistant"; content: string; model?: string; createdAt: number };
+export type SideChat = { id: string; title: string; createdAt: number; updatedAt: number; messages: SideChatMessage[] };
+export type SideChatInfo = { id: string; title: string; updatedAt: number; messageCount: number };
 
 // SteerInfo is a message sent into a running turn (chat/steer).
 export type SteerInfo = { message: string; display?: string };

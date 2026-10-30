@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("a provider retry shows a notice that clears once output streams", async ({ page }) => {
@@ -75,6 +76,7 @@ test("history renders a compaction divider with an expandable summary", async ({
       return base(method, params);
     };
   });
+  await showSidebar(page);
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("Continuing after compaction.");
   const divider = page.locator('#messages [data-notice="compaction"]');

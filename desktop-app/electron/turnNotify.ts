@@ -10,7 +10,14 @@ export interface HostEvent {
   tool?: { name?: string; status?: string };
   approval?: { id?: string; state?: string; command?: string; path?: string };
   budget?: { state?: string; spent?: number; limit?: number };
-  turn?: { cancelled?: boolean; stopped?: boolean; display?: string; message?: string; error?: string };
+  turn?: {
+    cancelled?: boolean;
+    stopped?: boolean;
+    display?: string;
+    message?: string;
+    error?: string;
+    parentSessionId?: string;
+  };
   [extra: string]: unknown;
 }
 
@@ -57,6 +64,8 @@ export function noteFor(msg: HostEvent | null): TurnNote | null {
   const turn = msg.turn;
   // The user stopped or dropped it themselves: nothing to tell them.
   if (turn.cancelled || turn.stopped) return null;
+  // A subagent's result goes to its parent agent, which reports it.
+  if (turn.parentSessionId) return null;
   const what = clip(String(turn.display || turn.message || "")) || "(continue)";
   if (turn.error) {
     return { sessionId, title: "Paladin · turn failed", body: clip(`${what} — ${turn.error}`) };

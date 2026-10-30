@@ -437,6 +437,32 @@ flowchart LR
 
 **Fork** copies a conversation into a new session. It can also give the copy its own worktree, to try a different idea.
 
+### Subagents (helper cooks 👩‍🍳👨‍🍳)
+
+A cook can hand a focused job to a **helper cook**: "go read every file about login and tell me how it works". The helper is a **subagent**: its own session, with its own conversation, running in the background like any other session.
+
+There are two kinds, and both are **read-only** (they look, they never write):
+
+| Kind | Job |
+|---|---|
+| `explore` | Search and read the codebase and report what it found |
+| `reviewer` | Review code or a diff and report problems |
+
+The main cook controls helpers with six tools: `spawn_agent` (hire one with a task), `wait_agent` (wait for answers, for a limited time), `send_message` (tip a helper mid-job), `followup_task` (give a finished helper more work), `interrupt_agent` (stop one) and `list_agents`.
+
+- **Fresh or full memory.** `fork_turns: "none"` (the default) gives the helper only its task, so it stays small and cheap. `fork_turns: "all"` also gives it a copy of the conversation so far (finished turns only).
+- **Never more power than the boss.** A helper's tools are its kind's list, narrowed by the parent's tool switches. It goes through the same approvals, hooks, sandbox and budget, and it can't hire helpers of its own (one level only, for now). At most 5 helpers work at once per parent (`maxSubagents`), even when the cook hires several in parallel, and re-hiring a finished helper with `followup_task` needs a free spot too.
+- **Shared kitchen.** Helpers work in the parent's folder. They're read-only, so they can't step on each other's files. Background shell jobs are private to the session that started them, so a helper can't check on or cancel anyone else's job.
+- **Money is shared.** A helper's spend counts toward its parent's budget limit.
+- **No deadlock.** With `maxConcurrentTurns: 1`, a parent waiting in `wait_agent` lends its slot to its helpers, so they still get to cook.
+- **Answers always arrive.** When a helper finishes, the parent hears about it: through `wait_agent`, as a note before its next model call, or, if the parent is idle, by starting a short parent turn to read the result. An answer is crossed off only once the parent's turn holding it is saved, so a crash or failed save means it's delivered again. Each answer carries an id that is saved with it, so after a restart Paladin checks the parent's conversation and skips answers it already has: exactly once, never zero, never twice. The full helper conversation stays in the helper's own session; the parent gets only the summary plus the helper's id.
+
+**In the app:**
+- Helpers sit **under their parent** in the sidebar ("2 subagents", fold/unfold), each with a coloured status dot (queued, running, done, failed, stopped).
+- Clicking one opens its full conversation in the main view, with a **"← parent"** bar at the top to go back. The composer is locked: only the parent gives a helper work.
+- A `spawn_agent` row in the chat has an **Open** button that shows the helper **live in the right-hand pane**, next to the parent, with a Stop button. You can switch sessions and come back; both keep running.
+- Helpers don't pop up "finished" notifications; their parent does.
+
 ---
 
 ## 9. Memory (the shared recipe notebook 📒)
@@ -483,7 +509,7 @@ flowchart LR
 - **Plan mode** (`/plan`): the agent only gets read-only tools. It looks around and proposes a plan.
 - **Build mode** (`/build`): back to normal.
 - **Skills**: packs of instructions the model can pull in when needed (with the `skill` tool), or that you attach to a turn.
-- **`/btw <question>`**: whisper a side question to the cook without interrupting. It works **while a turn is running**: Paladin copies the conversation so far (including tools still running), asks the model once with no tools, and shows the answer in a card you can dismiss. It is **never saved** to the chat, but its cost counts toward usage and the budget.
+- **`/btw [question]`**: whisper a side question to the cook without interrupting. It works **while a turn is running**: Paladin copies the conversation so far (including tools still running), asks the model once with no tools, and shows the answer in a **side chat** tab in the right-hand pane (the speech-bubble button in the title bar opens it). A bare `/btw` just opens an empty side chat, ready to type in. You can keep asking in that tab, open more tabs, and reopen old side chats from the pane's history menu. Side chats are saved next to the session (see §12) but **never added to the main conversation**; their cost counts toward usage and the budget.
 
 ---
 
@@ -525,9 +551,14 @@ flowchart LR
 ├── sessions/
 │   └── <encoded folder>/
 │       └── <session id>/
-│           ├── messages.jsonl   ← the conversation, one message per line
-│           ├── meta.json        ← title, model, worktree, revert, tool switches…
-│           └── usage.json       ← tokens & cost
+│           ├── messages.jsonl   ← the conversation, one turn per line
+│           ├── meta.json        ← title, model, worktree, revert, tool switches,
+│           │                       subagent link (parent/children)…
+│           ├── usage.json       ← tokens & cost
+│           ├── summary.json     ← list cache (count, title, bytes read); rebuildable
+│           └── side-chats/
+│               └── <chat id>/chat.json  ← one /btw side chat
+│       (a subagent is a session folder of its own, beside its parent)
 ├── memory/
 │   ├── USER.md
 │   ├── MEMORY.md
@@ -560,12 +591,13 @@ flowchart TB
     workingBar["workingBar.ts<br/>'Working…' bar"]
     resources["resources.ts<br/>CPU/RAM per session"]
     todos["todos.ts<br/>plan checklist above composer"]
+    sidePane["sidePane.ts<br/>right pane: side chats + live subagents"]
 ```
 
 **`live.ts` is the mail sorter.** Every event has a `sessionId`. If it's for the session on screen, it's drawn right away.
 If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
 
-**The sidebar is a drawer.** In the Agent view it floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The Chat view (ChatGPT, Claude…) has no sidebar at all: those pages are real mini-browsers stuck on top of the window, and nothing can be drawn over them, so you switch between them with tabs along the top, like a browser.
+**The sidebar is a drawer.** The app starts with it closed. In the Agent view it floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The Chat view (ChatGPT, Claude…) has no sidebar at all: those pages are real mini-browsers stuck on top of the window, and nothing can be drawn over them, so you switch between them with tabs along the top, like a browser.
 
 ---
 

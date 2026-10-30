@@ -216,16 +216,16 @@ func (r *AgentRuntime) DeleteSessionWith(sessionID, cwd string, discard bool) (b
 
 // worktreeInUse reports whether any session still works in path.
 func (r *AgentRuntime) worktreeInUse(path string) bool {
-	infos, err := r.transcripts.List("", 0)
+	metas, err := r.transcripts.ListMeta("")
 	if err != nil {
 		return true
 	}
 	prefix := path + string(filepath.Separator)
-	for _, info := range infos {
-		if wt := info.Meta.Worktree; wt != nil && wt.Path == path {
+	for _, meta := range metas {
+		if wt := meta.Worktree; wt != nil && wt.Path == path {
 			return true
 		}
-		if c := info.Meta.Cwd; c == path || strings.HasPrefix(c, prefix) {
+		if c := meta.Cwd; c == path || strings.HasPrefix(c, prefix) {
 			return true
 		}
 	}

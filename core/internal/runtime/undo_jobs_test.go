@@ -71,7 +71,7 @@ func TestCancelledJobIsFinalizedOnce(t *testing.T) {
 	rt, ws, sid := undoRuntime(t, `{"cmd":"sleep 30; echo late > k.txt","background":true}`, "")
 	turn(t, rt, sid, ws, "start job")
 	rec := runningJob(t, rt, sid)
-	if _, err := rt.shell.Call([]byte(`{"action":"cancel","job_id":"`+rec.ID+`"}`), &tools.ToolCtx{}); err != nil {
+	if _, err := rt.shell.Call([]byte(`{"action":"cancel","job_id":"`+rec.ID+`"}`), &tools.ToolCtx{SessionID: sid}); err != nil {
 		t.Fatal(err)
 	}
 	rec = waitJob(t, rt, sid)

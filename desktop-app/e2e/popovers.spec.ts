@@ -5,7 +5,7 @@ import { test, expect, type Page } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 const menus = ["#permMenu", "#toolsMenu", "#budgetMenu", "#modelMenu"];

@@ -55,6 +55,39 @@ type SessionInfo struct {
 	Revert *RevertInfo `json:"revert,omitempty"`
 	// Worktree is set for sessions working in a managed git worktree.
 	Worktree *WorktreeInfo `json:"worktree,omitempty"`
+	// Subagent links a child session to the parent that spawned it.
+	Subagent *SubagentInfo `json:"subagent,omitempty"`
+	// Children lists the subagent sessions this session spawned.
+	Children []string `json:"children,omitempty"`
+	// Damaged says why the session could not be read (it can still be
+	// deleted).
+	Damaged string `json:"damaged,omitempty"`
+}
+
+// SubagentInfo is the client view of a child session's link and state.
+type SubagentInfo struct {
+	ParentID string `json:"parentId"`
+	// SpawnCallID is the parent's spawn_agent call that created it.
+	SpawnCallID string `json:"spawnCallId,omitempty"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Task        string `json:"task,omitempty"`
+	ForkTurns   string `json:"forkTurns,omitempty"`
+	// Status is queued, running, completed, failed or interrupted.
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// SubagentView converts a stored subagent link for the client.
+func SubagentView(sa *transcript.Subagent) *SubagentInfo {
+	if sa == nil {
+		return nil
+	}
+	return &SubagentInfo{
+		ParentID: sa.ParentID, SpawnCallID: sa.SpawnCallID, Type: sa.Type, Name: sa.Name, Task: sa.Task, ForkTurns: sa.ForkTurns,
+		Status: sa.Status, Error: sa.Error, UpdatedAt: sa.UpdatedAt.UnixMilli(),
+	}
 }
 
 // WorktreeInfo is the client view of a session's worktree.
@@ -113,6 +146,8 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 		Title:        title,
 		Revert:       RevertView(meta.Revert),
 		Worktree:     WorktreeView(meta.Worktree),
+		Subagent:     SubagentView(meta.Subagent),
+		Children:     meta.Children,
 	}
 }
 

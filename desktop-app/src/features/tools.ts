@@ -381,6 +381,19 @@ type ToolKind = {
 
 const plural = (one: string, many: string) => (n: number) => `${n} ${n === 1 ? one : many}`;
 
+// The subagent control tools; "agent" is a finished child's notice.
+const isAgentTool = (name: string): boolean => Object.prototype.hasOwnProperty.call(AGENT_KINDS, name);
+
+const AGENT_KINDS: Record<string, ToolKind> = {
+  spawn_agent: { icon: "rl-agent", past: "Spawned", now: "Spawning", noun: plural("subagent", "subagents") },
+  wait_agent: { icon: "rl-agent", past: "Waited for", now: "Waiting for", noun: plural("subagent", "subagents") },
+  send_message: { icon: "rl-agent", past: "Messaged", now: "Messaging", noun: plural("subagent", "subagents") },
+  followup_task: { icon: "rl-agent", past: "Followed up", now: "Following up", noun: plural("subagent", "subagents") },
+  interrupt_agent: { icon: "rl-agent", past: "Stopped", now: "Stopping", noun: plural("subagent", "subagents") },
+  list_agents: { icon: "rl-agent", past: "Listed", now: "Listing", noun: plural("subagent list", "subagent lists") },
+  agent: { icon: "rl-agent", past: "Heard from", now: "Hearing from", noun: plural("subagent", "subagents") },
+};
+
 const KINDS: Record<string, ToolKind> = {
   shell: { icon: "tl-term", past: "Ran", now: "Running", noun: plural("command", "commands") },
   read: { icon: "tl-file", past: "Read", now: "Reading", noun: plural("file", "files") },
@@ -393,7 +406,39 @@ const KINDS: Record<string, ToolKind> = {
     now: "Updating",
     noun: (n) => (n === 1 ? "the plan" : `the plan ${n} times`),
   },
+  ...AGENT_KINDS,
 };
+
+// agentDetail names the subagent an agent tool call is about.
+function agentDetail(tool: ToolInfo, args: Record<string, unknown>): ToolLabel | null {
+  if (!isAgentTool(tool.name)) return null;
+  const kind = AGENT_KINDS[tool.name];
+  const verb = tool.status === "running" ? kind.now : kind.past;
+  const result = parseArgs(tool.result);
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const name = str(result.name) || str(args.name) || str(args.target);
+  switch (tool.name) {
+    case "spawn_agent":
+      return { verb, detail: name || str(args.agent_type) || "a subagent", chip: str(args.agent_type) };
+    case "wait_agent": {
+      const targets = Array.isArray(args.targets) ? args.targets.map(String) : [];
+      return { verb, detail: targets.length ? targets.join(", ") : "subagents", chip: "" };
+    }
+    case "list_agents":
+      return { verb, detail: "subagents", chip: "" };
+    case "agent":
+      return { verb, detail: name || "a subagent", chip: str(result.status) };
+    default:
+      return { verb, detail: name || "a subagent", chip: "" };
+  }
+}
+
+// agentIdOf is the child session an agent tool row can open.
+function agentIdOf(tool: ToolInfo): string {
+  if (!isAgentTool(tool.name) || tool.name === "list_agents" || tool.name === "wait_agent") return "";
+  const id = parseArgs(tool.result).agent_id ?? parseArgs(tool.arguments).agent_id;
+  return typeof id === "string" ? id : "";
+}
 
 const OTHER: ToolKind = { icon: "tl-tools", past: "Called", now: "Calling", noun: plural("tool", "tools") };
 const MCP: ToolKind = { icon: "sl-plug", past: "Called", now: "Calling", noun: plural("MCP tool", "MCP tools") };
@@ -413,6 +458,8 @@ export function toolLabel(tool: ToolInfo): ToolLabel {
   const verb = tool.status === "running" ? kind.now : kind.past;
   const args = parseArgs(tool.arguments);
   const summary = toolSummary(tool.name, tool.arguments);
+  const agent = agentDetail(tool, args);
+  if (agent) return agent;
   switch (tool.name) {
     case "shell":
       return { verb, detail: "", chip: summary };
@@ -544,9 +591,31 @@ export function createToolActivity(tool: ToolInfo): ToolView {
 
   box.append(toggle, details);
 
+  // A subagent's row opens it in the side pane; outside the toggle, as
+  // buttons cannot nest.
+  const paintOpen = () => {
+    const id = agentIdOf(current);
+    let open = box.querySelector<HTMLButtonElement>(":scope > .tool-open-agent");
+    if (!id) {
+      open?.remove();
+      return;
+    }
+    if (!open) {
+      open = document.createElement("button");
+      open.type = "button";
+      open.className = "tool-open-agent";
+      open.title = "Show this subagent beside the chat";
+      open.innerHTML = `${icon("external", "h-3 w-3")}<span>Open</span>`;
+      toggle.after(open);
+    }
+    open.dataset.openAgent = id;
+  };
+  paintOpen();
+
   const update = (next: ToolInfo) => {
     current = next;
     paintToolHead(box, toggle, current);
+    paintOpen();
     render();
   };
 

@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("settings fills most of the screen with a sidebar", async ({ page }) => {
@@ -86,7 +86,7 @@ test("workspace pane saves the default workspace", async ({ page }) => {
   await page.click("#settingsWorkspaceSaveBtn");
   await expect(page.locator("#toast")).toContainText("Default workspace saved");
   await page.reload();
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
   await page.click("#settingsBtn");
   await expect(page.locator("#settingsDefaultWorkspace")).toHaveValue("/home/tester/project");
 });

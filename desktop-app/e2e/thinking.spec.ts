@@ -2,6 +2,7 @@
 // chip and its slider card) and the model's streamed thinking, live and
 // from history.
 import { test, expect, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 async function hold(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -27,7 +28,7 @@ async function pickModel(page: Page, query: string): Promise<void> {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("the thinking chip opens a slider card that sets the model's level", async ({ page }) => {
@@ -132,6 +133,7 @@ test("saved thinking shows as a folded block from history", async ({ page }) => 
       { role: "assistant", content: "Because.", createdAt: at },
     ];
   });
+  await showSidebar(page);
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("Because.");
   const block = page.locator("#messages .think-block");

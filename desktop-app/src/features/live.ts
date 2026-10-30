@@ -6,7 +6,7 @@
 // history from the sidecar plus whatever is still running or queued.
 
 import * as api from "../core/api";
-import { messagesEl, pauseBtn, sendBtn, statusDetailEl, steerBtn } from "../core/dom";
+import { inputEl, messagesEl, pauseBtn, sendBtn, statusDetailEl, steerBtn } from "../core/dom";
 import { state } from "../core/state";
 import type { Approval, AttachSnapshot, ToolInfo, TurnEvent, TurnInfo } from "../core/types";
 import { setStatus } from "../ui/status";
@@ -17,7 +17,7 @@ import { TurnView } from "./turnView";
 import { handleAskToolEvent } from "./ask";
 import { handleTodoToolEvent, refreshTodos } from "./todos";
 import { refreshUsage } from "./usage";
-import { refreshSessions, renderSessions } from "./sessions";
+import { onAgentsChanged, refreshSessions, renderSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget } from "./budget";
@@ -53,6 +53,7 @@ type Entry = {
 };
 
 const entries = new Map<string, Entry>();
+const defaultPlaceholder = inputEl.placeholder;
 let wired = false;
 let sidebarQueued = false;
 
@@ -103,7 +104,8 @@ function sidebar(): void {
 
 // mount puts the visible session's live rows on screen (after history).
 function mount(e: Entry): void {
-  if (!visible(e.sessionId) || e.root.isConnected) return;
+  // The root may sit in a side-pane tab; the main view takes it back.
+  if (!visible(e.sessionId) || e.root.parentElement === messagesEl) return;
   if (e.root.childElementCount > 0) {
     dismissGreeting();
   }
@@ -119,6 +121,12 @@ export function liveBadge(sessionId: string): LiveBadge {
   if (e.running) return "running";
   if (e.queued.length > 0) return "queued";
   return e.badge;
+}
+
+// liveRoot is a session's live rows, for a view other than the main
+// one (a subagent's side-pane tab) to show after its history.
+export function liveRoot(sessionId: string): HTMLElement {
+  return entry(sessionId).root;
 }
 
 export function queuedCount(sessionId: string): number {
@@ -138,10 +146,14 @@ export function syncComposer(): void {
   const busy = !!e && e.running !== null;
   state.busy = busy;
   pauseBtn.classList.toggle("hidden", !busy);
-  sendBtn.disabled = false;
+  // Only its parent agent gives a subagent work.
+  const child = !!state.subagent;
+  inputEl.disabled = child;
+  inputEl.placeholder = child ? "A subagent takes work from its parent agent only" : defaultPlaceholder;
+  sendBtn.disabled = child;
   sendBtn.classList.remove("hidden");
   sendBtn.title = busy ? "Queue after the running turn" : "Send";
-  steerBtn.classList.toggle("hidden", !busy);
+  steerBtn.classList.toggle("hidden", !busy || child);
   paintWorking();
   syncWorktreeChip();
 }
@@ -441,7 +453,8 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     void syncBudget();
     void refreshTodos();
     void refreshWorktreeBar();
-  } else if (!quiet) {
+  } else if (!quiet && !turn.parentSessionId) {
+    // A subagent's outcome goes to its parent agent, which reports it.
     e.badge = failure ? "error" : "done";
     const what = failure ? "failed" : "finished";
     toast(`“${titleOf(e.sessionId)}” ${what}`, failure ? "error" : "ok");
@@ -464,6 +477,14 @@ export function noteSubmitted(info: TurnInfo): void {
 function onEvent(ev: TurnEvent): void {
   if (ev?.event === "host/restarted") {
     void recoverFromRestart();
+    return;
+  }
+  if (ev?.event === "host/resync") {
+    void resync();
+    return;
+  }
+  if (ev?.event === "agents/changed") {
+    if (ev.agent) onAgentsChanged(ev.agent);
     return;
   }
   if (!ev || typeof ev.sessionId !== "string" || !ev.sessionId) return;
@@ -494,6 +515,32 @@ async function recoverFromRestart(): Promise<void> {
     }
   }
   await bootLive();
+}
+
+// resyncHooks re-attach views outside the main conversation (the side
+// pane's agent tabs) after a resync.
+const resyncHooks: (() => void)[] = [];
+
+export function onResync(hook: () => void): void {
+  resyncHooks.push(hook);
+}
+
+let reopen: ((sessionId: string) => void) | null = null;
+
+// resync runs after the host dropped streaming events for a client
+// that fell behind: its turns are still alive, so they are re-read
+// rather than ended, and the open views re-attach to fetch what was
+// missed.
+async function resync(): Promise<void> {
+  await bootLive();
+  if (state.sessionId) reopen?.(state.sessionId);
+  for (const hook of resyncHooks) {
+    try {
+      hook();
+    } catch (error) {
+      console.error("resync hook failed", error);
+    }
+  }
 }
 
 // beginAttach starts buffering a session's events while its snapshot
@@ -568,7 +615,8 @@ export function finishAttach(sessionId: string, snap: AttachSnapshot): void {
   const buffered = e.attaching ?? [];
   e.attaching = null;
   mount(e);
-  if (e.root.childElementCount > 0) {
+  const shown = visible(sessionId);
+  if (shown && e.root.childElementCount > 0) {
     scrollToBottom();
   }
   for (const ev of buffered) {
@@ -583,7 +631,7 @@ export function finishAttach(sessionId: string, snap: AttachSnapshot): void {
     e.asks.delete(ask.id);
     handleAskToolEvent(e.sessionId, ask);
   }
-  if (e.running) {
+  if (shown && e.running) {
     setStatus("thinking…", "busy");
   }
   syncComposer();
@@ -637,6 +685,7 @@ export async function bootLive(): Promise<void> {
 export function initLive(open: (sessionId: string) => void): void {
   if (wired) return;
   wired = true;
+  reopen = open;
   try {
     api.onAgentEvent(onEvent);
     api.onOpenSessionRequest((id) => open(id));

@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("chat tab swaps the sidebar and the main view", async ({ page }) => {
@@ -136,6 +136,9 @@ test("chat mode has no sidebar, only the page tabs", async ({ page }) => {
 });
 
 test("collapsing in agent keeps the sessions and hides the chats", async ({ page }) => {
+  await expect(page.locator("#sessionList")).toBeHidden();
+  await page.click("#agentTab");
+  await expect(page.locator("#sessionList")).toBeVisible();
   await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeHidden();
   await page.click("#agentTab");
@@ -146,6 +149,8 @@ test("collapsing in agent keeps the sessions and hides the chats", async ({ page
 });
 
 test("collapse, expand, then switch sides stays clean", async ({ page }) => {
+  await page.click("#agentTab");
+  await expect(page.locator("#sessionList")).toBeVisible();
   await page.click("#agentTab");
   await expect(page.locator("#sessionList")).toBeHidden();
   await page.click("#agentTab");

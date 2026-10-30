@@ -24,7 +24,7 @@ const (
 
 // RunFunc runs one turn. It must not close tx; the hub does. gate wraps
 // the end-of-turn transcript write (agent.Deps.PersistGate).
-type RunFunc func(ctx context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error)
+type RunFunc func(ctx context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error)
 
 // TurnInfo describes one submitted turn.
 type TurnInfo struct {
@@ -40,6 +40,8 @@ type TurnInfo struct {
 	Mode    string `json:"mode,omitempty"`
 	Compact bool   `json:"compact,omitempty"`
 	Resume  bool   `json:"resume,omitempty"`
+	// Parent is set on a subagent's turn: its parent session's id.
+	Parent string `json:"parentSessionId,omitempty"`
 	// Permissions is the turn's approval preset as submitted.
 	Permissions string `json:"permissions,omitempty"`
 	State       string `json:"state"`
@@ -81,6 +83,8 @@ type TurnEvent struct {
 // SubmitOpts carries client-side extras that never reach the agent.
 type SubmitOpts struct {
 	Display string
+	// ParentSessionID marks a subagent's turn with its parent session.
+	ParentSessionID string
 }
 
 // Attachment is everything a client needs to show a session: its
@@ -109,6 +113,8 @@ type hubTurn struct {
 	// halted marks a user stop (or shutdown), as opposed to the turn
 	// ending on its own.
 	halted bool
+	// lent counts waits in which the turn gave its slot away (see Lend).
+	lent int
 }
 
 // halt stops the turn on the user's behalf. Callers hold the hub lock.
@@ -124,31 +130,62 @@ type Hub struct {
 	run   RunFunc
 	limit func() int
 
+	// events delivers broadcasts in seq order off the hub lock.
+	events *eventWriter
+	// gates serialize a session's transcript reads (Attach) with its
+	// turn's writes, without holding the hub lock across disk I/O. Lock
+	// order: a session gate, then mu.
+	gatesMu sync.Mutex
+	gates   map[string]*sync.Mutex
+
 	mu      sync.Mutex
-	sink    func(TurnEvent)
 	seq     uint64
 	nextID  atomic.Uint64
 	active  map[string]*hubTurn
 	queue   []*hubTurn
 	closed  bool
 	running sync.WaitGroup
+	// onDone sees every finished or dropped turn, in order, off the lock.
+	onDone       func(TurnInfo)
+	doneQueue    []TurnInfo
+	doneDraining bool
+	// doneIdle is closed when the running drainDone goroutine ends.
+	doneIdle chan struct{}
 }
 
 // NewHub builds a hub; limit is read on every scheduling pass so a
 // settings change applies to the next turn that would start.
 func NewHub(run RunFunc, limit func() int) *Hub {
-	return &Hub{run: run, limit: limit, active: map[string]*hubTurn{}, sink: func(TurnEvent) {}}
+	h := &Hub{run: run, limit: limit, active: map[string]*hubTurn{}, gates: map[string]*sync.Mutex{}}
+	h.events = newEventWriter(defaultEventLimits, h.publishResync)
+	return h
 }
 
-// SetSink sets the broadcast target. It is called with the hub lock
-// held, so events arrive in seq order; it must not call back into the hub.
-func (h *Hub) SetSink(sink func(TurnEvent)) {
+// SetSink sets the broadcast target. It is called on one writer
+// goroutine, in seq order, never with the hub lock held. A sink that
+// falls far behind loses streaming chunks and then gets a host/resync.
+func (h *Hub) SetSink(sink func(TurnEvent)) { h.events.setSink(sink) }
+
+// publishResync tells the client it missed streaming events and should
+// re-attach the sessions it shows.
+func (h *Hub) publishResync() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if sink == nil {
-		sink = func(TurnEvent) {}
+	h.seq++
+	h.events.push(TurnEvent{Event: "host/resync", Seq: h.seq})
+}
+
+// sessionGate returns the lock that orders a session's transcript
+// reads and writes.
+func (h *Hub) sessionGate(sessionID string) *sync.Mutex {
+	h.gatesMu.Lock()
+	defer h.gatesMu.Unlock()
+	gate := h.gates[sessionID]
+	if gate == nil {
+		gate = &sync.Mutex{}
+		h.gates[sessionID] = gate
 	}
-	h.sink = sink
+	return gate
 }
 
 // Submit queues a turn and starts it at once when its session is idle
@@ -190,6 +227,7 @@ func (h *Hub) newTurn(req agent.Request, opts SubmitOpts) *hubTurn {
 			Cwd:         req.Cwd,
 			Message:     req.Message,
 			Display:     opts.Display,
+			Parent:      opts.ParentSessionID,
 			Skill:       derefString(req.Skill),
 			Command:     derefString(req.Command),
 			Mode:        req.Mode,
@@ -287,13 +325,20 @@ func (h *Hub) pumpLocked() {
 			limit = n
 		}
 	}
+	busy := 0
+	for _, t := range h.active {
+		if t.lent == 0 {
+			busy++
+		}
+	}
 	kept := h.queue[:0]
 	for _, t := range h.queue {
-		if len(h.active) >= limit || h.active[t.info.SessionID] != nil {
+		if busy >= limit || h.active[t.info.SessionID] != nil {
 			kept = append(kept, t)
 			continue
 		}
 		h.startLocked(t)
+		busy++
 	}
 	for i := len(kept); i < len(h.queue); i++ {
 		h.queue[i] = nil
@@ -325,11 +370,18 @@ func (h *Hub) drive(ctx context.Context, t *hubTurn) {
 			h.forward(t, chunk)
 		}
 	}()
-	gate := func(persist func()) {
+	gate := func(persist func() error) {
+		sessionGate := h.sessionGate(t.info.SessionID)
+		sessionGate.Lock()
+		defer sessionGate.Unlock()
+		// A failed write leaves the turn unpersisted: its live log stays
+		// replayable and child results it took are delivered again.
+		err := persist()
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		persist()
-		t.info.Persisted = true
+		if err == nil {
+			t.info.Persisted = true
+		}
 	}
 	var (
 		out agent.ChatOutcome
@@ -422,6 +474,7 @@ func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
 	h.publishLocked(t, TurnEvent{Event: "turn/done", Turn: infoPtr(t.info)})
 	t.result <- t.info
 	close(t.finished)
+	h.notifyDoneLocked(t.info)
 	h.queueLeftoverSteerLocked(t)
 	h.pumpLocked()
 }
@@ -435,7 +488,7 @@ func (h *Hub) publishLocked(t *hubTurn, e TurnEvent) {
 	if t.info.State == TurnRunning && strings.HasPrefix(e.Event, "chat/") {
 		t.record(e)
 	}
-	h.sink(e)
+	h.events.push(e)
 }
 
 // record keeps the replay log compact: consecutive deltas (or thinking) merge and a
@@ -472,10 +525,13 @@ func replaceKey(e TurnEvent) string {
 }
 
 // Attach snapshots a session atomically with history: events published
-// after it carry a larger Seq than the snapshot.
+// after it carry a larger Seq than the snapshot. History is read under
+// the session's gate, so the turn cannot persist meanwhile, but not
+// under the hub lock, so a slow disk stalls only this session.
 func (h *Hub) Attach(sessionID string, history func() (any, error)) (Attachment, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	sessionGate := h.sessionGate(sessionID)
+	sessionGate.Lock()
+	defer sessionGate.Unlock()
 	var att Attachment
 	if history != nil {
 		hist, err := history()
@@ -484,6 +540,8 @@ func (h *Hub) Attach(sessionID string, history func() (any, error)) (Attachment,
 		}
 		att.History = hist
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	att.Seq = h.seq
 	att.Events = []TurnEvent{}
 	att.Queued = []TurnInfo{}
@@ -520,6 +578,16 @@ func (h *Hub) Running(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.active[sessionID] != nil
+}
+
+// RunningTurnID is the id of the session's running turn, or "".
+func (h *Hub) RunningTurnID(sessionID string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if t := h.active[sessionID]; t != nil {
+		return t.info.TurnID
+	}
+	return ""
 }
 
 // Busy reports whether the session has a turn running or queued.
@@ -609,8 +677,90 @@ func (h *Hub) dropQueuedLocked(match func(*hubTurn) bool) bool {
 		h.publishLocked(t, TurnEvent{Event: "turn/done", Turn: infoPtr(t.info)})
 		t.result <- t.info
 		close(t.finished)
+		h.notifyDoneLocked(t.info)
 	}
 	return hit
+}
+
+// SetOnDone registers a callback for every finished or dropped turn.
+// Calls arrive in completion order on a separate goroutine, so the
+// callback may call back into the hub.
+func (h *Hub) SetOnDone(fn func(TurnInfo)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onDone = fn
+}
+
+func (h *Hub) notifyDoneLocked(info TurnInfo) {
+	if h.onDone == nil {
+		return
+	}
+	h.doneQueue = append(h.doneQueue, info)
+	if !h.doneDraining {
+		h.doneDraining = true
+		h.doneIdle = make(chan struct{})
+		go h.drainDone()
+	}
+}
+
+func (h *Hub) drainDone() {
+	for {
+		h.mu.Lock()
+		if len(h.doneQueue) == 0 {
+			h.doneDraining = false
+			close(h.doneIdle)
+			h.mu.Unlock()
+			return
+		}
+		info, fn := h.doneQueue[0], h.onDone
+		h.doneQueue = h.doneQueue[1:]
+		h.mu.Unlock()
+		if fn != nil {
+			fn(info)
+		}
+	}
+}
+
+// SettleDone waits (bounded) until every queued done callback has run.
+// It must not be called from a done callback.
+func (h *Hub) SettleDone(timeout time.Duration) bool {
+	h.mu.Lock()
+	idle := h.doneIdle
+	draining := h.doneDraining
+	h.mu.Unlock()
+	if !draining {
+		return true
+	}
+	select {
+	case <-idle:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// Lend gives the session's running turn slot to queued work while the
+// turn blocks on it (a parent waiting on its subagents), so a parent
+// can never deadlock its own children, even with a limit of 1. The
+// returned func takes the slot back; it is safe to call more than once.
+// The turn may then briefly run above the limit rather than block again.
+func (h *Hub) Lend(sessionID string) (restore func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t := h.active[sessionID]
+	if t == nil {
+		return func() {}
+	}
+	t.lent++
+	h.pumpLocked()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			t.lent--
+		})
+	}
 }
 
 // WaitIdle blocks until the session has no running turn or the timeout passes.
@@ -630,7 +780,7 @@ func (h *Hub) WaitIdle(sessionID string, timeout time.Duration) bool {
 }
 
 // Shutdown refuses new turns, stops every turn and waits (bounded) for
-// them to persist.
+// them to persist and for their done callbacks to finish.
 func (h *Hub) Shutdown(timeout time.Duration) {
 	h.mu.Lock()
 	h.closed = true
@@ -641,10 +791,13 @@ func (h *Hub) Shutdown(timeout time.Duration) {
 		h.running.Wait()
 		close(waited)
 	}()
+	deadline := time.Now().Add(timeout)
 	select {
 	case <-waited:
+		h.SettleDone(time.Until(deadline))
 	case <-time.After(timeout):
 	}
+	h.events.flush(max(time.Until(deadline), 100*time.Millisecond))
 }
 
 func infoPtr(info TurnInfo) *TurnInfo { return &info }

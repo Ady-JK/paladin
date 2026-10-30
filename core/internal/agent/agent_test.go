@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,7 +252,7 @@ func TestRunUnknownToolIsErrorResult(t *testing.T) {
 func TestAppendNotifyShape(t *testing.T) {
 	a, _, _, done := testAgent(t, &mockProvider{})
 	defer close(done)
-	a.appendNotify("content", "c1#notify", true)
+	a.appendNotify("content", "c1#notify", "shell", true)
 	if len(a.records) != 1 || !a.records[0].IsNotify {
 		t.Fatalf("got %+v", a.records)
 	}
@@ -323,6 +325,25 @@ func TestEmitStopsWhenClientLeaves(t *testing.T) {
 	close(done)
 	if err := a.emit(ChatChunk{Delta: "x"}); err == nil {
 		t.Fatal("emit to a closed done channel should stop")
+	}
+}
+
+// A turn is written as one transcript line: a crash or failed write
+// can never leave the user message without its records.
+func TestTurnPersistsAsOneLine(t *testing.T) {
+	prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{inference.TextChunk("hello")}}}}
+	a, sess, _, done := testAgent(t, prov)
+	defer close(done)
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(sess.Dir, "messages.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], `{"turn":`) {
+		t.Fatalf("transcript lines = %q", lines)
 	}
 }
 

@@ -8,6 +8,9 @@ import type {
   HookScope,
   HooksOverview,
   SideAnswer,
+  SideChat,
+  SideChatInfo,
+  AgentInfo,
   GitInfo,
   MergeResult,
   OpenedSession,
@@ -545,13 +548,32 @@ export function hooksToggle(cwd: string | null, key: string, enabled: boolean): 
   return invoke<HooksOverview>("hooksToggle", { cwd, key, enabled });
 }
 
-// sideQuestion asks a /btw question about a session; nothing is saved.
+// sideQuestion asks a /btw question about a session. Without chatId a
+// new side chat starts; the exchange is saved in that side chat only.
 export function sideQuestion(
   sessionId: string,
   cwd: string | null,
   question: string,
   provider: string | null,
   model: string | null,
+  chatId: string | null = null,
 ): Promise<SideAnswer> {
-  return invoke<SideAnswer>("sideQuestion", { sessionId, cwd, question, provider, model });
+  return invoke<SideAnswer>("sideQuestion", { sessionId, cwd, question, chatId, provider, model });
+}
+
+export function listSideChats(sessionId: string, cwd: string | null): Promise<SideChatInfo[]> {
+  return invoke<SideChatInfo[]>("listSideChats", { sessionId, cwd });
+}
+
+export function loadSideChat(sessionId: string, cwd: string | null, chatId: string): Promise<SideChat> {
+  return invoke<SideChat>("loadSideChat", { sessionId, cwd, chatId });
+}
+
+export function deleteSideChat(sessionId: string, cwd: string | null, chatId: string): Promise<void> {
+  return invoke<void>("deleteSideChat", { sessionId, cwd, chatId });
+}
+
+// interruptAgent stops a subagent's running turn and its queued work.
+export function interruptAgent(sessionId: string, agentId: string): Promise<AgentInfo> {
+  return invoke<AgentInfo>("interruptAgent", { sessionId, agentId });
 }

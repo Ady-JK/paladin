@@ -293,21 +293,28 @@ const maxEscalations = 3
 const NoticeInterruptedContent = `{"error":"interrupted: the model's tool call never completed, so it did not run"}`
 
 func (a *Agent) drainNotifications() error {
-	if a.shell == nil {
-		return nil
+	var notices []Notice
+	if a.shell != nil {
+		for _, job := range a.shell.PollNotify(a.session.Meta.SessionID) {
+			notices = append(notices, Notice{
+				CallID: session.NotifyCallID(job.CallID), Name: "shell",
+				Arguments: session.NotifyArgs(job.JobID),
+				Content:   notifyContent(&job), IsError: job.IsError,
+			})
+		}
 	}
-	for _, notice := range a.shell.PollNotify(a.session.Meta.SessionID) {
-		content := notifyContent(&notice)
-		callID := session.NotifyCallID(notice.CallID)
-		a.appendNotify(content, callID, notice.IsError)
+	if a.notices != nil {
+		notices = append(notices, a.notices()...)
+	}
+	for _, n := range notices {
+		a.appendNotify(n.Content, n.CallID, n.Name, n.IsError)
 		status := session.ToolOK
-		if notice.IsError {
+		if n.IsError {
 			status = session.ToolFailed
 		}
 		if err := a.emit(ChatChunk{Tool: &ToolActivity{
-			ID: callID, Name: "shell",
-			Arguments: session.NotifyArgs(notice.JobID),
-			Result:    content, Status: status,
+			ID: n.CallID, Name: n.Name, Arguments: n.Arguments,
+			Result: n.Content, Status: status,
 		}}); err != nil {
 			return turnStop{}
 		}

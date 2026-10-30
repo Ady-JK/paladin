@@ -3,6 +3,7 @@
 // calls folded into one summarized group ("Ran 2 commands"), live
 // running/failed states, and the same layout for persisted history.
 import { test, expect, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 type Tool = { id: string; name: string; arguments: string; result: string; status: string };
 
@@ -26,7 +27,7 @@ async function setup(page: Page): Promise<void> {
       });
   });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
   await page.fill("#promptInput", "go");
   await page.click("#sendBtn");
   await page.waitForFunction(() => Boolean((window as any).__h));
@@ -178,6 +179,7 @@ test("history transcripts group calls the same way", async ({ page }) => {
     };
   });
   await page.goto("/");
+  await showSidebar(page);
   await page.click('[data-session="sess-hist"]');
   await expect(page.locator("#messages")).toContainText("All good.");
   await expect(runs(page)).toHaveCount(2);

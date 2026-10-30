@@ -391,7 +391,7 @@ func TestInfoCountsVisibleOnly(t *testing.T) {
 	if err := sess.Append(RoleAssistant, "   "); err != nil {
 		t.Fatal(err)
 	}
-	info := info(sessDir, sess.Meta)
+	info := info(sessionEntry{dir: sessDir, meta: sess.Meta})
 	if info.MessageCount != 1 || info.Title != "q" {
 		t.Fatalf("got %+v", info)
 	}

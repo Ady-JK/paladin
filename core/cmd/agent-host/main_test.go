@@ -350,6 +350,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	os.Stdout = w
 	fn()
+	notices.flush()
 	_ = w.Close()
 	os.Stdout = old
 	data := readAllPipe(r)

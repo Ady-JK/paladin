@@ -49,7 +49,17 @@ func (r *AgentRuntime) BudgetGet(cwd, sessionID string) (BudgetView, error) {
 		v.SessionUsd = b
 		v.EffectiveUsd = *b
 	}
-	totals, _ := readUsage(sess)
+	if sa := sess.Meta.Subagent; sa != nil {
+		// A child spends from its parent's limit.
+		if root, err := r.subagents.load(sess.Meta.Cwd, sa.ParentID); err == nil {
+			v.SessionUsd, v.EffectiveUsd = nil, v.DefaultUsd
+			if b := root.Meta.BudgetUsd; b != nil {
+				v.SessionUsd = b
+				v.EffectiveUsd = *b
+			}
+		}
+	}
+	totals := r.subagents.familyUsage(sess)
 	v.SpentUsd, v.HasCost, v.Calls = totals.Cost, totals.HasCost, totals.Calls
 	return v, nil
 }

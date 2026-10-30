@@ -1,12 +1,14 @@
 import { test, expect } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("a notify reminder renders in turn order", async ({ page }) => {
+  await showSidebar(page);
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("It printed hi.");
 
@@ -27,6 +29,7 @@ test("a notify reminder renders in turn order", async ({ page }) => {
 
 test("expanding a tool row keeps the reading position", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 400 });
+  await showSidebar(page);
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("notify job-1-1");
 

@@ -16,11 +16,11 @@ func TestPersistRunsInsideGate(t *testing.T) {
 	defer close(done)
 	calls := 0
 	var before, after int
-	a.persistGate = func(persist func()) {
+	a.persistGate = func(persist func() error) {
 		calls++
 		h, _ := sess.History()
 		before = len(h)
-		persist()
+		_ = persist()
 		h, _ = sess.History()
 		after = len(h)
 	}

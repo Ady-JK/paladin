@@ -135,7 +135,7 @@ func (s *ShellTool) runBackground(cmd, dir, owner, callID string, limit time.Dur
 	s.inner.mu.Lock()
 	s.inner.byID[id] = &job{
 		id: id, log: logPath, status: JobRunning,
-		notify: notify, childPID: childPID,
+		notify: notify, childPID: childPID, owner: owner,
 	}
 	s.inner.mu.Unlock()
 	timeout := time.AfterFunc(limit, func() { s.timeOutJob(id) })
@@ -217,9 +217,20 @@ func exitCodeOf(err error) *int {
 	return nil
 }
 
-func (s *ShellTool) status(jobID string) (string, error) {
-	s.inner.mu.Lock()
+// ownedJobLocked finds a job the caller's session started. The shell
+// tool is shared by every session, so another session's job reads as
+// unknown rather than revealing that it exists.
+func (s *ShellTool) ownedJobLocked(jobID, caller string) (*job, bool) {
 	j, ok := s.inner.byID[strings.TrimSpace(jobID)]
+	if !ok || j.owner != caller {
+		return nil, false
+	}
+	return j, true
+}
+
+func (s *ShellTool) status(jobID, caller string) (string, error) {
+	s.inner.mu.Lock()
+	j, ok := s.ownedJobLocked(jobID, caller)
 	// Snapshot under the lock: the waiter goroutine mutates the entry
 	// (status/exitCode/logDone) while a status check is in flight.
 	var snap job
@@ -240,10 +251,10 @@ func (s *ShellTool) status(jobID string) (string, error) {
 	return text, nil
 }
 
-func (s *ShellTool) cancel(jobID string) (string, error) {
+func (s *ShellTool) cancel(jobID, caller string) (string, error) {
 	var childPID int
 	s.inner.mu.Lock()
-	j, ok := s.inner.byID[strings.TrimSpace(jobID)]
+	j, ok := s.ownedJobLocked(jobID, caller)
 	if !ok {
 		s.inner.mu.Unlock()
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))

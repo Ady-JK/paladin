@@ -121,7 +121,34 @@ async function __paladinBaseInvoke(cmd, args) {
     case "sideQuestion":
       window.__e2eSideCalls = (window.__e2eSideCalls || []).concat([JSON.parse(JSON.stringify(args || {}))]);
       if (window.__e2eSideQuestion) return window.__e2eSideQuestion(args || {});
-      return { answer: "Side answer to: " + (args && args.question), model: (args && args.model) || "stub-model" };
+      return {
+        chatId: (args && args.chatId) || "chat-" + window.__e2eSideCalls.length,
+        answer: "Side answer to: " + (args && args.question),
+        model: (args && args.model) || "stub-model",
+      };
+    case "listSideChats":
+      return window.__e2eSideChats || [];
+    case "loadSideChat": {
+      const chat = (window.__e2eSideChatBodies || {})[args && args.chatId];
+      if (!chat) throw new Error("side chat not found");
+      return chat;
+    }
+    case "deleteSideChat":
+      window.__e2eSideDeletes = (window.__e2eSideDeletes || []).concat([args]);
+      window.__e2eSideChats = (window.__e2eSideChats || []).filter((c) => c.id !== (args && args.chatId));
+      return null;
+    case "listAgents":
+      return window.__e2eAgents || [];
+    case "interruptAgent":
+      window.__e2eAgentInterrupts = (window.__e2eAgentInterrupts || []).concat([args]);
+      return {
+        agentId: args && args.agentId,
+        parentSessionId: args && args.sessionId,
+        name: "",
+        type: "",
+        status: "interrupted",
+        updatedAt: Date.now(),
+      };
     case "toolsList":
     case "toolsSet":
     case "toolsAccept":
@@ -217,6 +244,8 @@ async function __paladinBaseInvoke(cmd, args) {
         ...((window.__e2eOpenExtra || {})[(args && args.sessionId) || ""] || {}),
       };
     case "sessionHistory": {
+      const own = (window.__e2eHistories || {})[(args && args.sessionId) || ""];
+      if (own) return own;
       if (window.__e2eHistory) return window.__e2eHistory;
       const at = Math.floor(Date.now() / 1000);
       if (window.__e2eRevertedAt === 0) {

@@ -45,7 +45,7 @@ async function seed(page: Page, mcp: Record<string, unknown>) {
 async function boot(page: Page) {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 }
 
 async function openPane(page: Page) {

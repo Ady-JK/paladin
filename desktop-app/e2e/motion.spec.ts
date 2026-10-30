@@ -5,7 +5,7 @@ import { test, expect, type Page } from "@playwright/test";
 async function boot(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 }
 
 const motion = (page: Page) => page.evaluate(() => document.documentElement.dataset.motion);
@@ -31,7 +31,7 @@ test("off stops transitions and persists across reloads", async ({ page }) => {
   const duration = await page.locator("#sidebar").evaluate((el) => getComputedStyle(el).transitionDuration);
   expect(duration.split(",").every((d) => parseFloat(d) === 0)).toBe(true);
   await page.reload();
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
   expect(await motion(page)).toBe("off");
 });
 

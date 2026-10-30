@@ -22,10 +22,11 @@ var camelName = regexp.MustCompile(`^[a-z][a-zA-Z0-9]*$`)
 var snakeAllowed = []string{
 	"internal/tools/",
 	"internal/inference/",
-	"internal/memory/memory.go",   // Op is the memory tool's input
-	"internal/agent/toolcalls.go", // parses the shell tool's receipt
-	"internal/session/session.go", // rebuilds shell tool arguments
-	"internal/hooks/input.go",     // hook stdin is the Claude/Codex contract
+	"internal/memory/memory.go",          // Op is the memory tool's input
+	"internal/agent/toolcalls.go",        // parses the shell tool's receipt
+	"internal/session/session.go",        // rebuilds shell tool arguments
+	"internal/hooks/input.go",            // hook stdin is the Claude/Codex contract
+	"internal/runtime/subagent_tools.go", // the agent tools' arguments
 }
 
 // Paladin-owned JSON (wire payloads, files on disk) is camelCase.

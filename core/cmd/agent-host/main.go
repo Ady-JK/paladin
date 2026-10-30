@@ -12,7 +12,8 @@
 //	event:    {"event":"chat/delta","seq":7,"sessionId":"...","turnId":"...","delta":"..."}
 //	          {"event":"turn/done","seq":9,"sessionId":"...","turnId":"...","turn":{...}}
 //
-// Every request is answered at once; turns run in the background and
+// Control calls answer inline; other requests run on a bounded pool,
+// in order per session (see dispatcher.go). Turns run in the background and
 // stream events (see desktop-app/PROTOCOL.md). Logs go to stderr so
 // stdout stays pure JSONL.
 package main
@@ -23,7 +24,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +43,7 @@ func main() {
 	installTurnSink(rt)
 	installMCPSink(rt)
 	installToolsSink(rt)
+	installAgentsSink(rt)
 	rt.StartMCP()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
@@ -50,7 +51,7 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "agent-host ready dir=%s\n", rt.GetWorkspace())
 
-	var slow sync.WaitGroup
+	requests := newDispatcher(rt, emitResponse, defaultLimits)
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -63,14 +64,15 @@ func main() {
 			logf("WARN bad request line: %v", err)
 			continue
 		}
-		dispatch(rt, &req, func(r Response) { emit(r) }, &slow)
+		requests.dispatch(&req)
 	}
 	if err := scanner.Err(); err != nil {
 		logf("WARN read stdin: %v", err)
 	}
 	// The client is gone: stop every turn and let them persist.
 	rt.ShutdownTurns(20 * time.Second)
-	slow.Wait()
+	requests.close(10 * time.Second)
+	notices.flush()
 }
 
 // handleSignals treats SIGTERM/SIGINT like the client hanging up: stop

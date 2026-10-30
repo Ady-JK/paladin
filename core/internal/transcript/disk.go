@@ -4,7 +4,6 @@
 package transcript
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -99,40 +98,28 @@ func LoadTranscript(dir string) ([]Message, error) {
 	return out, err
 }
 
-// scanTranscript streams messages.jsonl, calling fn per message, so a
-// long transcript never sits in memory as raw bytes. A complete line
-// that does not decode is an error; an unterminated last line is a
-// torn append (the process died mid-write) and is skipped.
 func scanTranscript(dir string, fn func(Message)) error {
-	f, err := os.Open(filepath.Join(dir, "messages.jsonl"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	_, err := scanTranscriptFrom(dir, 0, true, fn)
+	return err
+}
+
+var turnPrefix = []byte(`{"turn":`)
+
+// decodeLine reads one transcript line: a whole turn (see AppendTurn)
+// or, in older transcripts and forks, a single message.
+func decodeLine(line []byte) ([]Message, error) {
+	if bytes.HasPrefix(line, turnPrefix) {
+		var turn turnLine
+		if err := json.Unmarshal(line, &turn); err != nil {
+			return nil, fmt.Errorf("io: decode turn: %s", syserr.Str(err))
 		}
-		return fmt.Errorf("io: open transcript: %s", syserr.Str(err))
+		return turn.Turn.Messages, nil
 	}
-	defer f.Close()
-	br := bufio.NewReaderSize(f, 64*1024)
-	for {
-		line, rerr := br.ReadBytes('\n')
-		if rerr != nil && rerr != io.EOF {
-			return fmt.Errorf("io: read transcript: %s", syserr.Str(rerr))
-		}
-		torn := rerr == io.EOF
-		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
-			var msg Message
-			if err := json.Unmarshal(trimmed, &msg); err != nil {
-				if torn {
-					return nil
-				}
-				return fmt.Errorf("io: decode message: %s", syserr.Str(err))
-			}
-			fn(msg)
-		}
-		if torn {
-			return nil
-		}
+	var msg Message
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return nil, fmt.Errorf("io: decode message: %s", syserr.Str(err))
 	}
+	return []Message{msg}, nil
 }
 
 // dropTornTail truncates f after its last newline so an append never

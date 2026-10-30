@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("the todo hat stays hidden until the agent plans something", async ({ page }) => {
@@ -18,6 +19,7 @@ test("the todo hat stays hidden until the agent plans something", async ({ page 
 
 test("a resumed session shows its plan latched above the composer", async ({ page }) => {
   // Open the stub session: loadHistory + refreshTodos repopulate the panel.
+  await showSidebar(page);
   await page.click("#sessionList [data-session]");
   const hat = page.locator("#todoHat");
   await expect(hat).toBeVisible();

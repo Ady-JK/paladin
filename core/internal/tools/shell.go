@@ -389,12 +389,12 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
 		}
-		return s.status(args.JobID)
+		return s.status(args.JobID, ctx.SessionID)
 	case ShellCancel:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
 		}
-		return s.cancel(args.JobID)
+		return s.cancel(args.JobID, ctx.SessionID)
 	default:
 		return "", ArgsError(fmt.Sprintf("shell: action must be one of run, status or cancel, got %q", args.Action))
 	}

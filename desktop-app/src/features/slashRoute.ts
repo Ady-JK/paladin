@@ -14,7 +14,7 @@ import { openSettings } from "./settings";
 import { loadSkills, parseSkillLine } from "./skills";
 import { openToolsMenu } from "./toolSwitches";
 import { openUsageDashboard } from "./usage";
-import { askSideQuestion } from "./btw";
+import { askSideQuestion, openSideChat } from "./sidePane";
 import { openBudgetMenu, parseBudget, setSessionBudget } from "./budget";
 import { loadPrompts, promptArgs, setComposer, slashHelp } from "./slashCommands";
 
@@ -101,13 +101,9 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
       return "local";
     case "btw":
       clear();
-      if (!rest) {
-        setComposer("/btw ");
-        toast("Usage: /btw <question>", "error");
-        return "local";
-      }
       if (!needSession("ask a side question")) return "local";
-      void askSideQuestion(rest);
+      if (rest) askSideQuestion(rest);
+      else openSideChat();
       return "local";
     case "rename":
       clear();

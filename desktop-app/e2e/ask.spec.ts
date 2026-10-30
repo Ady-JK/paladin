@@ -68,7 +68,7 @@ async function stubAskTurn(page: Page, questions: unknown[] = QUESTIONS) {
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 test("the wizard walks one question at a time and submits every answer", async ({ page }) => {

@@ -30,8 +30,8 @@ Electron main spawns it with piped stdio:
 | `fsHome` | `{}` | `string` |
 | `fsList` | `{path?}` | `FsList` |
 | `fileComplete` | `{query,cwd?,limit?}` | `FileEntry[]` (`path` chat path, `resolvedPath` OS-absolute path to insert, `outside`, `isDir`; gitignored paths never suggested; `../` completes from the workspace parent) |
-| `openSession` | `{sessionId?,cwd?,worktree?,name?}` | `Session` (`sessionId,cwd,provider,model,revert?,worktree?`); `worktree:true` creates the session in a new git worktree of `cwd`'s repo on branch `paladin/<name>` (see Undo and worktrees) |
-| `listSessions` | `{cwd?,limit?}` | `SessionInfo[]` |
+| `openSession` | `{sessionId?,cwd?,worktree?,name?}` | `Session` (`sessionId,cwd,provider,model,revert?,worktree?,subagent?`; `subagent` is set for a subagent session, with its live `status`, see Subagents); `worktree:true` creates the session in a new git worktree of `cwd`'s repo on branch `paladin/<name>` (see Undo and worktrees) |
+| `listSessions` | `{cwd?,limit?}` | `SessionInfo[]`, newest first; only the `limit` newest sessions' transcripts are read. A session that cannot be read is still listed with `damaged` (the reason) so it can be deleted; its `cwd` may be empty (see Transcript format) |
 | `sessionHistory` | `{sessionId,cwd?}` | `HistoryMessage[]` |
 | `sessionTodos` | `{sessionId,cwd?}` | `TodoEntry[]` (`content,status`): the agent's todo list for the panel above the composer; empty before it plans |
 | `sessionUsage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,lastInputTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` is the last call's input tokens over the window, omitted when the model's window is unknown) |
@@ -72,7 +72,12 @@ Electron main spawns it with piped stdio:
 | `mcpTrust` | `{cwd,trust}` | `MCPOverview`; approves (or revokes) the folder's current `mcp.json` |
 | `mcpParse` | `{text}` | `{servers: {name, config}[]}`: servers read from pasted text — launch commands (`npx`/`uvx`/`docker run`/…, `KEY=value` prefixes, one per line), a Streamable HTTP URL, `claude`/`codex mcp add …` lines or `mcp.json` JSON. Nothing is saved |
 | `mcpAdd` | `{scope,cwd?,servers,replace?}` | `MCPOverview`; adds `{name, config}[]` to one `mcp.json` (existing names fail unless `replace`) and starts them. A new or trusted folder file is trusted afterwards; an untrusted one stays untrusted |
-| `sideQuestion` | `{sessionId,cwd?,question,provider?,model?}` | `{answer, model}`: a `/btw` answer about the session — the running turn's conversation as of its latest model call when one is live, else the saved history — with no tools. Nothing is added to the transcript; the call is billed to the session's usage (and budget). Answered off the request loop, so its response can arrive after later requests' |
+| `listAgents` | `{sessionId}` | `AgentInfo[]`: the session's subagents in spawn order with live status (see Subagents) |
+| `interruptAgent` | `{sessionId,agentId}` | `AgentInfo`: stops the subagent's running turn and drops its queued follow-ups; an idle agent is returned unchanged. `agentId` may also be the agent's name |
+| `sideQuestion` | `{sessionId,cwd?,question,chatId?,provider?,model?}` | `{chatId, answer, model}`: a `/btw` side-chat answer about the session — the running turn's conversation as of its latest model call when one is live, else the saved history — plus that side chat's earlier exchanges, with no tools. Without `chatId` a new side chat starts. The question and answer are saved to `<session dir>/side-chats/<chatId>/chat.json` once the answer arrives (a failed first question leaves no chat); nothing is added to the transcript. One question per chat at a time (a second fails "side chat is busy"). Billed to the session's usage (and budget). Runs on the long pool, so its response can arrive after later requests' |
+| `listSideChats` | `{sessionId,cwd?}` | `[{id, title, updatedAt, messageCount}]`: the session's saved side chats, newest first |
+| `loadSideChat` | `{sessionId,cwd?,chatId}` | `{id, title, createdAt, updatedAt, messages: [{role, content, model?, createdAt}]}` |
+| `deleteSideChat` | `{sessionId,cwd?,chatId}` | `null`; removes the side chat's folder |
 | `hooksList` | `{cwd?}` | `HooksOverview`: `{sources: Source[], events}` — the global `config/hooks.json` plus, with `cwd`, the folder's `.paladin/hooks.json`, `.codex/hooks.json` and `.claude/settings.json` (see Hooks). `Source` is `{path, scope, format: paladin\|codex\|claude, exists, editable, trusted, error?, warnings?, text?, handlers: [{key, event, matcher?, command, timeout?, statusMessage?, enabled}]}` |
 | `hooksSetConfig` | `{scope,cwd?,text}` | `HooksOverview`; validates and writes the global or folder `hooks.json` (blank `text` deletes it). A folder file saved here is trusted |
 | `hooksTrust` | `{cwd,path,trust}` | `HooksOverview`; approves (or revokes) one of the folder's hooks files at its current content |
@@ -128,7 +133,8 @@ Each gets a snake_case JSON object on stdin (`session_id`,
 `transcript_path`, `cwd`, `hook_event_name`, `permission_mode`, plus
 `prompt`, `tool_name`/`tool_input`/`tool_response`, `stop_hook_active`,
 `trigger`, `source` as fitting) — the same contract as Codex and Claude
-Code. Exit 2 blocks (stderr is the reason) for events that can block;
+Code. `transcript_path` is the session's `messages.jsonl` (see
+Transcript format below). Exit 2 blocks (stderr is the reason) for events that can block;
 stdout JSON may set `continue: false`, `systemMessage`,
 `decision: "block"` + `reason`, or `hookSpecificOutput` with
 `additionalContext`, `permissionDecision` (`allow` skips the approval
@@ -148,10 +154,12 @@ first. Closing stdin — or SIGTERM/SIGINT — stops every turn, persists
 it, then exits.
 
 `TurnInfo` is `{turnId, sessionId, cwd, message, display?, skill?,
-resume?, permissions?, state: queued|running|done, persisted?, reply?,
-stopped?, cancelled?, awaitingApproval?, error?,
+resume?, permissions?, parentSessionId?, state: queued|running|done,
+persisted?, reply?, stopped?, cancelled?, awaitingApproval?, error?,
 queuedAt, startedAt?, endedAt?}`. `awaitingApproval` is true while a
-tool call waits on an approval card.
+tool call waits on an approval card. `parentSessionId` marks a
+subagent's turn (the session that gave it the work); the desktop does
+not notify or toast for those.
 
 `attach` lets a client (re)join a session at any time — after a
 renderer reload, or when switching to a session that is working in the
@@ -178,6 +186,27 @@ Unary:
 {"id": 1, "ok": false, "error": "..."}
 ```
 
+Responses are matched by `id` and can arrive out of request order. The
+host answers control calls (`ping`, `stopChat`, `cancelTurn`,
+`answerApproval`, `answerAsk`, `cancelAsk`, `turns`, `resources`,
+`getWorkspace`, `fsHome`, `resolveWorkspace`) inline, so they never wait
+behind slow work. Everything else runs on a bounded worker pool:
+
+- session mutations (`submitChat`, `steerChat`, `renameSession`, `forkSession`,
+  `deleteSession`, `revertSession`, …) run one at a time per `sessionId`, in
+  request order;
+- host-wide settings (providers, prompt, memory, permissions, hooks, MCP,
+  tools) run one at a time, in request order;
+- reads run in any order; `sideQuestion` and `refreshProviders` use a
+  separate small pool.
+
+A `stopChat` refuses that session's `submitChat`/`steerChat` requests sent
+before it that have not started yet (error `stopped before it started`),
+and waits for one already starting so the stop reaches its turn. When
+too many requests are in flight a request fails at once with `agent host
+is busy, try again`; after stdin closes, queued requests fail with `agent
+host is shutting down`.
+
 Events are broadcast for every turn, whoever submitted it. Each carries
 `event`, a global strictly increasing `seq`, `sessionId` and `turnId`:
 
@@ -196,6 +225,21 @@ Streaming (between `turn/start` and `turn/done`):
 {"event": "chat/delta", "seq": 10, "sessionId": "...", "turnId": "t1-3", "delta": "..."}
 {"event": "chat/tool", "seq": 11, "sessionId": "...", "turnId": "t1-3", "tool": {...}}
 ```
+
+Events are written to stdout in `seq` order by one writer that never
+holds up the agent. If the client stops reading, the writer buffers up
+to about 20,000 events or 8 MB; past that it drops streaming chunks
+(`chat/delta`, `chat/reasoning`, `chat/retry`, `chat/compact`,
+`chat/hook`) but never `turn/*`, `chat/tool`, `chat/approval`,
+`chat/steer`, `chat/budget` or `chat/thinkingDropped`. Once it catches
+up it sends
+
+```json
+{"event": "host/resync", "seq": 812, "sessionId": "", "turnId": ""}
+```
+
+and the client re-reads `turns` and re-`attach`es the sessions it
+shows; the turns themselves are unaffected.
 
 More streaming events:
 
@@ -407,6 +451,74 @@ prompt cache: the turn runs without them and emits
 turn use them. Tools that disappear are simply dropped. New sessions
 never have pending tools.
 
+### Subagents
+
+A turn can delegate focused work to **subagents** with six tools:
+`spawn_agent`, `send_message`, `followup_task`, `wait_agent`,
+`interrupt_agent` and `list_agents`. Each subagent is a persistent child
+session stored beside its parent (`sessions/<encoded-cwd>/<child-uuid>/`);
+its `meta.json` has `subagent: {parentId, parentTurnId, spawnCallId, type,
+name, task, forkTurns, status, result?, error?, reported, completionId?,
+updatedAt}` and
+the parent's lists the child ids under `children`. `SessionInfo` carries
+both (`subagent` with a live `status`, `children`), so `listSessions`
+can nest children under their parent after a restart. A subagent is not
+a fork: `forkedFrom` stays empty.
+
+Two kinds exist, both read-only (no `write`/`edit`, plan-mode shell):
+`explore` (codebase investigation) and `reviewer` (code review). A
+child's tools are its kind's allowlist narrowed by the parent's and its
+own tool switches, never MCP or the agent tools, so children cannot
+spawn children and never gain a tool the parent lacks. They run on the
+parent's provider (a `model` override must be one the provider lists)
+with the parent's permission preset, through the same hub, approvals,
+hooks, sandbox and budget. Spend is shared: a child counts toward its
+parent's budget limit and the family's usage is summed.
+
+`fork_turns` is `none` (default: the child sees only its task) or `all`
+(it also gets a copy of the parent's finished turns, cut at a pending
+undo; the running turn is never copied). At most `maxSubagents`
+(settings, default 5) children may be queued or running per parent.
+The limit and name checks are atomic with the child's creation (one
+gate per parent, so parents never wait on each other), so parallel
+`spawn_agent` calls cannot overshoot the limit or share a name,
+and a `followup_task` that reactivates a finished child needs a free
+slot too.
+
+Each finished child result is delivered to the parent: as the
+`wait_agent` result, as a notify row (`agent` tool name, content
+`{"event":"subagent_finished",…}`) drained before the parent's next
+model call, or — when the parent is idle — by starting a parent turn
+with `resume:true` to read it. Each result has a
+`completionId` (`<child id>#<child turn id>`), used as the notify row's
+tool-call id and returned as `completion_id` by `wait_agent`, so the
+parent transcript records which results it holds. A delivered result is
+marked `reported` only once the parent turn that took it is saved; if
+that turn's save fails it goes back to the parent's mailbox, and after
+a crash before the save the restart delivers it again. On restart, an
+unreported result whose `completionId` is already in the parent
+transcript (a crash between the save and the `reported` write) is
+marked reported instead of delivered again. Delivery is therefore
+exactly once, including across crashes; a failed `reported` write is
+logged and settled by the same check at the next restart. A child stopped by its parent (or by
+stopping the parent) is not reported back. `wait_agent` lends the
+parent's hub slot, so a child runs even with `maxConcurrentTurns: 1`.
+After a restart, a child whose turn was cut off reads `interrupted` and
+unreported results are delivered on the parent's next turn.
+
+`submitChat` and `steerChat` into a subagent session fail: only its
+parent gives it work. Stopping its turn (`stopChat`/`interruptAgent`)
+works, and the parent is told. Deleting a parent deletes its children.
+
+Status changes stream as
+
+```json
+{"event": "agents/changed", "parentSessionId": "…", "agent": {"agentId": "…", "parentSessionId": "…", "name": "explore-1", "type": "explore", "task": "…", "forkTurns": "none", "status": "running", "result": "…", "error": "…", "updatedAt": 1767225600000}}
+```
+
+with `status` one of `queued`, `running`, `completed`, `failed`,
+`interrupted`. The child's own turn events stream like any session's.
+
 ### Undo and worktrees
 
 Every `shell`, `write` and `edit` run is bracketed by snapshots of the
@@ -428,7 +540,9 @@ messages disappear from `sessionHistory`, and `openSession` /
 (again skipping any changed since). The next message commits the
 revert: the hidden messages and their steps are dropped.
 
-Background shell jobs (`background: true`) time out after 300 s unless
+Background shell jobs (`background: true`) belong to the session that
+started them: `status`/`cancel` with another session's `job_id`
+(including a subagent's) fails as an unknown job. They time out after 300 s unless
 `timeout_ms` says otherwise (foreground commands default to 10 s). They
 are tracked separately: the
 sidecar snapshots the folder when the job starts, keeps a record in
@@ -504,16 +618,49 @@ composer and picker never carry the content. Unknown or oversize
 skills fail the turn with a `not found` / `exceeds` error; `listSkills`
 never returns content.
 
+## Transcript format
+
+`<session dir>/messages.jsonl` holds one JSON object per line. A turn
+is written as a single line, `{"turn": {"messages": [Message, ...]}}`,
+and synced, so a crash or failed write leaves all of a turn or none of
+it; a failed write is cut back off the file. Lines written by older
+builds, forks and subagent snapshots hold one `Message` each. Readers
+must accept both; message indexes (undo, `revertPreview`) count the
+messages inside turn lines. An unterminated last line is a torn write
+and is ignored (the next append removes it); any other line that does
+not decode is an error. Builds before this format show a turn line as
+an empty row.
+
+`<session dir>/summary.json` caches what `listSessions` shows (message
+count, fallback title) and the byte offset it has read up to, so a
+listing reads only what was appended since. It is rebuilt from
+`messages.jsonl` whenever it is missing, unreadable, or does not match
+the file (a rewrite such as undo drops it), and may be deleted freely.
+A session whose `meta.json` cannot be read, or whose transcript has a
+line that does not decode, is listed with `damaged` instead of being
+skipped.
+
 ## Electron side
 
 - `sidecar.ts` owns the agent-host process and a `pending` map
   `id -> {resolve, reject}`; unary `agent:invoke` resolves on the
-  matching `{id}` line.
+  matching `{id}` line, whatever order replies arrive in.
+- Every call has a deadline: 30s for reads (the dispatcher's read
+  methods), 10 min for `sideQuestion` and `refreshProviders`, 120s for
+  everything else. A timed-out mutation rejects with `agent-host did not
+  answer <method> within <n>s; it may still have completed, ...`. The
+  bridge never retries a call; a late reply is dropped.
+- More than 512 calls awaiting replies, or 16 MB of request bytes the
+  host has not read, rejects new calls with `agent-host is busy, try
+  again` (the host's own queue answers the same way).
+- A reply whose id is known but which is not valid JSON, or lacks a
+  boolean `ok`, rejects that call with `agent-host sent a malformed
+  reply to <method>`. Other stray lines are logged and ignored.
 - If the sidecar exits unexpectedly, in-flight calls reject with
   `agent-host exited`, calls made while it is down reject with
   `agent-host is not running`, and it is restarted with exponential
   backoff (0.5s doubling to 30s; reset after 60s of uptime). Once the
-  new process is up, the renderer receives
+  new process answers a `ping`, the renderer receives
   `{"event": "host/restarted"}` (no `sessionId`, sent by Electron, not
   the sidecar): it ends the turns that died with the old process and
   re-reads `turns`.

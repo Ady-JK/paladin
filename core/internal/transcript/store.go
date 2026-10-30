@@ -17,6 +17,9 @@ type Info struct {
 	Meta         Meta
 	MessageCount int
 	Title        string
+	// Damaged says why the session could not be read; such a session is
+	// still listed (with its id and folder time) so it does not vanish.
+	Damaged string
 }
 
 // Store is the on-disk session store: <root>/<encode_cwd>/<uuid>/.
@@ -59,9 +62,17 @@ func (s *Store) Create(cwd, provider, model string) (Session, error) {
 	return Session{Meta: meta, Dir: dir}, nil
 }
 
-// List returns sessions of a workspace, newest first. Empty cwd lists
-// all namespaces.
-func (s *Store) List(cwd string, limit int) ([]Info, error) {
+// sessionEntry is one session folder found on disk.
+type sessionEntry struct {
+	dir     string
+	meta    Meta
+	metaErr error
+	at      time.Time // creation time, or the folder's time when meta is unreadable
+}
+
+// entries finds the session folders of a workspace (every workspace
+// when cwd is empty) and reads their metadata only.
+func (s *Store) entries(cwd string) ([]sessionEntry, error) {
 	var dirs []string
 	if cwd != "" {
 		dirs = append(dirs, sessionDirs(s.Root, cwd)...)
@@ -80,7 +91,7 @@ func (s *Store) List(cwd string, limit int) ([]Info, error) {
 		}
 	}
 	seen := map[string]bool{}
-	var infos []Info
+	var out []sessionEntry
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -90,29 +101,64 @@ func (s *Store) List(cwd string, limit int) ([]Info, error) {
 			return nil, fmt.Errorf("io: session: read %s: %w", dir, err)
 		}
 		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
 			name := e.Name()
-			if seen[name] {
+			if !e.IsDir() || seen[name] {
 				continue
 			}
 			seen[name] = true
 			sessionDir := filepath.Join(dir, name)
 			meta, err := readMeta(sessionDir)
 			if err != nil {
+				if !ValidID(name) {
+					continue // not a session folder
+				}
+				at := time.Time{}
+				if fi, statErr := e.Info(); statErr == nil {
+					at = fi.ModTime()
+				}
+				out = append(out, sessionEntry{dir: sessionDir, meta: Meta{SessionID: name}, metaErr: err, at: at})
 				continue
 			}
-			infos = append(infos, info(sessionDir, meta))
+			out = append(out, sessionEntry{dir: sessionDir, meta: meta, at: meta.CreatedAt})
 		}
 	}
-	sort.SliceStable(infos, func(i, j int) bool {
-		return infos[i].Meta.CreatedAt.After(infos[j].Meta.CreatedAt)
-	})
-	if limit > 0 && len(infos) > limit {
-		infos = infos[:limit]
+	return out, nil
+}
+
+// List returns sessions of a workspace, newest first, at most limit
+// (0 means all). Empty cwd lists all namespaces. Only the returned
+// sessions' transcripts are read, through a summary cache. A session
+// that cannot be read is listed with Damaged set.
+func (s *Store) List(cwd string, limit int) ([]Info, error) {
+	entries, err := s.entries(cwd)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].at.After(entries[j].at) })
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	infos := make([]Info, 0, len(entries))
+	for _, e := range entries {
+		infos = append(infos, info(e))
 	}
 	return infos, nil
+}
+
+// ListMeta returns the readable sessions' metadata without reading
+// any transcript, in no particular order.
+func (s *Store) ListMeta(cwd string) ([]Meta, error) {
+	entries, err := s.entries(cwd)
+	if err != nil {
+		return nil, err
+	}
+	metas := make([]Meta, 0, len(entries))
+	for _, e := range entries {
+		if e.metaErr == nil {
+			metas = append(metas, e.meta)
+		}
+	}
+	return metas, nil
 }
 
 // Load a session by id, scoping to cwd's namespace when given.
@@ -213,24 +259,23 @@ func (s *Store) sessionDir(cwd, sessionID string) (string, error) {
 	return "", fmt.Errorf("not found: session: %q not found", sessionID)
 }
 
-func info(dir string, meta Meta) Info {
-	count, firstTitle := 0, ""
-	if err := scanTranscript(dir, func(m Message) {
-		if !m.Visible() {
-			return
-		}
-		count++
-		if firstTitle == "" {
-			firstTitle = TitleFor([]Message{m})
-		}
-	}); err != nil {
-		count, firstTitle = 0, ""
+func info(e sessionEntry) Info {
+	if e.metaErr != nil {
+		meta := e.meta
+		meta.CreatedAt = e.at
+		return Info{Meta: meta, Title: "Unreadable session", Damaged: "metadata: " + e.metaErr.Error()}
 	}
-	title := strings.TrimSpace(meta.Title)
-	if title == "" {
-		title = firstTitle
+	out := Info{Meta: e.meta, Title: strings.TrimSpace(e.meta.Title)}
+	sum, err := sessionSummary(e.dir)
+	if err != nil {
+		out.Damaged = "transcript: " + err.Error()
+		return out
 	}
-	return Info{Meta: meta, MessageCount: count, Title: title}
+	out.MessageCount = sum.Count
+	if out.Title == "" {
+		out.Title = sum.Title
+	}
+	return out
 }
 
 // Fork copies a session's transcript into a new session in the same
@@ -269,11 +314,9 @@ func (s *Store) ForkTo(cwd, sessionID, target string, wt *Worktree) (Session, er
 	if err != nil {
 		return Session{}, err
 	}
-	for _, m := range msgs {
-		if err := fork.AppendMessage(m); err != nil {
-			_ = os.RemoveAll(fork.Dir)
-			return Session{}, err
-		}
+	if err := fork.appendMessages(msgs); err != nil {
+		_ = os.RemoveAll(fork.Dir)
+		return Session{}, err
 	}
 	title := strings.TrimSpace(src.Meta.Title)
 	if title == "" {
@@ -290,6 +333,49 @@ func (s *Store) ForkTo(cwd, sessionID, target string, wt *Worktree) (Session, er
 		return Session{}, err
 	}
 	return fork, nil
+}
+
+// CreateChild makes a subagent session beside its parent: same folder
+// and worktree, history seeded from snapshot. provider and model default
+// to the parent's stored ones when empty. The parent's Children list
+// gains the new id.
+func (s *Store) CreateChild(parentID, cwd string, link Subagent, snapshot []Message, provider, model string) (Session, error) {
+	parent, err := s.Load(cwd, parentID)
+	if err != nil {
+		return Session{}, err
+	}
+	if provider == "" && parent.Meta.Provider != nil {
+		provider = *parent.Meta.Provider
+	}
+	if model == "" && parent.Meta.Model != nil {
+		model = *parent.Meta.Model
+	}
+	child, err := s.Create(parent.Meta.Cwd, provider, model)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := child.appendMessages(snapshot); err != nil {
+		_ = os.RemoveAll(child.Dir)
+		return Session{}, err
+	}
+	link.ParentID = parent.Meta.SessionID
+	link.UpdatedAt = time.Now().UTC()
+	child.Meta.Subagent = &link
+	child.Meta.Title = shorten(strings.TrimSpace(link.Name), MaxTitleRunes)
+	child.Meta.Worktree = parent.Meta.Worktree
+	if err := writeMeta(child.Dir, child.Meta); err != nil {
+		_ = os.RemoveAll(child.Dir)
+		return Session{}, err
+	}
+	err = s.UpdateMeta(cwd, parentID, func(m *Meta) error {
+		m.Children = append(m.Children, child.Meta.SessionID)
+		return nil
+	})
+	if err != nil {
+		_ = os.RemoveAll(child.Dir)
+		return Session{}, err
+	}
+	return child, nil
 }
 
 // Rename sets a session's title; an empty title restores the derived one.

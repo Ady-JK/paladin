@@ -26,6 +26,11 @@ test("failed and stopped turns say so; dropped ones are silent", () => {
   expect(noteFor(turn({ cancelled: true }))).toBeNull();
 });
 
+test("a subagent's finished turn is reported by its parent, not notified", () => {
+  expect(noteFor(turn({ parentSessionId: "p1" }))).toBeNull();
+  expect(noteFor(turn({ parentSessionId: "p1", error: "boom" }))).toBeNull();
+});
+
 test("a reached budget says so; an unknown-cost warning stays quiet", () => {
   const budget = (state: string) => ({
     event: "chat/budget",

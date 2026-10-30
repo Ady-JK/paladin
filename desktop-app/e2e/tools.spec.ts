@@ -2,6 +2,7 @@
 // composer's Tools popover (per session, session beats global), /tools,
 // the "new tools" banner, and pasting a command into Settings → MCP.
 import { test, expect, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 const SID = "sess-notify-1";
 const CWD = "/home/tester/project";
@@ -33,10 +34,11 @@ async function seed(page: Page, tools: Record<string, unknown> = {}) {
 async function boot(page: Page) {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 }
 
 async function openSession(page: Page) {
+  await showSidebar(page);
   await page.locator(`button.session-pick[data-session="${SID}"]`).click();
   await expect(page.locator("#toolsChip")).toBeVisible();
 }

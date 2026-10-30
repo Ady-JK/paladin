@@ -295,3 +295,22 @@ func cleanNames(names []string) []string {
 	}
 	return out
 }
+
+// childTools is a subagent turn's registry: the kind's allowlist,
+// narrowed to tools both the parent and the child have switched on. A
+// child never sees MCP or delegation tools, and never a tool its
+// parent cannot use.
+func (r *AgentRuntime) childTools(child transcript.Session, kind subagentKind) *tools.Registry {
+	global := r.globalToolSwitches()
+	var parentOverrides, childOverrides map[string]bool
+	if child.Meta.Tools != nil {
+		childOverrides = child.Meta.Tools.Overrides
+	}
+	if parent, err := r.subagents.load(child.Meta.Cwd, child.Meta.Subagent.ParentID); err == nil && parent.Meta.Tools != nil {
+		parentOverrides = parent.Meta.Tools.Overrides
+	}
+	return r.tools.Filter(func(name string) bool {
+		return kind.allows(name) && !slices.Contains(agentToolNames, name) &&
+			toolset.Enabled(name, global, parentOverrides) && toolset.Enabled(name, global, childOverrides)
+	})
+}

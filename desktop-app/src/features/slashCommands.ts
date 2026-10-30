@@ -75,9 +75,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: "btw",
     label: "By the way",
     desc: "Ask a side question; the answer is not added to the chat",
-    hint: "/btw <question>",
+    hint: "/btw [question]",
     icon: "comments",
-    args: "required",
+    args: "optional",
   },
   {
     name: "rename",

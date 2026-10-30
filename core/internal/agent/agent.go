@@ -66,6 +66,23 @@ type Request struct {
 	// means none). It is read before every round, so a limit changed
 	// mid-turn applies at once. The runtime sets it; never on the wire.
 	Budget func() float64 `json:"-"`
+	// SpendLedgers, when set, lists the usage.json files whose spend
+	// counts against Budget (a parent and its subagents share one
+	// limit). Nil means the session's own ledger only.
+	SpendLedgers func() []string `json:"-"`
+	// Notices, when set, returns (and clears) reminders for the model,
+	// such as a subagent's result; they join before the next model call.
+	Notices func() []Notice `json:"-"`
+}
+
+// Notice is a reminder delivered into a running turn: recorded as a
+// tool row (CallID, Name, Arguments) and shown to the model as Content.
+type Notice struct {
+	CallID    string
+	Name      string
+	Arguments string
+	Content   string
+	IsError   bool
 }
 
 // SteerMessage is a user message sent into a running turn.
@@ -161,11 +178,13 @@ func (e turnFailed) Error() string { return e.msg }
 
 // runConfig is everything a template resolves before the loop starts.
 type runConfig struct {
-	persistGate func(persist func())
+	persistGate func(persist func() error)
 	gate        ToolGate
 	steps       StepRecorder
 	steer       func() []SteerMessage
 	budget      func() float64
+	notices     func() []Notice
+	ledgers     func() []string
 	session     transcript.Session
 	provider    inference.Provider
 	tools       *tools.Registry
@@ -206,6 +225,10 @@ type Agent struct {
 	// steer, when set, hands over messages the user sent mid-turn.
 	steer  func() []SteerMessage
 	budget func() float64
+	// notices hands over reminders from outside the turn (subagents).
+	notices func() []Notice
+	// spendLedgers lists the ledgers the budget counts; nil is just ours.
+	spendLedgers func() []string
 	// budgetChecked: the turn's first budget check ran; budgetWrapUp:
 	// the limit was hit and the final no-tools summary round is running;
 	// costWarned: the unknown-cost warning went out; spendWarned: the
@@ -233,7 +256,7 @@ type Agent struct {
 	// so the UI never keeps a spinner for a call that won't run.
 	noticed []inference.ToolCall
 	// persistGate, when set, wraps the transcript write (see save).
-	persistGate func(persist func())
+	persistGate func(persist func() error)
 	// compactStreak counts compactions since a round last succeeded
 	// with the context under the threshold.
 	compactStreak int
@@ -309,6 +332,9 @@ func newAgent(c runConfig) *Agent {
 		steps:       c.steps,
 		steer:       c.steer,
 		budget:      c.budget,
+		notices:     c.notices,
+
+		spendLedgers: c.ledgers,
 
 		currentMessage: c.message,
 		currentDisplay: c.display,
@@ -401,29 +427,31 @@ func (a *Agent) save() error {
 		return a.persist(a.currentMessage, a.currentResume)
 	}
 	var err error
-	a.persistGate(func() { err = a.persist(a.currentMessage, a.currentResume) })
+	a.persistGate(func() error {
+		err = a.persist(a.currentMessage, a.currentResume)
+		return err
+	})
 	return err
 }
 
+// persist appends the whole turn (the user message unless resuming,
+// the model and tool records, then the reply) as one transcript line,
+// so a failed or interrupted write never leaves half a turn.
 func (a *Agent) persist(message string, resume bool) error {
+	turn := make([]transcript.Message, 0, len(a.records)+2)
 	if !resume {
 		msg := transcript.UserMessage(message)
 		if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(message) {
 			msg.Display = a.currentDisplay
 		}
-		if err := a.session.AppendMessage(msg); err != nil {
-			return turnFailed{"persist user message: " + err.Error()}
-		}
+		turn = append(turn, msg)
 	}
-	for _, record := range a.records {
-		if err := a.session.AppendMessage(record); err != nil {
-			return turnFailed{"persist turn: " + err.Error()}
-		}
-	}
+	turn = append(turn, a.records...)
 	if len(a.toolDefs) == 0 && !a.compactOnly && (a.reply.Len() > 0 || resume) {
-		if err := a.session.Append(transcript.RoleAssistant, a.reply.String()); err != nil {
-			return turnFailed{"persist reply: " + err.Error()}
-		}
+		turn = append(turn, transcript.Message{Role: transcript.RoleAssistant, Content: a.reply.String()})
+	}
+	if err := a.session.AppendTurn(turn); err != nil {
+		return turnFailed{"persist turn: " + err.Error()}
 	}
 	return nil
 }
@@ -548,12 +576,12 @@ func (a *Agent) appendToolResult(call *inference.ToolCall, result *tools.ToolRes
 	})
 }
 
-func (a *Agent) appendNotify(content, callID string, isErr bool) {
+func (a *Agent) appendNotify(content, callID, name string, isErr bool) {
 	a.messages = append(a.messages, inference.LlmMessage{Role: "user", Content: content})
 	a.records = append(a.records, transcript.Message{
 		Role: transcript.RoleTool, Content: content,
 		CreatedAt:  time.Now().UTC(),
-		ToolCallID: strptr(callID), Name: strptr("shell"),
+		ToolCallID: strptr(callID), Name: strptr(name),
 		IsError: isErr, IsNotify: true,
 	})
 }

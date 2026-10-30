@@ -38,6 +38,9 @@ type Settings struct {
 	// ThinkingLevels is each model's reasoning effort, by provider then
 	// model; absent means the provider default.
 	ThinkingLevels map[string]map[string]string `json:"thinkingLevels,omitempty"`
+	// MaxSubagents caps a session's queued or running children; 0
+	// means the default.
+	MaxSubagents int `json:"maxSubagents,omitempty"`
 }
 
 type AgentRuntime struct {
@@ -55,6 +58,7 @@ type AgentRuntime struct {
 	broker        *permission.Broker
 	agents        *agent.Registry
 	hub           *Hub
+	subagents     *subagentManager
 	snaps         *snapshot.Store
 	worktrees     *worktree.Manager
 	undoMu        sync.Mutex
@@ -83,6 +87,8 @@ type AgentRuntime struct {
 	// sideCtx ends in-flight side questions at shutdown.
 	sideCtx    context.Context
 	sideCancel context.CancelFunc
+	// sideBusy holds side chats with a question in flight.
+	sideBusy map[string]bool
 }
 
 // New builds the production runtime, backed by the OS keychain. The
@@ -125,6 +131,7 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		hooks:         hooks.NewManager(dataDir),
 		started:       map[string]bool{},
 		live:          map[string][]inference.LlmMessage{},
+		sideBusy:      map[string]bool{},
 	}
 	r.sideCtx, r.sideCancel = context.WithCancel(context.Background())
 	r.jobs = newJobBook(r)
@@ -133,7 +140,10 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	}
 	r.mcp = newMCPManager(dataDir, &r.mcpSink)
 	r.registerKnowledgeTools()
+	r.subagents = newSubagentManager(r)
+	r.registerAgentTools()
 	r.hub = NewHub(r.runTurn, r.maxConcurrentTurns)
+	r.hub.SetOnDone(r.subagents.onDone)
 	return r
 }
 
@@ -156,7 +166,7 @@ func (r *AgentRuntime) loadSettings() Settings {
 // runTurn is the hub's RunFunc: it builds the default agent template
 // (provider, session, history, tools, prompt) and runs one turn under
 // parent. The hub has already validated req and owns tx.
-func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate func(func()), tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
+func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
 	preset, err := permission.ParsePreset(req.Permissions)
 	if err != nil {
 		return agent.ChatOutcome{}, err
@@ -168,6 +178,11 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	if !ok {
 		return agent.ChatOutcome{}, fmt.Errorf("no agent template registered")
 	}
+	if r.subagents.turnStarted(req) {
+		// A wake turn whose results were already delivered.
+		r.emitDone(tx, req.SessionID, false, nil)
+		return agent.ChatOutcome{SessionID: req.SessionID}, nil
+	}
 	// A finished plan belongs to the finished work: the user's next
 	// message drops it so the panel goes empty until the agent plans
 	// the new work. Best-effort — a stale file never fails a turn.
@@ -177,7 +192,9 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	var extraWritable []string
 	var sessionStart string
 	var hookEngine *hooks.Engine
-	if sess, lerr := r.transcripts.Load(req.Cwd, req.SessionID); lerr == nil {
+	var child *subagentKind
+	sess, lerr := r.transcripts.Load(req.Cwd, req.SessionID)
+	if lerr == nil {
 		// A pending undo becomes permanent once the user moves on.
 		r.undoMu.Lock()
 		cerr := r.commitRevert(&sess)
@@ -200,6 +217,13 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		if rec := r.stepRecorderFor(sess, workspace); rec != nil {
 			steps = rec
 		}
+		if sa := sess.Meta.Subagent; sa != nil {
+			kind, ok := findSubagentKind(sa.Type)
+			if !ok {
+				return agent.ChatOutcome{}, fmt.Errorf("unknown subagent type %q", sa.Type)
+			}
+			child, template = &kind, kind.template()
+		}
 		if sess.Meta.Worktree != nil {
 			// Commits from a worktree write to the repository's shared git dir.
 			if dir := worktree.CommonDir(ctx, workspace); dir != "" {
@@ -207,8 +231,15 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			}
 		}
 	}
-	registry := r.turnTools(req.Cwd, req.SessionID, r.tools.With(r.mcpTools(ctx, project)...))
+	var registry *tools.Registry
+	if child != nil {
+		registry = r.childTools(sess, *child)
+	} else {
+		registry = r.turnTools(req.Cwd, req.SessionID, r.tools.With(r.mcpTools(ctx, project)...))
+		req.Notices = r.subagents.notices(req.SessionID, req.Cwd)
+	}
 	req.Budget = r.turnBudget(req.Cwd, req.SessionID)
+	req.SpendLedgers = r.subagents.spendLedgers(req.Cwd, req.SessionID)
 	built, err := template.Build(agent.Deps{
 		Sessions:  runtimeSessions{r},
 		Providers: runtimeProviders{r},
@@ -262,7 +293,17 @@ func (r *AgentRuntime) emitDone(tx chan<- agent.ChatChunk, sessionID string, sto
 
 // StopIn stops the session's running turn and drops its queued ones.
 // An empty session id stops every session in cwd (all when cwd is empty).
+// A stopped parent's children stop with it, without reporting back.
 func (r *AgentRuntime) StopIn(sessionID, cwd string) bool {
+	if sessionID != "" {
+		r.subagents.stopChildren(sessionID)
+	} else {
+		for _, t := range r.hub.List() {
+			if cwd == "" || t.Cwd == cwd {
+				r.subagents.stopChildren(t.SessionID)
+			}
+		}
+	}
 	return r.hub.StopSession(sessionID, cwd)
 }
 

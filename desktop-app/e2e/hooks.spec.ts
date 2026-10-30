@@ -136,7 +136,7 @@ test("a turn shows a quiet row when a hook acts", async ({ page }) => {
     ];
   });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
   await page.fill("#promptInput", "clean up");
   await page.click("#sendBtn");
   const rows = page.locator("#messages .hook-row");

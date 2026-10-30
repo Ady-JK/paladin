@@ -2,11 +2,12 @@
 // drives: local commands, prompt commands, skills, plan mode, compact,
 // fork/rename, memories, and the in-session working indicator.
 import { test, expect, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
-  await expect(page.locator("#sessionList")).toBeVisible();
+  await expect(page.locator("#promptInput")).toBeVisible();
 });
 
 async function lastSubmit(page: Page): Promise<any> {
@@ -57,6 +58,7 @@ test("Tab completes a command and Enter runs it", async ({ page }) => {
 });
 
 test("/compact submits a compaction turn", async ({ page }) => {
+  await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
   await page.fill("#promptInput", "/compact");
   await page.keyboard.press("Enter");
@@ -98,6 +100,7 @@ test("/plan toggles plan mode and Implement switches back to build", async ({ pa
 });
 
 test("/fork and /rename manage the current session", async ({ page }) => {
+  await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
   await page.fill("#promptInput", "/rename Cache redesign");
   await page.keyboard.press("Escape");
@@ -144,12 +147,14 @@ test("a running turn shows the working bar with elapsed time", async ({ page }) 
   await expect(bar).toContainText("Working");
   await expect(bar).toContainText(/\d+s/);
   await expect(bar).toContainText("make test");
+  await showSidebar(page);
   await expect(page.locator('#sessionList .session-row[data-live="running"] .live-spinner').first()).toBeVisible();
   await expect(bar).toBeHidden({ timeout: 5000 });
 });
 
 test("the sidebar row menu renames inline and forks", async ({ page }) => {
   const row = page.locator('#sessionList .session-row:has([data-session="sess-notify-1"])').first();
+  await showSidebar(page);
   await row.hover();
   await row.locator('[data-row-menu="sess-notify-1"]').click();
   const menu = page.locator("#sessionRowMenu");

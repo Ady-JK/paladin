@@ -8,6 +8,7 @@ import {
   inputEl,
   messagesEl,
   modelSelectLabelEl,
+  parentBarEl,
   searchInputEl,
   sessionLabelEl,
   sessionListEl,
@@ -16,13 +17,13 @@ import {
 } from "../core/dom";
 import { escapeAttr, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
-import type { MessageInfo, SessionInfo, ToolInfo } from "../core/types";
+import type { AgentInfo, AgentStatus, MessageInfo, SessionInfo, ToolInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
-import { addTurn, createCompactionDivider, renderGreeting, scrollToBottom } from "./chatView";
+import { createCompactionDivider, createTurn, renderGreeting, scrollToBottom } from "./chatView";
 import { createThinkingBlock } from "./turnView";
 import { ToolRun } from "./toolRun";
 import { clearTodos, refreshTodos } from "./todos";
@@ -38,6 +39,7 @@ import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
 import { loadJson, saveJson } from "../core/storage";
+import { disposeSidePanes, paintAgentTabs, syncSidePane } from "./sidePane";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -72,7 +74,60 @@ function toggleFold(cwd: string): void {
   saveJson(FOLD_KEY, [...folded]);
 }
 
-function sessionRow(session: SessionInfo): string {
+// kidsOpen remembers a parent's children toggle the user clicked; by
+// default they show while the parent is open or a child is at work.
+const kidsOpen = new Map<string, boolean>();
+
+const AGENT_STATUS_TEXT: Record<AgentStatus, string> = {
+  queued: "queued",
+  running: "running",
+  completed: "done",
+  failed: "failed",
+  interrupted: "stopped",
+};
+
+// agentStatus is the status of a child session: its own live turn wins
+// over the persisted status, which lags the event stream.
+export function agentStatus(session: SessionInfo): AgentStatus {
+  const live = liveBadge(session.sessionId);
+  if (live === "running" || live === "approval" || live === "input") return "running";
+  if (live === "queued") return "queued";
+  return session.subagent?.status ?? "completed";
+}
+
+// agentStatusHtml is a status dot with its words, for screen readers too.
+export function agentStatusHtml(status: AgentStatus): string {
+  return `<span class="agent-status" data-status="${status}"><span class="agent-dot" aria-hidden="true"></span><span class="agent-status-text">${AGENT_STATUS_TEXT[status]}</span></span>`;
+}
+
+function childRow(child: SessionInfo): string {
+  const sub = child.subagent!;
+  const active = child.sessionId === state.sessionId;
+  return `
+    <button type="button" data-child="${escapeAttr(child.sessionId)}" class="session-child${active ? " is-active" : ""}" title="${escapeAttr(sub.task || sub.name)}">
+      <span class="child-ico">${icon("rl-agent", "h-3 w-3")}</span>
+      <span class="child-name truncate">${escapeHtml(sub.name || child.title)}</span>
+      <span class="agent-type">${escapeHtml(sub.type)}</span>
+      ${agentStatusHtml(agentStatus(child))}
+    </button>`;
+}
+
+function childrenBlock(parent: SessionInfo, kids: SessionInfo[]): string {
+  if (kids.length === 0) return "";
+  const busy = kids.some((k) => ["running", "queued"].includes(agentStatus(k)));
+  const near = parent.sessionId === state.sessionId || kids.some((k) => k.sessionId === state.sessionId);
+  const open = kidsOpen.get(parent.sessionId) ?? (busy || near);
+  const id = escapeAttr(parent.sessionId);
+  return `
+    <button type="button" class="session-kids-toggle" data-kids-toggle="${id}" aria-expanded="${open}">
+      <span class="project-caret">${icon("rl-chevron", "h-2.5 w-2.5")}</span>
+      <span>${kids.length} ${kids.length === 1 ? "subagent" : "subagents"}</span>
+      ${busy ? `<span class="agent-dot" data-status="running" aria-hidden="true"></span>` : ""}
+    </button>
+    <div class="session-children" data-kids-of="${id}"${open ? "" : " hidden"}>${kids.map(childRow).join("")}</div>`;
+}
+
+function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
   const active = session.sessionId === state.sessionId;
   const title = session.title || "untitled session";
   const live = liveBadge(session.sessionId);
@@ -86,13 +141,14 @@ function sessionRow(session: SessionInfo): string {
       </button>`
       }
       ${session.worktree ? `<span class="session-branch" title="Worktree ${escapeAttr(session.worktree.path)}">${icon("code-branch", "h-2.5 w-2.5")}<span>${escapeHtml(session.worktree.branch.replace(/^paladin\//, ""))}</span></span>` : ""}
+      ${session.damaged ? `<span class="session-damaged" title="Unreadable: ${escapeAttr(session.damaged)}">${icon("warning", "h-3 w-3")}</span>` : ""}
       ${liveIndicator(session.sessionId, live)}
       ${resBadge(session.sessionId)}
       <span class="session-count">${session.messageCount}</span>
       <button data-row-menu="${escapeAttr(session.sessionId)}" class="session-del session-more" title="More" aria-haspopup="menu">
         ${icon("sl-more", "h-3.5 w-3.5")}
       </button>
-    </div>`;
+    </div>${childrenBlock(session, kids)}`;
 }
 
 // renderSessions draws the sidebar like Codex: sessions nested under
@@ -100,9 +156,25 @@ function sessionRow(session: SessionInfo): string {
 // Recents list across projects. Search narrows projects and hides
 // Recents.
 export function renderSessions(): void {
+  // The parent bar and pane heads show the same live agent status.
+  paintParentBar();
+  paintAgentTabs();
   const filter = searchInputEl.value.trim().toLowerCase();
 
-  const visible = filter ? state.sessions.filter((s) => s.title.toLowerCase().includes(filter)) : state.sessions;
+  // Children nest under their parent; one whose parent is not listed
+  // stands on its own.
+  const known = new Set(state.sessions.map((s) => s.sessionId));
+  const kidsOf = new Map<string, SessionInfo[]>();
+  for (const session of state.sessions) {
+    const parentId = session.subagent?.parentId;
+    if (parentId && known.has(parentId)) {
+      kidsOf.set(parentId, [...(kidsOf.get(parentId) ?? []), session]);
+    }
+  }
+  const tops = state.sessions.filter((s) => !s.subagent || !known.has(s.subagent.parentId));
+  const titled = (s: SessionInfo): boolean => s.title.toLowerCase().includes(filter);
+  const matches = (s: SessionInfo): boolean => titled(s) || (kidsOf.get(s.sessionId) ?? []).some(titled);
+  const visible = filter ? tops.filter(matches) : tops;
 
   if (visible.length === 0) {
     sessionListEl.innerHTML = `<p class="px-2 py-1 text-slate-400">${
@@ -128,15 +200,15 @@ export function renderSessions(): void {
       <div class="project${open ? " is-open" : ""}${current ? " is-current" : ""}" data-cwd="${escapeAttr(cwd)}">
         <button class="project-head" data-fold="${escapeAttr(cwd)}" title="${escapeAttr(cwd)}" aria-expanded="${open}">
           <span class="project-ico">${icon("rl-folder", "h-4 w-4")}</span>
-          <span class="project-name">${escapeHtml(shortPath(cwd))}</span>
+          <span class="project-name">${cwd ? escapeHtml(shortPath(cwd)) : "Unknown folder"}</span>
           <span class="project-caret">${icon("rl-chevron", "h-3 w-3")}</span>
         </button>
-        <div class="project-list"${open ? "" : " hidden"}>${group.map(sessionRow).join("")}</div>
+        <div class="project-list"${open ? "" : " hidden"}>${group.map((s) => sessionRow(s, kidsOf.get(s.sessionId))).join("")}</div>
       </div>`;
   }
 
   if (!filter) {
-    const recents = state.sessions.slice(0, RECENT_COUNT);
+    const recents = tops.slice(0, RECENT_COUNT);
     html += `<div id="recentWrap"><div class="side-label">Recents</div><div id="recentList">`;
     for (const session of recents) {
       const title = session.title || "untitled session";
@@ -311,8 +383,10 @@ async function deleteSession(id: string, discardWorktree = false): Promise<void>
   const session = state.sessions.find((s) => s.sessionId === id);
   const title = session?.title || "the session";
 
+  // A parent's children are deleted with it.
+  const gone = [id, ...(session?.children ?? [])];
   const before = state.sessions;
-  state.sessions = state.sessions.filter((s) => s.sessionId !== id);
+  state.sessions = state.sessions.filter((s) => !gone.includes(s.sessionId));
   renderSessions();
 
   try {
@@ -334,21 +408,29 @@ async function deleteSession(id: string, discardWorktree = false): Promise<void>
   }
 
   toast(`Deleted ${title}`);
-  forgetSession(id);
-
-  if (id === state.sessionId) {
+  gone.forEach(forgetSession);
+  if (gone.includes(state.sessionId)) {
     newSession();
   }
+  disposeSidePanes(gone);
 }
 
 export async function openSession(id: string): Promise<void> {
+  const damaged = state.sessions.find((s) => s.sessionId === id)?.damaged;
+  if (damaged) {
+    setStatus(`This session can't be opened (${damaged}). You can still delete it.`, "error");
+    return;
+  }
   try {
     // Null cwd searches every workspace namespace; the session brings
     // its own cwd with it, which becomes the new working folder.
     const session = await api.openSession(id, null);
 
     state.sessionId = session.sessionId;
+    state.subagent = session.subagent ?? null;
     state.cwd = session.cwd;
+    paintParentBar();
+    syncSidePane();
     syncPermChip();
     syncMcp();
     syncTools();
@@ -406,6 +488,35 @@ export async function openSession(id: string): Promise<void> {
   }
 }
 
+// paintParentBar shows, while a subagent's session is open, which
+// parent drives it and a way back there.
+function paintParentBar(): void {
+  const sub = state.subagent;
+  parentBarEl.hidden = !sub;
+  if (!sub) return;
+  const parent = state.sessions.find((s) => s.sessionId === sub.parentId);
+  const self = state.sessions.find((s) => s.sessionId === state.sessionId);
+  parentBarEl.querySelector("#parentBarTitle")!.textContent = parent?.title || "parent session";
+  const status = self ? agentStatus({ ...self, subagent: sub }) : sub.status;
+  parentBarEl.querySelector("#parentBarAgent")!.innerHTML =
+    `<span class="agent-type">${escapeHtml(sub.type)}</span><span class="parent-agent-name">${escapeHtml(sub.name)}</span>${agentStatusHtml(status)}`;
+}
+
+// onAgentsChanged applies an agents/changed event: a child's status
+// moves in place, and an unknown child reloads the list to find it.
+export function onAgentsChanged(agent: AgentInfo): void {
+  const child = state.sessions.find((s) => s.sessionId === agent.agentId);
+  if (!child?.subagent) {
+    void refreshSessions();
+    return;
+  }
+  child.subagent = { ...child.subagent, status: agent.status, error: agent.error, updatedAt: agent.updatedAt };
+  if (state.sessionId === agent.agentId && state.subagent) {
+    state.subagent = child.subagent;
+  }
+  renderSessions();
+}
+
 export async function loadHistory(id: string): Promise<void> {
   // Null cwd searches every workspace namespace, matching openSession.
   renderHistory(await api.sessionHistory(id, null));
@@ -417,13 +528,27 @@ function renderHistory(history: MessageInfo[]): void {
   // One layout for the whole transcript: keep the container display:none
   // while rows are appended, then paint once.
   messagesEl.style.display = "none";
+  // A subagent's conversation is driven by its parent: no rewinding it.
+  buildHistory(messagesEl, history, !state.subagent);
+  messagesEl.style.display = "";
 
+  if (messagesEl.childElementCount === 0) {
+    renderGreeting();
+  }
+
+  scrollToBottom();
+}
+
+// buildHistory appends a persisted transcript's rows to container.
+// Rows of a session the user cannot rewind here get no revert button.
+export function buildHistory(container: HTMLElement, history: MessageInfo[], revertable = true): void {
   let agentBody: HTMLElement | null = null;
   // run is the open group of consecutive calls; any text closes it.
   let run: ToolRun | null = null;
 
   const openAgent = (text: string): void => {
-    const { textEl } = addTurn("agent", text);
+    const { wrapper, textEl } = createTurn("agent", text);
+    container.append(wrapper);
     agentBody = textEl.parentElement!;
   };
 
@@ -463,7 +588,11 @@ function renderHistory(history: MessageInfo[]): void {
     if (message.role === "user") {
       agentBody = null;
       run = null;
-      addTurn("user", message.content, { index: message.index, revertable: message.index !== undefined });
+      const turn = createTurn("user", message.content, {
+        index: message.index,
+        revertable: revertable && message.index !== undefined,
+      });
+      container.append(turn.wrapper);
     } else if (message.role === "assistant" && message.kind === "thinking") {
       if (!agentBody) {
         openAgent("");
@@ -490,18 +619,13 @@ function renderHistory(history: MessageInfo[]): void {
       });
     }
   }
-
-  messagesEl.style.display = "";
-
-  if (messagesEl.childElementCount === 0) {
-    renderGreeting();
-  }
-
-  scrollToBottom();
 }
 
 export function newSession(): void {
   state.sessionId = "";
+  state.subagent = null;
+  paintParentBar();
+  syncSidePane();
   resetDraft();
   resetBudgetDraft();
   clearUsage();
@@ -565,6 +689,18 @@ export function initSessions(): void {
     if (target.closest("input.session-rename")) {
       return;
     }
+    const kids = target.closest<HTMLElement>("[data-kids-toggle]");
+    if (kids?.dataset.kidsToggle) {
+      const list = sessionListEl.querySelector<HTMLElement>(`[data-kids-of="${CSS.escape(kids.dataset.kidsToggle)}"]`);
+      kidsOpen.set(kids.dataset.kidsToggle, !!list?.hidden);
+      renderSessions();
+      return;
+    }
+    const child = target.closest<HTMLElement>("[data-child]");
+    if (child?.dataset.child) {
+      void openSession(child.dataset.child);
+      return;
+    }
     const fold = target.closest<HTMLElement>("[data-fold]");
     if (fold?.dataset.fold !== undefined) {
       toggleFold(fold.dataset.fold);
@@ -576,6 +712,10 @@ export function initSessions(): void {
     if (id) {
       void openSession(id);
     }
+  });
+
+  parentBarEl.querySelector("#parentBackBtn")!.addEventListener("click", () => {
+    if (state.subagent) void openSession(state.subagent.parentId);
   });
 
   const close = (): void => {
