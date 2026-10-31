@@ -15,6 +15,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/session"
@@ -553,13 +554,16 @@ func (a *Agent) appendAssistant(content string, calls []inference.ToolCall) {
 
 func (a *Agent) appendToolResult(call *inference.ToolCall, result *tools.ToolResult) {
 	var content string
+	var image *media.Image
 	if result != nil {
 		content = result.Content
+		image = result.Image
 	}
 	callID := call.ID
 	name := call.Name
 	a.messages = append(a.messages, inference.LlmMessage{
 		Role: "tool", Content: content,
+		Image:      image,
 		ToolCallID: &callID, Name: &name,
 	})
 	a.publishLive()
@@ -570,6 +574,7 @@ func (a *Agent) appendToolResult(call *inference.ToolCall, result *tools.ToolRes
 	}
 	a.records = append(a.records, transcript.Message{
 		Role: transcript.RoleTool, Content: content,
+		Image:      image,
 		CreatedAt:  time.Now().UTC(),
 		ToolCallID: strptr(resCallID), Name: strptr(resName),
 		IsError: isErr,

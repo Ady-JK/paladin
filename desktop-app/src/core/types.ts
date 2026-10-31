@@ -113,6 +113,14 @@ export type RevertPreview = {
   snapshots: boolean;
 };
 
+export type ChangedFile = { path: string; status: "created" | "modified" | "deleted" };
+export type SessionChanges = {
+  available: boolean;
+  turns: { turn: number; files: ChangedFile[]; callIds: string[] }[];
+  files: ChangedFile[];
+};
+export type SessionDiff = { path: string; patch: string; truncated: boolean };
+
 export type RevertResult = {
   index: number;
   message: string;

@@ -30,7 +30,7 @@ test("composer picker stays open while toggling and picking", async ({ page }) =
   await expect(menu).toBeVisible();
   await expect(page.locator("#modelSelectLabel")).toHaveText("local/llama3.2");
 
-  await page.click("#headerTitle");
+  await page.getByRole("heading", { name: "Ready when you are." }).click();
   await expect(menu).toBeHidden();
 });
 
@@ -70,7 +70,7 @@ test("dropdowns filter the tree and clear shows everything", async ({ page }) =>
   const menu = page.locator("#modelMenu");
   const tree = page.locator("#modelTree");
 
-  await expect(tree.locator("[data-ptoggle]")).toHaveCount(3);
+  await expect(tree.locator("[data-ptoggle]")).toHaveCount(4);
 
   await page.locator("#providerPick").selectOption("Opencode Go");
   await expect(tree.locator("[data-ptoggle]")).toHaveCount(1);
@@ -83,7 +83,7 @@ test("dropdowns filter the tree and clear shows everything", async ({ page }) =>
   await expect(page.locator("#filterLabel")).toHaveText("Showing Opencode Go / anthropic");
 
   await page.locator("#filterClearBtn").click();
-  await expect(tree.locator("[data-ptoggle]")).toHaveCount(3);
+  await expect(tree.locator("[data-ptoggle]")).toHaveCount(4);
   await expect(page.locator("#filterBar")).toBeHidden();
   await expect(menu).toBeVisible();
 });

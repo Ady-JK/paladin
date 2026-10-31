@@ -16,10 +16,16 @@ import (
 )
 
 type googlePart struct {
-	Text             string           `json:"text,omitempty"`
-	ThoughtSignature string           `json:"thoughtSignature,omitempty"`
-	FunctionCall     *googleFunction  `json:"functionCall,omitempty"`
-	FunctionResp     *googleFunctionR `json:"functionResponse,omitempty"`
+	Text             string            `json:"text,omitempty"`
+	InlineData       *googleInlineData `json:"inlineData,omitempty"`
+	ThoughtSignature string            `json:"thoughtSignature,omitempty"`
+	FunctionCall     *googleFunction   `json:"functionCall,omitempty"`
+	FunctionResp     *googleFunctionR  `json:"functionResponse,omitempty"`
+}
+
+type googleInlineData struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type googleFunction struct {
@@ -104,6 +110,14 @@ func toGoogleRequest(system string, messages []LlmMessage, tools []ToolDefinitio
 				Name:     googleToolName(m),
 				Response: googleToolResponse(m.Content),
 			}})
+			if m.Image != nil {
+				if url, err := m.Image.DataURL(); err == nil {
+					_, data, _ := strings.Cut(url, ",")
+					pendingTools = append(pendingTools, googlePart{InlineData: &googleInlineData{MIMEType: m.Image.MIMEType, Data: data}})
+				} else {
+					pendingTools = append(pendingTools, googlePart{Text: "Image unavailable: " + err.Error()})
+				}
+			}
 		case "system":
 			// Instructions live in systemInstruction.
 		default:

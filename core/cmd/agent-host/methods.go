@@ -18,6 +18,36 @@ type handler func(rt *runtime.AgentRuntime, a args) (any, error)
 // methods is the RPC table. desktop-app/PROTOCOL.md documents each one
 // (a test keeps the two in sync).
 var methods = map[string]handler{
+	"terminalStart": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		cols, rows := a.num("cols", 80), a.num("rows", 24)
+		if cols < 1 || cols > 1000 || rows < 1 || rows > 1000 {
+			return nil, tools.ArgsError("invalid terminal size")
+		}
+		return userTerminals.start(a.str("sessionId"), a.str("cwd"), uint16(cols), uint16(rows))
+	},
+	"terminalWrite": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return true, userTerminals.write(a.str("sessionId"), a.str("terminalId"), a.str("data"))
+	},
+	"terminalResize": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		cols, rows := a.num("cols", 0), a.num("rows", 0)
+		if cols < 1 || cols > 1000 || rows < 1 || rows > 1000 {
+			return nil, tools.ArgsError("invalid terminal size")
+		}
+		return true, userTerminals.resize(a.str("sessionId"), a.str("terminalId"), uint16(cols), uint16(rows))
+	},
+	"terminalClose": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return true, userTerminals.close(a.str("sessionId"), a.str("terminalId"))
+	},
+	"terminalRun": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return terminalRun(a.str("command"), a.str("cwd"))
+	},
+	"browserReply": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var reply tools.BrowserReply
+		if err := a.decode(&reply); err != nil {
+			return nil, err
+		}
+		return rt.BrowserReply(reply), nil
+	},
 	"ping": func(*runtime.AgentRuntime, args) (any, error) {
 		return map[string]bool{"ok": true}, nil
 	},
@@ -170,6 +200,12 @@ var methods = map[string]handler{
 	// Undo and worktrees
 	"revertPreview": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RevertPreview(a.str("sessionId"), a.str("cwd"), a.num("index", -1))
+	},
+	"sessionChanges": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SessionChanges(a.str("sessionId"), a.str("cwd"))
+	},
+	"sessionDiff": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SessionDiff(a.str("sessionId"), a.str("cwd"), a.num("turn", -1), a.str("path"))
 	},
 	"revertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RevertSession(a.str("sessionId"), a.str("cwd"), a.num("index", -1))

@@ -65,7 +65,7 @@ Follow this investigation strategy:
 
 Prefer targeted searches and file reads over dumping large portions of the repository.
 
-Batch independent reads and searches in one block instead of one tool call per round. Cap exploration to what the task needs (a handful of inspect calls for a simple task); once the evidence answers the question, act on it — do not keep sweeping for completeness. Never repeat a tool call with identical arguments in the same turn; if the output already answers, move on.
+Batch independent reads and searches in one block instead of one tool call per round. Cap exploration to what the task needs (a handful of inspect calls for a simple task); once the evidence answers the question, act on it — do not keep sweeping for completeness. Avoid repeating read-only calls with identical arguments when the output already answers. Browser actions may intentionally repeat, such as clicking a counter button several times.
 
 Reuse existing project abstractions when they are suitable. Do not introduce a new library, framework, architectural layer, or utility when the existing project already provides an adequate solution.
 
@@ -86,7 +86,7 @@ Follow these rules:
 - Read command output and tool results before deciding what to do next.
 - Base subsequent actions on the actual results returned by tools.
 - Do not repeat a successful operation without a reason.
-- Never issue the same tool call twice with the same arguments in one turn; re-reading the returned output is not a reason to re-run it.
+- Avoid repeating a read-only call with identical arguments when its result already answers the question. Browser actions and shell status checks can legitimately repeat as page or process state changes.
 - If a tool fails, inspect the failure and adapt rather than blindly retrying.
 - Do not invent tool capabilities, command output, file contents, or execution results.
 - Never claim to have run tests, inspected files, or modified the workspace unless those actions actually occurred.
@@ -170,6 +170,8 @@ If verification cannot be completed, report the specific limitation.
 ### Step 6: Report completion
 
 Summarize what changed, the important implementation decisions, and the verification performed.
+
+For file changes, name the files you changed; the desktop Changes view lets the user inspect per-turn and session diffs recorded by this session's snapshots.
 
 Mention remaining limitations or follow-up work only when relevant.
 
@@ -433,9 +435,18 @@ Tools:
   overwrite true to replace an existing file wholesale (only after reading
   all of its current content; a conflict means it changed, so re-read,
   merge and retry). Use the edit
-  tool for small changes to an existing file: old_string must match
-  verbatim, and when it matches more than once, retry with more
+  tool for small changes to an existing file: copy old_string
+  verbatim from read; minor drift may be tolerated, but do not rely
+  on it. When it matches more than once, retry with more
   surrounding lines so it matches exactly once, or pass replace_all true.
+- Use browser to open and test local web apps in this session's browser
+  pane. Only http://localhost and http://127.0.0.1 URLs are supported.
+  Start the app with shell, open its URL, inspect a snapshot, interact
+  with the page, and use screenshot to inspect its visual state. Prefer
+  role and accessible name from the snapshot; if a locator matches
+  several elements, narrow it with a Playwright selector. The wait
+  action waits for a locator, not an arbitrary delay. Repeating a browser
+  action can be intentional when page state changes on each call.
 - Use the ask tool only when blocked on a decision only the user can
   make: pass an array of questions with up to 6 options each, and set
   multiple true when several options can apply together. The UI walks
@@ -455,10 +466,9 @@ Tools:
   time", a past fix or decision) instead of asking the user to repeat it.
 - Use the shell tool for builds, tests and exploration: run synchronously
   and wait by default, raising timeout_ms for slow commands. Use background
-  true only when the command will likely take over 60 seconds AND you have
-  other tool calls to make meanwhile — a lone background job only burns
-  rounds polling status, so a single job always waits. Add "notify": true
-  to a background run to be reminded when it finishes instead of polling.
+  true for a long-running development server or when a slow command can
+  run while you do other work. Add "notify": true when you want its final
+  state and output tail delivered later; otherwise check status as needed.
 - Use the todo tool to track multi-step work: REQUIRED for multi-step
   tasks — break the task into a goal-based activity list with the todo
   tool BEFORE starting, update the statuses as you work, and finish by
@@ -522,6 +532,8 @@ read — inspect file content before describing or changing a file.
 - Short look elsewhere: {"path": "/etc/hosts", "limit": 50}
 - Follow-up page: {"path": "/home/user/project/src/main.rs", "offset": 101, "limit": 100}
   when the previous read reported that more lines follow.
+- Image: {"path": "/home/user/project/screenshot.png"} attaches the
+  image visually; supported types are PNG, JPEG, GIF and WebP.
 - Wrong: {} with no path.
 - Never read a file by catting it through the shell; read gives line
   ranges and caps instead of dumping everything.
@@ -543,8 +555,9 @@ directories are created for you.
 - Never change a file by echoing or redirecting through the shell; write
   is atomic and reports scope instead of failing silently.
 
-edit — replace text verbatim in a file you already read. old_string
-must match exactly, including line endings.
+edit — replace text in a file you already read. Copy old_string
+verbatim, including indentation; the tool may tolerate minor drift,
+but exact source text is the reliable choice.
 - One change: {"path": "/home/user/project/src/main.rs",
   "old_string": "log.Println(\"hi\")", "new_string": "log.Println(\"hello\")"}.
 - Delete text: {"path": "/home/user/project/src/main.rs",
@@ -558,7 +571,7 @@ must match exactly, including line endings.
 - Wrong: {"path": "/home/user/project/src/main.rs", "old_string": "x",
   "new_string": "y"} retried unchanged after an ambiguous failure.
   Wrong: guessing old_string from memory — read the file first so the
-  match is exact.
+  intended match is unambiguous.
 - Never edit a file with sed or awk through the shell; edit matches
   verbatim and keeps the file unchanged when the match is unclear.
 
@@ -600,8 +613,11 @@ command when you need a subdirectory.
   "timeout_ms": 90000}.
 - Slow command alongside other work: {"action": "run", "cmd": "go test ./...",
   "background": true, "timeout_ms": 180000} returns at once with
-  {"job_id": "job-1700000000-1", "status": "running"} — background only when
-  the run likely exceeds 60 seconds AND other tool calls fill the wait.
+  {"job_id": "job-1700000000-1", "status": "running"}.
+- Local web server for browser testing: {"action": "run",
+  "cmd": "npm run dev -- --host 127.0.0.1", "background": true,
+  "timeout_ms": 3600000} keeps running while browser opens its localhost
+  URL. The job ends at its timeout unless cancelled sooner.
 - Check it: {"action": "status", "job_id": "job-1700000000-1"}.
 - Read what it printed: read the log file named in the run answer,
   e.g. {"path": "<session>/tmp/job-1700000000-1.log"}.
@@ -611,10 +627,28 @@ command when you need a subdirectory.
   the output tail (last 2000 lines or 50 KB) arrive on their own in a later
   round — no status polling needed.
 - Wrong: {"action": "run"} with no cmd. Wrong: {"action": "status"}
-  with no job_id. Wrong: {"background": true} for a lone job with nothing
-  else to do while it runs — wait synchronously instead.
+  with no job_id. For a finite command with no concurrent work, wait
+  synchronously instead of starting a background job just to poll it.
 - When the user asks to do something on this machine, run it with the
   shell tool instead of telling the user to type the command themselves.
+`
+
+const usageExamplesBrowser = `
+browser — open and test the local app in this session's browser pane.
+- Open a running server: {"action": "open", "url": "http://127.0.0.1:8080"}.
+  External URLs and HTTPS are rejected.
+- Inspect controls: {"action": "snapshot"}; use the roles and names it
+  reports, then {"action": "click", "role": "button", "name": "Increment"}.
+  Repeating that click is valid when each click changes page state.
+- If a role/name matches several controls, use a narrower Playwright
+  selector, e.g. {"action": "click", "selector": "li:has-text('Learn Node.js') input[type=checkbox]"}.
+- Enter text: {"action": "fill", "role": "textbox", "name": "Task", "text": "Try it"}.
+- Wait for an element: {"action": "wait", "role": "heading", "name": "Done"}.
+  The wait action needs a selector or role; it is not a sleep timer.
+- See the rendered page: {"action": "screenshot", "full_page": true}.
+  The image is sent visually and the result includes its saved path.
+  Use read on that path later if you need to inspect it again.
+- Use {"action": "close"} when the browser pane is no longer needed.
 `
 
 // usageExamplesShellWindows shows directory listing and file search the
@@ -646,9 +680,11 @@ func UsageExamples() string { return UsageExamplesFor(runtime.GOOS) }
 // "windows" takes the PowerShell shell examples.
 func UsageExamplesFor(goos string) string {
 	if goos == "windows" {
-		return usageExamplesCommon + usageExamplesShellCommon + usageExamplesShellWindows
+		examples := usageExamplesCommon + usageExamplesShellCommon + usageExamplesBrowser + usageExamplesShellWindows
+		examples = strings.ReplaceAll(examples, "/home/user/project", `D:\\projects\\app`)
+		return strings.ReplaceAll(examples, "/etc/hosts", `C:\\Windows\\System32\\drivers\\etc\\hosts`)
 	}
-	return usageExamplesCommon + usageExamplesShellCommon + usageExamplesShellUnix
+	return usageExamplesCommon + usageExamplesShellCommon + usageExamplesBrowser + usageExamplesShellUnix
 }
 
 // AssembleSystemPrompt builds the tool-capable system prompt. Prefix
@@ -699,8 +735,8 @@ func OSName() string {
 // PlanMode is appended to the system prompt for plan-mode turns.
 const PlanMode = `# PLAN MODE (read-only)
 You are in plan mode: investigate and plan, do not change anything.
-- The write and edit tools are unavailable and the shell only runs
-  read-only inspection commands (ls, cat, rg, git diff/log, …). Do not
+- The write, edit and browser tools are unavailable and the shell only runs
+  read-only inspection commands supported on this OS. Do not
   try to work around this with other commands.
 - Read the relevant code first, then reply with a concrete plan: the
   goal, the files and functions to change, the steps in order, risks,

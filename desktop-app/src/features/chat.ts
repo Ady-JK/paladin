@@ -31,6 +31,7 @@ import { shortPath } from "../core/format";
 import { syncMcp } from "./mcp";
 import { applyToolDraft, syncTools } from "./toolSwitches";
 import { applyBudgetDraft, syncBudget } from "./budget";
+import { showTerminalResult } from "./sidePane";
 
 // TurnPlan is what a composer line resolves to before it is sent.
 interface TurnPlan {
@@ -90,11 +91,74 @@ async function ensureSession(title: string): Promise<void> {
   renderSessions();
 }
 
+let bangBusy = false;
+
+async function runBang(line: string): Promise<void> {
+  if (bangBusy) return;
+  const localOnly = line.startsWith("!!");
+  const command = line.slice(localOnly ? 2 : 1).replace(/^ /, "");
+  if (!command.trim()) {
+    toast("Enter a command after ! or !!", "error");
+    return;
+  }
+  bangBusy = true;
+  inputEl.value = "";
+  autosizeComposer();
+  let targetSession = state.sessionId;
+  try {
+    await ensureSession(command);
+    const sessionId = state.sessionId;
+    targetSession = sessionId;
+    const cwd = state.cwd;
+    const provider = state.selectedProvider || null;
+    const model = state.selectedModel || null;
+    const mode = state.mode;
+    const permissions = currentPreset();
+    const result = await api.terminalRun(cwd, command);
+    showTerminalResult(sessionId, cwd, command, result);
+    if (localOnly) return;
+    if (state.sessionId === sessionId) {
+      dropFinishedPanel();
+      dismissGreeting();
+    }
+    const output =
+      result.output.length > 64 * 1024
+        ? `${result.output.slice(0, 64 * 1024)}\n[output shortened for agent]`
+        : result.output;
+    const message = `I ran this command in ${cwd}: ${command}\nExit code: ${result.exitCode}\nOutput${result.truncated ? " (truncated)" : ""}:\n${output}`;
+    const info = await api.submitChat({
+      sessionId,
+      message,
+      cwd,
+      provider,
+      model,
+      skill: null,
+      display: `! ${command}`,
+      command: null,
+      compact: false,
+      mode,
+      permissions,
+    });
+    noteSubmitted(info);
+    noteSent(sessionId);
+  } catch (error) {
+    if (!inputEl.value && state.sessionId === targetSession) inputEl.value = line;
+    addTurn("error", String(error));
+    setStatus(String(error), "error");
+    syncComposer();
+  } finally {
+    bangBusy = false;
+    autosizeComposer();
+    if (!document.activeElement?.closest(".approval-card")) inputEl.focus();
+  }
+}
+
 async function send(): Promise<void> {
   const message = inputEl.value.trim();
   if (!message) {
     return;
   }
+  if (message.startsWith("!")) return runBang(inputEl.value.trimStart());
 
   // Slash lines either run locally (never reaching the agent) or become
   // special turns: prompt commands, /compact, /plan <task>, /<skill>.
@@ -174,7 +238,7 @@ async function send(): Promise<void> {
 async function steer(): Promise<void> {
   const message = inputEl.value.trim();
   if (!message) return;
-  if (message.startsWith("/") || !state.sessionId || !isBusy(state.sessionId)) {
+  if (message.startsWith("/") || message.startsWith("!") || !state.sessionId || !isBusy(state.sessionId)) {
     return send();
   }
   inputEl.value = "";

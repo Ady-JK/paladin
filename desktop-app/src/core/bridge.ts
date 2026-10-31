@@ -20,6 +20,20 @@ export interface PaladinBridge {
     drop: (name: string) => Promise<boolean>;
     setTheme: (theme: "dark" | "light") => Promise<boolean>;
   };
+  browser?: {
+    open: (sessionId: string, url: string) => Promise<unknown>;
+    show: (sessionId: string | null) => Promise<boolean>;
+    setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<boolean>;
+    drop: (sessionId: string) => Promise<boolean>;
+    pick: (
+      sessionId: string,
+    ) => Promise<{ url: string; selector: string; tag: string; label: string; text: string } | null>;
+    cancelPick: (sessionId: string) => Promise<void>;
+    getNotes: (
+      sessionId: string,
+    ) => Promise<Array<{ url: string; selector: string; tag: string; label: string; text: string; comment: string }>>;
+    clearNotes: (sessionId: string) => Promise<void>;
+  };
   shell: {
     openExternal: (url: string) => Promise<void>;
   };

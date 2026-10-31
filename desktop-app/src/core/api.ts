@@ -15,6 +15,8 @@ import type {
   MergeResult,
   OpenedSession,
   RevertPreview,
+  SessionChanges,
+  SessionDiff,
   RevertResult,
   WorktreeStatus,
   ApprovalDecision,
@@ -49,6 +51,23 @@ import { bridge } from "./bridge";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
   return bridge().invoke(method, args) as Promise<T>;
+}
+
+export type TerminalResult = { output: string; exitCode: number; truncated: boolean };
+export function terminalRun(cwd: string, command: string): Promise<TerminalResult> {
+  return invoke("terminalRun", { cwd, command });
+}
+export function terminalStart(sessionId: string, cwd: string, cols: number, rows: number): Promise<string> {
+  return invoke("terminalStart", { sessionId, cwd, cols, rows });
+}
+export function terminalWrite(sessionId: string, terminalId: string, data: string): Promise<boolean> {
+  return invoke("terminalWrite", { sessionId, terminalId, data });
+}
+export function terminalResize(sessionId: string, terminalId: string, cols: number, rows: number): Promise<boolean> {
+  return invoke("terminalResize", { sessionId, terminalId, cols, rows });
+}
+export function terminalClose(sessionId: string, terminalId: string): Promise<boolean> {
+  return invoke("terminalClose", { sessionId, terminalId });
 }
 
 export function getWorkspace(): Promise<string> {
@@ -136,6 +155,19 @@ export function forkSession(sessionId: string, cwd: string | null, opts: Worktre
 // would do: turns dropped, files restored, files changed since.
 export function revertPreview(sessionId: string, cwd: string | null, index: number): Promise<RevertPreview> {
   return invoke<RevertPreview>("revertPreview", { sessionId, cwd, index });
+}
+
+export function sessionChanges(sessionId: string, cwd: string | null): Promise<SessionChanges> {
+  return invoke<SessionChanges>("sessionChanges", { sessionId, cwd });
+}
+
+export function sessionDiff(
+  sessionId: string,
+  cwd: string | null,
+  turn: number | null,
+  path: string,
+): Promise<SessionDiff> {
+  return invoke<SessionDiff>("sessionDiff", { sessionId, cwd, turn: turn ?? -1, path });
 }
 
 // revertSession rewinds files and hides the conversation from index on,

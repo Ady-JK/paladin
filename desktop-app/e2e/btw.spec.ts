@@ -153,7 +153,7 @@ test("the history menu reopens and deletes saved side chats", async ({ page }) =
   await expect(pane).toBeVisible();
   await expect(pane.locator(".side-empty:visible")).toBeVisible();
 
-  await pane.locator("#paneHistoryBtn").click();
+  await page.locator("#paneHistoryBtn").click();
   const menu = page.locator("#paneHistoryMenu");
   await expect(menu.locator(".pane-hist-item")).toHaveCount(2);
   await menu.locator('.pane-hist-item[data-chat="c-old"] .pane-hist-open').click();
@@ -163,16 +163,16 @@ test("the history menu reopens and deletes saved side chats", async ({ page }) =
   await expect(chat.locator('.side-msg[data-role="assistant"] strong')).toHaveText("42");
 
   // Reopening an open chat focuses its tab instead of duplicating it.
-  await pane.locator("#paneHistoryBtn").click();
+  await page.locator("#paneHistoryBtn").click();
   await menu.locator('.pane-hist-item[data-chat="c-old"] .pane-hist-open').click();
   await expect(pane.locator('.pane-tab[data-chat="c-old"]')).toHaveCount(1);
 
-  await pane.locator("#paneHistoryBtn").click();
+  await page.locator("#paneHistoryBtn").click();
   await menu.locator('.pane-hist-item[data-chat="c-gone"] .pane-hist-del').click();
   await expect(menu.locator(".pane-hist-item")).toHaveCount(1);
   expect(await page.evaluate(() => (window as any).__e2eSideDeletes.map((d: any) => d.chatId))).toEqual(["c-gone"]);
 
   await page.keyboard.press("Escape");
-  await pane.locator("#paneCloseBtn").click();
+  await page.locator("#paneCloseBtn").click();
   await expect(pane).toBeHidden();
 });

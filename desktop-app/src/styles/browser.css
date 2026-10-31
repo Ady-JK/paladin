@@ -1,0 +1,106 @@
+.pane-browser {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  background: #fff;
+  color: var(--color-slate-800);
+}
+.dark .pane-browser {
+  background: var(--color-slate-900);
+  color: var(--color-slate-200);
+}
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-slate-200);
+}
+.dark .browser-toolbar {
+  border-color: var(--color-slate-800);
+}
+.browser-url {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 9px;
+  background: var(--color-slate-50);
+  color: inherit;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.dark .browser-url {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-850);
+}
+.browser-open,
+.browser-annotate,
+.browser-pass {
+  border-radius: 9px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.browser-open,
+.browser-annotate {
+  color: var(--color-slate-600);
+}
+.dark .browser-open,
+.dark .browser-annotate {
+  color: var(--color-slate-300);
+}
+.browser-open:hover,
+.browser-annotate:hover,
+.browser-annotate[aria-pressed="true"] {
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+}
+.dark .browser-open:hover,
+.dark .browser-annotate:hover,
+.dark .browser-annotate[aria-pressed="true"] {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+.browser-annotate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.browser-url:focus-visible,
+.browser-toolbar button:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+.browser-status {
+  min-height: 24px;
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--color-slate-200);
+  color: var(--color-slate-500);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dark .browser-status {
+  border-color: var(--color-slate-800);
+}
+.browser-pass {
+  white-space: nowrap;
+  background: var(--color-slate-800);
+  color: #fff;
+}
+.dark .browser-pass {
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+}
+.browser-pass:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.browser-surface {
+  min-height: 0;
+  flex: 1;
+  background: #fff;
+}

@@ -20,6 +20,7 @@ let tokenStart = -1;
 let tokenQuery = "";
 let debounce = 0;
 let open = false;
+let lookupSeq = 0;
 
 function ensurePopup(): HTMLElement {
   if (popup) {
@@ -55,6 +56,7 @@ function mentionTokenAt(value: string, caret: number): { start: number; query: s
 
 function closeMention(): void {
   open = false;
+  lookupSeq++;
   tokenStart = -1;
   items = [];
   popup?.classList.add("hidden");
@@ -81,24 +83,27 @@ function paintMention(): void {
     .join("");
 }
 
-async function refreshMention(query: string): Promise<void> {
+async function refreshMention(query: string, requestSeq: number): Promise<void> {
+  let nextItems: FileEntry[];
   try {
-    items = await api.fileComplete(query, state.cwd || null, 8);
+    nextItems = await api.fileComplete(query, state.cwd || null, 8);
   } catch {
-    items = [];
+    nextItems = [];
   }
   // The caret may have moved on while the lookup was in flight.
-  if (!open || query !== tokenQuery) {
+  if (!open || requestSeq !== lookupSeq || query !== tokenQuery) {
     return;
   }
+  items = nextItems;
   activeIdx = 0;
   paintMention();
 }
 
 function scheduleRefresh(query: string): void {
   tokenQuery = query;
+  const requestSeq = ++lookupSeq;
   window.clearTimeout(debounce);
-  debounce = window.setTimeout(() => void refreshMention(query), 120);
+  debounce = window.setTimeout(() => void refreshMention(query, requestSeq), 120);
 }
 
 // acceptMention swaps the `@token` for the row's OS-specific path.

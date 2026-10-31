@@ -53,6 +53,18 @@ contextBridge.exposeInMainWorld("paladin", {
     setTheme: (theme: "dark" | "light") => ipcRenderer.invoke("views:setTheme", theme),
   },
 
+  browser: {
+    open: (sessionId: string, url: string) => ipcRenderer.invoke("browser:open", sessionId, url),
+    show: (sessionId: string | null) => ipcRenderer.invoke("browser:show", sessionId),
+    setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.invoke("browser:setBounds", bounds),
+    drop: (sessionId: string) => ipcRenderer.invoke("browser:drop", sessionId),
+    pick: (sessionId: string) => ipcRenderer.invoke("browser:pick", sessionId),
+    cancelPick: (sessionId: string) => ipcRenderer.invoke("browser:cancelPick", sessionId),
+    getNotes: (sessionId: string) => ipcRenderer.invoke("browser:getNotes", sessionId),
+    clearNotes: (sessionId: string) => ipcRenderer.invoke("browser:clearNotes", sessionId),
+  },
+
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   },

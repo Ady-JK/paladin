@@ -40,9 +40,9 @@ var subagentKinds = []subagentKind{
 		Tools:       []string{"read", "shell"},
 		Prompt: subagentPreamble + `
 ## Role: explore
-Investigate the codebase to answer the parent's question. Search broadly
-first (rg, ls, git log), then read the relevant code. Report concrete
-findings: where things live, how they connect, and anything surprising.
+Investigate the codebase to answer the parent's question. Search likely
+locations first, widening only when needed, then read the relevant code.
+Report concrete findings: where things live, how they connect, and anything surprising.
 Do not propose large redesigns unless asked.`,
 	},
 	{

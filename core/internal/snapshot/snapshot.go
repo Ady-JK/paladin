@@ -421,6 +421,19 @@ func (r *Repo) Changed(ctx context.Context, from, to string) ([]string, error) {
 	return splitNul(out), nil
 }
 
+// DiffFile returns a unified patch for one recorded file between two
+// immutable trees. It does not inspect the current worktree.
+func (r *Repo) DiffFile(ctx context.Context, from, to, rel string) (string, error) {
+	if err := CheckPath(rel); err != nil {
+		return "", err
+	}
+	out, err := r.git(ctx, nil, "diff", "--no-ext-diff", "--no-renames", "--no-color", "--unified=3", from, to, "--", rel)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // Files lists every captured path in a snapshot.
 func (r *Repo) Files(ctx context.Context, tree string) ([]string, error) {
 	out, err := r.git(ctx, nil, "ls-tree", "-r", "-z", tree)

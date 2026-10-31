@@ -123,6 +123,26 @@ test("Escape cancels the wizard and stops the turn", async ({ page }) => {
   expect(cancelled).toBe("c-ask-1");
 });
 
+test("question wizard hides the native browser and restores it when dismissed", async ({ page }) => {
+  await page.fill("#promptInput", "start");
+  await page.click("#sendBtn");
+  await expect(page.locator("#messages")).toContainText("start");
+  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneBrowserBtn").click();
+  await page.locator(".browser-url").fill("http://127.0.0.1:3000");
+  await page.locator(".browser-open").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBeTruthy();
+
+  await stubAskTurn(page);
+  await page.fill("#promptInput", "ask me first");
+  await page.click("#sendBtn");
+  await expect(page.locator("#askModal")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBe(null);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#askModal")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBeTruthy();
+});
+
 test("a multiple-choice question takes several options plus free text", async ({ page }) => {
   await stubAskTurn(page, [
     {

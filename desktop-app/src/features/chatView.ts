@@ -6,6 +6,7 @@ import { state } from "../core/state";
 import type { CompactionInfo, RetryInfo, Turn } from "../core/types";
 import * as api from "../core/api";
 import { toast } from "../ui/toast";
+import { openLocalBrowserURL } from "./sidePane";
 import { icon } from "../icons";
 
 export function scrollToBottom(): void {
@@ -67,8 +68,22 @@ export function renderGreeting(): void {
   messagesEl.append(wrapper);
 }
 
-// initMessageLinks routes in-chat Markdown links to the system browser
-// instead of navigating the app window.
+function isLocalBrowserURL(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return (
+      url.protocol === "http:" &&
+      !url.username &&
+      !url.password &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Localhost links open the session browser. Other web links still use the
+// system browser, and no link navigates the Paladin renderer itself.
 export function initMessageLinks(): void {
   messagesEl.addEventListener("click", (event) => {
     const anchor = (event.target as HTMLElement).closest?.("a[data-ext]");
@@ -78,7 +93,8 @@ export function initMessageLinks(): void {
     event.preventDefault();
     const url = anchor.getAttribute("data-ext");
     if (url) {
-      void api.openExternalPage(url).catch((error) => toast(String(error), "error"));
+      if (isLocalBrowserURL(url)) openLocalBrowserURL(url);
+      else void api.openExternalPage(url).catch((error) => toast(String(error), "error"));
     }
   });
 }

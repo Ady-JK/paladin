@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>paladin</title>
+    <style>
+      html,
+      body {
+        background: #17171a;
+      }
+    </style>
+    <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
@@ -42,7 +49,7 @@
             >
               paladin
               <span id="brandVersion" class="font-mono text-[10px] font-normal text-slate-400 dark:text-slate-500"
-                >v0.6.0</span
+                >v0.7.0</span
               >
             </h1>
             <div
@@ -103,13 +110,62 @@
       </aside>
 
       <!-- ==================== MAIN ==================== -->
-      <main id="mainCard" class="relative flex h-full flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
+      <main id="mainCard" class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
         <!-- Header -->
         <header
           id="titleBar"
           class="flex select-none items-center justify-between border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-900"
         >
-          <div class="flex items-center gap-3">
+          <div id="paneActions" class="pane-actions" aria-label="Agent pane actions">
+            <button id="paneNewChatBtn" type="button" class="pane-btn" title="New side chat" aria-label="New side chat">
+              <span data-icon="plus"></span>
+            </button>
+            <button
+              id="paneBrowserBtn"
+              type="button"
+              class="pane-btn"
+              title="Open local browser"
+              aria-label="Open local browser"
+            >
+              <span data-icon="globe"></span>
+            </button>
+            <button id="paneTerminalBtn" type="button" class="pane-btn" title="New terminal" aria-label="New terminal">
+              <span data-icon="terminal"></span>
+            </button>
+            <button
+              id="paneHistoryBtn"
+              type="button"
+              class="pane-btn"
+              title="Pane options and saved side chats"
+              aria-label="Pane options and saved side chats"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span data-icon="rotate-ccw"></span>
+            </button>
+            <button
+              id="paneCloseBtn"
+              type="button"
+              class="pane-btn"
+              title="Close the side pane"
+              aria-label="Close the side pane"
+            >
+              <span data-icon="xmark"></span>
+            </button>
+            <div id="paneHistoryMenu" class="pane-menu" role="menu" hidden>
+              <button
+                id="paneLayoutBtn"
+                class="pane-menu-layout"
+                type="button"
+                role="menuitem"
+                title="Switch to tabs layout"
+              >
+                Tabs view
+              </button>
+              <div id="paneHistoryItems"></div>
+            </div>
+          </div>
+          <div id="headerIdentity" class="flex items-center gap-3">
             <span class="relative flex h-2 w-2">
               <span
                 id="headerPulse"
@@ -151,6 +207,15 @@
               aria-pressed="false"
             >
               <span data-icon="comments"></span>
+            </button>
+            <button
+              id="sessionChangesBtn"
+              class="session-changes-btn hidden"
+              type="button"
+              title="View files changed in this session"
+              aria-label="View files changed in this session"
+            >
+              <span data-icon="tl-file"></span><span id="sessionChangesCount"></span>
             </button>
             <button
               id="themeToggleBtn"
@@ -219,6 +284,7 @@
                     <div id="skillChipSlot" class="px-4 pt-2"></div>
                     <textarea
                       id="promptInput"
+                      title="! runs a workspace command and shares its output with the agent. !! runs it without starting a turn."
                       rows="3"
                       placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
                       class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
@@ -387,37 +453,7 @@
             <aside id="sidePane" class="side-pane" hidden aria-label="Side chats and subagents">
               <div class="pane-strip">
                 <div id="paneTabs" class="pane-tabs" role="tablist" aria-label="Side tabs"></div>
-                <button
-                  id="paneNewChatBtn"
-                  type="button"
-                  class="pane-btn"
-                  title="New side chat"
-                  aria-label="New side chat"
-                >
-                  <span data-icon="plus"></span>
-                </button>
-                <button
-                  id="paneHistoryBtn"
-                  type="button"
-                  class="pane-btn"
-                  title="Saved side chats"
-                  aria-label="Saved side chats"
-                  aria-haspopup="menu"
-                  aria-expanded="false"
-                >
-                  <span data-icon="rotate-ccw"></span>
-                </button>
-                <button
-                  id="paneCloseBtn"
-                  type="button"
-                  class="pane-btn"
-                  title="Close the side pane"
-                  aria-label="Close the side pane"
-                >
-                  <span data-icon="xmark"></span>
-                </button>
               </div>
-              <div id="paneHistoryMenu" class="pane-menu" role="menu" hidden></div>
               <div id="paneBody" class="pane-body"></div>
             </aside>
           </div>

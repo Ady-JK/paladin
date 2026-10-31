@@ -49,6 +49,62 @@ cd desktop-app
 `--smoke-test` loads the window, fails on renderer load errors /
 uncaught exceptions, pings the sidecar over JSONL, and exits 0/1.
 
+## Local browser testing
+
+The shipped `litellm` provider uses the usual `http://127.0.0.1:4000/v1`
+address as an editable starting point. In Settings → Providers, connect it
+with your proxy URL and key, refresh its model list, and choose a model before
+starting an agent turn. The proxy and its credentials remain under your
+control; Paladin does not start or bundle a LiteLLM server.
+
+Each Agent session has its own browser tab in the side pane. Open a local URL
+there, or let the agent use the `browser` tool to open it, inspect an accessible
+snapshot, interact with the page, and take screenshots. The agent's `read`
+tool also accepts PNG, JPEG, GIF, and WebP files up to 4 MB and sends them as
+image input to a vision-capable model. Browser screenshots are saved under the
+session's `browser/screenshots/` directory and sent to the model visually.
+
+The Agent header keeps the new side chat, browser, terminal, history, and close
+actions visible in either layout, even when the side pane is closed. The
+history menu contains the Split/Tabs choice: split shows chat beside a side
+view, while tabs show one full-width view at a time. Tabs mode includes the main chat,
+side chats, subagents, and the session browser; switching layouts keeps their
+state. Clicking an `http://localhost` or `http://127.0.0.1` link in an agent
+message opens that session's browser tab inside Paladin. Other links still open
+in the system browser. Repeated local links reuse the browser tab.
+
+Browser navigation and network requests are limited to `http://localhost` and
+`http://127.0.0.1`. Session pages use separate in-memory partitions; a hidden
+parking window keeps each page interactive while another session is visible.
+Electron opens a random Chromium debugging port bound to `127.0.0.1` for the
+life of the app so bundled Playwright can control those pages. Software on the
+same computer with access to that port can inspect other open Electron pages.
+
+`build:electron` copies the installed, lockfile-resolved `playwright-core` into
+the packaged Electron output. Electron supplies Chromium, so this feature does
+not download a separate browser. The real browser smoke can be run with:
+
+```sh
+cd desktop-app
+pnpm build:electron && pnpm build:renderer
+pnpm exec electron . --smoke-browser
+```
+
+## Workspace terminal
+
+Open the side pane and click the terminal icon to start an interactive shell in
+the current session's workspace. Each terminal tab has its own PTY, supports
+normal terminal programs, and runs with your OS permissions outside the agent
+sandbox. Closing the tab stops its shell. The terminal emulator loads only when
+you open a terminal.
+
+At the start of the main composer, `! command` runs the command in the session
+workspace and starts an agent turn with its command, exit code, and output.
+`!! command` runs and displays the output without starting an agent turn or
+adding it to the agent's conversation. Both forms show their output in the
+terminal pane. These composer commands are separate from the interactive
+terminal shell; they run in the workspace selected for the session.
+
 ## OpenCode Go
 
 The seeded `Opencode Go` provider targets OpenCode's OpenAI-compatible endpoint

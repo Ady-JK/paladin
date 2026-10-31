@@ -1,0 +1,40 @@
+.pane-terminal {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  background: #17171a;
+  color: #e9e9ed;
+}
+.pane-terminal[hidden] {
+  display: none;
+}
+.terminal-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  padding: 0 13px;
+  border-bottom: 1px solid #34343a;
+  font-size: 12px;
+}
+.terminal-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.terminal-heading small {
+  overflow: hidden;
+  color: #96969e;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-surface {
+  min-height: 0;
+  flex: 1;
+  padding: 10px 11px;
+}
+.terminal-surface .xterm {
+  height: 100%;
+}

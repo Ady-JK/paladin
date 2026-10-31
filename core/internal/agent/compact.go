@@ -48,7 +48,7 @@ Include, as applicable:
 2. Work completed so far and key decisions with their reasons.
 3. Files read, created or modified, with the details that matter (paths, functions, important snippets, commands run).
 4. Errors encountered and how they were resolved, or whether they are still open.
-5. The current state: what was in progress at the end of the conversation.
+5. The current state: what was in progress at the end of the conversation, including any running shell job IDs, local browser URL, and pending user questions when relevant.
 6. Remaining next steps.
 
 Be specific and factual; never invent details. Output only the summary.`

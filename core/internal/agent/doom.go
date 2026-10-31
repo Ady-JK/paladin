@@ -30,7 +30,7 @@ type doomCall struct{ name, sig string }
 // completes the doomLimit-th lap of a repeating sequence, or "" when it
 // may run.
 func (g *doomGuard) check(name, args string) string {
-	if isPolling(name, args) {
+	if isDynamicAction(name, args) {
 		g.recent = g.recent[:0]
 		return ""
 	}
@@ -80,9 +80,13 @@ func (g *doomGuard) repeats(period int) bool {
 	return false
 }
 
-// isPolling exempts calls whose result legitimately changes between
-// identical invocations.
-func isPolling(name, args string) bool {
+// isDynamicAction exempts calls whose result or page state can change
+// between identical invocations. Browser clicks and other interactions
+// can intentionally repeat on the same locator.
+func isDynamicAction(name, args string) bool {
+	if name == "browser" {
+		return true
+	}
 	if name != "shell" {
 		return false
 	}

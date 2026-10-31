@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
@@ -55,7 +56,20 @@ type ToolResult struct {
 	CallID  string
 	Name    string
 	Content string
+	Image   *media.Image
 	IsError bool
+}
+
+// RichOutput lets a tool provide an image without embedding its bytes in
+// text, JSONL events, or the transcript.
+type RichOutput struct {
+	Content string
+	Image   *media.Image
+}
+
+// RichTool is optional; existing text tools keep their Call method.
+type RichTool interface {
+	CallRich(args json.RawMessage, ctx *ToolCtx) (RichOutput, error)
 }
 
 // ToolError is a failed tool call. Failed carries model-facing output;
@@ -279,7 +293,15 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 			result = errorResult(ToolResult{CallID: call.ID, Name: name}, fmt.Sprintf("tool %s crashed: %v", name, p))
 		}
 	}()
-	content, err := tool.Call(args, ctxWithCall(ctx, call.ID))
+	var content string
+	var err error
+	if rich, ok := tool.(RichTool); ok {
+		var output RichOutput
+		output, err = rich.CallRich(args, ctxWithCall(ctx, call.ID))
+		content, result.Image = output.Content, output.Image
+	} else {
+		content, err = tool.Call(args, ctxWithCall(ctx, call.ID))
+	}
 	if err != nil {
 		if terr := (*ToolError)(nil); errors.As(err, &terr) {
 			result.Content = terr.ResultContent()
@@ -287,6 +309,7 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 			result.Content = string(jsonx.MustMarshal(map[string]string{"error": err.Error()}))
 		}
 		result.Content = redact.String(result.Content)
+		result.Image = nil
 		result.IsError = true
 		return result
 	}
@@ -390,6 +413,7 @@ func BuiltinCatalog() *Catalog {
 	c.Register(Template{Name: "edit", New: func() Tool { return NewEditTool(NewEngine()) }})
 	c.Register(Template{Name: "shell", New: func() Tool { return NewShellTool() }})
 	c.Register(Template{Name: "ask", New: func() Tool { return NewAskTool() }})
+	c.Register(Template{Name: "browser", New: func() Tool { return NewBrowserTool() }})
 	c.Register(Template{Name: "todo", New: func() Tool { return TodoTool{} }})
 	return c
 }

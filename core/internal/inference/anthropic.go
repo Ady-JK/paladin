@@ -21,14 +21,21 @@ const (
 )
 
 type anthropicBlock struct {
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     any                   `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   string                `json:"content,omitempty"`
+	IsError   bool                  `json:"is_error,omitempty"`
+	Source    *anthropicImageSource `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
 	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     any    `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type anthropicMessage struct {
@@ -99,6 +106,16 @@ func toAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefini
 			pendingToolResults = append(pendingToolResults, anthropicBlock{
 				Type: "tool_result", ToolUseID: id, Content: m.Content,
 			})
+			if m.Image != nil {
+				if url, err := m.Image.DataURL(); err == nil {
+					_, data, _ := strings.Cut(url, ",")
+					pendingToolResults = append(pendingToolResults, anthropicBlock{
+						Type: "image", Source: &anthropicImageSource{Type: "base64", MediaType: m.Image.MIMEType, Data: data},
+					})
+				} else {
+					pendingToolResults = append(pendingToolResults, anthropicBlock{Type: "text", Text: "Image unavailable: " + err.Error()})
+				}
+			}
 		case "system":
 			// Instructions live in the top-level system field.
 		default:

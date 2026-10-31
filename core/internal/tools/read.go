@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
@@ -53,7 +54,7 @@ func (ReadTool) ParallelSafe() bool { return true }
 func (ReadTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "read",
-		Description: "Read a text file from disk. Pass path as a full " +
+		Description: "Read a text file or PNG, JPEG, GIF or WebP image from disk. Images are sent visually to the model. Pass path as a full " +
 			"absolute path; bare relative paths are rejected. " +
 			"The reply holds the file content, the line range that " +
 			"was returned, and whether more lines follow: when has_more is true, " +
@@ -69,6 +70,38 @@ func (ReadTool) Definition() ToolDefinition {
 			"required": []string{"path"},
 		},
 	}
+}
+
+func (t ReadTool) CallRich(raw json.RawMessage, ctx *ToolCtx) (RichOutput, error) {
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return RichOutput{}, ArgsError(fmt.Sprintf("read: the arguments are not valid JSON: %v", err))
+	}
+	if strings.TrimSpace(args.Path) == "" {
+		return RichOutput{}, ArgsError("read: path is required")
+	}
+	resolved, scope, err := ResolveScopedPath("read", "path", args.Path, ctx.Workspace)
+	if err != nil {
+		return RichOutput{}, ArgsError(err.Error())
+	}
+	ref, image, err := media.ReadIfImage(resolved)
+	if err != nil {
+		return RichOutput{}, ArgsError(fmt.Sprintf("read: image: %v", err))
+	}
+	if image {
+		data, err := jsonx.Marshal(map[string]any{
+			"requested_path": args.Path, "resolved_path": resolved, "scope": scope,
+			"mime_type": ref.MIMEType, "size": ref.Size, "content": "[image attached]",
+		})
+		if err != nil {
+			return RichOutput{}, ArgsError(fmt.Sprintf("read: encode image metadata: %v", err))
+		}
+		return RichOutput{Content: string(data), Image: ref}, nil
+	}
+	content, err := t.Call(raw, ctx)
+	return RichOutput{Content: content}, err
 }
 
 func (ReadTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {

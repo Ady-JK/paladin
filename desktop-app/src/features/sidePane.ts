@@ -4,10 +4,15 @@
 // hidden tab keeps its DOM, so switching back loses nothing.
 
 import * as api from "../core/api";
-import { $, sidePaneBtn, sidePaneEl } from "../core/dom";
+import type { Terminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
+import { $, inputEl, sidePaneBtn, sidePaneEl } from "../core/dom";
+import { bridge, hasBridge } from "../core/bridge";
 import { escapeAttr, escapeHtml, renderMarkdown } from "../core/format";
 import { state } from "../core/state";
-import type { SideChatMessage } from "../core/types";
+import { loadText, saveText } from "../core/storage";
+import type { ChangedFile, SessionChanges, SideChatMessage } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { abortAttach, beginAttach, finishAttach, liveBadge, liveRoot, onResync } from "./live";
@@ -34,17 +39,187 @@ type AgentTab = {
   head: string;
 };
 
-type Tab = ChatTab | AgentTab;
+type BrowserTab = {
+  kind: "browser";
+  key: string;
+  sessionId: string;
+  title: string;
+  body: HTMLElement;
+  url: string;
+  picking: boolean;
+  pickToken: number;
+  noteCount: number;
+  passing: boolean;
+};
+
+type TerminalTab = {
+  kind: "terminal";
+  key: string;
+  sessionId: string;
+  cwd: string;
+  title: string;
+  body: HTMLElement;
+  term: Terminal | null;
+  fit: FitAddon | null;
+  pendingText: string[];
+  terminalId: string;
+  starting: Promise<void> | null;
+  closed: boolean;
+};
+
+type ChangesTab = {
+  kind: "changes";
+  key: string;
+  sessionId: string;
+  title: string;
+  body: HTMLElement;
+  turn: number | null;
+  selected: string | null;
+  request: number;
+};
+
+type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | TerminalTab;
 type TabSet = { tabs: Tab[]; active: string };
 
 const tabsEl = $("#paneTabs");
+const stripEl = tabsEl.parentElement!;
 const bodyEl = $("#paneBody");
 const historyBtn = $<HTMLButtonElement>("#paneHistoryBtn");
 const menuEl = $("#paneHistoryMenu");
+const menuItemsEl = $("#paneHistoryItems");
+const layoutBtn = $<HTMLButtonElement>("#paneLayoutBtn");
+const changesBtn = $<HTMLButtonElement>("#sessionChangesBtn");
+const titleBar = $("#titleBar");
+const agentView = $("#agentView");
+const layoutKey = "paladin.paneLayout";
 
 const sets = new Map<string, TabSet>();
+const changesCache = new Map<string, SessionChanges>();
 let paneOpen = false;
+let layoutMode: "split" | "tabs" = loadText(layoutKey) === "tabs" ? "tabs" : "split";
 let nextKey = 0;
+const pendingTerminalData = new Map<string, string[]>();
+
+function terminalEvent(raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const e = raw as { event?: string; sessionId?: string; terminalId?: string; data?: string; exitCode?: number };
+  if (!e.event?.startsWith("terminal/") || !e.terminalId || !e.sessionId) return;
+  const tab = sets
+    .get(e.sessionId)
+    ?.tabs.find((t): t is TerminalTab => t.kind === "terminal" && t.terminalId === e.terminalId);
+  if (e.event === "terminal/data" && e.data) {
+    if (!tab) {
+      const queued = pendingTerminalData.get(e.terminalId) ?? [];
+      if (queued.length < 128) queued.push(e.data);
+      pendingTerminalData.set(e.terminalId, queued);
+      return;
+    }
+    tab.term?.write(Uint8Array.from(atob(e.data), (char) => char.charCodeAt(0)));
+  } else if (e.event === "terminal/exit" && tab) {
+    tab.term?.write(`\r\n[terminal exited${e.exitCode ? `: ${e.exitCode}` : ""}]\r\n`);
+    tab.terminalId = "";
+    tab.closed = true;
+  } else if (e.event === "terminal/exit") {
+    pendingTerminalData.delete(e.terminalId);
+  }
+}
+
+function newTerminalTab(sessionId: string, cwd: string): TerminalTab {
+  const body = document.createElement("div");
+  body.className = "pane-terminal";
+  body.innerHTML = `<div class="terminal-heading"><span>${icon("terminal", "h-3.5 w-3.5")} Terminal</span><small>${escapeHtml(cwd)}</small></div><div class="terminal-surface" aria-label="Interactive terminal"></div>`;
+  const tab: TerminalTab = {
+    kind: "terminal",
+    key: `t${++nextKey}`,
+    sessionId,
+    cwd,
+    title: "Terminal",
+    body,
+    term: null,
+    fit: null,
+    pendingText: [],
+    terminalId: "",
+    starting: null,
+    closed: false,
+  };
+  void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
+    ([{ Terminal }, { FitAddon }]) => {
+      if (tab.closed) return;
+      const term = new Terminal({
+        cursorBlink: true,
+        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+        fontSize: 12,
+        scrollback: 5000,
+        theme: { background: "#17171a", foreground: "#e9e9ed", cursor: "#8faafa" },
+      });
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      tab.term = term;
+      tab.fit = fit;
+      term.onData((data) => {
+        if (tab.terminalId) void api.terminalWrite(tab.sessionId, tab.terminalId, data).catch(() => undefined);
+      });
+      term.onResize(({ cols, rows }) => {
+        if (tab.terminalId) void api.terminalResize(tab.sessionId, tab.terminalId, cols, rows).catch(() => undefined);
+      });
+      for (const text of tab.pendingText) term.write(text);
+      tab.pendingText = [];
+      if (!tab.body.hidden) activateTerminal(tab);
+    },
+    (error) => {
+      body.querySelector<HTMLElement>(".terminal-surface")!.textContent =
+        `Terminal could not load: ${errorText(error)}`;
+    },
+  );
+  return tab;
+}
+
+function activateTerminal(tab: TerminalTab): void {
+  if (!tab.term || !tab.fit) return;
+  const term = tab.term;
+  const fit = tab.fit;
+  const surface = tab.body.querySelector<HTMLElement>(".terminal-surface")!;
+  if (!surface.querySelector(".xterm")) term.open(surface);
+  if (!tab.body.hidden) fit.fit();
+  if (tab.starting || tab.terminalId || tab.closed) return;
+  tab.starting = api
+    .terminalStart(tab.sessionId, tab.cwd, Math.max(term.cols, 20), Math.max(term.rows, 5))
+    .then((id) => {
+      if (tab.closed) {
+        void api.terminalClose(tab.sessionId, id);
+        return;
+      }
+      tab.terminalId = id;
+      for (const chunk of pendingTerminalData.get(id) ?? []) {
+        term.write(Uint8Array.from(atob(chunk), (char) => char.charCodeAt(0)));
+      }
+      pendingTerminalData.delete(id);
+      term.focus();
+    })
+    .catch((error) => term.write(`\r\nTerminal could not start: ${errorText(error)}\r\n`))
+    .finally(() => {
+      tab.starting = null;
+    });
+}
+
+function openTerminalTab(sessionId: string, cwd = state.cwd): TerminalTab {
+  const set = browserSet(sessionId);
+  const tab = newTerminalTab(sessionId, cwd);
+  set.tabs.push(tab);
+  set.active = tab.key;
+  if (state.sessionId === sessionId) showPane();
+  return tab;
+}
+
+export function showTerminalResult(sessionId: string, cwd: string, command: string, result: api.TerminalResult): void {
+  const set = browserSet(sessionId);
+  const tab = set.tabs.find((t): t is TerminalTab => t.kind === "terminal") ?? openTerminalTab(sessionId, cwd);
+  set.active = tab.key;
+  if (state.sessionId === sessionId) showPane();
+  const text = `\r\n$ ${command}\r\n${result.output.replace(/\n/g, "\r\n")}${result.truncated ? "\r\n[output truncated]" : ""}\r\n[exit ${result.exitCode}]\r\n`;
+  if (tab.term) tab.term.write(text);
+  else tab.pendingText.push(text);
+}
 
 function currentSet(): TabSet | null {
   if (!state.sessionId) return null;
@@ -54,6 +229,403 @@ function currentSet(): TabSet | null {
     sets.set(state.sessionId, set);
   }
   return set;
+}
+
+function browserSet(sessionId: string): TabSet {
+  let set = sets.get(sessionId);
+  if (!set) {
+    set = { tabs: [], active: "" };
+    sets.set(sessionId, set);
+  }
+  return set;
+}
+
+function newBrowserTab(sessionId: string): BrowserTab {
+  const body = document.createElement("div");
+  body.className = "pane-browser";
+  body.innerHTML = `<form class="browser-toolbar"><input class="browser-url" type="url" inputmode="url" spellcheck="false" placeholder="http://localhost:8080" aria-label="Local browser URL" /><button class="browser-open" type="submit">Open</button><button class="browser-annotate" type="button" aria-label="Comment on elements" aria-pressed="false" title="Comment on elements">${icon("comments", "h-4 w-4")}<span>Comment</span></button><button class="browser-pass" type="button" disabled>Pass to agent</button></form><p class="browser-status" role="status">Open a local development server to preview it here.</p><div class="browser-surface" aria-label="Local browser page"></div>`;
+  const tab: BrowserTab = {
+    kind: "browser",
+    key: `t${++nextKey}`,
+    sessionId,
+    title: "Browser",
+    body,
+    url: "",
+    picking: false,
+    pickToken: 0,
+    noteCount: 0,
+    passing: false,
+  };
+  body.querySelector<HTMLFormElement>("form")!.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const url = body.querySelector<HTMLInputElement>(".browser-url")!.value.trim();
+    navigateBrowser(tab, url);
+  });
+  body.querySelector<HTMLButtonElement>(".browser-annotate")!.addEventListener("click", () => {
+    if (tab.picking) stopBrowserPick(tab);
+    else void startBrowserPick(tab);
+  });
+  body
+    .querySelector<HTMLButtonElement>(".browser-pass")!
+    .addEventListener("click", () => void passBrowserComments(tab));
+  return tab;
+}
+
+function stopBrowserPick(tab: BrowserTab): void {
+  if (!tab.picking) return;
+  tab.picking = false;
+  tab.pickToken++;
+  void bridge().browser?.cancelPick(tab.sessionId);
+  updateBrowserToolbar(tab);
+}
+
+async function startBrowserPick(tab: BrowserTab): Promise<void> {
+  if (!hasBridge() || !bridge().browser?.pick) {
+    tab.body.querySelector<HTMLElement>(".browser-status")!.textContent =
+      "Element selection needs the desktop browser.";
+    return;
+  }
+  tab.picking = true;
+  const token = ++tab.pickToken;
+  updateBrowserToolbar(tab);
+  await bridge().browser!.cancelPick(tab.sessionId);
+  if (!tab.picking || token !== tab.pickToken) return;
+  while (tab.picking && token === tab.pickToken) {
+    try {
+      const element = await bridge().browser!.pick(tab.sessionId);
+      if (!tab.picking || token !== tab.pickToken || !element) break;
+    } catch (error) {
+      if (token === tab.pickToken)
+        tab.body.querySelector<HTMLElement>(".browser-status")!.textContent = errorText(error);
+      break;
+    }
+  }
+  if (token === tab.pickToken) {
+    tab.picking = false;
+    updateBrowserToolbar(tab);
+  }
+}
+
+function updateBrowserToolbar(tab: BrowserTab): void {
+  const toggle = tab.body.querySelector<HTMLButtonElement>(".browser-annotate")!;
+  toggle.setAttribute("aria-pressed", String(tab.picking));
+  toggle.title = tab.picking ? "Stop selecting elements" : "Comment on elements";
+  const pass = tab.body.querySelector<HTMLButtonElement>(".browser-pass")!;
+  pass.disabled = tab.passing || tab.noteCount === 0;
+  pass.textContent = tab.noteCount ? `Pass to agent (${tab.noteCount})` : "Pass to agent";
+}
+
+async function passBrowserComments(tab: BrowserTab): Promise<void> {
+  if (tab.passing || !hasBridge() || !bridge().browser?.getNotes) return;
+  tab.passing = true;
+  updateBrowserToolbar(tab);
+  stopBrowserPick(tab);
+  try {
+    const notes = await bridge().browser!.getNotes(tab.sessionId);
+    if (!notes.length || state.sessionId !== tab.sessionId) return;
+    const lines = notes.map(
+      (note, index) =>
+        `${index + 1}. URL: ${note.url}\n   Element: <${note.tag}>${note.label || note.text ? ` ${JSON.stringify(note.label || note.text)}` : ""}\n   CSS selector: ${note.selector}\n   Change: ${note.comment}`,
+    );
+    const feedback = `Browser UI feedback:\n${lines.join("\n")}`;
+    inputEl.value = `${inputEl.value.trimEnd()}${inputEl.value.trim() ? "\n\n" : ""}${feedback}`;
+    inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+    await bridge().browser!.clearNotes(tab.sessionId);
+    if (layoutMode === "tabs") closePane();
+    inputEl.focus();
+  } catch (error) {
+    tab.body.querySelector<HTMLElement>(".browser-status")!.textContent = errorText(error);
+  } finally {
+    tab.passing = false;
+    updateBrowserToolbar(tab);
+  }
+}
+
+function navigateBrowser(tab: BrowserTab, url: string): void {
+  stopBrowserPick(tab);
+  const status = tab.body.querySelector<HTMLElement>(".browser-status")!;
+  if (!url) {
+    status.textContent = "Enter a localhost URL.";
+    return;
+  }
+  tab.body.querySelector<HTMLInputElement>(".browser-url")!.value = url;
+  if (!hasBridge() || !bridge().browser) {
+    status.textContent = "The desktop browser is unavailable.";
+    return;
+  }
+  status.textContent = "Opening…";
+  void bridge()
+    .browser!.open(tab.sessionId, url)
+    .then(
+      () => {
+        tab.url = url;
+        status.textContent = url;
+        syncNativeBrowser();
+      },
+      (error: unknown) => {
+        status.textContent = errorText(error);
+      },
+    );
+}
+
+function openBrowserTab(sessionId: string, url = ""): void {
+  const set = browserSet(sessionId);
+  let tab = set.tabs.find((t): t is BrowserTab => t.kind === "browser");
+  if (!tab) {
+    tab = newBrowserTab(sessionId);
+    set.tabs.push(tab);
+    if (hasBridge() && bridge().browser?.getNotes) {
+      const created = tab;
+      void bridge()
+        .browser!.getNotes(sessionId)
+        .then((notes) => {
+          created.noteCount = notes.length;
+          updateBrowserToolbar(created);
+        })
+        .catch(() => undefined);
+    }
+  }
+  if (url) tab.body.querySelector<HTMLInputElement>(".browser-url")!.value = url;
+  set.active = tab.key;
+  if (state.sessionId === sessionId && state.sideView === "agent") showPane();
+}
+
+// Chat links use the same one-browser-per-session view as the agent tool.
+export function openLocalBrowserURL(url: string): void {
+  if (!state.sessionId || state.sideView !== "agent") {
+    toast("Start a conversation to open a local browser.", "error");
+    return;
+  }
+  const set = browserSet(state.sessionId);
+  openBrowserTab(state.sessionId, url);
+  const tab = set.tabs.find((t): t is BrowserTab => t.kind === "browser")!;
+  navigateBrowser(tab, url);
+}
+
+function browserEvent(raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const e = raw as { event?: string; sessionId?: string; url?: string; count?: number };
+  if (!e.sessionId) return;
+  if (e.event === "browser/opened") {
+    openBrowserTab(e.sessionId, e.url ?? "");
+    return;
+  }
+  const tab = sets.get(e.sessionId)?.tabs.find((t): t is BrowserTab => t.kind === "browser");
+  if (!tab) return;
+  if (e.event === "browser/annotations") {
+    tab.noteCount = Math.max(0, e.count ?? 0);
+    updateBrowserToolbar(tab);
+    return;
+  }
+  if (e.event === "browser/closed") {
+    stopBrowserPick(tab);
+    if (state.sessionId === e.sessionId) closeTab(tab.key, false);
+    else {
+      const set = sets.get(e.sessionId)!;
+      set.tabs = set.tabs.filter((t) => t !== tab);
+      tab.body.remove();
+    }
+  } else if (e.event === "browser/navigated" && e.url) {
+    if (tab.url && tab.url !== e.url) stopBrowserPick(tab);
+    tab.url = e.url;
+    const input = tab.body.querySelector<HTMLInputElement>(".browser-url")!;
+    if (document.activeElement !== input) input.value = e.url;
+    tab.body.querySelector<HTMLElement>(".browser-status")!.textContent = e.url;
+  }
+}
+
+function paintChangesHeader(data: SessionChanges | undefined): void {
+  const count = data?.files.length ?? 0;
+  changesBtn.classList.toggle("hidden", count === 0);
+  $("#sessionChangesCount").textContent = count ? String(count) : "";
+  changesBtn.title = `View ${count} ${count === 1 ? "file" : "files"} changed in this session`;
+}
+
+function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[]): void {
+  let button = row.querySelector<HTMLButtonElement>(".turn-changes");
+  if (!files.length) {
+    button?.remove();
+    return;
+  }
+  if (!button) {
+    button = document.createElement("button");
+    button.type = "button";
+    button.className = "turn-changes";
+    row.prepend(button);
+  }
+  button.dataset.changeTurn = String(turn);
+  button.title = "View this turn's file changes";
+  button.setAttribute(
+    "aria-label",
+    `View ${files.length} ${files.length === 1 ? "file" : "files"} changed in this turn`,
+  );
+  button.innerHTML = `${icon("tl-file", "h-3.5 w-3.5")}<span>${files.length} ${files.length === 1 ? "file" : "files"}</span>`;
+}
+
+let changeRequest = 0;
+
+// Refresh after a tool settles or a session is opened. Persisted user
+// rows carry transcript indices; the current live row is passed in.
+export async function refreshChanges(
+  sessionId = state.sessionId,
+  liveRow?: HTMLElement | null,
+  callId?: string,
+): Promise<void> {
+  if (!sessionId) {
+    paintChangesHeader(undefined);
+    return;
+  }
+  const request = ++changeRequest;
+  try {
+    const data = await api.sessionChanges(sessionId, null);
+    changesCache.set(sessionId, data);
+    if (sessionId !== state.sessionId || request !== changeRequest) return;
+    paintChangesHeader(data);
+    const byTurn = new Map(data.turns.map((turn) => [turn.turn, turn.files]));
+    for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
+      const turn = Number(row.dataset.turnIndex);
+      paintTurnMarker(row, turn, byTurn.get(turn) ?? []);
+    }
+    if (liveRow && callId) {
+      const turn = data.turns.find((item) => item.callIds?.includes(callId));
+      if (turn) paintTurnMarker(liveRow, turn.turn, turn.files);
+    }
+    const tab = sets.get(sessionId)?.tabs.find((t): t is ChangesTab => t.kind === "changes");
+    if (tab) paintChangesTab(tab, data);
+  } catch {
+    if (sessionId === state.sessionId && request === changeRequest) paintChangesHeader(undefined);
+  }
+}
+
+function newChangesTab(sessionId: string): ChangesTab {
+  const body = document.createElement("div");
+  body.className = "pane-changes";
+  body.innerHTML = `<div class="change-scope"></div><div class="change-files"></div><div class="change-diff" role="region" aria-label="File diff">Select a file to view its changes.</div>`;
+  const tab: ChangesTab = {
+    kind: "changes",
+    key: `t${++nextKey}`,
+    sessionId,
+    title: "Changes",
+    body,
+    turn: null,
+    selected: null,
+    request: 0,
+  };
+  body.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-change-all]")) {
+      tab.turn = null;
+      tab.selected = null;
+      paintChangesTab(tab, changesCache.get(sessionId));
+      return;
+    }
+    const file = target.closest<HTMLElement>("[data-change-file]")?.dataset.changeFile;
+    if (file) {
+      tab.selected = file;
+      paintChangesTab(tab, changesCache.get(sessionId));
+      void loadChangeDiff(tab, file);
+    }
+  });
+  return tab;
+}
+
+function paintChangesTab(tab: ChangesTab, data: SessionChanges | undefined): void {
+  const files = tab.turn === null ? data?.files : data?.turns.find((t) => t.turn === tab.turn)?.files;
+  tab.body.querySelector<HTMLElement>(".change-scope")!.innerHTML =
+    `<span>${tab.turn === null ? "Session changes" : "Turn changes"}</span>` +
+    (tab.turn === null ? "" : `<button type="button" data-change-all>All session changes</button>`);
+  const list = tab.body.querySelector<HTMLElement>(".change-files")!;
+  if (!data) {
+    list.textContent = "Loading file changes…";
+  } else if (!data.available) {
+    list.textContent = "File snapshots are unavailable for this session.";
+  } else if (!files?.length) {
+    list.textContent = "No file changes recorded.";
+  } else {
+    list.innerHTML = files
+      .map(
+        (f) =>
+          `<button type="button" class="change-file${tab.selected === f.path ? " is-active" : ""}" data-change-file="${escapeAttr(f.path)}" title="${escapeAttr(f.path)}">` +
+          `${icon("tl-file", "h-3.5 w-3.5")}<span>${escapeHtml(f.path)}</span><small>${f.status}</small></button>`,
+      )
+      .join("");
+  }
+  if (tab.selected && !files?.some((f) => f.path === tab.selected)) tab.selected = null;
+  if (!tab.selected)
+    tab.body.querySelector<HTMLElement>(".change-diff")!.textContent = "Select a file to view its changes.";
+}
+
+async function loadChangeDiff(tab: ChangesTab, path: string): Promise<void> {
+  const request = ++tab.request;
+  const preview = tab.body.querySelector<HTMLElement>(".change-diff")!;
+  preview.textContent = "Loading diff…";
+  try {
+    const diff = await api.sessionDiff(tab.sessionId, null, tab.turn, path);
+    if (request !== tab.request || tab.selected !== path) return;
+    preview.replaceChildren();
+    if (!diff.patch) {
+      preview.textContent = "No text diff available for this file.";
+      return;
+    }
+    const lines = diff.patch.split("\n");
+    const fragment = document.createDocumentFragment();
+    for (const line of lines.slice(0, 5000)) {
+      const el = document.createElement("div");
+      el.className =
+        line.startsWith("+") && !line.startsWith("+++")
+          ? "change-add"
+          : line.startsWith("-") && !line.startsWith("---")
+            ? "change-remove"
+            : line.startsWith("@@")
+              ? "change-hunk"
+              : "";
+      el.textContent = line || " ";
+      fragment.append(el);
+    }
+    preview.append(fragment);
+    if (diff.truncated || lines.length > 5000) preview.append("\nDiff preview truncated.");
+  } catch (error) {
+    if (request === tab.request) preview.textContent = `Could not load diff: ${errorText(error)}`;
+  }
+}
+
+function openChangesTab(turn: number | null): void {
+  const sessionId = state.sessionId;
+  if (!sessionId) return;
+  const set = currentSet()!;
+  let tab = set.tabs.find((t): t is ChangesTab => t.kind === "changes");
+  if (!tab) {
+    tab = newChangesTab(sessionId);
+    set.tabs.push(tab);
+  }
+  tab.turn = turn;
+  tab.selected = null;
+  set.active = tab.key;
+  showPane();
+  paintChangesTab(tab, changesCache.get(sessionId));
+  void refreshChanges(sessionId);
+}
+
+function syncNativeBrowser(): void {
+  if (!hasBridge() || !bridge().browser) return;
+  const set = state.sessionId ? sets.get(state.sessionId) : undefined;
+  const tab = set && activeTab(set);
+  const modalOpen = ["settingsModal", "sessionModal", "confirmModal", "siteModal", "askModal"].some((id) => {
+    const el = document.getElementById(id);
+    return el && !el.classList.contains("hidden");
+  });
+  if (!paneOpen || state.sideView !== "agent" || tab?.kind !== "browser" || modalOpen) {
+    void bridge().browser!.show(null);
+    return;
+  }
+  const surface = tab.body.querySelector<HTMLElement>(".browser-surface")!;
+  const rect = surface.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) {
+    void bridge().browser!.show(null);
+    return;
+  }
+  void bridge().browser!.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+  void bridge().browser!.show(tab.sessionId);
 }
 
 function activeTab(set: TabSet): Tab | undefined {
@@ -326,14 +898,25 @@ function paintHead(tab: AgentTab): void {
 // ---- the pane ----
 
 function tabHtml(tab: Tab, active: boolean): string {
-  const glyph = tab.kind === "agent" ? icon("rl-agent", "h-3 w-3") : icon("comments", "h-3 w-3");
+  const glyph =
+    tab.kind === "agent"
+      ? icon("rl-agent", "h-3 w-3")
+      : tab.kind === "browser"
+        ? icon("globe", "h-3 w-3")
+        : tab.kind === "terminal"
+          ? icon("terminal", "h-3 w-3")
+          : tab.kind === "changes"
+            ? icon("tl-file", "h-3 w-3")
+            : icon("comments", "h-3 w-3");
   const data =
     tab.kind === "agent"
       ? ` data-agent="${escapeAttr(tab.agentId)}"`
-      : tab.chatId
-        ? ` data-chat="${escapeAttr(tab.chatId)}"`
-        : "";
-  const busy = tab.kind === "chat" ? tab.busy : liveBadge(tab.agentId) === "running";
+      : tab.kind === "browser"
+        ? ` data-browser="${escapeAttr(tab.sessionId)}"`
+        : tab.kind === "chat" && tab.chatId
+          ? ` data-chat="${escapeAttr(tab.chatId)}"`
+          : "";
+  const busy = tab.kind === "chat" ? tab.busy : tab.kind === "agent" && liveBadge(tab.agentId) === "running";
   return (
     `<div class="pane-tab${active ? " is-active" : ""}" data-key="${tab.key}"${data}>` +
     `<button type="button" role="tab" aria-selected="${active}" class="pane-tab-pick" title="${escapeAttr(tab.title)}">` +
@@ -343,11 +926,17 @@ function tabHtml(tab: Tab, active: boolean): string {
   );
 }
 
+function mainTabHtml(): string {
+  return `<div class="pane-tab pane-main-tab${paneOpen ? "" : " is-active"}" data-key="main"><button type="button" role="tab" aria-selected="${!paneOpen}" class="pane-tab-pick" title="Main chat">${icon("comments", "h-3 w-3")}<span>Chat</span></button></div>`;
+}
+
 let tabsHtml = "";
 
 function paintTabs(): void {
   const set = currentSet();
-  const html = set ? set.tabs.map((t) => tabHtml(t, t.key === set.active)).join("") : "";
+  const html =
+    (layoutMode === "tabs" ? mainTabHtml() : "") +
+    (set ? set.tabs.map((t) => tabHtml(t, paneOpen && t.key === set.active)).join("") : "");
   if (html === tabsHtml && tabsEl.innerHTML !== "") return;
   tabsHtml = html;
   tabsEl.innerHTML = html;
@@ -355,37 +944,53 @@ function paintTabs(): void {
 
 // render paints the open session's tabs, keeping each tab's DOM.
 function render(): void {
+  if (layoutMode === "tabs") {
+    titleBar.insertBefore(stripEl, titleBar.lastElementChild);
+  } else {
+    sidePaneEl.insertBefore(stripEl, sidePaneEl.firstElementChild);
+  }
+  agentView.classList.toggle("is-tab-layout", layoutMode === "tabs");
+  agentView.classList.toggle("is-side-tab", layoutMode === "tabs" && paneOpen);
   sidePaneEl.hidden = !paneOpen;
+  layoutBtn.dataset.layout = layoutMode;
+  layoutBtn.setAttribute("aria-label", layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout");
+  layoutBtn.title = layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout";
+  layoutBtn.textContent = layoutMode === "tabs" ? "Split view" : "Tabs view";
   sidePaneBtn.setAttribute("aria-pressed", String(paneOpen));
   sidePaneBtn.classList.toggle("is-on", paneOpen);
-  if (!paneOpen) {
+  if (!paneOpen && layoutMode === "split") {
     closeMenu();
     tabsEl.innerHTML = "";
     bodyEl.replaceChildren();
+    syncNativeBrowser();
     return;
   }
   const set = currentSet();
   if (!set) {
-    tabsEl.innerHTML = "";
+    paintTabs();
     bodyEl.innerHTML = `<div class="side-empty"><span class="side-empty-ico">${icon("comments", "h-5 w-5")}</span><p class="side-empty-title">Side chat</p><p class="side-empty-text">Send a message first: side chats are about a conversation.</p></div>`;
+    syncNativeBrowser();
     return;
   }
-  if (set.tabs.length === 0) {
+  if (paneOpen && set.tabs.length === 0) {
     const tab = newChatTab();
     set.tabs.push(tab);
     set.active = tab.key;
   }
-  if (!activeTab(set)) set.active = set.tabs[0].key;
+  if (set.tabs.length && !activeTab(set)) set.active = set.tabs[0].key;
   paintTabs();
   bodyEl.replaceChildren(...set.tabs.map((t) => t.body));
   for (const tab of set.tabs) {
-    tab.body.hidden = tab.key !== set.active;
+    tab.body.hidden = !paneOpen || tab.key !== set.active;
+    if (tab.kind === "browser" && tab.body.hidden) stopBrowserPick(tab);
+    if (tab.kind === "terminal" && !tab.body.hidden) activateTerminal(tab);
   }
-  const tab = activeTab(set)!;
-  if (tab.kind === "agent") {
+  const tab = activeTab(set);
+  if (tab?.kind === "agent") {
     paintHead(tab);
     void loadAgent(tab);
   }
+  syncNativeBrowser();
 }
 
 // After a resync the shown agent tab re-attaches to fetch the events
@@ -405,15 +1010,30 @@ function showPane(): void {
 
 function closePane(): void {
   paneOpen = false;
+  closeMenu();
   render();
 }
 
-function closeTab(key: string): void {
+function toggleLayout(): void {
+  layoutMode = layoutMode === "split" ? "tabs" : "split";
+  saveText(layoutKey, layoutMode);
+  tabsHtml = "";
+  render();
+}
+
+function closeTab(key: string, dropBrowser = true): void {
   const set = currentSet();
   if (!set) return;
   const at = set.tabs.findIndex((t) => t.key === key);
   if (at < 0) return;
-  set.tabs.splice(at, 1);
+  const [removed] = set.tabs.splice(at, 1);
+  if (removed.kind === "browser") stopBrowserPick(removed);
+  if (removed.kind === "browser" && dropBrowser && hasBridge()) void bridge().browser?.drop(removed.sessionId);
+  if (removed.kind === "terminal") {
+    removed.closed = true;
+    if (removed.terminalId) void api.terminalClose(removed.sessionId, removed.terminalId).catch(() => undefined);
+    removed.term?.dispose();
+  }
   if (set.tabs.length === 0) {
     closePane();
     return;
@@ -431,12 +1051,20 @@ export function disposeSidePanes(ids: string[]): void {
       if (tab.loading) abortAttach(tab.agentId);
       liveRoot(tab.agentId).remove();
     }
+    if (tab.kind === "browser" && hasBridge()) void bridge().browser?.drop(tab.sessionId);
+    if (tab.kind === "browser") stopBrowserPick(tab);
+    if (tab.kind === "terminal") {
+      tab.closed = true;
+      if (tab.terminalId) void api.terminalClose(tab.sessionId, tab.terminalId).catch(() => undefined);
+      tab.term?.dispose();
+    }
     tab.body.remove();
   };
   for (const [id, set] of sets) {
     if (gone.has(id)) {
       set.tabs.forEach(drop);
       sets.delete(id);
+      changesCache.delete(id);
       continue;
     }
     const keep = set.tabs.filter((t) => t.kind !== "agent" || !gone.has(t.agentId));
@@ -459,6 +1087,7 @@ export function paneSessionIds(): string[] {
 // syncSidePane follows the main view to another session.
 export function syncSidePane(): void {
   closeMenu();
+  paintChangesHeader(changesCache.get(state.sessionId));
   render();
 }
 
@@ -482,14 +1111,14 @@ async function openMenu(): Promise<void> {
   menuEl.hidden = false;
   historyBtn.setAttribute("aria-expanded", "true");
   if (!sessionId) {
-    menuEl.innerHTML = `<p class="pane-menu-note">No conversation yet.</p>`;
+    menuItemsEl.innerHTML = `<p class="pane-menu-note">No conversation yet.</p>`;
     return;
   }
-  menuEl.innerHTML = `<p class="pane-menu-note">Loading…</p>`;
+  menuItemsEl.innerHTML = `<p class="pane-menu-note">Loading…</p>`;
   try {
     const chats = (await api.listSideChats(sessionId, state.cwd || null)) ?? [];
     if (state.sessionId !== sessionId || menuEl.hidden) return;
-    menuEl.innerHTML = chats.length
+    menuItemsEl.innerHTML = chats.length
       ? `<p class="pane-menu-label">Saved side chats</p>` +
         chats
           .map(
@@ -503,7 +1132,7 @@ async function openMenu(): Promise<void> {
           .join("")
       : `<p class="pane-menu-note">No saved side chats.</p>`;
   } catch (error) {
-    menuEl.innerHTML = `<p class="pane-menu-note side-error">${escapeHtml(errorText(error))}</p>`;
+    menuItemsEl.innerHTML = `<p class="pane-menu-note side-error">${escapeHtml(errorText(error))}</p>`;
   }
 }
 
@@ -541,8 +1170,8 @@ async function deleteChat(chatId: string, row: HTMLElement): Promise<void> {
     return;
   }
   row.remove();
-  if (!menuEl.querySelector(".pane-hist-item")) {
-    menuEl.innerHTML = `<p class="pane-menu-note">No saved side chats.</p>`;
+  if (!menuItemsEl.querySelector(".pane-hist-item")) {
+    menuItemsEl.innerHTML = `<p class="pane-menu-note">No saved side chats.</p>`;
   }
   const set = currentSet();
   const open = set?.tabs.find((t) => t.kind === "chat" && t.chatId === chatId);
@@ -550,7 +1179,56 @@ async function deleteChat(chatId: string, row: HTMLElement): Promise<void> {
 }
 
 export function initSidePane(): void {
+  if (hasBridge()) {
+    bridge().onEvent?.(browserEvent);
+    bridge().onEvent?.(terminalEvent);
+  }
+  const observer = new ResizeObserver(() => {
+    syncNativeBrowser();
+    const set = state.sessionId ? sets.get(state.sessionId) : null;
+    const tab = set && activeTab(set);
+    if (paneOpen && tab?.kind === "terminal") tab.fit?.fit();
+  });
+  observer.observe(sidePaneEl);
+  observer.observe(bodyEl);
+  window.addEventListener("resize", syncNativeBrowser);
+  for (const id of ["settingsModal", "sessionModal", "confirmModal", "siteModal"]) {
+    const el = document.getElementById(id);
+    if (el) new MutationObserver(syncNativeBrowser).observe(el, { attributes: true, attributeFilter: ["class"] });
+  }
+  new MutationObserver((records) => {
+    if (
+      records.some((record) =>
+        Array.from(record.addedNodes)
+          .concat(Array.from(record.removedNodes))
+          .some((node) => node instanceof HTMLElement && node.id === "askModal"),
+      )
+    ) {
+      syncNativeBrowser();
+    }
+  }).observe(document.body, { childList: true });
   sidePaneBtn.addEventListener("click", () => (paneOpen ? closePane() : showPane()));
+  changesBtn.addEventListener("click", () => openChangesTab(null));
+  $("#messages").addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-change-turn]");
+    if (button?.dataset.changeTurn) openChangesTab(Number(button.dataset.changeTurn));
+  });
+  layoutBtn.addEventListener("click", () => {
+    toggleLayout();
+    closeMenu();
+  });
+  $("#paneBrowserBtn").addEventListener("click", () => {
+    if (!state.sessionId) return showPane();
+    openBrowserTab(state.sessionId);
+    currentSet()
+      ?.tabs.find((t) => t.kind === "browser")
+      ?.body.querySelector<HTMLInputElement>(".browser-url")
+      ?.focus();
+  });
+  $("#paneTerminalBtn").addEventListener("click", () => {
+    if (!state.sessionId) return showPane();
+    openTerminalTab(state.sessionId);
+  });
   $("#paneCloseBtn").addEventListener("click", closePane);
   $("#paneNewChatBtn").addEventListener("click", () => {
     const set = currentSet();
@@ -563,8 +1241,10 @@ export function initSidePane(): void {
   });
   historyBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (menuEl.hidden) void openMenu();
-    else closeMenu();
+    if (menuEl.hidden) {
+      showPane();
+      void openMenu();
+    } else closeMenu();
   });
   menuEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
@@ -577,13 +1257,17 @@ export function initSidePane(): void {
   tabsEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     const key = target.closest<HTMLElement>(".pane-tab")?.dataset.key;
+    if (key === "main") {
+      closePane();
+      return;
+    }
     const set = currentSet();
     if (!key || !set) return;
     if (target.closest(".pane-tab-close")) {
       closeTab(key);
     } else {
       set.active = key;
-      render();
+      showPane();
     }
   });
   document.addEventListener("mousedown", (event) => {
@@ -601,4 +1285,5 @@ export function initSidePane(): void {
       void openAgentTab(open.dataset.openAgent);
     }
   });
+  render();
 }

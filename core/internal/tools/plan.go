@@ -244,8 +244,8 @@ func (*PlanShell) Name() string { return "shell" }
 
 func (p *PlanShell) Definition() ToolDefinition {
 	def := p.inner.Definition()
-	def.Description = "PLAN MODE (read-only): only inspection commands run — ls, cat, rg/grep, find, " +
-		"head/tail, git status/diff/log/show, go list/vet, and similar. Writes, redirection, installs " +
+	def.Description = "PLAN MODE (read-only): only inspection commands supported on this OS run, " +
+		"such as git status/diff/log/show. Writes, redirection, installs " +
 		"and builds are refused. " + def.Description
 	return def
 }

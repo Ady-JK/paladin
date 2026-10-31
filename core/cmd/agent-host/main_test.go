@@ -113,8 +113,8 @@ func TestListProvidersSeedsHermetic(t *testing.T) {
 	if err := json.Unmarshal(data, &infos); err != nil {
 		t.Fatal(err)
 	}
-	if len(infos) != 2 {
-		t.Fatalf("want 2 seeds, got %+v", infos)
+	if len(infos) != 3 {
+		t.Fatalf("want 3 seeds, got %+v", infos)
 	}
 	for _, info := range infos {
 		if info.HasKey {
@@ -460,7 +460,7 @@ func TestEndToEndStdioProtocol(t *testing.T) {
 	}
 	if msg := h.call("2", "listProviders", nil); msg["ok"] != true {
 		t.Fatalf("list: %v", msg)
-	} else if arr, _ := msg["result"].([]any); len(arr) != 2 {
+	} else if arr, _ := msg["result"].([]any); len(arr) != 3 {
 		t.Fatalf("seeds: %v", msg)
 	}
 	if msg := h.call("3", "nope", nil); msg["ok"] != false || !strings.Contains(msg["error"].(string), "unknown method") {

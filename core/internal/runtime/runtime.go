@@ -53,6 +53,7 @@ type AgentRuntime struct {
 	tools         *tools.Registry
 	shell         *tools.ShellTool
 	ask           *tools.AskTool
+	browser       *tools.BrowserTool
 	memory        *memory.Bank
 	perms         *permission.Store
 	broker        *permission.Broker
@@ -109,6 +110,8 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	shellTool, _ := shell.(*tools.ShellTool)
 	ask, _ := registry.Get("ask")
 	askTool, _ := ask.(*tools.AskTool)
+	bt, _ := registry.Get("browser")
+	browserTool, _ := bt.(*tools.BrowserTool)
 	agents := agent.NewRegistry()
 	_ = agents.Register(agent.DefaultTemplate())
 	r := &AgentRuntime{
@@ -120,6 +123,7 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		tools:         registry,
 		shell:         shellTool,
 		ask:           askTool,
+		browser:       browserTool,
 		agents:        agents,
 		perms:         permission.NewStore(dataDir),
 		broker:        permission.NewBroker(),

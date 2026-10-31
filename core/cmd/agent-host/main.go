@@ -40,10 +40,12 @@ func main() {
 	dataDir := config.DataDir()
 	initLogging(dataDir)
 	rt := runtime.New(dataDir, config.NewConfig(dataDir))
+	defer userTerminals.closeAll()
 	installTurnSink(rt)
 	installMCPSink(rt)
 	installToolsSink(rt)
 	installAgentsSink(rt)
+	installBrowserSink(rt)
 	rt.StartMCP()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
@@ -83,6 +85,7 @@ func handleSignals(rt *runtime.AgentRuntime, sigs <-chan os.Signal, exit func(in
 		return
 	}
 	logf("agent-host: %v, stopping turns", sig)
+	userTerminals.closeAll()
 	rt.ShutdownTurns(10 * time.Second)
 	exit(0)
 }

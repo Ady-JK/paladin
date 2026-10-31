@@ -19,7 +19,26 @@ import (
 
 func toResponsesInput(messages []LlmMessage) responses.ResponseInputParam {
 	out := make(responses.ResponseInputParam, 0, len(messages))
+	var images []LlmMessage
+	flushImages := func() {
+		for _, m := range images {
+			url, err := m.Image.DataURL()
+			if err != nil {
+				out = append(out, responses.ResponseInputItemParamOfMessage("Image from tool "+m.NameValue()+" unavailable: "+err.Error(), responses.EasyInputMessageRoleUser))
+				continue
+			}
+			part := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailAuto)
+			part.OfInputImage.ImageURL = openai.String(url)
+			out = append(out, responses.ResponseInputItemParamOfMessage(responses.ResponseInputMessageContentListParam{
+				responses.ResponseInputContentParamOfInputText("Image returned by tool " + m.NameValue() + ":"), part,
+			}, responses.EasyInputMessageRoleUser))
+		}
+		images = nil
+	}
 	for _, m := range messages {
+		if m.Role != "tool" {
+			flushImages()
+		}
 		switch m.Role {
 		case "assistant":
 			if m.Content != "" {
@@ -34,14 +53,28 @@ func toResponsesInput(messages []LlmMessage) responses.ResponseInputParam {
 				id = *m.ToolCallID
 			}
 			out = append(out, responses.ResponseInputItemParamOfFunctionCallOutput(id, m.Content))
+			if m.Image != nil {
+				images = append(images, m)
+			}
 		default:
 			role := responses.EasyInputMessageRoleUser
 			if m.Role == "system" {
 				role = responses.EasyInputMessageRoleSystem
 			}
-			out = append(out, responses.ResponseInputItemParamOfMessage(m.Content, role))
+			if m.Image == nil {
+				out = append(out, responses.ResponseInputItemParamOfMessage(m.Content, role))
+			} else if url, err := m.Image.DataURL(); err == nil {
+				part := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailAuto)
+				part.OfInputImage.ImageURL = openai.String(url)
+				out = append(out, responses.ResponseInputItemParamOfMessage(responses.ResponseInputMessageContentListParam{
+					responses.ResponseInputContentParamOfInputText(m.Content), part,
+				}, role))
+			} else {
+				out = append(out, responses.ResponseInputItemParamOfMessage(m.Content+" [image unavailable: "+err.Error()+"]", role))
+			}
 		}
 	}
+	flushImages()
 	return out
 }
 

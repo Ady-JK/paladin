@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/media"
 )
 
 type LlmMessage struct {
 	Role       string
 	Content    string
+	Image      *media.Image
 	ToolCalls  []ToolCall
 	ToolCallID *string
 	Name       *string

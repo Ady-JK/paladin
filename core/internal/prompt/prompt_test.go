@@ -63,6 +63,25 @@ func TestSystemPromptContent(t *testing.T) {
 	}
 }
 
+func TestBrowserAndServerGuidanceMatchesAvailableTools(t *testing.T) {
+	if strings.Contains(SystemPrompt, "Never issue the same tool call twice") {
+		t.Fatal("base prompt forbids repeated browser actions")
+	}
+	for label, content := range map[string]string{
+		"guidance": ToolGuidanceFor("darwin"),
+		"examples": UsageExamplesFor("darwin"),
+	} {
+		for _, want := range []string{"browser", "screenshot", "localhost", "background"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s lacks %q", label, want)
+			}
+		}
+	}
+	if strings.Contains(ToolGuidanceFor("darwin"), "a single job always waits") {
+		t.Fatal("guidance discourages a long-running local development server")
+	}
+}
+
 // TestGuidanceIsOSSpecific pins the per-OS compilation: a Windows turn
 // never sees sh/Unix-tool text, and a Unix turn never sees
 // PowerShell/cmd.exe text.
@@ -89,6 +108,9 @@ func TestGuidanceIsOSSpecific(t *testing.T) {
 	}
 	if strings.Contains(winEx, "find ~/") || strings.Contains(winEx, `"ls `) {
 		t.Fatal("windows examples leak unix commands")
+	}
+	if strings.Contains(winEx, "/home/user/project") || strings.Contains(winEx, "/etc/hosts") || !strings.Contains(winEx, `D:\\projects\\app`) {
+		t.Fatal("windows examples contain unix paths or lack Windows absolute paths")
 	}
 	nixEx := UsageExamplesFor("linux")
 	if !strings.Contains(nixEx, "find ~/") {

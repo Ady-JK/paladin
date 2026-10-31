@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -43,6 +44,14 @@ func TestStdioRevertAndRedo(t *testing.T) {
 	pv := h.call("revertPreview", map[string]any{"sessionId": sid, "index": 0})["result"].(map[string]any)
 	if files := pv["files"].([]any); len(files) != 1 || files[0] != "a.txt" || pv["snapshots"] != true {
 		t.Fatalf("preview %v", pv)
+	}
+	changes := h.call("sessionChanges", map[string]any{"sessionId": sid})["result"].(map[string]any)
+	if files := changes["files"].([]any); len(files) != 1 || files[0].(map[string]any)["status"] != "created" {
+		t.Fatalf("session changes %v", changes)
+	}
+	diff := h.call("sessionDiff", map[string]any{"sessionId": sid, "path": "a.txt", "turn": 0})["result"].(map[string]any)
+	if !strings.Contains(diff["patch"].(string), "+agent") {
+		t.Fatalf("session diff %v", diff)
 	}
 	res := h.call("revertSession", map[string]any{"sessionId": sid, "index": 0})["result"].(map[string]any)
 	if res["message"] != "write it" {

@@ -106,6 +106,46 @@ func TestStepsRecordedForFileChangingCalls(t *testing.T) {
 	}
 }
 
+func TestSessionChangesAndDiffUseRecordedSnapshots(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "printf 'one\\n' > a.txt; printf 'new\\n' > b.txt", "", "printf 'two\\n' > a.txt", "")
+	turn(t, rt, sid, ws, "create two files")
+	turn(t, rt, sid, ws, "edit one file")
+	changes, err := rt.SessionChanges(sid, "")
+	if err != nil || !changes.Available || len(changes.Turns) != 2 || len(changes.Files) != 2 {
+		t.Fatalf("changes = %+v, %v", changes, err)
+	}
+	if changes.Turns[0].Turn != 0 || len(changes.Turns[0].Files) != 2 || changes.Turns[0].Files[0].Status != "created" {
+		t.Fatalf("first turn = %+v", changes.Turns[0])
+	}
+	if changes.Turns[1].Files[0].Status != "modified" || changes.Files[0].Status != "created" {
+		t.Fatalf("edit and session summary = %+v", changes)
+	}
+	first, err := rt.SessionDiff(sid, "", 0, "a.txt")
+	if err != nil || !strings.Contains(first.Patch, "+one") || !strings.Contains(first.Patch, "new file mode") {
+		t.Fatalf("created file diff = %+v, %v", first, err)
+	}
+	second, err := rt.SessionDiff(sid, "", changes.Turns[1].Turn, "a.txt")
+	if err != nil || !strings.Contains(second.Patch, "-one") || !strings.Contains(second.Patch, "+two") {
+		t.Fatalf("edited file diff = %+v, %v", second, err)
+	}
+	if _, err := rt.SessionDiff(sid, "", -1, "../outside"); err == nil {
+		t.Fatal("diff accepted path outside workspace")
+	}
+	if _, err := rt.SessionDiff(sid, "", -1, "not-changed.txt"); err == nil {
+		t.Fatal("diff accepted path not changed by this session")
+	}
+	if _, err := rt.RevertSession(sid, "", changes.Turns[1].Turn); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := rt.SessionChanges(sid, "")
+	if err != nil || len(hidden.Turns) != 1 {
+		t.Fatalf("reverted turn still visible: %+v, %v", hidden, err)
+	}
+	if _, err := rt.SessionDiff(sid, "", changes.Turns[1].Turn, "a.txt"); err == nil {
+		t.Fatal("reverted turn diff remained visible")
+	}
+}
+
 func TestRevertRedoAndCommitOnNextTurn(t *testing.T) {
 	rt, ws, sid := undoRuntime(t,
 		"echo one > a.txt", "",

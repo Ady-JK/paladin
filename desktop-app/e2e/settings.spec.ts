@@ -28,17 +28,25 @@ test("settings nav switches panes", async ({ page }) => {
   await expect(page.locator("#settingsPaneProviders")).toBeHidden();
 });
 
-test("providers pane lists opencode and openrouter rows", async ({ page }) => {
+test("providers pane lists shipped providers and lets LiteLLM use a custom URL", async ({ page }) => {
   await page.click("#settingsBtn");
   await page.click("#settingsNavProviders");
   const list = page.locator("#settingsProviderList");
   await expect(list).toContainText("Opencode Go");
   await expect(list).toContainText("openrouter");
+  await expect(list).toContainText("litellm");
   const opencodeRow = list.locator("div", { hasText: "Opencode Go" }).first();
   await expect(opencodeRow).toContainText("default");
   const routerRow = list.locator("div", { hasText: "openrouter" }).first();
   await expect(routerRow.locator("[data-setdefault]")).toBeVisible();
   await expect(routerRow.locator("[data-connect]")).toBeVisible();
+  const liteRow = list.locator("div", { hasText: "litellm" }).first();
+  await liteRow.locator("[data-connect]").click();
+  await expect(page.locator("#providerCardUrl")).toHaveValue("http://127.0.0.1:4000/v1");
+  await page.fill("#providerCardUrl", "http://127.0.0.1:14054/v1");
+  await page.fill("#providerCardKey", "local-test-key");
+  await page.click("#providerCardSave");
+  await expect(list).toContainText("http://127.0.0.1:14054/v1");
 });
 
 test("add provider card creates an entry", async ({ page }) => {

@@ -31,6 +31,8 @@ const (
 
 var methodClass = map[string]runClass{
 	"ping": runInline, "stopChat": runInline, "cancelTurn": runInline,
+	"terminalWrite": runInline, "terminalResize": runInline, "terminalClose": runInline,
+	"browserReply":   runInline,
 	"answerApproval": runInline, "answerAsk": runInline, "cancelAsk": runInline,
 	"turns": runInline, "resources": runInline, "getWorkspace": runInline,
 	"fsHome": runInline, "resolveWorkspace": runInline,
@@ -39,12 +41,13 @@ var methodClass = map[string]runClass{
 	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead,
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
 	"sessionTodos": runRead, "sessionUsage": runRead, "budgetGet": runRead, "thinkingGet": runRead,
-	"overallUsage": runRead, "revertPreview": runRead, "worktreeStatus": runRead, "attach": runRead,
+	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "worktreeStatus": runRead, "attach": runRead,
 	"permissionsGet": runRead, "listAgents": runRead, "interruptAgent": runRead,
 	"listSideChats": runRead, "loadSideChat": runRead, "hooksList": runRead, "mcpList": runRead,
 	"mcpConfig": runRead, "mcpParse": runRead, "toolsList": runRead,
 
 	"submitChat": runSession, "steerChat": runSession, "openSession": runSession,
+	"terminalStart": runSession,
 	"renameSession": runSession, "forkSession": runSession, "deleteSession": runSession,
 	"revertSession": runSession, "unrevertSession": runSession, "worktreeMerge": runSession,
 	"budgetSet": runSession, "thinkingSet": runSession, "memoryRefreshSnapshot": runSession,
@@ -57,7 +60,7 @@ var methodClass = map[string]runClass{
 	"mcpSetEnabled": runGlobal, "mcpRestart": runGlobal, "mcpTrust": runGlobal,
 	"mcpAdd": runGlobal, "toolsSet": runGlobal, "toolsAccept": runGlobal,
 
-	"refreshProviders": runLong, "sideQuestion": runLong,
+	"refreshProviders": runLong, "sideQuestion": runLong, "terminalRun": runLong,
 }
 
 // startsTurn marks the requests a later stopChat for the same session

@@ -39,7 +39,7 @@ import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
 import { loadJson, saveJson } from "../core/storage";
-import { disposeSidePanes, paintAgentTabs, syncSidePane } from "./sidePane";
+import { disposeSidePanes, paintAgentTabs, refreshChanges, syncSidePane } from "./sidePane";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -530,6 +530,7 @@ function renderHistory(history: MessageInfo[]): void {
   messagesEl.style.display = "none";
   // A subagent's conversation is driven by its parent: no rewinding it.
   buildHistory(messagesEl, history, !state.subagent);
+  void refreshChanges(state.sessionId);
   messagesEl.style.display = "";
 
   if (messagesEl.childElementCount === 0) {
@@ -592,6 +593,7 @@ export function buildHistory(container: HTMLElement, history: MessageInfo[], rev
         index: message.index,
         revertable: revertable && message.index !== undefined,
       });
+      if (message.index !== undefined) turn.wrapper.dataset.turnIndex = String(message.index);
       container.append(turn.wrapper);
     } else if (message.role === "assistant" && message.kind === "thinking") {
       if (!agentBody) {

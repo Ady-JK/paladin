@@ -49,6 +49,28 @@ test("@ popup completes to the OS-specific path", async ({ page }) => {
   await expect(page.locator("#promptInput")).toHaveValue("/home/tester/project/src/main.go");
 });
 
+test("a delayed mention lookup cannot replace the current selection", async ({ page }) => {
+  await page.evaluate(() => {
+    const testWindow = window as any;
+    const original = testWindow.paladin.invoke;
+    testWindow.paladin.invoke = (method: string, args: { query?: string }) => {
+      if (method === "fileComplete" && args.query === "src/ma") {
+        return new Promise((resolve) => {
+          testWindow.__releaseOldMention = () => original(method, args).then(resolve);
+        });
+      }
+      return original(method, args);
+    };
+  });
+  await page.fill("#promptInput", "@src/ma");
+  await expect.poll(() => page.evaluate(() => Boolean((window as any).__releaseOldMention))).toBe(true);
+  await page.fill("#promptInput", "@README");
+  await expect(page.locator("#mentionPopup")).toContainText("README.md");
+  await page.evaluate(() => (window as any).__releaseOldMention());
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#promptInput")).toHaveValue("/home/tester/project/README.md");
+});
+
 test("a hand-typed @path expands to the OS path on send", async ({ page }) => {
   await page.fill("#promptInput", "look at @src/main.go please");
   await page.click("#sendBtn");

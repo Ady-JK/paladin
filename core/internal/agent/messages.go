@@ -115,6 +115,7 @@ func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMe
 			callID := id
 			out = append(out, inference.LlmMessage{
 				Role: "tool", Content: msg.Content,
+				Image:      msg.Image,
 				ToolCallID: &callID, Name: msg.Name,
 			})
 		case transcript.RoleSystem:

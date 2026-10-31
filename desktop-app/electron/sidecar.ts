@@ -92,6 +92,8 @@ const READ_METHODS = new Set([
   "thinkingGet",
   "overallUsage",
   "revertPreview",
+  "sessionChanges",
+  "sessionDiff",
   "worktreeStatus",
   "attach",
   "permissionsGet",
@@ -112,6 +114,9 @@ export function isReadMethod(method: string): boolean {
 
 // deadlineFor is how long a call to method may wait for its reply.
 export function deadlineFor(method: string, deadlines: Deadlines): number {
+  // The host limits a user command to ten minutes. Leave time for its
+  // timeout result to cross the JSONL bridge before this call expires.
+  if (method === "terminalRun") return deadlines.longMs + 60_000;
   if (LONG_METHODS.has(method)) return deadlines.longMs;
   return isReadMethod(method) ? deadlines.readMs : deadlines.writeMs;
 }
@@ -166,9 +171,14 @@ export class Sidecar {
     }
     const id = `m${this.nextId++}`;
     return new Promise((resolve, reject) => {
+      const request = JSON.stringify({ id, method, params }) + "\n";
+      if (stdin.writableLength + Buffer.byteLength(request) > maxBuffered) {
+        reject(new Error("agent-host is busy, try again"));
+        return;
+      }
       const timer = setTimeout(() => this.settle(id, this.timeoutError(method, deadlineMs)), deadlineMs);
       this.pending.set(id, { method, timer, resolve, reject });
-      stdin.write(JSON.stringify({ id, method, params }) + "\n", (error) => {
+      stdin.write(request, (error) => {
         if (error) this.settle(id, new Error(`agent-host write failed: ${error.message}`));
       });
     });

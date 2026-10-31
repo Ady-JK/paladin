@@ -22,7 +22,7 @@ const ProtocolVersion = "2025-06-18"
 var supportedVersions = map[string]bool{"2025-06-18": true, "2025-03-26": true, "2024-11-05": true}
 
 // ClientVersion is reported to servers in clientInfo.
-var ClientVersion = "0.6"
+var ClientVersion = "0.7"
 
 // ErrClosed is the connection error after Close.
 var ErrClosed = errors.New("connection closed")

@@ -152,7 +152,25 @@ func (p *OpenAIProvider) requestError(status int, body string) *ProviderError {
 
 func toSDKMessages(messages []LlmMessage) []openai.ChatCompletionMessageParamUnion {
 	out := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	var images []LlmMessage
+	flushImages := func() {
+		for _, m := range images {
+			url, err := m.Image.DataURL()
+			if err != nil {
+				out = append(out, openai.UserMessage("An image from tool "+m.NameValue()+" is unavailable: "+err.Error()))
+				continue
+			}
+			out = append(out, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+				openai.TextContentPart("Image returned by tool " + m.NameValue() + ":"),
+				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: url}),
+			}))
+		}
+		images = nil
+	}
 	for _, m := range messages {
+		if m.Role != "tool" {
+			flushImages()
+		}
 		switch m.Role {
 		case "assistant":
 			u := openai.AssistantMessage(m.Content)
@@ -176,10 +194,22 @@ func toSDKMessages(messages []LlmMessage) []openai.ChatCompletionMessageParamUni
 				id = *m.ToolCallID
 			}
 			out = append(out, openai.ToolMessage(m.Content, id))
+			if m.Image != nil {
+				images = append(images, m)
+			}
 		default:
-			out = append(out, openai.UserMessage(m.Content))
+			if m.Image == nil {
+				out = append(out, openai.UserMessage(m.Content))
+			} else if url, err := m.Image.DataURL(); err == nil {
+				out = append(out, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+					openai.TextContentPart(m.Content), openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: url}),
+				}))
+			} else {
+				out = append(out, openai.UserMessage(m.Content+" [image unavailable: "+err.Error()+"]"))
+			}
 		}
 	}
+	flushImages()
 	return out
 }
 

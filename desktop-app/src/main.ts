@@ -1,7 +1,6 @@
 // main.ts bootstraps the desktop app frontend.
 // Every backend call goes through api.ts to the agent-host sidecar.
 
-import "./styles.css";
 import { version as appVersion } from "../package.json";
 import * as api from "./core/api";
 import {

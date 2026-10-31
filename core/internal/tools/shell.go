@@ -328,10 +328,10 @@ func (ShellTool) Definition() ToolDefinition {
 			"returns its output; with background true it returns at once with a " +
 			"job_id in running state and writes everything to a log file. " +
 			"Status checks a background job, cancel stops one. Prefer " +
-			"synchronous runs and wait, raising timeout_ms for slow commands; " +
-			"use the background only for commands over about 60 seconds when " +
-			"other tool calls can run meanwhile, then poll status and read " +
-			"the log file.",
+			"synchronous runs for finite commands, raising timeout_ms for slow ones. " +
+			"Use background for a long-running development server or work that " +
+			"can proceed while other calls run. Check status and read the log as " +
+			"needed, or set notify true to receive the final state later.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

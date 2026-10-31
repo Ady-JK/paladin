@@ -4,6 +4,18 @@
 
 async function __paladinBaseInvoke(cmd, args) {
   switch (cmd) {
+    case "terminalStart":
+      window.__e2eTerminalStarts = (window.__e2eTerminalStarts || []).concat([args]);
+      return "terminal-" + window.__e2eTerminalStarts.length;
+    case "terminalWrite":
+      window.__e2eTerminalWrites = (window.__e2eTerminalWrites || []).concat([args]);
+      return true;
+    case "terminalResize":
+    case "terminalClose":
+      return true;
+    case "terminalRun":
+      window.__e2eTerminalRuns = (window.__e2eTerminalRuns || []).concat([args]);
+      return { output: args.cwd + "\n", exitCode: 0, truncated: false };
     case "resolveWorkspace":
       return (args && args.cwd) || "/home/tester/project";
     case "listSessions":
@@ -163,6 +175,11 @@ async function __paladinBaseInvoke(cmd, args) {
     case "revertPreview":
       window.__e2ePreviews = (window.__e2ePreviews || []).concat([args]);
       return { index: args.index, turns: 1, files: [], conflicts: [], snapshots: true, ...(window.__e2ePreview || {}) };
+    case "sessionChanges":
+      return window.__e2eChanges || { available: true, turns: [], files: [] };
+    case "sessionDiff":
+      window.__e2eDiffCalls = (window.__e2eDiffCalls || []).concat([args]);
+      return { path: args.path, patch: window.__e2ePatch || "", truncated: false };
     case "revertSession": {
       window.__e2eReverts = (window.__e2eReverts || []).concat([args]);
       window.__e2eRevertedAt = args.index;
@@ -500,6 +517,15 @@ async function __paladinBaseInvoke(cmd, args) {
             apiUrl: "https://openrouter.ai/api/v1",
             model: "",
             models: ["openai/gpt-4o"],
+            default: false,
+            hasKey: false,
+          },
+          {
+            name: "litellm",
+            apiType: "openai",
+            apiUrl: "http://127.0.0.1:4000/v1",
+            model: "",
+            models: [],
             default: false,
             hasKey: false,
           },
@@ -1152,6 +1178,38 @@ window.paladin = {
     reload: async () => true,
     drop: async () => true,
     setTheme: async () => true,
+  },
+  browser: {
+    open: async (sessionId, url) => {
+      window.__e2eBrowserOpens = (window.__e2eBrowserOpens || []).concat([{ sessionId, url }]);
+      __e2eHub.emit({ event: "browser/opened", sessionId, url });
+      return { url, title: "Local preview" };
+    },
+    show: async (sessionId) => {
+      window.__e2eBrowserVisible = sessionId;
+      return true;
+    },
+    setBounds: async (bounds) => {
+      window.__e2eBrowserBounds = bounds;
+      return true;
+    },
+    drop: async (sessionId) => {
+      __e2eHub.emit({ event: "browser/closed", sessionId });
+      return true;
+    },
+    pick: async () =>
+      new Promise((resolve) => {
+        window.__e2eResolveBrowserPick = resolve;
+      }),
+    cancelPick: async () => {
+      window.__e2eResolveBrowserPick?.(null);
+      return true;
+    },
+    getNotes: async () => window.__e2eBrowserNotes || [],
+    clearNotes: async (sessionId) => {
+      window.__e2eBrowserNotes = [];
+      __e2eHub.emit({ event: "browser/annotations", sessionId, count: 0 });
+    },
   },
   shell: {
     openExternal: async () => {},

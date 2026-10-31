@@ -3,6 +3,7 @@ module github.com/Ady-JK/paladin/core
 go 1.27.3
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/google/uuid v1.6.0
 	github.com/openai/openai-go v1.12.0

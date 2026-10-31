@@ -285,6 +285,8 @@ function setSideView(view: SideView): void {
   externalViewEl.classList.toggle("flex", !agent);
 
   headerTitleEl.textContent = agent ? "Agent Chat" : (currentChatPage()?.title ?? "Chat");
+  $("#paneLayoutBtn").classList.toggle("hidden", !agent);
+  $("#sessionChangesBtn").classList.toggle("hidden", !agent || $("#sessionChangesCount").textContent === "");
   pageReloadBtnEl.classList.toggle("hidden", agent || !hasBridge());
 
   if (!agent) {

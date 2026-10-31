@@ -207,7 +207,10 @@ func TestValidateProviderInput(t *testing.T) {
 func TestEnsureSeededKeepsExisting(t *testing.T) {
 	file := EnsureSeeded(ProvidersFile{
 		DefaultProvider: "custom",
-		Providers:       []Provider{{Name: "custom", ApiURL: "https://c/v1", ApiType: ApiTypeOpenai}},
+		Providers: []Provider{
+			{Name: "custom", ApiURL: "https://c/v1", ApiType: ApiTypeOpenai},
+			{Name: "litellm", ApiURL: "http://127.0.0.1:4444/v1", ApiType: ApiTypeOpenai},
+		},
 	})
 	if file.DefaultProvider != "custom" {
 		t.Fatalf("default overwritten: %q", file.DefaultProvider)
@@ -216,9 +219,14 @@ func TestEnsureSeededKeepsExisting(t *testing.T) {
 	for _, p := range file.Providers {
 		seen[p.Name] = true
 	}
-	for _, want := range []string{"custom", DefaultProviderName, OpenrouterName} {
+	for _, want := range []string{"custom", DefaultProviderName, OpenrouterName, "litellm"} {
 		if !seen[want] {
 			t.Fatalf("missing %q in %v", want, seen)
+		}
+	}
+	for _, p := range file.Providers {
+		if p.Name == "litellm" && p.ApiURL != "http://127.0.0.1:4444/v1" {
+			t.Fatalf("custom LiteLLM URL overwritten: %q", p.ApiURL)
 		}
 	}
 	// Idempotent: seeding twice adds nothing.
@@ -231,6 +239,19 @@ func TestEnsureSeededKeepsExisting(t *testing.T) {
 	if empty.DefaultProvider != DefaultProviderName {
 		t.Fatalf("got %q", empty.DefaultProvider)
 	}
+}
+
+func TestDefaultLiteLLMProviderIsEditableOpenAIEndpoint(t *testing.T) {
+	file := DefaultProvidersFile()
+	for _, p := range file.Providers {
+		if p.Name == "litellm" {
+			if p.ApiURL != "http://127.0.0.1:4000/v1" || p.ApiType != ApiTypeOpenai || p.Model != "" {
+				t.Fatalf("unexpected LiteLLM seed: %+v", p)
+			}
+			return
+		}
+	}
+	t.Fatal("LiteLLM provider is missing")
 }
 
 func TestIsPlaceholderKeyMatrix(t *testing.T) {

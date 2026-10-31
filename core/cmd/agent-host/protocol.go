@@ -9,6 +9,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
+	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 type Request struct {
@@ -89,6 +90,10 @@ func emitToolsEvent(e runtime.ToolsEvent) { notices.push(e) }
 // installAgentsSink streams agents/changed events (subagent spawned or
 // changed status).
 func installAgentsSink(rt *runtime.AgentRuntime) { rt.SetAgentsSink(emitAgentsEvent) }
+
+func installBrowserSink(rt *runtime.AgentRuntime) {
+	rt.SetBrowserSink(func(req tools.BrowserRequest) { emit(req) })
+}
 
 func emitAgentsEvent(e runtime.AgentsEvent) { notices.push(e) }
 

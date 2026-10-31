@@ -169,6 +169,18 @@ test("too many pending calls are refused instead of queued forever", async () =>
   }
 });
 
+test("one oversized request is refused before it reaches the host", async () => {
+  const { sidecar } = fakeHost({ maxBufferedBytes: 128 });
+  sidecar.start();
+  try {
+    await expect(sidecar.invoke("ping")).resolves.toBeTruthy();
+    await expect(sidecar.invoke("echo", { text: "x".repeat(256) })).rejects.toThrow("agent-host is busy");
+    await expect(sidecar.invoke("ping")).resolves.toBeTruthy();
+  } finally {
+    await sidecar.stop(1000);
+  }
+});
+
 test("a malformed reply rejects its call; stray JSON values do not break the bridge", async () => {
   const logs: string[] = [];
   const { sidecar } = fakeHost({ log: (line) => logs.push(line) });

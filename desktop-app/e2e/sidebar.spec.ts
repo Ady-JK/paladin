@@ -144,6 +144,16 @@ test("the sidebar floats over a main view that never resizes", async ({ page }) 
   expect(closed).toEqual(open);
 });
 
+test("the main card has equal top and bottom insets", async ({ page }) => {
+  await setup(page);
+  const card = await page.locator("#mainCard").boundingBox();
+  const viewport = page.viewportSize();
+  expect(card).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(card!.y).toBe(8);
+  expect(viewport!.height - card!.y - card!.height).toBe(8);
+});
+
 test("the drawer closes on an outside click, Escape, and a session pick", async ({ page }) => {
   await setup(page);
   const side = page.locator("#sidebar");

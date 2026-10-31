@@ -6,12 +6,18 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, shell, WebContentsView } from "electron";
 import { noteFor } from "./turnNotify";
 import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
+import { BrowserManager, type BrowserRequest, type BrowserState } from "./browser";
+import { runBrowserSmoke } from "./browserSmoke";
 
 type ViewBounds = { x: number; y: number; width: number; height: number };
 
 // Match Chrome's wheel behaviour: interpolate ticks instead of snapping.
 // (Harmless if the platform already defaults to smooth scrolling.)
 app.commandLine.appendSwitch("enable-smooth-scrolling");
+// Chromium chooses an ephemeral loopback port; Playwright connects only to
+// the session browser targets. The port lives for this app process.
+app.commandLine.appendSwitch("remote-debugging-port", "0");
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 
 let win: BrowserWindow | null = null;
 // CJS (tsconfig.electron): __dirname is the dist-electron dir.
@@ -84,6 +90,17 @@ const agent = new Sidecar({
   onRestart: () => liveWindow()?.webContents.send("agent:event", { event: "host/restarted" }),
 });
 
+function forwardBrowserState(event: BrowserState): void {
+  try {
+    liveWindow()?.webContents.send("agent:event", event);
+  } catch {
+    /* renderer reloading */
+  }
+}
+
+const browsers = new BrowserManager(liveWindow, forwardBrowserState);
+let nextUIBrowserID = 0;
+
 // isWebUrl admits only http(s) URLs: guest views and the OS browser
 // must never be handed file:, javascript: or custom-scheme URLs.
 function isWebUrl(value: unknown): value is string {
@@ -108,6 +125,15 @@ function liveWindow(): BrowserWindow | null {
 }
 
 function forwardEvent(msg: HostMessage): void {
+  if (msg.event === "browser/request") {
+    if (typeof msg.id !== "string" || typeof msg.sessionId !== "string" || typeof msg.action !== "string") return;
+    void browsers
+      .execute(msg as BrowserRequest)
+      .then((reply) =>
+        agent.invoke("browserReply", reply).catch((error: unknown) => console.error("browser reply failed", error)),
+      );
+    return;
+  }
   const w = liveWindow();
   if (w) {
     try {
@@ -278,6 +304,7 @@ function layoutVisible(): void {
 
 function showOnly(name: string | null): void {
   if (!win || win.isDestroyed()) return;
+  if (name && name !== "agent") browsers.show(null);
   // Same page already up: no detach/reattach, just confirm bounds.
   if (name && name !== "agent" && visibleView === name && views.has(name)) {
     layoutVisible();
@@ -353,7 +380,9 @@ function createWindow(): void {
     win?.show();
   });
 
-  if (!app.isPackaged && process.env.ELECTRON_START_URL) {
+  if (!app.isPackaged && process.argv.includes("--smoke-browser")) {
+    win.loadFile(path.join(HERE, "..", "dist", "index.html")).catch(console.error);
+  } else if (!app.isPackaged && process.env.ELECTRON_START_URL) {
     win.loadURL(process.env.ELECTRON_START_URL).catch(console.error);
   } else if (!app.isPackaged) {
     win.loadURL("http://localhost:5173").catch(console.error);
@@ -362,10 +391,12 @@ function createWindow(): void {
   }
 
   win.on("resized", layoutVisible);
+  win.on("resized", () => browsers.layout());
   win.on("moved", layoutVisible);
   // Closing the window keeps the app (and every running turn) alive on
   // macOS; guest views die with the window, so forget them.
   win.on("closed", () => {
+    browsers.windowClosed();
     win = null;
     views.clear();
     visibleView = null;
@@ -396,7 +427,7 @@ app
   .whenReady()
   .then(() => {
     nativeTheme.themeSource = appTheme;
-    agent.start();
+    if (!process.argv.includes("--smoke-browser")) agent.start();
 
     ipcMain.handle("agent:invoke", (_e, method: unknown, params: unknown) => {
       if (typeof method !== "string" || !method) throw new Error("agent:invoke needs a method name");
@@ -480,7 +511,41 @@ app
       return true;
     });
 
+    ipcMain.handle("browser:open", async (_e, sessionId: string, url: string) => {
+      const reply = await browsers.execute({
+        event: "browser/request",
+        id: `ui-${++nextUIBrowserID}`,
+        sessionId,
+        action: "open",
+        url,
+      });
+      if (!reply.ok) throw new Error(reply.error ?? "browser open failed");
+      return reply.result;
+    });
+    ipcMain.handle("browser:show", (_e, sessionId: string | null) => browsers.show(sessionId));
+    ipcMain.handle("browser:setBounds", (_e, bounds: ViewBounds) => browsers.setBounds(bounds));
+    ipcMain.handle("browser:drop", (_e, sessionId: string) => {
+      browsers.drop(sessionId);
+      return true;
+    });
+    ipcMain.handle("browser:pick", (_e, sessionId: string) => browsers.pick(sessionId));
+    ipcMain.handle("browser:cancelPick", (_e, sessionId: string) => browsers.cancelPick(sessionId));
+    ipcMain.handle("browser:getNotes", (_e, sessionId: string) => browsers.getNotes(sessionId));
+    ipcMain.handle("browser:clearNotes", (_e, sessionId: string) => browsers.clearNotes(sessionId));
+
     createWindow();
+    if (process.argv.includes("--smoke-browser")) {
+      void runBrowserSmoke(browsers).then(
+        () => {
+          console.log("[browser smoke] PASS: two sessions, Playwright actions, screenshot and element picker");
+          app.exit(0);
+        },
+        (error: unknown) => {
+          console.error("[browser smoke] FAIL:", error);
+          app.exit(1);
+        },
+      );
+    }
     // Headless smoke: --smoke-test loads the window, pings the sidecar
     // over JSONL, reports, and exits (non-zero on any failure).
     if (process.argv.includes("--smoke-test")) {
@@ -547,6 +612,7 @@ app.on("window-all-closed", () => {
 // Quit closes the sidecar's stdin: it stops every turn, persists what
 // they did, and exits. A sidecar that hangs is killed after a grace.
 app.on("before-quit", (event) => {
+  void browsers.stop();
   if (quitting || !agent.running) return;
   quitting = true;
   event.preventDefault();

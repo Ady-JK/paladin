@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 	"github.com/Ady-JK/paladin/core/internal/toolset"
 )
@@ -31,14 +32,15 @@ type ToolCall struct {
 }
 
 type Message struct {
-	Role       Role        `json:"role"`
-	Content    string      `json:"content"`
-	CreatedAt  time.Time   `json:"createdAt"`
-	ToolCalls  *[]ToolCall `json:"toolCalls,omitempty"`
-	ToolCallID *string     `json:"toolCallId,omitempty"`
-	Name       *string     `json:"name,omitempty"`
-	IsError    bool        `json:"isError,omitempty"`
-	IsNotify   bool        `json:"isNotify,omitempty"`
+	Role       Role         `json:"role"`
+	Content    string       `json:"content"`
+	Image      *media.Image `json:"image,omitempty"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	ToolCalls  *[]ToolCall  `json:"toolCalls,omitempty"`
+	ToolCallID *string      `json:"toolCallId,omitempty"`
+	Name       *string      `json:"name,omitempty"`
+	IsError    bool         `json:"isError,omitempty"`
+	IsNotify   bool         `json:"isNotify,omitempty"`
 	// Compaction marks a summary checkpoint: the model view restarts
 	// here, with Content as the summary of everything before it.
 	Compaction *Compaction `json:"compaction,omitempty"`

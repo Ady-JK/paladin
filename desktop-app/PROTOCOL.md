@@ -19,6 +19,12 @@ Electron main spawns it with piped stdio:
 | method | params | result |
 |---|---|---|
 | `ping` | `{}` | `{"ok":true}` |
+| `browserReply` | `{id,ok,result?,imageBase64?,error?}` | `bool`: resolves a pending `browser` tool call. The host emits `browser/request` with the same id; Electron runs Playwright and returns the result. Screenshot bytes are bounded and saved in the session before the model sees them |
+| `terminalStart` | `{sessionId,cwd,cols,rows}` | `terminalId`: starts an unsandboxed interactive PTY in the workspace; output arrives as `terminal/data` events with base64 `data` |
+| `terminalWrite` | `{sessionId,terminalId,data}` | `bool`: sends UTF-8 or control characters to that PTY |
+| `terminalResize` | `{sessionId,terminalId,cols,rows}` | `bool`: resizes that PTY |
+| `terminalClose` | `{sessionId,terminalId}` | `bool`: stops that PTY |
+| `terminalRun` | `{cwd,command}` | `{output,exitCode,truncated}`: runs a user-entered `!` or `!!` command outside the agent sandbox, in the workspace, with a 10-minute limit and 1 MiB output cap. It never writes a transcript entry by itself |
 | `listProviders` | `{}` | `ProviderInfo[]` |
 | `refreshProviders` | `{name?}` | no name: `bool` (background refresh-all started); `{name}`: `RefreshResult` (`name,count,models,error?`) for that provider only. Catalogs are never fetched on startup or on add/update — only on this explicit call |
 | `setDefaultProvider` | `{name}` | `ProviderInfo[]` |
@@ -53,6 +59,8 @@ Electron main spawns it with piped stdio:
 | `memoryRefreshSnapshot` | `{sessionId,cwd?}` | `bool`: the session's next turn re-reads memory instead of its frozen snapshot |
 | `forkSession` | `{sessionId,cwd?,worktree?,name?}` | `SessionInfo` of the copy (title `… (fork)`); `worktree:true` forks into a new worktree, a plain fork stays in the source's folder (and worktree) |
 | `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],conflicts[],snapshots}`: what reverting to the user message at transcript `index` would restore |
+| `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's saved file snapshots |
+| `sessionDiff` | `{sessionId,cwd?,turn?,path}` | `{path,patch,truncated}`: unified diff for one changed file; `turn` is a transcript index or omitted for the session |
 | `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],skipped[],failed?[],snapshots}`: undo from that user message on (files + conversation); `message` is its text for the composer. `failed` lists files whose restore errored (also in `skipped`; the others were still restored). Fails while a turn runs |
 | `unrevertSession` | `{sessionId,cwd?}` | same shape: redo the pending revert |
 | `gitInfo` | `{cwd}` | `{repo,root?,branch?,hasCommits}` |
@@ -646,7 +654,8 @@ skipped.
   `id -> {resolve, reject}`; unary `agent:invoke` resolves on the
   matching `{id}` line, whatever order replies arrive in.
 - Every call has a deadline: 30s for reads (the dispatcher's read
-  methods), 10 min for `sideQuestion` and `refreshProviders`, 120s for
+  methods), 10 min for `sideQuestion` and `refreshProviders`, 11 min for
+  `terminalRun` (the host stops it at 10 min), and 120s for
   everything else. A timed-out mutation rejects with `agent-host did not
   answer <method> within <n>s; it may still have completed, ...`. The
   bridge never retries a call; a late reply is dropped.

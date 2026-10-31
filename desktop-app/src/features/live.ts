@@ -21,6 +21,7 @@ import { onAgentsChanged, refreshSessions, renderSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget } from "./budget";
+import { refreshChanges } from "./sidePane";
 import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
 
 export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "approval";
@@ -191,6 +192,9 @@ function newView(e: Entry): TurnView {
 }
 
 function onTool(e: Entry, tool: ToolInfo): void {
+  if (tool.status !== "running" && ["shell", "write", "edit"].includes(tool.name) && visible(e.sessionId)) {
+    void refreshChanges(e.sessionId, e.running ? e.users.get(e.running.turnId) : null, tool.id);
+  }
   if (tool.name === "ask") {
     if (tool.status === "running") {
       if (visible(e.sessionId) && !e.attaching) {
@@ -436,6 +440,7 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
   }
   const quiet = turn.cancelled || turn.stopped;
   if (shown) {
+    void refreshChanges(e.sessionId);
     e.badge = "";
     if (failure) {
       setStatus(failure, "error");

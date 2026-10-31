@@ -844,14 +844,14 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 	rt, _ := testRuntime(t)
 	defs := rt.tools.Definitions()
-	if len(defs) != 15 {
+	if len(defs) != 16 {
 		t.Fatalf("got %d", len(defs))
 	}
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.Name] = true
 	}
-	for _, want := range []string{"read", "write", "edit", "shell", "ask", "todo", "memory", "skill", "session_search",
+	for _, want := range []string{"read", "write", "edit", "shell", "ask", "todo", "browser", "memory", "skill", "session_search",
 		"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"} {
 		if !names[want] {
 			t.Fatalf("missing %q", want)

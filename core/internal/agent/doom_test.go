@@ -86,6 +86,24 @@ func TestDoomLoopAllowsJobPolling(t *testing.T) {
 	}
 }
 
+func TestDoomGuardAllowsRepeatedBrowserActions(t *testing.T) {
+	var g doomGuard
+	click := `{"action":"click","role":"button","name":"Increment"}`
+	for i := 0; i < 5; i++ {
+		if refusal := g.check("browser", click); refusal != "" {
+			t.Fatalf("browser click %d was refused: %s", i+1, refusal)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if refusal := g.check("read", `{"path":"a"}`); refusal != "" {
+			t.Fatalf("read %d refused too early: %s", i+1, refusal)
+		}
+	}
+	if refusal := g.check("read", `{"path":"a"}`); refusal == "" {
+		t.Fatal("browser exemption must not disable the guard for read")
+	}
+}
+
 func TestDoomGuardRefusesRepeatingCycle(t *testing.T) {
 	var g doomGuard
 	seq := []struct{ name, args string }{

@@ -11,6 +11,16 @@ const ICONS: Record<string, Icon> = {
     line: true,
   },
   comments: { d: "M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z" },
+  "layout-tabs": {
+    d: "M4 5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm-2 5h20M6 7.5h4m3 0h4",
+    line: true,
+    thin: true,
+  },
+  "layout-split": {
+    d: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm8 0v16",
+    line: true,
+    thin: true,
+  },
   code: { d: "m16 18 6-6-6-6M8 6l-6 6 6 6", line: true },
   folder: { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" },
   "folder-open": { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H6.5L3 17V7Z" },

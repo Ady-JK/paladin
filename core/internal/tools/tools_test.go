@@ -32,8 +32,8 @@ func TestDefinitionsSortedByName(t *testing.T) {
 	if len(r.Definitions()) != 1 {
 		t.Fatal("expected one definition")
 	}
-	if got := BuiltinRegistry().Len(); got != 6 {
-		t.Fatalf("expected 6 builtin tools, got %d", got)
+	if got := BuiltinRegistry().Len(); got != 7 {
+		t.Fatalf("expected 7 builtin tools, got %d", got)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestRegistrySubsetSharesInstances(t *testing.T) {
 func TestCatalogRegistersAndInstantiates(t *testing.T) {
 	c := BuiltinCatalog()
 	names := c.Names()
-	want := []string{"ask", "edit", "read", "shell", "todo", "write"}
+	want := []string{"ask", "browser", "edit", "read", "shell", "todo", "write"}
 	if len(names) != len(want) {
 		t.Fatalf("got %v", names)
 	}
@@ -140,7 +140,7 @@ func TestCatalogRegistersAndInstantiates(t *testing.T) {
 		}
 	}
 	reg := c.Instantiate()
-	if reg.Len() != 6 {
+	if reg.Len() != 7 {
 		t.Fatalf("got %d", reg.Len())
 	}
 	for _, n := range want {

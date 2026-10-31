@@ -272,14 +272,6 @@ test("a child's finished turn does not toast like a user session", async ({ page
   await expect(page.locator("#toastText")).not.toContainText("reviewer-1");
 });
 
-// paneSessions reads which sessions still hold side-pane tabs, from the
-// app's own module instance (the dev server serves one copy).
-const paneSessions = (page: Page) =>
-  page.evaluate(async () => {
-    const mod = "/src/features/sidePane.ts";
-    return ((await import(/* @vite-ignore */ mod)) as { paneSessionIds: () => string[] }).paneSessionIds();
-  });
-
 test("deleting a parent drops its and its children's views, even with a child open", async ({ page }) => {
   await showSidebar(page);
   await page.locator('[data-session="sess-parent"]').click();
@@ -288,7 +280,7 @@ test("deleting a parent drops its and its children's views, even with a child op
   // Open the child in the main view, its own pane open too.
   await page.locator('.pane-agent[data-agent="sess-child-1"] .pane-agent-open').click();
   await expect(page.locator("#parentBar")).toBeVisible();
-  expect(await paneSessions(page)).toEqual(expect.arrayContaining(["sess-parent", "sess-child-1"]));
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
 
   await showSidebar(page);
   const row = page.locator('#sessionList .session-row:has([data-session="sess-parent"])');
@@ -301,8 +293,10 @@ test("deleting a parent drops its and its children's views, even with a child op
   await expect(page.locator("#parentBar")).toBeHidden();
   await expect(page.locator("#messages")).not.toContainText("Child found login.go.");
   await expect(page.locator('[data-child="sess-child-1"]')).toHaveCount(0);
-  await expect.poll(() => paneSessions(page)).not.toEqual(expect.arrayContaining(["sess-parent"]));
-  const left = await paneSessions(page);
-  expect(left).not.toContain("sess-child-1");
-  expect(left).not.toContain("sess-child-2");
+  await expect(page.locator('#paneTabs [data-agent="sess-child-1"]')).toHaveCount(0);
+  await expect(page.locator('#paneTabs [data-agent="sess-child-2"]')).toHaveCount(0);
+  await showSidebar(page);
+  await expect(page.locator('#sessionList [data-session="sess-parent"]')).toHaveCount(0);
+  await expect(page.locator('#sessionList [data-session="sess-child-1"]')).toHaveCount(0);
+  await expect(page.locator('#sessionList [data-session="sess-child-2"]')).toHaveCount(0);
 });

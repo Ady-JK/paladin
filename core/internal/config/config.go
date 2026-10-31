@@ -27,6 +27,8 @@ const (
 	OpencodeDefaultModel = "deepseek-v4.1-flash"
 	OpenrouterName       = "openrouter"
 	OpenrouterBaseURL    = "https://openrouter.ai/api/v1"
+	LiteLLMName          = "litellm"
+	LiteLLMBaseURL       = "http://127.0.0.1:4000/v1"
 	PlaceholderKey       = "replace_me"
 
 	KeyringService = "paladin"
@@ -428,6 +430,7 @@ func DefaultProvidersFile() ProvidersFile {
 		Providers: []Provider{
 			{Name: DefaultProviderName, ApiURL: OpencodeBaseURL, ApiType: ApiTypeOpenai},
 			{Name: OpenrouterName, ApiURL: OpenrouterBaseURL, ApiType: ApiTypeOpenai},
+			{Name: LiteLLMName, ApiURL: LiteLLMBaseURL, ApiType: ApiTypeOpenai},
 		},
 	}
 }
