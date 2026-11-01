@@ -762,22 +762,45 @@ app
     // Headless smoke: --smoke-test loads the window, pings the sidecar
     // over JSONL, reports, and exits (non-zero on any failure).
     if (process.argv.includes("--smoke-test")) {
+      // Never dereference the mutable global `win` from a delayed
+      // callback: closing the window during a retry used to throw
+      // "Cannot read properties of null (reading 'webContents')".
+      const smokeWin = win;
+      if (!smokeWin) {
+        console.error("[smoke] FAIL: no window to test");
+        process.exit(1);
+      }
+      // Electron emits "closed" while process.exit tears the window down,
+      // so a passing run must not be turned into a failure by its own
+      // shutdown.
+      let finished = false;
       const fail = (msg: string): never => {
+        finished = true;
         console.error(`[smoke] FAIL: ${msg}`);
         process.exit(1);
       };
-      win!.webContents.on("did-fail-load", (_e, code, desc) => fail(`renderer load failed ${code}: ${desc}`));
-      win!.webContents.on("console-message", (_e, _level, message) => {
+      const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
+      const gone = (): boolean => smokeWin.isDestroyed();
+      const execute = (code: string): Promise<unknown> => {
+        if (gone()) return Promise.reject(new Error("window closed"));
+        return smokeWin.webContents.executeJavaScript(code);
+      };
+      smokeWin.once("closed", () => {
+        clearTimeout(timer);
+        if (!finished) fail("window closed before the smoke test finished");
+      });
+      smokeWin.webContents.on("did-fail-load", (_e, code, desc) => fail(`renderer load failed ${code}: ${desc}`));
+      smokeWin.webContents.on("console-message", (_e, _level, message) => {
         if (/preload bridge missing|Uncaught/.test(message)) fail(`renderer console: ${message}`);
       });
-      const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
-      win!.webContents.on("did-finish-load", () => {
+      smokeWin.webContents.on("did-finish-load", () => {
         // The frame can be momentarily undisposed-ready right after load
         // (worse headless); poll briefly instead of failing on one shot.
         const probeBridge = (tries: number): void => {
-          win!.webContents
-            .executeJavaScript("typeof window.paladin")
+          if (gone()) return;
+          execute("typeof window.paladin")
             .then((t) => {
+              if (gone()) return;
               if (t !== "object") {
                 if (tries > 0) {
                   setTimeout(() => probeBridge(tries - 1), 250);
@@ -787,6 +810,7 @@ app
               }
             })
             .catch((e) => {
+              if (gone()) return;
               if (tries > 0) {
                 setTimeout(() => probeBridge(tries - 1), 250);
               } else {
@@ -798,13 +822,15 @@ app
         agent
           .invoke("ping")
           .then(async (r) => {
+            if ((r as { ok?: unknown } | null)?.ok !== true) {
+              fail(`unexpected ping result: ${JSON.stringify(r)}`);
+            }
+            const bridged = await execute('window.paladin.invoke("ping")');
+            if ((bridged as { ok?: unknown } | null)?.ok !== true) fail("preload bridge ping failed");
             clearTimeout(timer);
-            if ((r as { ok?: unknown } | null)?.ok === true) {
-              const bridged = await win!.webContents.executeJavaScript('window.paladin.invoke("ping")');
-              if ((bridged as { ok?: unknown } | null)?.ok !== true) fail("preload bridge ping failed");
-              console.log("[smoke] PASS: renderer loaded, preload bridge and agent-host ping ok");
-              process.exit(0);
-            } else fail(`unexpected ping result: ${JSON.stringify(r)}`);
+            finished = true;
+            console.log("[smoke] PASS: renderer loaded, preload bridge and agent-host ping ok");
+            process.exit(0);
           })
           .catch((e) => fail(`ping failed: ${e.message}`));
       });

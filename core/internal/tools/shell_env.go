@@ -241,7 +241,8 @@ func spawnShellCmd(cmdStr, dir string, extra ...string) *exec.Cmd {
 	if login {
 		args[2] = loginPathExport() + cmdStr
 	}
-	cmd := exec.Command(shell, args...)
+	argv := niceArgv(append([]string{shell}, args...))
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = shellEnv(extra...)
 	return cmd

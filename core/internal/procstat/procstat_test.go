@@ -26,12 +26,12 @@ func newTracker(procs []Proc, calls *atomic.Int32, wantAll *atomic.Bool) (*Track
 }
 
 func TestParsePS(t *testing.T) {
-	out := "  100     1   100  2.5  20480\n  201   100   201 50.0  1024\nbad line\n  202   201   201  0.0     8\n"
+	out := "  100     1   100  2.5  20480 00:00:07\n  201   100   201 50.0  1024 1-02:03:04\nbad line\n  202   201   201  0.0     8 00:00:00.50\n"
 	got := parsePS(out)
 	want := []Proc{
-		{PID: 100, PPID: 1, PGID: 100, CPU: 2.5, RSS: 20480 * 1024},
-		{PID: 201, PPID: 100, PGID: 201, CPU: 50, RSS: 1024 * 1024},
-		{PID: 202, PPID: 201, PGID: 201, CPU: 0, RSS: 8 * 1024},
+		{PID: 100, PPID: 1, PGID: 100, CPU: 2.5, CPUTime: 7 * time.Second, RSS: 20480 * 1024},
+		{PID: 201, PPID: 100, PGID: 201, CPU: 50, CPUTime: (26*3600 + 3*60 + 4) * time.Second, RSS: 1024 * 1024},
+		{PID: 202, PPID: 201, PGID: 201, CPU: 0, CPUTime: 500 * time.Millisecond, RSS: 8 * 1024},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d procs, want %d: %+v", len(got), len(want), got)
@@ -40,6 +40,65 @@ func TestParsePS(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("proc %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestParseCPUTime(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+		ok   bool
+	}{
+		{"00:00:07", 7 * time.Second, true},
+		{"1:02", 62 * time.Second, true},
+		{"01:02:03", time.Hour + 2*time.Minute + 3*time.Second, true},
+		{"2-03:04:05", 51*time.Hour + 4*time.Minute + 5*time.Second, true},
+		{"00:00:00.50", 500 * time.Millisecond, true},
+		{"", 0, false},
+		{"7", 0, false},
+		{"a:b", 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := parseCPUTime(tc.in)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("parseCPUTime(%q) = %v, %v; want %v, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestSnapshotUsesInstantaneousCPU(t *testing.T) {
+	procs := []Proc{
+		{PID: 100, PPID: 1, PGID: 100, CPU: 1, CPUTime: 10 * time.Second, Start: 5},
+		{PID: 201, PPID: 100, PGID: 201, CPU: 80, CPUTime: 1 * time.Second, Start: 90},
+	}
+	tr := New(func(bool) ([]Proc, error) { return procs, nil }, 100)
+	clock := &fakeClock{t: time.Unix(2000, 0)}
+	tr.now = clock.now
+	tr.Track("a", 201)
+
+	// The first sighting has no previous sample, so it keeps ps's
+	// lifetime average.
+	if got := tr.Snapshot().Sessions["a"].CPU; got != 80 {
+		t.Fatalf("first sample CPU = %v, want the lifetime average 80", got)
+	}
+	// 1.5s of CPU over 3s of wall time is 50% of one core, even though
+	// the lifetime average would still read 80.
+	procs[1].CPUTime += 1500 * time.Millisecond
+	clock.t = clock.t.Add(3 * time.Second)
+	if got := tr.Snapshot().Sessions["a"].CPU; got != 50 {
+		t.Fatalf("second sample CPU = %v, want 50", got)
+	}
+	// No CPU time used since the last sample: idle, not a stale spike.
+	clock.t = clock.t.Add(3 * time.Second)
+	if got := tr.Snapshot().Sessions["a"].CPU; got != 0 {
+		t.Fatalf("idle sample CPU = %v, want 0", got)
+	}
+	// A reused PID (new start time) falls back to the lister's average
+	// instead of reporting a negative or bogus rate.
+	procs[1] = Proc{PID: 201, PPID: 100, PGID: 201, CPU: 7, CPUTime: 100 * time.Millisecond, Start: 91}
+	clock.t = clock.t.Add(3 * time.Second)
+	if got := tr.Snapshot().Sessions["a"].CPU; got != 7 {
+		t.Fatalf("reused pid CPU = %v, want the fallback 7", got)
 	}
 }
 

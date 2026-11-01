@@ -26,6 +26,8 @@ const verifyDisplay = "Check before finishing"
 const (
 	verifyDefault = "Before you finish: this turn changed {{files}} and no build, test or linter has passed since. " +
 		"If one (or the app itself) can check these changes here, run it now and fix what fails. " +
+		"Prefer the narrowest check that covers the changed files (the touched package's tests or a build of it); " +
+		"run the repository-wide suite only when the change crosses packages. " +
 		"If nothing applies or it cannot run here, say so in one line in your answer."
 	verifyFailedDefault = "Before you finish: this turn changed {{files}} and the last check you ran failed. " +
 		"Fix what fails and run it again. If the failure is unrelated to these changes or cannot be fixed here, " +

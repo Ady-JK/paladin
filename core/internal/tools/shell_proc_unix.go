@@ -17,7 +17,7 @@ func spawnPiped(cmdStr, dir string, sb *sandbox.Policy) (*exec.Cmd, io.ReadClose
 	if err := confine(cmd, sb); err != nil {
 		return nil, nil, nil, err
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = shellSysProcAttr()
 	outR, errR, err := startPiped(cmd)
 	if err != nil {
 		return nil, nil, nil, err
@@ -35,7 +35,7 @@ func spawnToLog(cmdStr, dir string, log *os.File, sb *sandbox.Policy) (*exec.Cmd
 		dup.Close()
 		return nil, err
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = shellSysProcAttr()
 	cmd.Stdout = log
 	cmd.Stderr = dup
 	if err := cmd.Start(); err != nil {
@@ -61,6 +61,23 @@ func killProcessGroup(pid int) {
 	// its child's death could fork the next command past the SIGKILL.
 	_ = syscall.Kill(-pid, syscall.SIGSTOP)
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
+}
+
+// shellNiceLevel is the scheduling priority model commands inherit.
+// Agent builds and test suites want all available cores and would
+// otherwise make the desktop (and the UI painting the results) stutter;
+// nice lets the foreground app win the next timeslice.
+const shellNiceLevel = "10"
+
+// niceArgv prepends a best-effort `nice` so the whole command tree runs
+// below the user's interactive work. Without a nice binary the command
+// runs unchanged.
+func niceArgv(argv []string) []string {
+	nice, err := lookPath("nice")
+	if err != nil || nice == "" {
+		return argv
+	}
+	return append([]string{nice, "-n", shellNiceLevel}, argv...)
 }
 
 func exitCode(err error) (*int, bool) {

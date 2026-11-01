@@ -7,12 +7,7 @@ import (
 	"syscall"
 )
 
-// setProcessGroup puts the server in its own group so stopping it also
-// stops anything it spawned.
-func setProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
-
+// killProcessGroup stops the server and anything it spawned.
 func killProcessGroup(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return

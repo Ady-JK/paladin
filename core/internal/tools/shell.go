@@ -187,6 +187,11 @@ func runSyncInner(cmdStr, dir, owner, spillPath string, limit time.Duration, can
 				return "", ArgsError(fmt.Sprintf("shell: the command ran past its timeout of %dms", limit.Milliseconds()))
 			}
 		case w := <-waitDone:
+			// The command itself is gone, so anything alive in its
+			// process group was left behind (a daemon, watcher or
+			// detached child). Kill it before reaping the output: an
+			// untracked leftover would keep burning CPU invisibly.
+			killProcessGroup(pid)
 			select {
 			case <-ioDone:
 			case <-time.After(10 * time.Second):
@@ -383,7 +388,9 @@ func (ShellTool) Definition() ToolDefinition {
 			"synchronous runs for finite commands, raising timeout_ms for slow ones. " +
 			"Use background for a long-running development server or work that " +
 			"can proceed while other calls run. Check status and read the log as " +
-			"needed, or set notify true to receive the final state later.",
+			"needed, or set notify true to receive the final state later. " +
+			"When a command exits, any processes it left behind are terminated; " +
+			"start servers with background true rather than '&'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

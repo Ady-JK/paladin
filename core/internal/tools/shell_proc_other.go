@@ -48,6 +48,9 @@ func killProcessGroup(pid int) {
 	}
 }
 
+// niceArgv is a no-op off unix: there is no nice binary to prepend.
+func niceArgv(argv []string) []string { return argv }
+
 func exitCode(err error) (*int, bool) {
 	if err == nil {
 		z := 0

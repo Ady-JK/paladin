@@ -55,6 +55,7 @@ async function setup(page: Page, snap: unknown, app: unknown = { cpu: 4, rss: 20
     [snap, app] as const,
   );
   await page.goto("/");
+  await showSidebar(page);
   await expect(page.locator('[data-session="sess-busy"]')).toBeVisible();
 }
 

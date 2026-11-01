@@ -20,12 +20,19 @@ const MinGap = 1500 * time.Millisecond
 
 // Proc is one row of the process table. RSS is in bytes; CPU is a
 // percentage of one core (it can exceed 100 on multi-threaded work).
+// CPUTime is the cumulative CPU time the process has used; the tracker
+// turns it into an instantaneous rate between samples. Start is the
+// kernel start time in clock ticks when the lister knows it, so a
+// reused PID is not mistaken for the old process. Both may be zero on
+// platforms whose lister only reports averages.
 type Proc struct {
-	PID  int
-	PPID int
-	PGID int
-	CPU  float64
-	RSS  int64
+	PID     int
+	PPID    int
+	PGID    int
+	CPU     float64
+	CPUTime time.Duration
+	Start   uint64
+	RSS     int64
 }
 
 // Lister reads the process table. all=false may return only the
@@ -62,15 +69,26 @@ type Tracker struct {
 	lastAt   time.Time
 	lastGen  uint64
 	have     bool
+	prev     map[int]cpuSample
+}
+
+// cpuSample is one process's cumulative CPU time at a sample time.
+type cpuSample struct {
+	at    time.Time
+	cpu   time.Duration
+	start uint64
 }
 
 // New builds a tracker; self is the core's own PID.
 func New(list Lister, self int) *Tracker {
-	return &Tracker{list: list, self: self, now: time.Now, roots: map[int]map[string]int{}}
+	return &Tracker{
+		list: list, self: self, now: time.Now,
+		roots: map[int]map[string]int{}, prev: map[int]cpuSample{},
+	}
 }
 
 // Default samples the real process table for this process.
-var Default = New(listPS, os.Getpid())
+var Default = New(defaultLister, os.Getpid())
 
 // Track attributes pid and its descendants to session until the
 // returned func is called. The func is idempotent; bad input is a no-op.
@@ -130,6 +148,7 @@ func (t *Tracker) Snapshot() Snapshot {
 	if t.list != nil {
 		if procs, err := t.list(len(roots) > 0); err == nil {
 			snap.Supported = true
+			t.instantaneous(procs, now)
 			attribute(&snap, procs, t.self, roots)
 		}
 	}
@@ -144,6 +163,31 @@ func clone(s Snapshot) Snapshot {
 		out.Sessions[k] = v
 	}
 	return out
+}
+
+// instantaneous replaces each process's lifetime-average CPU with the
+// rate since the previous sample. A process that finishes a burst then
+// idles would otherwise keep reporting the burst (ps %cpu is total CPU
+// time divided by elapsed lifetime), which reads as a spike that never
+// goes away. The first sighting keeps the lister's average; so does a
+// reused PID or a sample whose clock went backwards.
+func (t *Tracker) instantaneous(procs []Proc, now time.Time) {
+	next := make(map[int]cpuSample, len(procs))
+	for i := range procs {
+		p := &procs[i]
+		next[p.PID] = cpuSample{at: now, cpu: p.CPUTime, start: p.Start}
+		prev, seen := t.prev[p.PID]
+		if !seen || (prev.start != 0 && p.Start != 0 && prev.start != p.Start) {
+			continue
+		}
+		dt := now.Sub(prev.at).Seconds()
+		delta := p.CPUTime - prev.cpu
+		if dt <= 0 || delta < 0 {
+			continue
+		}
+		p.CPU = float64(delta) / float64(time.Second) / dt * 100
+	}
+	t.prev = next
 }
 
 // attribute walks each root's descendants (by parent and by process
@@ -202,12 +246,12 @@ func attribute(snap *Snapshot, procs []Proc, self int, roots map[int][]string) {
 	}
 }
 
-// parsePS reads `pid ppid pgid %cpu rss(KiB)` rows, skipping junk.
+// parsePS reads `pid ppid pgid %cpu rss(KiB) time` rows, skipping junk.
 func parsePS(out string) []Proc {
 	var procs []Proc
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 5 {
+		if len(f) != 6 {
 			continue
 		}
 		pid, e1 := strconv.Atoi(f[0])
@@ -215,12 +259,50 @@ func parsePS(out string) []Proc {
 		pgid, e3 := strconv.Atoi(f[2])
 		cpu, e4 := strconv.ParseFloat(f[3], 64)
 		rss, e5 := strconv.ParseInt(f[4], 10, 64)
-		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
+		cpuTime, e6 := parseCPUTime(f[5])
+		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil || !e6 {
 			continue
 		}
-		procs = append(procs, Proc{PID: pid, PPID: ppid, PGID: pgid, CPU: cpu, RSS: rss * 1024})
+		procs = append(procs, Proc{PID: pid, PPID: ppid, PGID: pgid, CPU: cpu, CPUTime: cpuTime, RSS: rss * 1024})
 	}
 	return procs
+}
+
+// parseCPUTime reads ps's `[[dd-]hh:]mm:ss[.ff]` CPU-time column into a
+// duration; it reports false for anything else so a junk row is skipped.
+func parseCPUTime(s string) (time.Duration, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	var days int64
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		d, err := strconv.ParseInt(s[:i], 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		days, s = d, s[i+1:]
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0, false
+	}
+	sec, err := strconv.ParseFloat(parts[len(parts)-1], 64)
+	if err != nil {
+		return 0, false
+	}
+	minutes, err := strconv.ParseInt(parts[len(parts)-2], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	var hours int64
+	if len(parts) == 3 {
+		if hours, err = strconv.ParseInt(parts[0], 10, 64); err != nil {
+			return 0, false
+		}
+	}
+	seconds := float64(days*24*3600+hours*3600+minutes*60) + sec
+	return time.Duration(seconds * float64(time.Second)), true
 }
 
 // Tracked counts live roots per session.

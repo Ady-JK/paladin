@@ -142,6 +142,9 @@ func (s *ShellTool) runBackground(cmd, dir, owner, callID string, limit time.Dur
 	go func() {
 		err := child.Wait()
 		timeout.Stop()
+		// The job's shell is done; kill anything it left running in its
+		// process group so no untracked daemon survives the job.
+		killProcessGroup(childPID)
 		untrack()
 		s.finishJob(id, event, exitCodeOf(err))
 	}()
