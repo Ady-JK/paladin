@@ -642,20 +642,21 @@ session list; omit todos to read the current list.
 `
 
 const usageExamplesShellCommon = `
-shell — build, test and explore on this machine. The action defaults to
-run, and every run starts in the session workspace root: cd inside the
-command when you need a subdirectory.
-- Quick build: {"action": "run", "cmd": "cd backend && go build ./..."}
-- Wrong: {"cmd": "go build ./..."} when the code lives in a subdirectory
+shell — build, test and explore on this machine. Pass the shell command
+in the command field; the action defaults to run, and every run starts in
+the session workspace root: cd inside the command when you need a
+subdirectory.
+- Quick build: {"action": "run", "command": "cd backend && go build ./..."}
+- Wrong: {"command": "go build ./..."} when the code lives in a subdirectory
   and you forgot the cd — it builds the wrong tree. Write
-  "cmd": "cd /home/user/project/backend && go build ./...".
-- Slow command, waited out: {"action": "run", "cmd": "go test ./short/...",
+  "command": "cd /home/user/project/backend && go build ./...".
+- Slow command, waited out: {"action": "run", "command": "go test ./short/...",
   "timeout_ms": 90000}.
-- Slow command alongside other work: {"action": "run", "cmd": "go test ./...",
+- Slow command alongside other work: {"action": "run", "command": "go test ./...",
   "background": true, "timeout_ms": 180000} returns at once with
   {"job_id": "job-1700000000-1", "status": "running"}.
 - Local web server for browser testing: {"action": "run",
-  "cmd": "npm run dev -- --host 127.0.0.1", "background": true,
+  "command": "npm run dev -- --host 127.0.0.1", "background": true,
   "timeout_ms": 3600000} keeps running while browser opens its localhost
   URL. The job ends at its timeout unless cancelled sooner.
 - Check it: {"action": "status", "job_id": "job-1700000000-1"}.
@@ -666,7 +667,7 @@ command when you need a subdirectory.
   background run, keep doing other tool calls, and the finished state plus
   the output tail (last 2000 lines or 50 KB) arrive on their own in a later
   round — no status polling needed.
-- Wrong: {"action": "run"} with no cmd. Wrong: {"action": "status"}
+- Wrong: {"action": "run"} with no command. Wrong: {"action": "status"}
   with no job_id. For a finite command with no concurrent work, wait
   synchronously instead of starting a background job just to poll it.
 - When the user asks to do something on this machine, run it with the
@@ -700,10 +701,10 @@ browser — open and test the local app (or a web site) in this session's browse
 // usageExamplesShellWindows shows directory listing and file search the
 // PowerShell way. No Unix commands appear here.
 const usageExamplesShellWindows = `
-- List directories: {"cmd": "Get-ChildItem D:\\projects"}
+- List directories: {"command": "Get-ChildItem D:\\projects"}
   on Windows — always PowerShell cmdlets with Windows paths, never cmd.exe
   commands, never Unix tools like ls or grep, never /d/ style paths.
-- Find a file: {"cmd": "Get-ChildItem D:\\projects -Filter go.work -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName"}
+- Find a file: {"command": "Get-ChildItem D:\\projects -Filter go.work -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName"}
   (bare paths, no table headers). Search likely folders first;
   never sweep a whole drive at once — it takes minutes and times out.
 `
@@ -711,10 +712,10 @@ const usageExamplesShellWindows = `
 // usageExamplesShellUnix shows listing and search the sh way. No
 // PowerShell or cmd.exe appears here.
 const usageExamplesShellUnix = `
-- List directories: {"cmd": "ls /home/user/project/backend"} still works
+- List directories: {"command": "ls /home/user/project/backend"} still works
   from the workspace root with an absolute path; prefer
-  {"cmd": "cd backend && ls"} for paths under the workspace.
-- Find a file: {"cmd": "find ~/projects -name go.work 2>/dev/null"}.
+  {"command": "cd backend && ls"} for paths under the workspace.
+- Find a file: {"command": "find ~/projects -name go.work 2>/dev/null"}.
   Search likely folders first; never sweep a whole drive at once —
   it takes minutes and times out.
 `

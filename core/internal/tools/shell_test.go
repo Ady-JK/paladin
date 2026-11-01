@@ -57,6 +57,80 @@ func TestSyncRunReturnsOutput(t *testing.T) {
 	}
 }
 
+func TestShellCommandParamAndLegacyCmd(t *testing.T) {
+	ctx, _ := testCtx(t)
+	tool := NewShellTool()
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"command", `{"command":"echo new"}`, "new\n"},
+		{"legacy cmd", `{"cmd":"echo old"}`, "old\n"},
+		{"command wins", `{"command":"echo new","cmd":"echo old"}`, "new\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tool.Call(json.RawMessage(tc.args), ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var resp ShellResponse
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp.Output == nil || *resp.Output != tc.want {
+				t.Fatalf("got %+v, want output %q", resp, tc.want)
+			}
+		})
+	}
+}
+
+func TestShellDefinitionAdvertisesCommand(t *testing.T) {
+	def := NewShellTool().Definition()
+	params, ok := def.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("parameters are not an object: %#v", def.Parameters)
+	}
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("parameters have no properties: %#v", params)
+	}
+	if _, ok := props["command"]; !ok {
+		t.Fatal("shell definition does not advertise command")
+	}
+	if _, ok := props["cmd"]; ok {
+		t.Fatal("shell definition still advertises the legacy cmd name")
+	}
+}
+
+func TestShellRegistryAcceptsBothNames(t *testing.T) {
+	ctx, _ := testCtx(t)
+	reg := BuiltinRegistry()
+	for _, tc := range []struct {
+		name string
+		args string
+		want string
+	}{
+		{"command", `{"command":"echo new"}`, "new\n"},
+		{"legacy cmd", `{"cmd":"echo old"}`, "old\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := reg.Call(&ToolCall{ID: "c1", Name: "shell", Arguments: tc.args}, ctx)
+			if res.IsError {
+				t.Fatalf("call failed: %s", res.Content)
+			}
+			var resp ShellResponse
+			if err := json.Unmarshal([]byte(res.Content), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp.Output == nil || *resp.Output != tc.want {
+				t.Fatalf("got %+v, want output %q", resp, tc.want)
+			}
+		})
+	}
+}
+
 func TestShellFindsGoWithMinimalPath(t *testing.T) {
 	// The sidecar inherits Electron's desktop PATH without the
 	// toolchain dirs, so `go` must still resolve (regression: every
@@ -100,7 +174,7 @@ func TestBackgroundStatusCancel(t *testing.T) {
 	os.MkdirAll(sess, 0o755)
 	ctx := &ToolCtx{Workspace: ws, SessionDir: sess, Cancel: context.Background()}
 	tool := NewShellTool()
-	out, err := tool.Call(json.RawMessage(`{"cmd":"sleep 30","background":true}`), ctx)
+	out, err := tool.Call(json.RawMessage(`{"command":"sleep 30","background":true}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +215,7 @@ func TestShellValidation(t *testing.T) {
 	for _, args := range []string{
 		`{"action":"run"}`,
 		`{"action":"run","cmd":""}`,
+		`{"action":"run","command":""}`,
 		`{"action":"run","cmd":"echo hi","timeout_ms":-1}`,
 		`{"action":"status"}`,
 		`{"action":"cancel"}`,
@@ -153,6 +228,9 @@ func TestShellValidation(t *testing.T) {
 	}
 	if _, err := tool.Call(json.RawMessage(`{"action":"status","job_id":"nope"}`), ctx); err == nil {
 		t.Fatal("unknown job accepted")
+	}
+	if _, err := tool.Call(json.RawMessage(`{"action":"run"}`), ctx); err == nil || !strings.Contains(err.Error(), "command is required") {
+		t.Fatalf("missing command error = %v", err)
 	}
 	if _, err := tool.Call(json.RawMessage(`{"action":"cancel","job_id":"nope"}`), ctx); err == nil {
 		t.Fatal("unknown cancel accepted")

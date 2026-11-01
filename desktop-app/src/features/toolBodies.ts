@@ -96,7 +96,8 @@ function shellStatus(tool: ToolInfo, args: Obj, result: unknown): { text: string
 
 function shellHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null): string {
   const action = str(args.action) || "run";
-  const cmd = str(args.cmd).trim() || `${action}${str(args.job_id) ? ` ${str(args.job_id)}` : ""}`;
+  const cmd =
+    str(args.command).trim() || str(args.cmd).trim() || `${action}${str(args.job_id) ? ` ${str(args.job_id)}` : ""}`;
   const st = err ? { text: "failed", tone: "is-bad" } : shellStatus(tool, args, result);
   let html =
     `<div data-body="shell" class="term">` +

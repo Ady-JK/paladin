@@ -22,8 +22,9 @@ function toolSummary(name: string, raw: string): string {
       return "ask";
     }
     if (name === "shell") {
-      if (typeof args.cmd === "string" && args.cmd.trim()) {
-        return short(args.cmd.trim());
+      const command = typeof args.command === "string" ? args.command : typeof args.cmd === "string" ? args.cmd : "";
+      if (command.trim()) {
+        return short(command.trim());
       }
       const action = typeof args.action === "string" && args.action ? args.action : "run";
       const job = typeof args.job_id === "string" && args.job_id ? ` ${args.job_id}` : "";

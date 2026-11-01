@@ -51,7 +51,7 @@ test("shell shows a terminal: prompt, output and exit status", async ({ page }) 
   await setup(page);
   const body = await open(
     page,
-    tool("1", "shell", { cmd: "ls -la src" }, "ok", { status: "done", exit_code: 0, output: "main.go\nutil.go\n" }),
+    tool("1", "shell", { command: "ls -la src" }, "ok", { status: "done", exit_code: 0, output: "main.go\nutil.go\n" }),
   );
   const term = body.locator('[data-body="shell"]');
   await expect(term.locator(".term-cmd")).toHaveText("ls -la src");

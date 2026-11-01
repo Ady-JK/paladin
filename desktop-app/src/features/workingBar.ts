@@ -19,8 +19,10 @@ export function workingLabel(tool: ToolInfo): string {
   const str = (k: string) => (typeof args[k] === "string" ? args[k] : "");
   const tail = (p: string) => p.split(/[\\/]/).filter(Boolean).slice(-2).join("/") || p;
   switch (tool.name) {
-    case "shell":
-      return str("cmd") ? `Running ${str("cmd").split("\n")[0]}` : "Running a command";
+    case "shell": {
+      const command = str("command") || str("cmd");
+      return command ? `Running ${command.split("\n")[0]}` : "Running a command";
+    }
     case "read":
       return str("path") ? `Reading ${tail(str("path"))}` : "Reading a file";
     case "write":

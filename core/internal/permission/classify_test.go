@@ -16,6 +16,15 @@ func TestClassifyShell(t *testing.T) {
 	if req.Safe || req.Destructive {
 		t.Fatalf("npm test is neither safe nor destructive: %+v", req)
 	}
+	// command is the model-facing name; cmd remains the legacy alias.
+	req, gated = Classify("shell", args(map[string]any{"command": "git status"}), "/ws")
+	if !gated || req.Command != "git status" || !req.Safe {
+		t.Fatalf("command param: got %+v gated=%v", req, gated)
+	}
+	req, _ = Classify("shell", args(map[string]any{"command": "git status", "cmd": "rm -rf /"}), "/ws")
+	if req.Command != "git status" || req.Destructive {
+		t.Fatalf("command must win over cmd: %+v", req)
+	}
 	// status/cancel on a background job never need approval.
 	if _, gated := Classify("shell", args(map[string]any{"action": "status", "job_id": "j1"}), "/ws"); gated {
 		t.Fatal("status should not be gated")

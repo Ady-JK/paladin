@@ -95,14 +95,15 @@ func ClassifyMCP(name string, info tools.MCPInfo, raw json.RawMessage) Request {
 func Classify(name string, raw json.RawMessage, workspace string) (Request, bool) {
 	switch name {
 	case "shell":
-		var a struct {
-			Action string `json:"action"`
-			Cmd    string `json:"cmd"`
-		}
-		if json.Unmarshal(raw, &a) != nil || (a.Action != "" && a.Action != "run") || strings.TrimSpace(a.Cmd) == "" {
+		var a tools.ShellArgs
+		if json.Unmarshal(raw, &a) != nil || (a.Action != "" && a.Action != "run") {
 			return Request{}, false
 		}
-		return classifyShell(a.Cmd, workspace), true
+		cmd := a.CommandLine()
+		if strings.TrimSpace(cmd) == "" {
+			return Request{}, false
+		}
+		return classifyShell(cmd, workspace), true
 	case "write", "edit":
 		var a struct {
 			Path string `json:"path"`

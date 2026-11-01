@@ -332,7 +332,7 @@ func (p *PlanShell) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		return p.inner.Call(raw, ctx)
 	}
 	if args.Action == "" || args.Action == ShellRun {
-		if err := ReadOnlyCommand(args.Cmd); err != nil {
+		if err := ReadOnlyCommand(args.CommandLine()); err != nil {
 			return "", ArgsError(fmt.Sprintf("plan mode: %v. Plan mode is read-only; describe the change in your plan, "+
 				"and the user can switch to build mode to carry it out.", err))
 		}

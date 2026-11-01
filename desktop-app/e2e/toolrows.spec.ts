@@ -96,6 +96,19 @@ test("a lone call is one row: verb, detail and a command chip", async ({ page })
   await expect(read.locator(".tool-detail")).toHaveText("src/conf.py");
 });
 
+test("the command parameter is shown, not the action fallback", async ({ page }) => {
+  await setup(page);
+  await emit(page, [
+    tool("1", "shell", { command: "go test ./..." }, "failed", {
+      error: "shell: the command exited with status 1",
+    }),
+  ]);
+  const row = runs(page).locator(".tool-row");
+  await expect(row.locator(".tool-verb")).toHaveText("Ran");
+  await expect(row.locator(".tool-chip")).toHaveText("go test ./...");
+  await expect(row.locator(".tool-chip")).not.toHaveText("run");
+});
+
 test("running calls read in the present tense and settle in place", async ({ page }) => {
   await setup(page);
   await emit(page, [tool("1", "shell", { cmd: "make" }, "running", null)]);

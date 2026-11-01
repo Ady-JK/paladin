@@ -126,6 +126,14 @@ func TestGuidanceIsOSSpecific(t *testing.T) {
 	if !strings.Contains(nixEx, "find ~/") {
 		t.Fatal("unix examples lost find")
 	}
+	for _, ex := range []string{winEx, nixEx} {
+		if !strings.Contains(ex, `"command":`) {
+			t.Fatal("shell examples lost the command parameter")
+		}
+		if strings.Contains(ex, `"cmd":`) {
+			t.Fatal("shell examples still use the legacy cmd parameter")
+		}
+	}
 	if strings.Contains(nixEx, "PowerShell") || strings.Contains(nixEx, "Get-ChildItem") || strings.Contains(nixEx, "cmd.exe") {
 		t.Fatal("unix examples leak windows commands")
 	}

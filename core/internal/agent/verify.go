@@ -75,7 +75,7 @@ func (a *Agent) noteVerify(call *inference.ToolCall, result *tools.ToolResult) {
 		if res.Output != nil {
 			output = *res.Output
 		}
-		switch checkOutcome(args.Cmd, *res.ExitCode, output) {
+		switch checkOutcome(args.CommandLine(), *res.ExitCode, output) {
 		case checkPassed:
 			a.unverified, a.verifyFailed = nil, false
 		case checkFailed:

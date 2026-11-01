@@ -45,12 +45,25 @@ const (
 )
 
 type ShellArgs struct {
-	Action     string `json:"action"`
-	JobID      string `json:"job_id"`
+	Action string `json:"action"`
+	JobID  string `json:"job_id"`
+	// Command is the model-facing name. Cmd is the old name, accepted so
+	// calls saved or scripted before the rename keep working; Command wins
+	// when both are present.
+	Command    string `json:"command"`
 	Cmd        string `json:"cmd"`
 	Background bool   `json:"background"`
 	Notify     bool   `json:"notify"`
 	TimeoutMs  int64  `json:"timeout_ms"`
+}
+
+// CommandLine returns the command to run, preferring command over the
+// legacy cmd alias.
+func (a ShellArgs) CommandLine() string {
+	if strings.TrimSpace(a.Command) != "" {
+		return a.Command
+	}
+	return a.Cmd
 }
 
 type ShellResponse struct {
@@ -360,6 +373,7 @@ func (ShellTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "shell",
 		Description: "Run a shell command in the session workspace. " +
+			"Pass the shell command in the command field. " +
 			"There is no workdir: every run starts in the workspace root, " +
 			"so cd inside the command when you need a subdirectory. " +
 			"With background false (the default) the call waits for the command and " +
@@ -375,7 +389,7 @@ func (ShellTool) Definition() ToolDefinition {
 			"properties": map[string]any{
 				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "cancel"}, "description": "What to do: run a command, check a job, or stop a job. Defaults to run."},
 				"job_id":     map[string]any{"type": "string", "description": "The job to check or stop. Empty or missing for a new run."},
-				"cmd":        map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
+				"command":    map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
 				"notify":     map[string]any{"type": "boolean", "description": "With background true, remind the agent when the job finishes: its final state and output tail arrive on their own in a later round. Defaults to false; ignored without background."},
 				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000, or 300000 with background.", "minimum": 1, "maximum": maxShellTimeoutMs},
@@ -397,8 +411,9 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	}
 	switch args.Action {
 	case "", ShellRun:
-		if strings.TrimSpace(args.Cmd) == "" {
-			return "", ArgsError("shell: cmd is required for action run")
+		cmd := args.CommandLine()
+		if strings.TrimSpace(cmd) == "" {
+			return "", ArgsError("shell: command is required")
 		}
 		limit, err := shellTimeoutMs(args.TimeoutMs, args.Background)
 		if err != nil {
@@ -420,9 +435,9 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(args.Cmd, dir, ctx.SessionID, ctx.CallID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
+			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
 		}
-		return s.runSync(args.Cmd, dir, ctx.SessionID, SpillPath(ctx), limit, ctx.Cancel, ctx.Sandbox)
+		return s.runSync(cmd, dir, ctx.SessionID, SpillPath(ctx), limit, ctx.Cancel, ctx.Sandbox)
 	case ShellStatus:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
