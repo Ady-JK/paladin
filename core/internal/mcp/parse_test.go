@@ -138,7 +138,7 @@ func TestManagerAddServers(t *testing.T) {
 	path := FolderPath(ws)
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, []byte(`{"mcpServers":{"keep":{"command":"x"}},"note":"hi"}`), 0o644)
-	if err := m.Trust(ws, true); err != nil {
+	if err := m.Trust(ws, true, shown(t, ws)); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddServers(ScopeFolder, ws, []NamedServer{{Name: "new", Config: ServerConfig{URL: "https://n/mcp"}}}, false); err != nil {

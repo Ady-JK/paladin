@@ -5,6 +5,7 @@ package tools
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,14 @@ type WriteResult struct {
 	Overwritten   bool   `json:"overwritten"`
 	Bytes         int    `json:"bytes"`
 	Lines         int    `json:"lines"`
+	OldLines      int    `json:"old_lines"`
+	// Formatted names the formatter that rewrote the file afterwards.
+	Formatted string `json:"formatted,omitempty"`
+	// Diagnostics are a language server's errors after the write.
+	Diagnostics     []Diagnostic `json:"diagnostics,omitempty"`
+	DiagnosticsFrom string       `json:"diagnostics_from,omitempty"`
+	Errors          int          `json:"errors,omitempty"`
+	Note            string       `json:"note,omitempty"`
 }
 
 type EditResult struct {
@@ -125,6 +134,7 @@ func (eng Engine) Write(session, workspace, requestedPath, content string, overw
 	defer unlock()
 	perm := os.FileMode(0o644)
 	current := ""
+	oldLines := 0
 	info, statErr := os.Stat(resolved)
 	existed := statErr == nil
 	if existed {
@@ -156,6 +166,10 @@ func (eng Engine) Write(session, workspace, requestedPath, content string, overw
 		if seen != current {
 			return WriteResult{}, conflict("write", ConflictStale, requestedPath, resolved, scope)
 		}
+		oldLines, err = countFileLines(resolved)
+		if err != nil {
+			return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: count old lines: %s", syserr.Str(err))}
+		}
 	} else if !os.IsNotExist(statErr) {
 		return WriteResult{}, &EngineError{Kind: "message", Message: fmt.Sprintf("write: path %q cannot be used: %s", requestedPath, syserr.Str(statErr))}
 	}
@@ -186,7 +200,42 @@ func (eng Engine) Write(session, workspace, requestedPath, content string, overw
 		Overwritten:   existed,
 		Bytes:         len(content),
 		Lines:         CountLines(content),
+		OldLines:      oldLines,
 	}, nil
+}
+
+func countFileLines(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	buf := make([]byte, 32*1024)
+	lines := 0
+	var last byte
+	sawBytes := false
+	for {
+		n, readErr := file.Read(buf)
+		if n > 0 {
+			sawBytes = true
+		}
+		for _, b := range buf[:n] {
+			if b == '\n' {
+				lines++
+			}
+			last = b
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return 0, readErr
+		}
+	}
+	if sawBytes && last != '\n' {
+		lines++
+	}
+	return lines, nil
 }
 
 // Edit replaces old text in a file. It needs no prior read (old_string

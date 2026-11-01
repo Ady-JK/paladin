@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -68,10 +69,11 @@ var errNothingToCompact = errors.New("nothing older than the current exchange to
 // compactionUserContent is the model-facing stand-in for everything
 // before a compaction marker.
 func compactionUserContent(summary string) string {
-	return "This session was compacted to fit the model's context window. Summary of the earlier conversation:\n\n" +
-		summary +
-		"\n\n(The conversation continues below. Re-read files before relying on exact contents.)"
+	return custom.TextFill("compact.summary", map[string]string{"summary": summary})
 }
+
+const compactSummaryDefault = "This session was compacted to fit the model's context window. Summary of the earlier conversation:\n\n" +
+	"{{summary}}\n\n(The conversation continues below. Re-read files before relying on exact contents.)"
 
 // estimateTokens is a cheap chars/4 estimate, used only where no
 // provider-reported count exists.
@@ -316,7 +318,7 @@ func (a *Agent) compact(reason string, before int64) error {
 	var resp inference.ToolResponse
 	err := guardProvider(func() error {
 		var cerr error
-		resp, cerr = a.provider.CompleteTools(a.ctx, compactSystemPrompt,
+		resp, cerr = a.provider.CompleteTools(a.ctx, custom.Text("compact.system"),
 			[]inference.LlmMessage{{Role: "user", Content: prompt}}, nil, a.session.Meta.SessionID)
 		return cerr
 	})

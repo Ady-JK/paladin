@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
@@ -36,6 +37,19 @@ func main() {
 	// The Linux sandbox re-execs agent-host to confine a shell command.
 	if len(os.Args) > 1 && os.Args[1] == sandbox.HelperArg {
 		os.Exit(sandbox.RunHelper(os.Args[2:]))
+	}
+	if len(os.Args) == 3 && os.Args[1] == "extensions" && os.Args[2] == "init" {
+		dir, err := extension.Init(config.DataDir())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(dir)
+		return
+	}
+	if len(os.Args) > 1 {
+		fmt.Fprintln(os.Stderr, "usage: agent-host [extensions init] (without arguments, speak JSONL on stdin/stdout)")
+		os.Exit(2)
 	}
 	dataDir := config.DataDir()
 	initLogging(dataDir)

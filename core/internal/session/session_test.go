@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -23,6 +24,17 @@ func TestHistoryLinksToolResultsToCalls(t *testing.T) {
 	}
 	if view[1].Status == nil || *view[1].Status != "ok" {
 		t.Fatalf("got %+v", view[1])
+	}
+}
+
+func TestHistoryRetainsSessionImageReferences(t *testing.T) {
+	image := &media.Image{Path: "/session/browser/one.png", MIMEType: "image/png"}
+	user := transcript.UserMessage("see this")
+	user.Attachments = []media.Attachment{{ID: "file-1", Name: "one.png", Path: image.Path, Image: image}}
+	tool := transcript.Message{Role: transcript.RoleTool, Content: "saved", Image: image, CreatedAt: time.Now().UTC()}
+	view := HistoryView([]transcript.Message{user, tool})
+	if len(view) != 2 || len(view[0].Attachments) != 1 || view[1].Image == nil {
+		t.Fatalf("image refs missing: %+v", view)
 	}
 }
 

@@ -3,6 +3,8 @@
 package runtime
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
@@ -47,12 +49,92 @@ func (r *AgentRuntime) ListSkills(cwd string) []SkillEntry {
 // runtimeCommands adapts prompt commands to agent.CommandSource.
 type runtimeCommands struct{ r *AgentRuntime }
 
-func (c runtimeCommands) LoadCommand(cwd, name, args string) (agent.Command, error) {
+func (c runtimeCommands) LoadCommand(cwd, sessionID, name, args string) (agent.Command, error) {
 	cmd, err := commands.Load(c.r.dataDir, cwd, strings.TrimPrefix(name, "/"))
 	if err != nil {
 		return agent.Command{}, err
 	}
-	return agent.Command{Name: cmd.Name, Prompt: commands.Expand(cmd.Body, args), Mode: cmd.Mode}, nil
+	// The diff goes in after expansion so a "$1" inside it stays as is.
+	prompt := commands.Expand(cmd.Body, args)
+	if strings.Contains(cmd.Body, sessionChangesSlot) {
+		changes, err := c.r.sessionChangesFor(sessionID, cwd, args)
+		if err != nil {
+			return agent.Command{}, err
+		}
+		prompt = strings.Replace(prompt, sessionChangesSlot, changes, 1)
+	}
+	return agent.Command{Name: cmd.Name, Prompt: prompt, Mode: cmd.Mode, Tools: cmd.Tools}, nil
+}
+
+// sessionChangesSlot in a command body becomes the session's own file
+// changes as a unified diff when the command's argument is "session"
+// (as in `/review session`), and nothing otherwise. When the session
+// has no snapshots or changed nothing, the command fails before the
+// model runs: substituting other changes would review work that may not
+// be this session's.
+const sessionChangesSlot = "$SESSION_CHANGES"
+
+// maxSessionChanges caps the diff a command prompt can carry.
+const maxSessionChanges = 100 * 1024
+
+func (r *AgentRuntime) sessionChangesFor(sessionID, cwd, args string) (string, error) {
+	if !strings.EqualFold(strings.TrimSpace(args), "session") {
+		return "", nil
+	}
+	const other = " Run /review for the uncommitted changes, or /review <branch or commit>"
+	view, err := r.SessionChanges(sessionID, cwd)
+	if err != nil || !view.Available {
+		return "", errors.New("/review session: session changes unavailable, since this session has no snapshots to tell its own changes apart." + other)
+	}
+	if len(view.Files) == 0 {
+		return "", errors.New("/review session: this session has not changed any files, so there is nothing to review." + other)
+	}
+	return renderSessionChanges(view.Files, func(path string) (string, error) {
+		d, err := r.SessionDiff(sessionID, cwd, -1, path)
+		return d.Patch, err
+	})
+}
+
+// renderSessionChanges is the diff of files within maxSessionChanges. A file
+// whose diff fails or does not fit is named with the reason, so the
+// review never takes a partial diff for the whole; when no diff can be
+// built at all, it is an error.
+func renderSessionChanges(files []ChangedFile, diff func(path string) (string, error)) (string, error) {
+	var body strings.Builder
+	var left []string
+	full := false
+	for _, f := range files {
+		if full {
+			left = append(left, f.Path+": over the "+strconv.Itoa(maxSessionChanges>>10)+" KB limit")
+			continue
+		}
+		patch, err := diff(f.Path)
+		if err != nil {
+			left = append(left, f.Path+": could not build its diff ("+err.Error()+")")
+			continue
+		}
+		if body.Len()+len(patch) > maxSessionChanges {
+			full = true
+			left = append(left, f.Path+": over the "+strconv.Itoa(maxSessionChanges>>10)+" KB limit")
+			continue
+		}
+		body.WriteString(strings.TrimRight(patch, "\n") + "\n")
+	}
+	if body.Len() == 0 {
+		return "", errors.New("/review session: could not build a diff for any changed file (" + strings.Join(left, "; ") + ")")
+	}
+	var b strings.Builder
+	if len(left) == 0 {
+		b.WriteString("Session changes (unified diff of every file this session changed, from Paladin's snapshots; paths are relative to the workspace):\n")
+	} else {
+		b.WriteString("Session changes (unified diff of the files this session changed, from Paladin's snapshots; paths are relative to the workspace; " +
+			"some files are not included, see the list after the diff):\n")
+	}
+	b.WriteString("```diff\n" + body.String() + "```")
+	if len(left) > 0 {
+		b.WriteString("\nNot included (read these files directly):\n- " + strings.Join(left, "\n- "))
+	}
+	return b.String(), nil
 }
 
 // ListCommands returns the prompt commands for a workspace.

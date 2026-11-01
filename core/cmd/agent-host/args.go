@@ -85,7 +85,8 @@ type ChatParams struct {
 	// Compact runs a manual compaction instead of a model turn.
 	Compact bool `json:"compact"`
 	// Permissions is "read-only", "auto" (default) or "full-access".
-	Permissions string `json:"permissions"`
+	Permissions   string   `json:"permissions"`
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }
 
 func (p ChatParams) request() agent.Request {
@@ -95,7 +96,8 @@ func (p ChatParams) request() agent.Request {
 		SystemPrompt: p.SystemPrompt, Resume: p.Resume,
 		Skill: p.Skill, Command: p.Command, Mode: p.Mode,
 		Compact: p.Compact, Display: p.Display,
-		Permissions: p.Permissions,
+		Permissions:   p.Permissions,
+		AttachmentIDs: p.AttachmentIDs,
 	}
 }
 

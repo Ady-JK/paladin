@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Only the app's own scripts run here (file: is the packaged app's
+      folder): no inline handlers, no eval, no plugins, no network but
+      the app's own origin. Styles may be inline (rendered markup uses
+      style attributes). Visuals load public/visual-frame.html, which has
+      its own stricter policy.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' file:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>paladin</title>
     <style>
       html,
@@ -133,35 +144,26 @@
               <span data-icon="terminal"></span>
             </button>
             <button
+              id="paneLayoutBtn"
+              type="button"
+              class="pane-btn"
+              title="Switch to tabs layout"
+              aria-label="Switch to tabs layout"
+            >
+              <span data-icon="layout-split"></span>
+            </button>
+            <button
               id="paneHistoryBtn"
               type="button"
               class="pane-btn"
-              title="Pane options and saved side chats"
-              aria-label="Pane options and saved side chats"
+              title="Saved side chats"
+              aria-label="Saved side chats"
               aria-haspopup="menu"
               aria-expanded="false"
             >
               <span data-icon="rotate-ccw"></span>
             </button>
-            <button
-              id="paneCloseBtn"
-              type="button"
-              class="pane-btn"
-              title="Close the side pane"
-              aria-label="Close the side pane"
-            >
-              <span data-icon="xmark"></span>
-            </button>
             <div id="paneHistoryMenu" class="pane-menu" role="menu" hidden>
-              <button
-                id="paneLayoutBtn"
-                class="pane-menu-layout"
-                type="button"
-                role="menuitem"
-                title="Switch to tabs layout"
-              >
-                Tabs view
-              </button>
               <div id="paneHistoryItems"></div>
             </div>
           </div>
@@ -176,7 +178,7 @@
             <span id="headerTitle" class="text-xs font-semibold text-slate-800 dark:text-slate-200">Agent Chat</span>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div id="headerStatusActions" class="flex items-center gap-3">
             <div
               class="hidden items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300"
             >
@@ -198,15 +200,6 @@
             >
               <span data-icon="rl-pulse" class="res-pill-ico"></span>
               <span id="resPillLabel">idle</span>
-            </button>
-            <button
-              id="sidePaneBtn"
-              class="rounded-md p-1.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
-              title="Side chats"
-              aria-label="Toggle the side pane"
-              aria-pressed="false"
-            >
-              <span data-icon="comments"></span>
             </button>
             <button
               id="sessionChangesBtn"
@@ -282,6 +275,7 @@
                 <div class="mx-auto w-full max-w-3xl">
                   <div class="composer-float relative rounded-3xl">
                     <div id="skillChipSlot" class="px-4 pt-2"></div>
+                    <div id="attachmentCards" class="attachment-cards" aria-label="Attached files"></div>
                     <textarea
                       id="promptInput"
                       title="! runs a workspace command and shares its output with the agent. !! runs it without starting a turn."
@@ -451,6 +445,15 @@
 
             <!-- Side pane: /btw side chats and live subagent tabs. -->
             <aside id="sidePane" class="side-pane" hidden aria-label="Side chats and subagents">
+              <button
+                id="paneCloseBtn"
+                type="button"
+                class="pane-btn pane-inner-close"
+                title="Close the side pane"
+                aria-label="Close the side pane"
+              >
+                <span data-icon="xmark"></span>
+              </button>
               <div class="pane-strip">
                 <div id="paneTabs" class="pane-tabs" role="tablist" aria-label="Side tabs"></div>
               </div>
@@ -510,13 +513,17 @@
     <!-- ==================== SETTINGS ==================== -->
     <div id="settingsModal" class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4">
       <div
+        id="settingsShell"
         class="modal-card flex h-[90vh] w-[90vw] overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
       >
         <!-- Settings sidebar -->
         <div
+          id="settingsSidebar"
           class="flex w-48 flex-shrink-0 flex-col gap-1 border-r border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60"
         >
           <div class="px-2 pb-2 pt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
+          <input id="settingsSearch" type="search" placeholder="Search settings" aria-label="Search settings" />
+          <div class="settings-nav-group">Core</div>
           <button
             id="settingsNavWorkspace"
             role="tab"
@@ -542,6 +549,14 @@
             <span>Prompt</span>
           </button>
           <button
+            id="settingsNavCustomize"
+            role="tab"
+            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
+          >
+            <span data-icon="sliders"></span>
+            <span>Customize</span>
+          </button>
+          <button
             id="settingsNavConnection"
             role="tab"
             class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
@@ -557,6 +572,7 @@
             <span data-icon="chart"></span>
             <span>Analytics</span>
           </button>
+          <div class="settings-nav-group">Personal</div>
           <button
             id="settingsNavAppearance"
             role="tab"
@@ -616,9 +632,15 @@
         </div>
 
         <!-- Settings content -->
-        <div class="flex min-w-0 flex-1 flex-col">
-          <div class="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-slate-800">
-            <h3 id="settingsPaneTitle" class="text-sm font-semibold text-slate-900 dark:text-slate-100">Workspace</h3>
+        <div id="settingsContent" class="flex min-w-0 flex-1 flex-col">
+          <div
+            id="settingsContentHeader"
+            class="flex items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-slate-800"
+          >
+            <div>
+              <h3 id="settingsPaneTitle" class="text-sm font-semibold text-slate-900 dark:text-slate-100">Workspace</h3>
+              <p id="settingsPaneSubtitle" class="settings-pane-subtitle"></p>
+            </div>
             <button
               id="settingsCloseBtn"
               class="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
@@ -627,7 +649,7 @@
             </button>
           </div>
 
-          <div class="flex-1 space-y-5 overflow-y-auto p-5 text-xs">
+          <div id="settingsContentBody" class="flex-1 space-y-5 overflow-y-auto p-5 text-xs">
             <div id="settingsPaneWorkspace" class="space-y-5">
               <div>
                 <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> Default workspace </label>
@@ -697,39 +719,95 @@
             </div>
 
             <div id="settingsPanePrompt" class="hidden space-y-4">
-              <p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              <p class="settings-lead">
                 The agent reads <code class="font-mono">config/SYSTEM_PROMPT.md</code> on every turn. Tool guidance and
                 examples are compiled for this machine's OS and always appended with its details and the session
-                workspace. Edits apply to new turns immediately; a per-message override still wins.
+                workspace. Saved edits apply to new turns immediately; a per-message override still wins.
               </p>
-              <div>
-                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> System prompt </label>
+              <div class="settings-segmented" role="tablist" aria-label="Prompt view">
+                <button id="settingsPromptPreviewTab" type="button" role="tab" aria-selected="true">Preview</button>
+                <button id="settingsPromptEditTab" type="button" role="tab" aria-selected="false">Editor</button>
+              </div>
+              <div id="settingsPromptPreview" class="settings-prompt-preview md" role="tabpanel"></div>
+              <div id="settingsPromptEditor" class="hidden space-y-4" role="tabpanel">
+                <label for="settingsSystemPrompt" class="block font-medium text-slate-700 dark:text-slate-300"
+                  >System prompt</label
+                >
                 <textarea
                   id="settingsSystemPrompt"
                   rows="20"
                   spellcheck="false"
                   class="w-full rounded border border-slate-200 bg-slate-100 p-2 font-mono text-[11px] leading-relaxed text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 ></textarea>
+                <div class="flex flex-wrap gap-2">
+                  <button id="settingsPromptSaveBtn" class="settings-primary">Save prompt</button>
+                  <button
+                    id="settingsPromptResetBtn"
+                    class="settings-secondary"
+                    title="Rewrite the file from the built-in default"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+                <section class="settings-group space-y-3">
+                  <div class="settings-group-heading">Improve with a model</div>
+                  <p class="settings-group-help">
+                    Describe the change. The current prompt and instruction are sent to your selected provider only when
+                    you generate a proposal. Review it before applying, then save separately.
+                  </p>
+                  <p id="settingsPromptModelLabel" class="settings-group-help"></p>
+                  <label for="settingsPromptInstruction">What should change?</label>
+                  <textarea
+                    id="settingsPromptInstruction"
+                    rows="3"
+                    maxlength="4096"
+                    placeholder="For example: shorten the tool instructions while keeping their exact behavior"
+                  ></textarea>
+                  <button id="settingsPromptSuggestBtn" class="settings-secondary" type="button">
+                    Generate proposal
+                  </button>
+                  <div id="settingsPromptProposalWrap" class="hidden space-y-3">
+                    <div class="settings-group-heading">Proposed prompt</div>
+                    <div id="settingsPromptProposal" class="settings-prompt-preview md"></div>
+                    <div class="flex gap-2">
+                      <button id="settingsPromptApplyBtn" class="settings-primary" type="button">Apply to editor</button
+                      ><button id="settingsPromptDiscardBtn" class="settings-secondary" type="button">Discard</button>
+                    </div>
+                  </div>
+                </section>
               </div>
               <p id="settingsPromptError" class="hidden text-[11px] text-agent-rose"></p>
-              <div class="flex gap-2">
-                <button
-                  id="settingsPromptSaveBtn"
-                  class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white hover:bg-accent-700"
-                >
-                  Save prompt
-                </button>
-                <button
-                  id="settingsPromptResetBtn"
-                  class="rounded border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                  title="Rewrite the file from the built-in default"
-                >
-                  Reset to default
-                </button>
-              </div>
             </div>
 
             <div id="settingsPaneConnection" class="hidden space-y-3">
+              <section class="settings-group">
+                <div class="settings-group-heading">Core location</div>
+                <p class="settings-group-help">
+                  Run the core on this computer, or start it on a remote machine over SSH. The remote machine needs
+                  Paladin's agent-host binary and an SSH key already trusted by your system.
+                </p>
+                <div class="settings-field-row">
+                  <label for="settingsCoreMode">Connection</label>
+                  <select id="settingsCoreMode">
+                    <option value="local">This computer</option>
+                    <option value="ssh">Remote over SSH</option>
+                  </select>
+                </div>
+                <div id="settingsRemoteFields" class="hidden">
+                  <div class="settings-field-row">
+                    <label for="settingsRemoteTarget">SSH target</label
+                    ><input id="settingsRemoteTarget" placeholder="user@host" spellcheck="false" />
+                  </div>
+                  <div class="settings-field-row">
+                    <label for="settingsRemoteBinary">Remote agent-host</label
+                    ><input id="settingsRemoteBinary" placeholder="/opt/paladin/agent-host" spellcheck="false" />
+                  </div>
+                </div>
+                <div class="settings-actions">
+                  <span id="settingsRemoteError" role="alert"></span
+                  ><button id="settingsRemoteSave" type="button">Apply connection</button>
+                </div>
+              </section>
               <div class="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
                 <div
                   class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60"
@@ -777,34 +855,60 @@
             </div>
 
             <div id="settingsPaneAppearance" class="hidden space-y-3">
-              <div>
-                <div class="text-xs font-semibold text-slate-800 dark:text-slate-100">Animations</div>
-                <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Turn motion down on slower machines. Off also drops blur and shadows that cost GPU time.
-                </p>
-              </div>
-              <div id="motionOptions" role="radiogroup" class="motion-options">
-                <label class="motion-opt"
-                  ><input type="radio" name="motion" value="system" /><span
-                    ><b>System</b><small>Follow the OS reduce-motion setting</small></span
-                  ></label
-                >
-                <label class="motion-opt"
-                  ><input type="radio" name="motion" value="full" /><span
-                    ><b>Full</b><small>Smooth transitions and effects</small></span
-                  ></label
-                >
-                <label class="motion-opt"
-                  ><input type="radio" name="motion" value="reduced" /><span
-                    ><b>Reduced</b><small>Short fades only, no movement</small></span
-                  ></label
-                >
-                <label class="motion-opt"
-                  ><input type="radio" name="motion" value="off" /><span
-                    ><b>Off</b><small>No animation, blur or heavy shadows</small></span
-                  ></label
-                >
-              </div>
+              <section class="settings-group space-y-3">
+                <div class="settings-group-heading">Color</div>
+                <p class="settings-group-help">Follow your computer's appearance or choose a fixed theme.</p>
+                <div class="settings-field-row">
+                  <label for="settingsColorMode">Theme</label
+                  ><select id="settingsColorMode">
+                    <option value="system">System</option>
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
+                </div>
+              </section>
+              <section class="settings-group space-y-3">
+                <div class="settings-group-heading">Text size</div>
+                <p class="settings-group-help">Adjust the interface text across Paladin.</p>
+                <div class="settings-field-row">
+                  <label for="settingsFontSize">Size</label
+                  ><select id="settingsFontSize">
+                    <option value="small">Small</option>
+                    <option value="default">Default</option>
+                    <option value="large">Large</option>
+                  </select>
+                </div>
+              </section>
+              <section class="settings-group space-y-3">
+                <div>
+                  <div class="text-xs font-semibold text-slate-800 dark:text-slate-100">Animations</div>
+                  <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Turn motion down on slower machines. Off also drops blur and shadows that cost GPU time.
+                  </p>
+                </div>
+                <div id="motionOptions" role="radiogroup" class="motion-options">
+                  <label class="motion-opt"
+                    ><input type="radio" name="motion" value="system" /><span
+                      ><b>System</b><small>Follow the OS reduce-motion setting</small></span
+                    ></label
+                  >
+                  <label class="motion-opt"
+                    ><input type="radio" name="motion" value="full" /><span
+                      ><b>Full</b><small>Smooth transitions and effects</small></span
+                    ></label
+                  >
+                  <label class="motion-opt"
+                    ><input type="radio" name="motion" value="reduced" /><span
+                      ><b>Reduced</b><small>Short fades only, no movement</small></span
+                    ></label
+                  >
+                  <label class="motion-opt"
+                    ><input type="radio" name="motion" value="off" /><span
+                      ><b>Off</b><small>No animation, blur or heavy shadows</small></span
+                    ></label
+                  >
+                </div>
+              </section>
             </div>
 
             <div id="settingsPaneResources" class="hidden">
@@ -829,6 +933,9 @@
 
             <div id="settingsPaneTools" class="hidden">
               <div id="toolsBody" class="text-xs"></div>
+            </div>
+            <div id="settingsPaneCustomize" class="hidden h-full">
+              <div id="customizeBody" class="h-full text-xs"></div>
             </div>
           </div>
 

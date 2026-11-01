@@ -28,6 +28,17 @@ func (r *AgentRuntime) maxConcurrentTurns() int {
 // is idle and a slot is free. The channel yields the final TurnInfo.
 // A subagent session only takes turns from its parent.
 func (r *AgentRuntime) SubmitTurn(req agent.Request, opts SubmitOpts) (TurnInfo, <-chan TurnInfo, error) {
+	if len(req.AttachmentIDs) > 12 {
+		return TurnInfo{}, nil, fmt.Errorf("too many attachments")
+	}
+	for _, id := range req.AttachmentIDs {
+		ref, err := r.SessionAttachment(req.SessionID, req.Cwd, id)
+		if err != nil {
+			return TurnInfo{}, nil, err
+		}
+		req.Attachments = append(req.Attachments, *ref)
+		req.Message += fmt.Sprintf("\n[Attached file: %q at %q]", ref.Name, ref.Path)
+	}
 	if err := r.subagents.refuseUserTurn(req.SessionID, req.Cwd); err != nil {
 		return TurnInfo{}, nil, err
 	}
@@ -61,11 +72,12 @@ func (r *AgentRuntime) Attach(sessionID, cwd string) (Attachment, error) {
 }
 
 // ShutdownTurns stops everything and waits (bounded) for turns to
-// persist, then stops the MCP servers.
+// persist, then stops the MCP and language servers.
 func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) {
 	r.sideCancel()
 	r.hub.Shutdown(timeout)
 	r.mcp.Close()
+	r.lsp.Close()
 }
 
 // ListAgents lists a session's subagents with their live status.

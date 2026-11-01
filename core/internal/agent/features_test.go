@@ -18,7 +18,7 @@ func (f fakeContext) SystemSections(transcript.Session) []string { return f.sect
 
 type fakeCommands map[string]Command
 
-func (f fakeCommands) LoadCommand(cwd, name, args string) (Command, error) {
+func (f fakeCommands) LoadCommand(cwd, sessionID, name, args string) (Command, error) {
 	c, ok := f[name]
 	if !ok {
 		return Command{}, errors.New("not found: command " + name)
@@ -207,5 +207,59 @@ func TestPlanModeKeepsMCPToolsBehindTheGate(t *testing.T) {
 	a, _ = DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "go"})
 	if g := a.gate.(*permission.Gate); g.Plan {
 		t.Fatal("build mode gate is in plan mode")
+	}
+}
+
+func TestBuildAddsTheCommandsOwnTools(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000035")
+	d, _, _, _ := testDeps(t, sess)
+	d.Commands = fakeCommands{
+		"review": {Name: "review", Prompt: "Review", Mode: "plan", Tools: []string{"report_findings"}},
+		"broken": {Name: "broken", Prompt: "x", Tools: []string{"no_such_tool"}},
+	}
+	cmd := "review"
+	a, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "", Command: &cmd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.tools.Get("report_findings"); !ok {
+		t.Fatal("the command's tool is offered in its turn")
+	}
+	plain, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain.tools.Get("report_findings"); ok {
+		t.Fatal("other turns never see it")
+	}
+	bad := "broken"
+	if _, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "", Command: &bad}); err == nil ||
+		!strings.Contains(err.Error(), "no_such_tool") {
+		t.Fatalf("an unknown command tool fails loudly: %v", err)
+	}
+}
+
+// extProbe is an extension tool.
+type extProbe struct{ trustProbe }
+
+func (extProbe) Name() string    { return "jira_lookup" }
+func (extProbe) Extension() bool { return true }
+func (extProbe) Definition() tools.ToolDefinition {
+	return tools.ToolDefinition{Name: "jira_lookup", Parameters: map[string]any{"type": "object"}}
+}
+
+// Plan mode leaves extension tools out: they run local code that may
+// change anything.
+func TestPlanModeDropsExtensionTools(t *testing.T) {
+	r := tools.BuiltinRegistry().With(&extProbe{})
+	if !r.IsExtension("jira_lookup") || r.IsExtension("read") {
+		t.Fatal("IsExtension")
+	}
+	planned, _ := planRegistry(r, nil)
+	if _, ok := planned.Get("jira_lookup"); ok {
+		t.Fatal("plan mode kept an extension tool")
+	}
+	if _, ok := planned.Get("read"); !ok {
+		t.Fatal("plan mode lost read")
 	}
 }

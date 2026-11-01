@@ -3,12 +3,31 @@
 
 import type { ProviderInfo } from "./types";
 
+// escapeHtml makes text safe in element content and in quoted
+// attributes: a quote left as is would close the attribute and let the
+// text add its own (an event handler, say).
 export function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// revealHidden makes invisible and direction-changing characters (zero-
+// width spaces, bidi overrides, control characters) visible in text that
+// was already escaped, so an approval card shows exactly what will run.
+export function revealHidden(html: string): string {
+  return html.replace(/[\p{Cf}\p{Cc}]/gu, (ch) =>
+    ch === "\t" || ch === "\n" || ch === "\r"
+      ? ch
+      : `<span class="hidden-char" title="Invisible character">⟨U+${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}⟩</span>`,
+  );
 }
 
 export function escapeAttr(text: string): string {
-  return escapeHtml(text).replace(/"/g, "&quot;");
+  return escapeHtml(text);
 }
 
 // renderMarkdown renders agent output as Markdown HTML: fenced code,
@@ -241,7 +260,13 @@ function alignAttr(align: string | undefined): string {
 // Anchors carry data-ext and are opened in the system browser by the
 // chat view's delegated click handler.
 function mdLink(text: string, rawUrl: string): string {
-  const url = rawUrl.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  const url = rawUrl
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .trim();
   if (!/^(https?:\/\/|mailto:)/i.test(url)) {
     return text;
   }
@@ -260,10 +285,12 @@ function mdInline(src: string): string {
   let s = src.replace(/``(.+?)``|`([^`\n]+?)`/g, (_m, a: string, b: string) =>
     stash(`<code class="md-code">${a ?? b}</code>`),
   );
-  s = s.replace(/!\[([^\]]*?)\]\((\S+?)(?:\s+"[^"]*")?\)/g, (_m, alt: string, url: string) =>
+  s = s.replace(/!\[([^\]]*?)\]\((\S+?)(?:\s+&quot;.*?&quot;)?\)/g, (_m, alt: string, url: string) =>
     stash(mdLink(alt.trim() || "image", url)),
   );
-  s = s.replace(/\[([^\]]+?)\]\((\S+?)(?:\s+"[^"]*")?\)/g, (_m, t: string, url: string) => stash(mdLink(t, url)));
+  s = s.replace(/\[([^\]]+?)\]\((\S+?)(?:\s+&quot;.*?&quot;)?\)/g, (_m, t: string, url: string) =>
+    stash(mdLink(t, url)),
+  );
   s = s.replace(/\*\*\*([^*\n]+?)\*\*\*/g, "<strong><em>$1</em></strong>");
   s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_\n]+?)__/g, "<strong>$1</strong>");
@@ -272,7 +299,7 @@ function mdInline(src: string): string {
   s = s.replace(/~~([^~\n]+?)~~/g, "<del>$1</del>");
   s = s.replace(/&lt;(https?:[^&\s]+?)&gt;/g, (_m, url: string) => stash(mdLink(url, url)));
   s = s.replace(/(^|[\s(>])(https?:\/\/[^\s<]+)/g, (_m, pre: string, url: string) => {
-    let clean = url.replace(/[.,;:!?]+$/, "");
+    let clean = url.replace(/(?:[.,;:!?]|&quot;|&#39;)+$/, "");
     let opens = 0;
     let closes = 0;
     for (const ch of clean) {

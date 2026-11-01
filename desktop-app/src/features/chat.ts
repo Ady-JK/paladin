@@ -32,6 +32,7 @@ import { syncMcp } from "./mcp";
 import { applyToolDraft, syncTools } from "./toolSwitches";
 import { applyBudgetDraft, syncBudget } from "./budget";
 import { showTerminalResult } from "./sidePane";
+import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
 
 // TurnPlan is what a composer line resolves to before it is sent.
 interface TurnPlan {
@@ -155,17 +156,23 @@ async function runBang(line: string): Promise<void> {
 
 async function send(): Promise<void> {
   const message = inputEl.value.trim();
-  if (!message) {
+  if (!message && !hasAttachments()) {
     return;
   }
-  if (message.startsWith("!")) return runBang(inputEl.value.trimStart());
+  if (message.startsWith("!")) {
+    if (hasAttachments()) {
+      toast("Send attachments in a chat message, separate from ! commands", "error");
+      return;
+    }
+    return runBang(inputEl.value.trimStart());
+  }
 
   // Slash lines either run locally (never reaching the agent) or become
   // special turns: prompt commands, /compact, /plan <task>, /<skill>.
   // `/skill <name> …` routes to the agent with the name sent separately;
   // the sidecar injects SKILL.md before the LLM call.
   let route: AgentRoute | null = null;
-  const routed = await routeSlash(message);
+  const routed = message ? await routeSlash(message) : "none";
   if (routed === "local") {
     autosizeComposer();
     return;
@@ -178,7 +185,7 @@ async function send(): Promise<void> {
   if (!route?.compact) {
     dropFinishedPanel();
   }
-  const { skill, display } = planTurn(message, route);
+  const { skill, display } = planTurn(message || "Please inspect the attached files.", route);
 
   // Hand-typed @paths resolve to OS-specific absolute paths here;
   // popup-accepted rows are already absolute. The bubble keeps the
@@ -195,14 +202,17 @@ async function send(): Promise<void> {
 
   try {
     await ensureSession(display || message);
+    const sessionId = state.sessionId;
+    const cwd = state.cwd;
+    const attachmentBatch = await uploadAttachments(sessionId, cwd);
     dismissGreeting();
     // Fire and forget: the turn runs (or queues) in the sidecar and its
     // progress arrives as events for this session, even if the user
     // switches away or reloads.
     const info = await api.submitChat({
-      sessionId: state.sessionId,
+      sessionId,
       message: outgoing,
-      cwd: state.cwd,
+      cwd,
       provider: state.selectedProvider || null,
       model: state.selectedModel || null,
       skill,
@@ -211,9 +221,11 @@ async function send(): Promise<void> {
       compact: !!route?.compact,
       mode: turnMode(route),
       permissions: currentPreset(),
+      attachmentIds: attachmentBatch.ids,
     });
+    attachmentBatch.consume();
     noteSubmitted(info);
-    noteSent(state.sessionId);
+    noteSent(sessionId);
   } catch (error) {
     if (!inputEl.value && !route?.compact) {
       inputEl.value = message;
@@ -274,6 +286,7 @@ function requestStop(): void {
 // initChat wires the composer and the stop affordances.
 export function initChat(): void {
   initMessageLinks();
+  initAttachments();
   setSlashRunner(() => void send());
   initPermissions();
   initMode(() => {
@@ -314,7 +327,7 @@ export function initChat(): void {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       // Mod+Enter steers the running turn; Enter queues a follow-up.
-      if ((event.metaKey || event.ctrlKey) && isBusy(state.sessionId)) void steer();
+      if ((event.metaKey || event.ctrlKey) && isBusy(state.sessionId) && !hasAttachments()) void steer();
       else void send();
     }
   });

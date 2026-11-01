@@ -3,11 +3,29 @@
 // channels exposed by preload. stdout stays pure JSONL; logs go to stderr.
 
 import path from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, shell, WebContentsView } from "electron";
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  Notification,
+  session,
+  shell,
+  WebContentsView,
+  type IpcMainInvokeEvent,
+} from "electron";
 import { noteFor } from "./turnNotify";
 import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
-import { BrowserManager, type BrowserRequest, type BrowserState } from "./browser";
+import { hostCommand, validateConnection, type CoreConnection } from "./remote";
+import { allowedChatPopup, guestPermissionAllowed } from "./guestPolicy";
+import { BrowserManager, type BrowserRequest, type BrowserState, type EgressSetup } from "./browser";
+import { remoteOpenRefusal } from "./browserPolicy";
 import { runBrowserSmoke } from "./browserSmoke";
+import { refuseAll } from "./browserEgress";
+import { appFrameNavigationAllowed, appNavigationAllowed, isMainWindowFrame } from "./mainWindowPolicy";
 
 type ViewBounds = { x: number; y: number; width: number; height: number };
 
@@ -17,7 +35,30 @@ app.commandLine.appendSwitch("enable-smooth-scrolling");
 // Chromium chooses an ephemeral loopback port; Playwright connects only to
 // the session browser targets. The port lives for this app process.
 app.commandLine.appendSwitch("remote-debugging-port", "0");
+// Every renderer runs in Chromium's sandbox, whatever its webPreferences
+// say (each already asks for it; this makes it the rule).
+app.enableSandbox();
+// Defaults for any web contents the app creates: no <webview> guests and
+// no new windows. The windows and views below set their own window-open
+// handlers after this, which replace the deny where they allow more.
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("will-attach-webview", (event) => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+});
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+// The browser smoke checks the web-site policy without the network: its
+// made-up .test names resolve to its own loopback server, where the two
+// fixture sites stand in for public ones (rebind.test does not).
+const smokeEgress: EgressSetup =
+  !app.isPackaged && process.argv.includes("--smoke-browser")
+    ? {
+        lookup: async (host) => {
+          if (host.endsWith(".test") || host === "localhost") return [{ address: "127.0.0.1", family: 4 }];
+          throw new Error(`getaddrinfo ENOTFOUND ${host}`);
+        },
+        trusted: new Set(["site-a.test", "sub.site-a.test", "site-b.test", "sub.site-b.test"]),
+      }
+    : {};
 
 let win: BrowserWindow | null = null;
 // CJS (tsconfig.electron): __dirname is the dist-electron dir.
@@ -82,13 +123,62 @@ function agentBin(): string {
   return path.join(HERE, "..", "..", "core", "bin", agentHostFile());
 }
 
-const agent = new Sidecar({
-  command: agentBin(),
-  onEvent: forwardEvent,
-  // Turns that were running died with the old host: the renderer ends
-  // them and re-reads state.
-  onRestart: () => liveWindow()?.webContents.send("agent:event", { event: "host/restarted" }),
-});
+let connection: CoreConnection = { mode: "local" };
+let agent: Sidecar;
+
+function connectionFile(): string {
+  return path.join(app.getPath("userData"), "core-connection.json");
+}
+
+function loadConnection(): CoreConnection {
+  try {
+    return validateConnection(JSON.parse(fs.readFileSync(connectionFile(), "utf8")));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.error("invalid core connection", error);
+    return { mode: "local" };
+  }
+}
+
+function createAgent(selected: CoreConnection): Sidecar {
+  const sidecar = new Sidecar({
+    ...hostCommand(selected, agentBin()),
+    onEvent: forwardEvent,
+    // The renderer re-reads sessions and ends any interrupted turns.
+    onRestart: () => {
+      if (agent === sidecar) liveWindow()?.webContents.send("agent:event", { event: "host/restarted" });
+    },
+  });
+  return sidecar;
+}
+
+async function switchConnection(next: CoreConnection): Promise<CoreConnection> {
+  const checked = validateConnection(next);
+  const candidate = createAgent(checked);
+  candidate.start();
+  try {
+    const ping = await candidate.invoke("ping", {}, 12_000);
+    if (!ping || typeof ping !== "object" || (ping as { ok?: unknown }).ok !== true) {
+      throw new Error("remote core did not answer ping");
+    }
+  } catch (error) {
+    await candidate.stop(1_000);
+    throw error;
+  }
+  const file = connectionFile();
+  const pending = `${file}.tmp`;
+  try {
+    fs.writeFileSync(pending, JSON.stringify(checked), { mode: 0o600 });
+    fs.renameSync(pending, file);
+  } catch (error) {
+    await candidate.stop(1_000);
+    throw error;
+  }
+  await agent.stop(10_000);
+  connection = checked;
+  agent = candidate;
+  liveWindow()?.webContents.send("agent:event", { event: "host/restarted" });
+  return checked;
+}
 
 function forwardBrowserState(event: BrowserState): void {
   try {
@@ -98,7 +188,7 @@ function forwardBrowserState(event: BrowserState): void {
   }
 }
 
-const browsers = new BrowserManager(liveWindow, forwardBrowserState);
+const browsers = new BrowserManager(liveWindow, forwardBrowserState, smokeEgress);
 let nextUIBrowserID = 0;
 
 // isWebUrl admits only http(s) URLs: guest views and the OS browser
@@ -127,8 +217,20 @@ function liveWindow(): BrowserWindow | null {
 function forwardEvent(msg: HostMessage): void {
   if (msg.event === "browser/request") {
     if (typeof msg.id !== "string" || typeof msg.sessionId !== "string" || typeof msg.action !== "string") return;
+    const req = msg as BrowserRequest;
+    if (connection.mode === "ssh") {
+      // A remote core does not decide this computer's network access.
+      req.privateNetwork = false;
+      const refusal = req.action === "open" && typeof req.url === "string" ? remoteOpenRefusal(req.url) : "";
+      if (refusal) {
+        void agent
+          .invoke("browserReply", { id: req.id, ok: false, error: refusal })
+          .catch((error: unknown) => console.error("browser reply failed", error));
+        return;
+      }
+    }
     void browsers
-      .execute(msg as BrowserRequest)
+      .execute(req)
       .then((reply) =>
         agent.invoke("browserReply", reply).catch((error: unknown) => console.error("browser reply failed", error)),
       );
@@ -228,6 +330,18 @@ function defuseGuestDrag(view: WebContentsView): void {
   });
 }
 
+// lockGuestSession applies the site-pane permission policy to a
+// partition once (its popups share it).
+const lockedGuests = new WeakSet<Electron.Session>();
+function lockGuestSession(partition: string): void {
+  const jar = session.fromPartition(partition);
+  if (lockedGuests.has(jar)) return;
+  lockedGuests.add(jar);
+  jar.setPermissionRequestHandler((_contents, permission, callback) => callback(guestPermissionAllowed(permission)));
+  jar.setPermissionCheckHandler((_contents, permission) => guestPermissionAllowed(permission));
+  jar.setDevicePermissionHandler(() => false);
+}
+
 function ensureView(name: string, url: string, partition: string): WebContentsView {
   const existing = views.get(name);
   if (existing) {
@@ -245,6 +359,7 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
       return existing.view;
     }
   }
+  lockGuestSession(partition);
   const view = new WebContentsView({
     webPreferences: {
       partition,
@@ -270,7 +385,27 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
   if (ua) {
     view.webContents.setUserAgent(ua);
   }
-  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  // Sign-in windows for the embedded chat providers need their shared
+  // cookie partition. Other destinations keep the existing deny policy.
+  view.webContents.setWindowOpenHandler(({ url }) =>
+    allowedChatPopup(view.webContents.getURL()) && allowedChatPopup(url)
+      ? {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            width: 650,
+            height: 760,
+            webPreferences: { partition, sandbox: true, contextIsolation: true, nodeIntegration: false },
+          },
+        }
+      : { action: "deny" },
+  );
+  view.webContents.on("did-create-window", (popup) => {
+    popup.webContents.on("will-navigate", (event, nextURL) => {
+      if (!allowedChatPopup(nextURL)) event.preventDefault();
+    });
+    popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  });
   defuseGuestDrag(view);
   views.set(name, { view, url, partition });
   view.webContents.loadURL(url).catch(() => undefined);
@@ -354,6 +489,37 @@ function showOnly(name: string | null): void {
   }
 }
 
+// lockAppSession: the app window never needs the network (the core does
+// that work), so its session goes through a proxy that refuses
+// everything; only the dev server is reached directly. With WebRTC
+// limited to that proxy (createWindow), code in a visual cannot send
+// data out over WebRTC either, which CSP does not cover.
+async function lockAppSession(): Promise<void> {
+  const port = await refuseAll();
+  let bypass = "localhost;127.0.0.1;[::1]";
+  if (!app.isPackaged && process.env.ELECTRON_START_URL) {
+    try {
+      bypass += `;${new URL(process.env.ELECTRON_START_URL).host}`;
+    } catch {
+      /* no dev server override */
+    }
+  }
+  await session.defaultSession.setProxy({
+    mode: "fixed_servers",
+    proxyRules: `http://127.0.0.1:${port}`,
+    proxyBypassRules: bypass,
+  });
+  // The window uses no web permissions (notifications come from the main
+  // process): Electron would otherwise grant every request, including to
+  // code in a visual.
+  const allowed = (permission: string) => permission === "clipboard-sanitized-write";
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) =>
+    callback(allowed(permission)),
+  );
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) => allowed(permission));
+  session.defaultSession.setDevicePermissionHandler(() => false);
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1400,
@@ -375,10 +541,29 @@ function createWindow(): void {
     },
   });
 
+  win.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+
   win.once("ready-to-show", () => {
+    // The browser smoke drives a hidden window; it never needs the screen.
+    if (process.argv.includes("--smoke-browser")) return;
     win?.maximize();
     win?.show();
   });
+
+  const appURL =
+    !app.isPackaged && !process.argv.includes("--smoke-browser")
+      ? (process.env.ELECTRON_START_URL ?? "http://localhost:5173")
+      : pathToFileURL(path.join(HERE, "..", "dist", "index.html")).href;
+  const keepAppPage = (event: Electron.Event, navigation: string | { url: string }): void => {
+    const nextURL = typeof navigation === "string" ? navigation : navigation.url;
+    if (!appNavigationAllowed(appURL, nextURL)) event.preventDefault();
+  };
+  win.webContents.on("will-navigate", keepAppPage);
+  win.webContents.on("will-redirect", keepAppPage);
+  win.webContents.on("will-frame-navigate", (details) => {
+    if (!details.isMainFrame && !appFrameNavigationAllowed(appURL, details.url)) details.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   if (!app.isPackaged && process.argv.includes("--smoke-browser")) {
     win.loadFile(path.join(HERE, "..", "dist", "index.html")).catch(console.error);
@@ -425,15 +610,32 @@ function createWindow(): void {
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
     nativeTheme.themeSource = appTheme;
+    connection = loadConnection();
+    agent = createAgent(connection);
     if (!process.argv.includes("--smoke-browser")) agent.start();
 
-    ipcMain.handle("agent:invoke", (_e, method: unknown, params: unknown) => {
+    function handleTrusted<T extends unknown[], R>(
+      channel: string,
+      handler: (event: IpcMainInvokeEvent, ...args: T) => R,
+    ): void {
+      ipcMain.handle(channel, (event, ...args: unknown[]) => {
+        if (!isMainWindowFrame(event.sender, event.senderFrame, win?.webContents, win?.webContents.mainFrame)) {
+          throw new Error("privileged IPC requires the Paladin main frame");
+        }
+        return handler(event, ...(args as T));
+      });
+    }
+
+    handleTrusted("core:connection", () => connection);
+    handleTrusted("core:setConnection", (_e, value: unknown) => switchConnection(validateConnection(value)));
+
+    handleTrusted("agent:invoke", (_e, method: unknown, params: unknown) => {
       if (typeof method !== "string" || !method) throw new Error("agent:invoke needs a method name");
       return agent.invoke(method, params);
     });
-    ipcMain.handle("app:metrics", () => {
+    handleTrusted("app:metrics", () => {
       let cpu = 0;
       let rss = 0;
       const procs = app.getAppMetrics();
@@ -443,7 +645,7 @@ app
       }
       return { cpu, rss, procs: procs.length };
     });
-    ipcMain.handle("app:takePendingOpen", () => {
+    handleTrusted("app:takePendingOpen", () => {
       const id = pendingOpenSession;
       pendingOpenSession = null;
       return id;
@@ -451,7 +653,7 @@ app
 
     // Native OS folder picker for workspace selection. Null means the
     // user cancelled (or no window yet).
-    ipcMain.handle("dialog:pickDirectory", async (_e, defaultPath: string | null) => {
+    handleTrusted("dialog:pickDirectory", async (_e, defaultPath: string | null) => {
       if (!win) return null;
       const res = await dialog.showOpenDialog(win, {
         properties: ["openDirectory"],
@@ -460,58 +662,66 @@ app
       return res.canceled ? null : (res.filePaths[0] ?? null);
     });
 
-    ipcMain.handle("views:ensure", (_e, name: string, url: unknown, partition: string) => {
+    handleTrusted("views:ensure", (_e, name: string, url: unknown, partition: string) => {
       if (!win || !isWebUrl(url)) return false;
       ensureView(name, url, partition);
       return true;
     });
-    ipcMain.handle("views:show", (_e, name: string) => {
+    handleTrusted("views:show", (_e, name: string) => {
       showOnly(name);
       return true;
     });
-    ipcMain.handle("views:setBounds", (_e, bounds: unknown) => {
+    handleTrusted("views:setBounds", (_e, bounds: unknown) => {
       if (!isViewBounds(bounds)) return false;
       lastBounds = bounds;
       layoutVisible();
       return true;
     });
-    ipcMain.handle("views:navigate", (_e, name: string, url: unknown) => {
+    handleTrusted("views:navigate", (_e, name: string, url: unknown) => {
       const entry = views.get(name);
       if (!entry || !isWebUrl(url)) return false;
       entry.url = url;
       entry.view.webContents.loadURL(url).catch(() => undefined);
       return true;
     });
-    ipcMain.handle("views:reload", (_e, name: string) => {
+    handleTrusted("views:reload", (_e, name: string) => {
       views.get(name)?.view.webContents.reload();
       return true;
     });
-    ipcMain.handle("shell:openExternal", (_e, url: unknown) => {
+    handleTrusted("shell:openExternal", (_e, url: unknown) => {
       if (!isWebUrl(url) && !(typeof url === "string" && url.startsWith("mailto:"))) {
         throw new Error("openExternal only opens web and mailto links");
       }
       return shell.openExternal(url);
     });
 
-    ipcMain.handle("window:minimize", () => win?.minimize());
-    ipcMain.handle("window:toggleMaximize", () => {
+    handleTrusted("window:minimize", () => win?.minimize());
+    handleTrusted("window:toggleMaximize", () => {
       if (!win) return;
       if (win.isMaximized()) win.unmaximize();
       else win.maximize();
     });
-    ipcMain.handle("window:close", () => win?.close());
-    ipcMain.handle("window:isMaximized", () => win?.isMaximized() ?? false);
+    handleTrusted("window:close", () => win?.close());
+    handleTrusted("window:isMaximized", () => win?.isMaximized() ?? false);
 
-    ipcMain.handle("views:setTheme", (_e, theme: string) => {
+    handleTrusted("views:setTheme", (_e, theme: string) => {
       applyTheme(theme === "light" ? "light" : "dark");
       return true;
     });
-    ipcMain.handle("views:drop", (_e, name: string) => {
+    handleTrusted("views:drop", (_e, name: string) => {
       dropView(name);
       return true;
     });
 
-    ipcMain.handle("browser:open", async (_e, sessionId: string, url: string) => {
+    handleTrusted("browser:open", async (_e, sessionId: string, url: string) => {
+      // A URL typed in the pane follows the same private-network switch
+      // as the agent's requests; without an answer the last one stands.
+      const tools = (await agent.invoke("toolsList", {}, 3000).catch(() => null)) as {
+        behavior?: { webPrivateNetwork?: boolean };
+      } | null;
+      if (tools?.behavior && connection.mode === "local") {
+        browsers.setPrivateNetwork(tools.behavior.webPrivateNetwork === true);
+      }
       const reply = await browsers.execute({
         event: "browser/request",
         id: `ui-${++nextUIBrowserID}`,
@@ -522,22 +732,25 @@ app
       if (!reply.ok) throw new Error(reply.error ?? "browser open failed");
       return reply.result;
     });
-    ipcMain.handle("browser:show", (_e, sessionId: string | null) => browsers.show(sessionId));
-    ipcMain.handle("browser:setBounds", (_e, bounds: ViewBounds) => browsers.setBounds(bounds));
-    ipcMain.handle("browser:drop", (_e, sessionId: string) => {
+    handleTrusted("browser:show", (_e, sessionId: string | null) => browsers.show(sessionId));
+    handleTrusted("browser:setBounds", (_e, bounds: ViewBounds) => browsers.setBounds(bounds));
+    handleTrusted("browser:drop", (_e, sessionId: string) => {
       browsers.drop(sessionId);
       return true;
     });
-    ipcMain.handle("browser:pick", (_e, sessionId: string) => browsers.pick(sessionId));
-    ipcMain.handle("browser:cancelPick", (_e, sessionId: string) => browsers.cancelPick(sessionId));
-    ipcMain.handle("browser:getNotes", (_e, sessionId: string) => browsers.getNotes(sessionId));
-    ipcMain.handle("browser:clearNotes", (_e, sessionId: string) => browsers.clearNotes(sessionId));
+    handleTrusted("browser:pick", (_e, sessionId: string) => browsers.pick(sessionId));
+    handleTrusted("browser:cancelPick", (_e, sessionId: string) => browsers.cancelPick(sessionId));
+    handleTrusted("browser:getNotes", (_e, sessionId: string) => browsers.getNotes(sessionId));
+    handleTrusted("browser:clearNotes", (_e, sessionId: string) => browsers.clearNotes(sessionId));
 
+    await lockAppSession();
     createWindow();
     if (process.argv.includes("--smoke-browser")) {
-      void runBrowserSmoke(browsers).then(
+      void runBrowserSmoke(browsers, liveWindow, smokeEgress).then(
         () => {
-          console.log("[browser smoke] PASS: two sessions, Playwright actions, screenshot and element picker");
+          console.log(
+            "[browser smoke] PASS: two sessions, Playwright actions, screenshot, element picker and web-site policy",
+          );
           app.exit(0);
         },
         (error: unknown) => {
@@ -584,10 +797,12 @@ app
         probeBridge(12);
         agent
           .invoke("ping")
-          .then((r) => {
+          .then(async (r) => {
             clearTimeout(timer);
             if ((r as { ok?: unknown } | null)?.ok === true) {
-              console.log("[smoke] PASS: renderer loaded, agent-host ping ok");
+              const bridged = await win!.webContents.executeJavaScript('window.paladin.invoke("ping")');
+              if ((bridged as { ok?: unknown } | null)?.ok !== true) fail("preload bridge ping failed");
+              console.log("[smoke] PASS: renderer loaded, preload bridge and agent-host ping ok");
               process.exit(0);
             } else fail(`unexpected ping result: ${JSON.stringify(r)}`);
           })

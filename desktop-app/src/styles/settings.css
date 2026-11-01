@@ -1,0 +1,429 @@
+/* One consistent settings surface across every pane. */
+#settingsModal {
+  background: rgb(9 9 11 / 0.72);
+  backdrop-filter: blur(10px);
+}
+
+#settingsShell {
+  width: min(94vw, 1480px);
+  height: min(92vh, 1000px);
+  border-radius: 22px;
+  background: #18181b;
+  border-color: rgb(255 255 255 / 0.09);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 0.48);
+}
+
+#settingsSidebar {
+  width: 236px;
+  padding: 22px 14px;
+  gap: 3px;
+  overflow-y: auto;
+  background: #1f1f22;
+  border-color: rgb(255 255 255 / 0.08);
+}
+
+#settingsSidebar > div:first-child {
+  padding: 4px 12px 17px;
+  font-size: 1.12rem;
+  letter-spacing: -0.025em;
+}
+
+#settingsSearch {
+  width: 100%;
+  margin-bottom: 15px;
+  padding: 10px 13px;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 12px;
+  background: #303033;
+  color: #fafafa;
+  outline: none;
+}
+
+#settingsSearch:focus-visible,
+#settingsContentBody :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+
+.settings-nav-group {
+  padding: 12px 12px 7px;
+  color: #88888f;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#settingsSidebar button[role="tab"] {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  font-size: 0.85rem;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+#settingsSidebar button[role="tab"]:hover {
+  background: #303033;
+  color: #f4f4f5;
+}
+#settingsSidebar button[role="tab"][aria-selected="true"] {
+  background: #353538;
+  color: #fff;
+  box-shadow: none;
+}
+
+#settingsContent {
+  background: #18181b;
+}
+#settingsContentHeader {
+  min-height: 88px;
+  padding: 22px clamp(24px, 4vw, 60px) 0;
+  border: 0;
+}
+#settingsPaneTitle {
+  font-size: clamp(1.5rem, 2.1vw, 2rem);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+}
+.settings-pane-subtitle {
+  margin-top: 7px;
+  color: #93939c;
+  font-size: 0.78rem;
+}
+#settingsContentBody {
+  padding: 28px clamp(24px, 4vw, 60px) 60px;
+  font-size: 0.85rem;
+}
+#settingsContentBody > div:not(.hidden) {
+  width: 100%;
+  max-width: none;
+}
+#settingsContentBody label {
+  font-size: 0.85rem;
+}
+#settingsContentBody p {
+  line-height: 1.55;
+}
+
+#settingsContentBody :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  border-radius: 11px;
+  border-color: rgb(255 255 255 / 0.12);
+  background: #29292d;
+  color: #eeeef0;
+  min-height: 36px;
+}
+#settingsContentBody textarea {
+  line-height: 1.5;
+}
+#settingsContentBody button:not(.settings-icon-button) {
+  border-radius: 10px;
+}
+
+#settingsContentBody .tsw-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#settingsContentBody .tsw-search input[type="search"],
+.light #settingsContentBody .tsw-search input[type="search"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+#settingsContentBody .tsw-search:focus-within {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+#settingsPaneTools .tsw-search {
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 13px;
+  background: #29292d;
+}
+#settingsPaneTools .tsw-group {
+  border-color: rgb(255 255 255 / 0.1);
+  background: #242427;
+  box-shadow: none;
+  border-radius: 16px;
+}
+#settingsPaneTools .tsw-group-head {
+  padding: 13px 16px;
+  background: #29292d;
+  border-color: rgb(255 255 255 / 0.08);
+}
+#settingsPaneTools .tsw-row {
+  padding: 12px 16px;
+}
+#settingsPaneTools .tsw-row + .tsw-row {
+  border-color: rgb(255 255 255 / 0.07);
+}
+.light #settingsPaneTools .tsw-search {
+  background: #fff;
+  border-color: #d4d4d8;
+}
+.light #settingsPaneTools .tsw-group {
+  background: #fff;
+  border-color: #dedee2;
+}
+.light #settingsPaneTools .tsw-group-head {
+  background: #f5f5f6;
+  border-color: #dedee2;
+}
+
+.settings-lead {
+  max-width: 78ch;
+  color: #a1a1aa;
+}
+.settings-segmented {
+  display: inline-flex;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid rgb(255 255 255 / 0.09);
+  border-radius: 12px;
+  background: #242427;
+}
+.settings-segmented button {
+  padding: 8px 17px;
+  color: #a1a1aa;
+}
+.settings-segmented button[aria-selected="true"] {
+  background: #3b3b40;
+  color: #fafafa;
+}
+.settings-prompt-preview {
+  overflow: auto;
+  max-height: min(60vh, 640px);
+  padding: 24px 28px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 16px;
+  background: #222225;
+  color: #eeeef0;
+  line-height: 1.65;
+}
+#settingsPromptEditor textarea {
+  width: 100%;
+  padding: 14px;
+}
+#settingsSystemPrompt {
+  min-height: 420px;
+}
+.settings-primary,
+.settings-secondary {
+  padding: 9px 15px;
+  font-weight: 600;
+}
+.settings-primary {
+  background: #7569b2;
+  color: #fff;
+}
+.settings-primary:hover {
+  background: #877bc5;
+}
+.settings-secondary {
+  border: 1px solid rgb(255 255 255 / 0.14);
+  color: #dddde2;
+}
+.settings-secondary:hover {
+  background: #343438;
+}
+.light .settings-prompt-preview {
+  background: #fff;
+  color: #27272a;
+  border-color: #dedee2;
+}
+.light .settings-segmented {
+  background: #eaeaec;
+  border-color: #dedee2;
+}
+.light .settings-segmented button[aria-selected="true"] {
+  background: #fff;
+  color: #27272a;
+}
+.light .settings-secondary {
+  color: #27272a;
+  border-color: #dedee2;
+}
+
+#settingsPaneAnalytics .glass-panel {
+  background: #242427;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: none;
+}
+#settingsPaneAnalytics .glass-panel:hover {
+  transform: none;
+  box-shadow: none;
+}
+#settingsPaneAnalytics .glass-panel svg {
+  filter: saturate(0.65);
+}
+#settingsPaneAnalytics .settings-stat-icon {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.05);
+  color: #c3bbdf;
+}
+#settingsPaneAnalytics .glass-panel .bg-slate-950,
+#settingsPaneAnalytics .glass-panel .bg-slate-800 {
+  background: #2c2c30;
+}
+.light #settingsPaneAnalytics .glass-panel {
+  background: #f5f5f6;
+  border-color: #dedee2;
+}
+.light #settingsPaneAnalytics .settings-stat-icon {
+  background: #eaeaec;
+  border-color: #dedee2;
+  color: #655b9b;
+}
+.light #settingsPaneAnalytics :is(.text-slate-100, .text-slate-200, .text-slate-300) {
+  color: #3f3f46;
+}
+.light #settingsPaneAnalytics .text-slate-400 {
+  color: #71717a;
+}
+
+html[data-font-size="small"] {
+  font-size: 14px;
+}
+html[data-font-size="default"] {
+  font-size: 16px;
+}
+html[data-font-size="large"] {
+  font-size: 18px;
+}
+#settingsContentBody :is(.rounded-lg, .rounded-md, .budget-default) {
+  border-color: rgb(255 255 255 / 0.1);
+}
+
+.settings-group {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 17px;
+  padding: 19px 22px;
+  background: #242427;
+}
+.settings-group-heading {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fafafa;
+}
+.settings-group-help {
+  margin: 5px 0 16px;
+  color: #a1a1aa;
+}
+.settings-field-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 11px 0;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+}
+.settings-field-row label {
+  flex: 0 0 150px;
+  color: #eeeef0;
+}
+.settings-field-row input,
+.settings-field-row select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+}
+.settings-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 15px;
+}
+#settingsRemoteError {
+  color: #fda4af;
+}
+#settingsRemoteSave {
+  padding: 8px 14px;
+  background: #454051;
+  color: #fff;
+}
+
+.light #settingsShell,
+.light #settingsContent {
+  background: #fbfbfc;
+  color: #27272a;
+}
+.light #settingsShell {
+  border-color: #dedee2;
+  box-shadow: 0 28px 90px rgb(0 0 0 / 0.18);
+}
+.light #settingsSidebar {
+  background: #f1f1f3;
+  border-color: #dedee2;
+}
+.light #settingsSearch {
+  background: #e5e5e8;
+  border-color: #dedee2;
+  color: #27272a;
+}
+.light #settingsSidebar button[role="tab"]:hover {
+  background: #e5e5e8;
+  color: #27272a;
+}
+.light #settingsSidebar button[role="tab"][aria-selected="true"] {
+  background: #dedee2;
+  color: #18181b;
+}
+.light #settingsContentBody :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  background: #fff;
+  border-color: #d4d4d8;
+  color: #27272a;
+}
+.light .settings-group {
+  background: #f5f5f6;
+  border-color: #dedee2;
+}
+.light .settings-group-heading,
+.light .settings-field-row label {
+  color: #27272a;
+}
+.light .settings-field-row {
+  border-color: #e4e4e7;
+}
+.light .settings-group-help {
+  color: #71717a;
+}
+.light #settingsRemoteSave {
+  background: #e4e4e7;
+  color: #27272a;
+}
+
+@media (max-width: 760px) {
+  #settingsShell {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+  #settingsSidebar {
+    width: 170px;
+    padding-inline: 8px;
+  }
+  #settingsContentHeader {
+    min-height: 72px;
+  }
+  .settings-field-row {
+    display: block;
+  }
+  .settings-field-row label {
+    display: block;
+    margin-bottom: 7px;
+  }
+  .settings-field-row input,
+  .settings-field-row select {
+    width: 100%;
+  }
+}

@@ -79,3 +79,20 @@ func TestLoadAndBodyStripsFrontmatter(t *testing.T) {
 		t.Fatalf("builtin init: %v", err)
 	}
 }
+
+func TestCommandToolsFrontmatter(t *testing.T) {
+	c := parse("x", "---\ndescription: d\ntools: report_findings, other  extra\n---\nbody")
+	if strings.Join(c.Tools, "|") != "report_findings|other|extra" {
+		t.Fatalf("tools = %q", c.Tools)
+	}
+	review, err := Load(t.TempDir(), "", "review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(review.Tools, ",") != "report_findings" || review.Mode != "plan" {
+		t.Fatalf("builtin review: %+v", review)
+	}
+	if !strings.Contains(review.Body, "report_findings") || !strings.Contains(review.Body, "$SESSION_CHANGES") {
+		t.Fatal("review prompt must ask for report_findings and carry the session changes slot")
+	}
+}

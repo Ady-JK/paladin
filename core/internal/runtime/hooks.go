@@ -25,8 +25,8 @@ func (r *AgentRuntime) HooksSetConfig(scope, cwd, text string) (HooksOverview, e
 }
 
 // HooksTrust approves or revokes one of the folder's hooks files.
-func (r *AgentRuntime) HooksTrust(cwd, path string, trust bool) (HooksOverview, error) {
-	if err := r.hooks.Trust(cwd, path, trust); err != nil {
+func (r *AgentRuntime) HooksTrust(cwd, path string, trust bool, fingerprint string) (HooksOverview, error) {
+	if err := r.hooks.Trust(cwd, path, trust, fingerprint); err != nil {
 		return HooksOverview{}, err
 	}
 	return r.HooksList(cwd), nil

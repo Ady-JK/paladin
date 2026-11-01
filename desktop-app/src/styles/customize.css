@@ -1,0 +1,227 @@
+/* Settings → Customize: a list of built-ins beside an editor. */
+.cz-wrap {
+  display: flex;
+  gap: 16px;
+  height: calc(90vh - 190px);
+  min-height: 360px;
+}
+.cz-side {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.cz-search {
+  width: 100%;
+}
+.cz-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.cz-group {
+  margin: 10px 4px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+}
+.cz-group:first-child {
+  margin-top: 2px;
+}
+.cz-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cz-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border-radius: 6px;
+  padding: 5px 8px;
+  text-align: left;
+  color: var(--color-slate-600);
+}
+.dark .cz-item {
+  color: var(--color-slate-300);
+}
+.cz-item:hover {
+  background: var(--color-slate-100);
+}
+.dark .cz-item:hover {
+  background: rgb(255 255 255 / 0.04);
+}
+.cz-item.is-on {
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+  font-weight: 500;
+}
+.dark .cz-item.is-on {
+  background: rgb(255 255 255 / 0.07);
+  color: var(--color-slate-100);
+}
+.cz-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cz-badge {
+  flex-shrink: 0;
+  border-radius: 9999px;
+  padding: 0 6px;
+  font-size: 10px;
+  color: var(--color-slate-500);
+  background: var(--color-slate-100);
+}
+.dark .cz-badge {
+  background: rgb(255 255 255 / 0.05);
+}
+.cz-badge.is-edited {
+  color: var(--color-accent-700);
+  background: var(--color-accent-50);
+}
+.dark .cz-badge.is-edited {
+  color: var(--color-accent-400);
+  background: rgb(146 134 214 / 0.14);
+}
+.cz-badge.is-off {
+  color: var(--color-slate-400);
+}
+.cz-none,
+.cz-empty {
+  padding: 12px 6px;
+  color: var(--color-slate-500);
+}
+.cz-editor {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.cz-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cz-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-slate-900);
+}
+.dark .cz-title {
+  color: var(--color-slate-100);
+}
+.cz-kind {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--color-slate-400);
+}
+.cz-desc,
+.cz-vars,
+.cz-path {
+  margin: 0;
+  color: var(--color-slate-500);
+}
+.cz-path code,
+.cz-vars code,
+.cz-warn code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.cz-skill-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--color-slate-600);
+}
+.dark .cz-skill-switch {
+  color: var(--color-slate-300);
+}
+.cz-warn,
+.cz-dirty {
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--color-agent-amber);
+  background: rgb(245 158 11 / 0.08);
+}
+.cz-dirty button {
+  margin-left: 8px;
+  text-decoration: underline;
+}
+.cz-text {
+  flex: 1;
+  min-height: 220px;
+  resize: none;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-slate-800);
+  tab-size: 2;
+}
+.dark .cz-text {
+  border-color: var(--color-slate-700);
+  background: rgb(2 6 23 / 0.45);
+  color: var(--color-slate-200);
+}
+.cz-text:focus {
+  outline: none;
+  border-color: var(--color-accent-500);
+}
+.cz-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cz-status {
+  flex: 1;
+  color: var(--color-slate-500);
+}
+.cz-status[data-tone="ok"] {
+  color: var(--color-agent-emerald);
+}
+.cz-status[data-tone="warn"] {
+  color: var(--color-agent-rose);
+}
+.cz-btn {
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-weight: 600;
+  color: var(--color-slate-600);
+}
+.dark .cz-btn {
+  color: var(--color-slate-300);
+}
+.cz-btn:hover:not(:disabled) {
+  background: var(--color-slate-100);
+}
+.dark .cz-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.06);
+}
+.cz-btn:disabled {
+  opacity: 0.4;
+}
+.cz-btn.is-primary {
+  color: white;
+  background: var(--color-accent-600);
+}
+.cz-btn.is-primary:hover {
+  background: var(--color-accent-700);
+}
+.cz-btn.is-danger {
+  color: var(--color-agent-rose);
+}

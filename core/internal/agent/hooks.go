@@ -120,8 +120,8 @@ func (a *Agent) runPromptHooks() error {
 // and returns the hook's allow/ask verdict for the permission gate.
 func (a *Agent) preToolHooks(call *tools.ToolCall) (verdict hooks.Decision, context string, refusal *tools.ToolResult) {
 	in := a.hookInput(hooks.PreToolUse)
-	in.ToolName, in.ToolUseID = call.Name, call.ID
-	in.ToolInput = rawJSON(call.Arguments)
+	in.ToolName, in.ToolInput = a.hookTool(call)
+	in.ToolUseID = call.ID
 	out := a.runHooks(in)
 	if out.Blocked {
 		msg := "blocked by a PreToolUse hook: " + out.Reason + ". Do not retry it unchanged."
@@ -134,12 +134,24 @@ func (a *Agent) preToolHooks(call *tools.ToolCall) (verdict hooks.Decision, cont
 	return out.Decision, hookContext(hooks.PreToolUse, out.Context), nil
 }
 
+// hookTool is the call as it will run: the registry's name for the tool
+// ("functions.read" is read) and its repaired arguments, so a hook's
+// matcher and checks see what the gate and the tool see.
+func (a *Agent) hookTool(call *tools.ToolCall) (string, json.RawMessage) {
+	if a.tools != nil {
+		if name, args, ok := a.tools.Prepare(call); ok {
+			return name, args
+		}
+	}
+	return call.Name, rawJSON(call.Arguments)
+}
+
 // postToolHooks runs PostToolUse and folds its feedback into the result
 // the model sees. The tool already ran, so a block is feedback only.
 func (a *Agent) postToolHooks(call *tools.ToolCall, result tools.ToolResult) tools.ToolResult {
 	in := a.hookInput(hooks.PostToolUse)
-	in.ToolName, in.ToolUseID = call.Name, call.ID
-	in.ToolInput = rawJSON(call.Arguments)
+	in.ToolName, in.ToolInput = a.hookTool(call)
+	in.ToolUseID = call.ID
 	in.ToolResponse = rawJSON(result.Content)
 	out := a.runHooks(in)
 	if out.Blocked {

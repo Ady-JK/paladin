@@ -4,7 +4,7 @@
 // shrinks to a one-line receipt so the transcript stays readable.
 
 import * as api from "../core/api";
-import { escapeHtml } from "../core/format";
+import { escapeHtml, revealHidden } from "../core/format";
 import type { Approval, ApprovalDecision, PermissionRule } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
@@ -21,6 +21,9 @@ function patterns(rules: PermissionRule[] | undefined): string {
 function title(ap: Approval): string {
   if (ap.kind === "escalate") return ap.path ? "The sandbox blocked a write" : "Run without the sandbox?";
   if (ap.kind === "mcp") return ap.destructive ? "Call a destructive MCP tool?" : "Call this MCP tool?";
+  if (ap.kind === "web") return ap.tool === "browser" ? "Open this site in the browser?" : "Fetch from this site?";
+  if (ap.kind === "project") return "Run this project's own tool?";
+  if (ap.kind === "extension") return "Run this extension tool?";
   if (ap.destructive) return "Run a destructive command?";
   if (ap.tool === "shell") return "Run this command?";
   if (ap.kind === "read") return "Read this file?";
@@ -29,6 +32,7 @@ function title(ap: Approval): string {
 
 function subject(ap: Approval): string {
   if (ap.kind === "mcp" && ap.server) return `${ap.server} › ${ap.mcpTool || ap.tool}`;
+  if (ap.kind === "web") return ap.url || ap.host || ap.tool;
   return ap.command || ap.path || ap.tool;
 }
 
@@ -47,7 +51,13 @@ function choiceLabel(ap: Approval, choice: ApprovalDecision): string {
   if (ap.kind === "escalate" && ap.path) return GRANT_LABEL[choice];
   const what = patterns(ap.remember);
   const ruleTool = ap.remember?.[0]?.tool;
-  const prefix = ruleTool === "write" ? "writes to " : ruleTool === "read" ? "reads in " : "";
+  const prefix =
+    ruleTool === "write" ? "writes to " : ruleTool === "read" ? "reads in " : ruleTool === "web" ? "visits to " : "";
+  if (ruleTool === "project") {
+    if (choice === "session") return "Allow this project's tools for this session";
+    if (choice === "folder") return "Always allow this project's tools";
+    if (choice === "deny") return "Don't run them";
+  }
   switch (choice) {
     case "once":
       return ap.kind === "escalate" ? "Rerun without the sandbox" : "Allow once";
@@ -105,14 +115,28 @@ function pendingHtml(ap: Approval): string {
     })
     .join("");
   const kindIcon =
-    ap.destructive || ap.kind === "escalate" ? "sl-shield-off" : ap.kind === "mcp" ? "sl-plug" : "sl-shield";
+    ap.destructive || ap.kind === "escalate"
+      ? "sl-shield-off"
+      : ap.kind === "mcp" || ap.kind === "extension"
+        ? "sl-plug"
+        : ap.kind === "web"
+          ? "globe"
+          : "sl-shield";
   const body =
     ap.kind === "mcp"
       ? `<div class="approval-mcp"><span class="approval-mcp-server">${escapeHtml(ap.server ?? "")}</span>` +
         `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(ap.mcpTool || ap.tool)}</span></div>` +
         `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
-      : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${escapeHtml(subject(ap))}</pre>` +
-        grantHtml(ap);
+      : ap.kind === "extension"
+        ? `<div class="approval-mcp"><span class="approval-mcp-server">extension</span>` +
+          `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(ap.tool)}</span></div>` +
+          `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
+        : ap.kind === "web"
+          ? `<div class="approval-web"><span class="approval-web-host">${escapeHtml(ap.host ?? "")}</span>` +
+            `<span class="approval-web-url" title="${escapeHtml(ap.url ?? "")}">${revealHidden(escapeHtml(ap.url ?? ""))}</span>` +
+            `<span class="approval-web-note">Page content is treated as untrusted data.</span></div>`
+          : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>` +
+            grantHtml(ap);
   return (
     `<div class="approval-head">` +
     `<span class="approval-ico">${icon(kindIcon, "h-4 w-4")}</span>` +
@@ -132,6 +156,7 @@ export function paintApproval(el: HTMLElement, ap: Approval): void {
   el.classList.toggle("is-destructive", !!ap.destructive);
   el.classList.toggle("is-escalate", ap.kind === "escalate");
   el.classList.toggle("is-mcp", ap.kind === "mcp");
+  el.classList.toggle("is-web", ap.kind === "web");
   el.classList.toggle("is-resolved", ap.state !== "pending");
   if (ap.state === "pending") {
     if (was !== "pending") el.innerHTML = pendingHtml(ap);

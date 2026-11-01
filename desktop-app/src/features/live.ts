@@ -12,7 +12,8 @@ import type { Approval, AttachSnapshot, ToolInfo, TurnEvent, TurnInfo } from "..
 import { setStatus } from "../ui/status";
 import { toast } from "../ui/toast";
 import { escapeHtml } from "../core/format";
-import { createTurn, dismissGreeting, followTail, scrollToBottom } from "./chatView";
+import { createTurn, dismissGreeting, followTail, scrollToBottom, mountLinkCards } from "./chatView";
+import { mountImage, registerImage } from "./mediaGallery";
 import { TurnView } from "./turnView";
 import { handleAskToolEvent } from "./ask";
 import { handleTodoToolEvent, refreshTodos } from "./todos";
@@ -424,9 +425,45 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     e.asks.delete(id);
   }
   const view = e.views.get(turn.turnId);
+  const userRow = e.users.get(turn.turnId);
   e.views.delete(turn.turnId);
   e.users.delete(turn.turnId);
   const failure = view ? view.finish(turn) : turn.error || null;
+  if (view && turn.reply) mountLinkCards(view.wrapper, turn.reply);
+  if (view && turn.persisted)
+    void api
+      .sessionHistory(e.sessionId, null)
+      .then((history) => {
+        let latestUser = -1;
+        history.forEach((message, index) => {
+          if (message.role === "user") latestUser = index;
+        });
+        for (const message of history) {
+          if (message.image) registerImage(e.sessionId, message.image.path);
+          for (const attachment of message.attachments ?? [])
+            if (attachment.image) registerImage(e.sessionId, attachment.image.path);
+        }
+        const user = history[latestUser];
+        if (userRow && user)
+          for (const attachment of user.attachments ?? []) {
+            if (
+              attachment.image &&
+              !Array.from(userRow.querySelectorAll<HTMLElement>("[data-image-path]")).some(
+                (el) => el.dataset.imagePath === attachment.image!.path,
+              )
+            )
+              mountImage(userRow, e.sessionId, attachment.image.path, attachment.name);
+          }
+        for (const message of history.slice(latestUser + 1))
+          if (
+            message.image &&
+            !Array.from(view.wrapper.querySelectorAll<HTMLElement>("[data-image-path]")).some(
+              (el) => el.dataset.imagePath === message.image!.path,
+            )
+          )
+            mountImage(view.wrapper, e.sessionId, message.image.path, "Browser screenshot");
+      })
+      .catch(() => {});
   if (failure) {
     const err = createTurn("error", failure.startsWith("Error") ? failure : `Error: ${failure}`).wrapper;
     if (view?.wrapper.isConnected || view?.wrapper.parentElement) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/memory"
 )
 
@@ -70,7 +71,7 @@ func (s *Store) read(path string) ruleFile {
 }
 
 func (s *Store) write(path string, f ruleFile) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	if f.Rules == nil {
@@ -80,11 +81,7 @@ func (s *Store) write(path string, f ruleFile) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.Write(path, b)
 }
 
 // Rules returns one scope's rules.

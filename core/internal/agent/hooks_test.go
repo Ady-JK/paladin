@@ -283,3 +283,23 @@ func TestNoHooksMeansNoHookChunks(t *testing.T) {
 		t.Fatalf("notes %+v", notes)
 	}
 }
+
+// Hooks match the tool that runs, not the spelling the model used: a
+// "Read" matcher fires for "functions.read" and sees the repaired input.
+func TestToolHooksSeeTheResolvedTool(t *testing.T) {
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "functions.read", `{"path":"x.txt","offset":"2"}`), textRound("ok")}}
+	a, _, _, done := testAgent(t, prov)
+	defer close(done)
+	log := filepath.Join(t.TempDir(), "seen.json")
+	withHooks(t, a, `{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"command":`+hookScript(t, `cat > `+log+`; echo "no reads" >&2; exit 2`)+`}]}]}}`)
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if got := toolResultsByID(t, a)["c1"]; !strings.Contains(got, "no reads") {
+		t.Fatalf("the hook did not fire for functions.read: %q", got)
+	}
+	seen, _ := os.ReadFile(log)
+	if !strings.Contains(string(seen), `"tool_name":"read"`) || !strings.Contains(string(seen), `"offset":2`) {
+		t.Fatalf("hook input %s", seen)
+	}
+}

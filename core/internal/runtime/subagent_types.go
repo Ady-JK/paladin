@@ -7,8 +7,10 @@ package runtime
 import (
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/custom"
 )
 
 // subagentKind is one spawnable agent type.
@@ -16,8 +18,10 @@ type subagentKind struct {
 	Name        string
 	Description string
 	// Tools is the allowlist before the parent's switches apply.
-	Tools  []string
-	Prompt string
+	Tools []string
+	// Role follows the shared preamble in the child's prompt; both are
+	// editable (subagent.preamble, subagent.<name>).
+	Role string
 }
 
 const subagentPreamble = `# SUBAGENT
@@ -37,9 +41,8 @@ var subagentKinds = []subagentKind{
 	{
 		Name:        "explore",
 		Description: "Fast read-only codebase exploration: find files, trace call paths, answer questions about how code works.",
-		Tools:       []string{"read", "shell"},
-		Prompt: subagentPreamble + `
-## Role: explore
+		Tools:       []string{"read", "grep", "glob", "list", "shell"},
+		Role: `## Role: explore
 Investigate the codebase to answer the parent's question. Search likely
 locations first, widening only when needed, then read the relevant code.
 Report concrete findings: where things live, how they connect, and anything surprising.
@@ -48,9 +51,8 @@ Do not propose large redesigns unless asked.`,
 	{
 		Name:        "reviewer",
 		Description: "Read-only code review: inspect a diff or files for bugs, regressions, missing tests and risky changes.",
-		Tools:       []string{"read", "shell"},
-		Prompt: subagentPreamble + `
-## Role: reviewer
+		Tools:       []string{"read", "grep", "glob", "list", "shell"},
+		Role: `## Role: reviewer
 Review the code or change the parent describes (use git diff / git show
 when it names a change). Report only real problems: bugs, logic errors,
 regressions, security issues, missing error handling or tests. For each,
@@ -81,7 +83,12 @@ func subagentKindNames() []string {
 // Tools stays nil: the runtime pre-filters the registry, because the
 // parent may have switched some of the allowlist off.
 func (k subagentKind) template() agent.Template {
-	return agent.Template{Name: "subagent:" + k.Name, ReadOnly: true, Prompt: k.Prompt}
+	return agent.Template{Name: "subagent:" + k.Name, ReadOnly: true, Prompt: k.prompt()}
+}
+
+// prompt is the preamble plus the kind's role, as the user has them.
+func (k subagentKind) prompt() string {
+	return strings.TrimRight(custom.Text("subagent.preamble"), "\n") + "\n\n" + strings.TrimSpace(custom.Text("subagent."+k.Name))
 }
 
 func (k subagentKind) allows(tool string) bool { return slices.Contains(k.Tools, tool) }

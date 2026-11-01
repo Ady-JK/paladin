@@ -58,7 +58,9 @@ type Request struct {
 	Display string `json:"display,omitempty"`
 	// Permissions is the approval preset: "read-only", "auto"
 	// (default) or "full-access".
-	Permissions string `json:"permissions,omitempty"`
+	Permissions   string             `json:"permissions,omitempty"`
+	AttachmentIDs []string           `json:"attachmentIds,omitempty"`
+	Attachments   []media.Attachment `json:"-"`
 	// Steer, when set, returns (and clears) messages the user sent while
 	// the turn runs; they join before the next model call. The turn hub
 	// sets it; it never travels over the wire.
@@ -74,6 +76,18 @@ type Request struct {
 	// Notices, when set, returns (and clears) reminders for the model,
 	// such as a subagent's result; they join before the next model call.
 	Notices func() []Notice `json:"-"`
+	// FormatOnWrite runs the project's formatter after write and edit.
+	// The runtime sets it from settings; never on the wire.
+	FormatOnWrite bool `json:"-"`
+	// VerifyNudge reminds the model once to check changed code before
+	// the turn ends. The runtime sets it from settings; never on the wire.
+	VerifyNudge bool `json:"-"`
+	// Diagnose and Warm connect write/edit/read to language servers
+	// (tools.ToolCtx); nil means none. Set by the runtime.
+	Diagnose func(path string, trust func(string) bool) tools.Diagnosis `json:"-"`
+	Warm     func(path string, trust func(string) bool)                 `json:"-"`
+	// Web is the user's web settings for web_fetch. Set by the runtime.
+	Web tools.WebOptions `json:"-"`
 }
 
 // Notice is a reminder delivered into a running turn: recorded as a
@@ -143,6 +157,12 @@ type ToolGate interface {
 	Escalate(ctx context.Context, callID, name string, args json.RawMessage, b permission.Blocked, notify func(permission.Approval)) permission.Escalation
 }
 
+// ProjectTrust is a gate that also decides whether tools the workspace
+// ships may run (formatters, language servers); see tools.ToolCtx.
+type ProjectTrust interface {
+	TrustProject(ctx context.Context, callID, tool string, notify func(permission.Approval)) bool
+}
+
 // StepRecorder brackets each run of a file-changing tool, e.g. with
 // workspace snapshots for undo. It must call run exactly once and return
 // its result; recording is best-effort and must never fail the call.
@@ -186,6 +206,11 @@ type runConfig struct {
 	budget      func() float64
 	notices     func() []Notice
 	ledgers     func() []string
+	format      bool
+	web         tools.WebOptions
+	verify      bool
+	diagnose    func(string, func(string) bool) tools.Diagnosis
+	warm        func(string, func(string) bool)
 	session     transcript.Session
 	provider    inference.Provider
 	tools       *tools.Registry
@@ -199,6 +224,7 @@ type runConfig struct {
 	done        <-chan struct{}
 	message     string
 	display     string
+	attachments []media.Attachment
 	resume      bool
 	compactOnly bool
 	// hooks runs the user's hook scripts; sessionStart is the
@@ -281,9 +307,10 @@ type Agent struct {
 
 	// currentMessage and currentResume are the turn input, held so Run
 	// can persist exactly what was asked.
-	currentMessage string
-	currentDisplay string
-	currentResume  bool
+	currentMessage     string
+	currentDisplay     string
+	currentAttachments []media.Attachment
+	currentResume      bool
 	// compactOnly runs a manual /compact instead of a model turn.
 	compactOnly bool
 
@@ -297,6 +324,13 @@ type Agent struct {
 	// hook's continue:false.
 	stopContinuations int
 	halt              hookHalt
+	// verify turns on the check-before-finishing nudge (verify.go);
+	// unverified are code files changed since the last passing check;
+	// verifyFailed is set when the last check run failed.
+	verify       bool
+	verifyNudged bool
+	unverified   []string
+	verifyFailed bool
 }
 
 func newAgent(c runConfig) *Agent {
@@ -320,6 +354,11 @@ func newAgent(c runConfig) *Agent {
 			SessionDir: c.session.Dir,
 			Cancel:     c.ctx,
 			SessionID:  c.session.Meta.SessionID,
+
+			FormatOnWrite: c.format,
+			Diagnose:      c.diagnose,
+			Warm:          c.warm,
+			Web:           c.web,
 		},
 		system:   c.system,
 		history:  c.history,
@@ -328,6 +367,7 @@ func newAgent(c runConfig) *Agent {
 		tx:       c.tx,
 		done:     c.done,
 
+		verify:      c.verify,
 		persistGate: c.persistGate,
 		gate:        c.gate,
 		steps:       c.steps,
@@ -337,10 +377,11 @@ func newAgent(c runConfig) *Agent {
 
 		spendLedgers: c.ledgers,
 
-		currentMessage: c.message,
-		currentDisplay: c.display,
-		currentResume:  c.resume,
-		compactOnly:    c.compactOnly,
+		currentMessage:     c.message,
+		currentDisplay:     c.display,
+		currentAttachments: c.attachments,
+		currentResume:      c.resume,
+		compactOnly:        c.compactOnly,
 
 		hooks:          c.hooks,
 		sessionStart:   c.sessionStart,
@@ -445,6 +486,7 @@ func (a *Agent) persist(message string, resume bool) error {
 		if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(message) {
 			msg.Display = a.currentDisplay
 		}
+		msg.Attachments = a.currentAttachments
 		turn = append(turn, msg)
 	}
 	turn = append(turn, a.records...)

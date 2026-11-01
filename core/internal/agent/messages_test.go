@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -62,6 +63,24 @@ func TestModelMessagesIncludesCurrent(t *testing.T) {
 	resumed := a.modelMessages("new", true)
 	if len(resumed) != 0 {
 		t.Fatalf("resume should not append: %+v", resumed)
+	}
+}
+
+func TestAttachedImagesReachCurrentAndReplayedModelMessages(t *testing.T) {
+	image := &media.Image{Path: "/session/pixel.png", MIMEType: "image/png", Size: 8, SHA256: "hash"}
+	attachment := media.Attachment{ID: "file-1", Name: "pixel.png", Path: image.Path, Image: image}
+	a, _, _, done := testAgent(t, &mockProvider{})
+	defer close(done)
+	a.currentAttachments = []media.Attachment{attachment}
+	current := a.modelMessages("inspect it", false)
+	if len(current) != 2 || current[1].Image != image || current[1].Role != "user" {
+		t.Fatalf("current image missing: %+v", current)
+	}
+	stored := transcript.UserMessage("inspect it")
+	stored.Attachments = []media.Attachment{attachment}
+	replayed := LlmMessages([]transcript.Message{stored}, true)
+	if len(replayed) != 2 || replayed[1].Image == nil || replayed[1].Image.Path != image.Path {
+		t.Fatalf("replayed image missing: %+v", replayed)
 	}
 }
 

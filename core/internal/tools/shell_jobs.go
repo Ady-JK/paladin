@@ -241,7 +241,7 @@ func (s *ShellTool) status(jobID, caller string) (string, error) {
 	if !ok {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
 	}
-	text, err := shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log)
+	text, err := shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "")
 	if err != nil {
 		return "", err
 	}
@@ -279,7 +279,7 @@ func (s *ShellTool) cancel(jobID, caller string) (string, error) {
 	if !ok {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
 	}
-	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log)
+	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "")
 }
 
 func (s *ShellTool) ArmNotify(owner, callID, jobID string) {

@@ -28,8 +28,10 @@ test("a turn's files open a snapshot diff and the header opens session changes",
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
 
   await expect(page.locator("#sessionChangesBtn")).toContainText("2");
-  const turnChange = page.locator('#messages [data-turn-index="0"] .turn-changes');
+  const turnChange = page.locator('#messages .turn-changes[data-change-turn="0"]');
   await expect(turnChange).toContainText("2 files");
+  await expect(turnChange).toContainText("+2");
+  await expect(turnChange).toContainText("-0");
   await turnChange.click();
   await expect(page.locator("#sidePane .pane-changes")).toBeVisible();
   await page.locator('#sidePane [data-change-file="index.html"]').click();
@@ -40,7 +42,6 @@ test("a turn's files open a snapshot diff and the header opens session changes",
   await expect(page.locator("#sidePane .change-scope")).toContainText("Session changes");
   await page.locator('#sidePane [data-change-file="page2.html"]').click();
   expect(await page.evaluate(() => (window as any).__e2eDiffCalls?.at(-1)?.turn)).toBe(-1);
-  await page.locator("#paneHistoryBtn").click();
   await page.locator("#paneLayoutBtn").click();
   await expect(page.locator("#sidePane .pane-changes")).toBeVisible();
   expect((await page.locator("#sidePane").boundingBox())!.width).toBeGreaterThan(page.viewportSize()!.width * 0.8);
@@ -73,6 +74,6 @@ test("a finished write shows its file indicator while the turn is still running"
       status: "ok",
     });
   });
-  await expect(page.locator("#messages [data-turn-id] .turn-changes")).toContainText("1 file");
+  await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toContainText("1 file");
   await expect(page.locator("#sessionChangesBtn")).toContainText("1");
 });

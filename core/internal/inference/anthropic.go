@@ -162,7 +162,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
 	p.anthropicHeaders(req, sessionID, false)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return ToolResponse{}, CancelledError()
@@ -269,7 +269,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 		return RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
 	p.anthropicHeaders(req, sessionID, true)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		if parent.Err() != nil {
 			return CancelledError()

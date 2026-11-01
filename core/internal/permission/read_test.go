@@ -162,3 +162,63 @@ func swapHome(dir string) func() {
 	homeDir = func() (string, error) { return dir, nil }
 	return func() { homeDir = old }
 }
+
+func TestSearchToolsGateOutsideRoots(t *testing.T) {
+	ws, other := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(other, "src", "private"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"grep", "glob", "list"} {
+		if _, gated := Classify(name, args(map[string]any{"pattern": "x"}), ws); gated {
+			t.Errorf("%s with no path searches the workspace and must not be gated", name)
+		}
+		if _, gated := Classify(name, args(map[string]any{"pattern": "x", "path": ws}), ws); gated {
+			t.Errorf("%s inside the workspace must not be gated", name)
+		}
+		root := filepath.Join(other, "src")
+		req, gated := Classify(name, args(map[string]any{"pattern": "x", "path": root}), ws)
+		if !gated || req.Kind != KindRead || !req.Outside || !req.Dir || req.Tool != name {
+			t.Fatalf("%s outside: %+v %v", name, req, gated)
+		}
+		// A folder search is granted that folder, not its parent.
+		d := Decide(Auto, req, nil)
+		if d.Verdict != Ask || len(d.Remember) != 1 || d.Remember[0].Pattern != root {
+			t.Fatalf("%s grant: %+v", name, d)
+		}
+		// A deny rule under the searched folder blocks the whole search.
+		deny := []Rule{{Tool: ToolRead, Pattern: filepath.Join(root, "private"), Action: ActionDeny}}
+		if d := Decide(FullAccess, req, deny); d.Verdict != Deny {
+			t.Fatalf("%s nested deny: %+v", name, d)
+		}
+	}
+}
+
+// A session's own folder (spilled tool output, job logs, screenshots)
+// reads without a card; a deny rule still wins.
+func TestGateReadsTheSessionsOwnFiles(t *testing.T) {
+	ws, sess := t.TempDir(), t.TempDir()
+	spill := filepath.Join(sess, "tool-output", "c1.txt")
+	os.MkdirAll(filepath.Dir(spill), 0o755)
+	os.WriteFile(spill, []byte("full"), 0o644)
+	g := newGate(t, Auto)
+	g.Workspace = ws
+	g.Readable = []string{sess}
+	for _, call := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"read", map[string]any{"path": spill}},
+		{"grep", map[string]any{"pattern": "x", "path": filepath.Dir(spill)}},
+	} {
+		rec := &recorder{}
+		if auth := g.Authorize(context.Background(), "c", call.name, args(call.args), rec.notify); !auth.Run || rec.count() != 0 {
+			t.Fatalf("%s of the session folder should run without asking: %+v %d", call.name, auth, rec.count())
+		}
+	}
+	if err := g.Store.Add(ScopeSession, ws, "s1", Rule{Tool: ToolRead, Pattern: filepath.Join(sess, "tool-output"), Action: ActionDeny}); err != nil {
+		t.Fatal(err)
+	}
+	if auth := g.Authorize(context.Background(), "c", "read", args(map[string]any{"path": spill}), func(Approval) {}); auth.Run {
+		t.Fatal("a deny rule must still block the session folder")
+	}
+}

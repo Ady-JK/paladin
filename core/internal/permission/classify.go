@@ -16,6 +16,11 @@ const (
 	KindEscalate = "escalate"
 	KindMCP      = "mcp"
 	KindRead     = "read"
+	KindWeb      = "web"
+	// KindProject asks whether a tool the workspace ships may run.
+	KindProject = "project"
+	// KindExtension is a call to an extension tool.
+	KindExtension = "extension"
 )
 
 // maxCardArgs caps the arguments an approval card shows.
@@ -28,19 +33,27 @@ type segment struct {
 
 // Request is a gated tool call, classified.
 type Request struct {
-	Tool        string
-	Kind        string
-	Command     string
-	Path        string
-	Outside     bool
+	Tool    string
+	Kind    string
+	Command string
+	Path    string
+	Outside bool
+	// Protected is the folder of a write whose files can make something
+	// run code later (see protectedDir), or "".
+	Protected   string
 	Safe        bool
 	Destructive bool
 	// Real is Path with symlinks resolved (reads); Linked marks a path
 	// inside the workspace whose symlink leads out.
 	Real   string
 	Linked bool
+	// Dir marks a read of a whole folder by a search tool.
+	Dir bool
 	// Unparsed commands use substitution, so no rule can cover them.
 	Unparsed bool
+	// Hidden marks a command or path with invisible or direction-changing
+	// characters: it may not run, or land, where the card shows.
+	Hidden bool
 	// Reads are paths outside the workspace that otherwise read-only
 	// shell segments name; VarRead marks one that expands a variable.
 	Reads    []readTarget
@@ -52,9 +65,22 @@ type Request struct {
 	Server  string
 	MCPTool string
 	Args    string
+	// Host and URL describe a web request (web_fetch, browser open).
+	Host string
+	URL  string
 }
 
 // ClassifyMCP describes a call to a tool proxied from an MCP server.
+// classifyExtension is a call to an extension tool, with its arguments
+// for the card.
+func classifyExtension(name string, raw json.RawMessage) Request {
+	args := strings.TrimSpace(string(raw))
+	if len(args) > maxCardArgs {
+		args = args[:maxCardArgs] + "…"
+	}
+	return Request{Tool: name, Kind: KindExtension, Args: args}
+}
+
 func ClassifyMCP(name string, info tools.MCPInfo, raw json.RawMessage) Request {
 	args := strings.TrimSpace(string(raw))
 	if len(args) > maxCardArgs {
@@ -89,7 +115,16 @@ func Classify(name string, raw json.RawMessage, workspace string) (Request, bool
 			// The tool rejects it itself; nothing would be written.
 			return Request{}, false
 		}
-		return Request{Tool: name, Kind: KindWrite, Path: path, Outside: scope == tools.ScopeOutside}, true
+		req := Request{Tool: name, Kind: KindWrite, Path: path, Real: tools.RealPath(path), Outside: scope == tools.ScopeOutside,
+			Hidden: tools.HiddenChars(a.Path)}
+		if !req.Outside {
+			// Through a symlink too: link -> .git is still .git.
+			req.Protected = protectedDir(workspace, path)
+			if req.Protected == "" && protectedDir(tools.RealPath(workspace), tools.RealPath(path)) != "" {
+				req.Protected = filepath.Dir(path)
+			}
+		}
+		return req, true
 	case "read":
 		var a struct {
 			Path string `json:"path"`
@@ -103,12 +138,62 @@ func Classify(name string, raw json.RawMessage, workspace string) (Request, bool
 		}
 		t := newReadTarget(path, workspace)
 		return Request{Tool: name, Kind: KindRead, Path: path, Real: t.real, Linked: t.linked, Outside: true}, true
+	case "grep", "glob", "list":
+		return classifySearch(name, raw, workspace)
+	case "web_fetch", "browser":
+		return classifyWeb(name, raw)
 	}
 	return Request{}, false
 }
 
+// classifyWeb gates web_fetch and browser open by site, and a service on
+// this machine by port (localhost:PORT, whichever name the URL used).
+// Invalid URLs (the tool rejects them) are not gated; other browser
+// actions stay on the page already approved.
+func classifyWeb(name string, raw json.RawMessage) (Request, bool) {
+	var a struct {
+		Action string `json:"action"`
+		URL    string `json:"url"`
+	}
+	if json.Unmarshal(raw, &a) != nil || (name == "browser" && a.Action != "open") {
+		return Request{}, false
+	}
+	u, err := tools.ParseWebURL(a.URL)
+	if err != nil {
+		return Request{}, false
+	}
+	host := strings.ToLower(u.Hostname())
+	if tools.LocalHost(host) {
+		port := u.Port()
+		if port == "" {
+			port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+		}
+		host = "localhost:" + port
+	}
+	return Request{Tool: name, Kind: KindWeb, Host: host, URL: u.String()}, true
+}
+
+// classifySearch gates a search whose root lies outside the workspace
+// like a read of that folder (or file). No path means the workspace.
+func classifySearch(name string, raw json.RawMessage, workspace string) (Request, bool) {
+	var a struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(raw, &a) != nil || strings.TrimSpace(a.Path) == "" {
+		return Request{}, false
+	}
+	path, scope, err := tools.ResolveScopedPath(name, "path", a.Path, workspace)
+	if err != nil || scope == tools.ScopeInside {
+		return Request{}, false
+	}
+	t := newReadTarget(path, workspace)
+	info, err := os.Stat(path)
+	return Request{Tool: name, Kind: KindRead, Path: path, Real: t.real, Linked: t.linked, Outside: true,
+		Dir: err == nil && info.IsDir()}, true
+}
+
 func classifyShell(cmd, workspace string) Request {
-	req := Request{Tool: "shell", Kind: KindShell, Command: strings.TrimSpace(cmd)}
+	req := Request{Tool: "shell", Kind: KindShell, Command: strings.TrimSpace(cmd), Hidden: tools.HiddenChars(cmd)}
 	req.Safe = tools.ReadOnlyCommand(cmd) == nil
 	req.Destructive = isDestructive(cmd)
 	req.Unparsed = strings.Contains(cmd, "$(") || strings.Contains(cmd, "`") ||
@@ -121,6 +206,11 @@ func classifyShell(cmd, workspace string) Request {
 	for _, words := range segs {
 		safe := !redirects(words) && tools.ReadOnlyCommand(strings.Join(quoteAll(words), " ")) == nil
 		req.Segments = append(req.Segments, segment{words: words, safe: safe})
+		// A bare cd (or cd -) goes to a folder the words do not name, so
+		// relative paths after it may be outside the workspace.
+		if words[0] == "cd" && (len(words) == 1 || words[1] == "-" || words[1] == "--") {
+			req.VarRead = true
+		}
 		if safe {
 			reads, variable := outsideReads(words, workspace)
 			req.Reads = append(req.Reads, reads...)
@@ -131,10 +221,12 @@ func classifyShell(cmd, workspace string) Request {
 }
 
 // readTarget is a path a command reads: as written and symlink-resolved.
-// linked marks a path inside the workspace whose symlink leads out.
+// linked marks a path inside the workspace whose symlink leads out; dir
+// marks a folder searched as a whole (grep, glob, list).
 type readTarget struct {
 	path, real string
 	linked     bool
+	dir        bool
 }
 
 func newReadTarget(path, workspace string) readTarget {
@@ -215,6 +307,8 @@ func quoteAll(words []string) []string {
 
 // splitCommand splits on ;, &, &&, ||, | and newlines outside quotes and
 // returns each segment's words, quotes removed. Redirections stay as words.
+// A # starting a word begins a comment to the end of the line, as in the
+// shell: a quote inside it must not swallow the lines after it.
 func splitCommand(cmd string) ([][]string, error) {
 	var (
 		segs  [][]string
@@ -253,6 +347,14 @@ func splitCommand(cmd string) ([][]string, error) {
 			continue
 		}
 		switch r {
+		case '#':
+			if cur.Len() == 0 && !has {
+				for i+1 < len(runes) && runes[i+1] != '\n' {
+					i++
+				}
+				continue
+			}
+			cur.WriteRune(r)
 		case '\'', '"':
 			quote, has = r, true
 		case '\\':
@@ -455,4 +557,29 @@ func contains(args []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// protectedDir is the folder of path, below base, whose files make
+// something run code later: git's config and hooks (.git), agent
+// settings, hooks and MCP servers (.paladin, .claude), and installed
+// tools and packages Paladin or the user runs (node_modules, a Python
+// virtualenv). It is "" for any other path. Names compare case-blind,
+// as on macOS's default file system.
+func protectedDir(base, path string) string {
+	rel, err := filepath.Rel(base, path)
+	if base == "" || err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	cur := base
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		switch strings.ToLower(part) {
+		case ".git", ".paladin", ".claude", "node_modules", ".venv":
+			return cur
+		}
+		if _, err := os.Stat(filepath.Join(cur, "pyvenv.cfg")); err == nil {
+			return cur
+		}
+	}
+	return ""
 }

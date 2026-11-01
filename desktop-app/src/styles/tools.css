@@ -563,3 +563,42 @@
   color: var(--color-agent-rose);
   border-color: rgb(244 63 94 / 0.35);
 }
+
+/* Language server status under its Behavior switch. */
+.tsw-lsp-wrap {
+  list-style: none;
+  padding: 0 0 6px 2px;
+}
+.tsw-lsp {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  color: var(--color-slate-500);
+}
+.tsw-lsp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.tsw-lsp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-slate-400);
+}
+.tsw-lsp-row[data-state="ready"] .tsw-lsp-dot {
+  background: rgb(22 163 74);
+}
+.tsw-lsp-row[data-state="failed"] .tsw-lsp-dot {
+  background: rgb(225 86 104);
+}
+.tsw-lsp-root {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}

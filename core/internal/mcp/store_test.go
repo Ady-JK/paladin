@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 func TestParseFileValidates(t *testing.T) {
@@ -150,8 +152,23 @@ func TestRenderResult(t *testing.T) {
 	if got := renderResult(CallResult{}); got != "(no output)" {
 		t.Fatalf("empty: %q", got)
 	}
-	big := renderResult(CallResult{Content: []Content{{Type: "text", Text: strings.Repeat("a", maxResultChars*2)}}})
+	full := renderResult(CallResult{Content: []Content{{Type: "text", Text: strings.Repeat("a", maxResultChars*2)}}})
+	big := fitResult(full, nil)
 	if len(big) > maxResultChars+200 || !strings.Contains(big, "characters omitted") {
 		t.Fatalf("not truncated: %d", len(big))
+	}
+	// With a session the whole result is kept on disk and named.
+	dir := t.TempDir()
+	tc := &tools.ToolCtx{SessionDir: dir, CallID: "c1"}
+	spilled := fitResult(full, tc)
+	path := filepath.Join(dir, tools.ToolOutputDir, "c1.txt")
+	if len(spilled) > maxResultChars+400 || !strings.Contains(spilled, path) {
+		t.Fatalf("spill not named: %q", spilled[len(spilled)-300:])
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != full {
+		t.Fatalf("spill holds %d bytes, err %v", len(data), err)
+	}
+	if fitResult("short", tc) != "short" {
+		t.Fatal("short results pass through")
 	}
 }

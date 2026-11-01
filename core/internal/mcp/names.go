@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 // maxToolName is the strictest provider limit on function names.
@@ -91,6 +93,19 @@ func renderResult(res CallResult) string {
 	}
 	if strings.TrimSpace(out) == "" {
 		return "(no output)"
+	}
+	return out
+}
+
+// fitResult caps a rendered result for the model. An over-long one is
+// kept whole in the session's tool-output folder and the clipped text
+// names that file.
+func fitResult(out string, tc *tools.ToolCtx) string {
+	if len(out) <= maxResultChars {
+		return out
+	}
+	if path := tools.SpillText(tc, out); path != "" {
+		return clip(out, maxResultChars) + "\n\n" + tools.SpillNote(path)
 	}
 	return clip(out, maxResultChars)
 }

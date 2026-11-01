@@ -136,6 +136,21 @@ test("a row expands to its input and output", async ({ page }) => {
   await expect(row).toContainText("hi-from-shell");
 });
 
+test("write and edit rows show added and removed lines", async ({ page }) => {
+  await setup(page);
+  await emit(page, [
+    tool("write-1", "write", { path: "a.txt", content: "one\ntwo\n" }, "ok", { created: true, lines: 2, old_lines: 0 }),
+    tool("edit-1", "edit", { path: "b.txt", old_string: "before\n", new_string: "after\nmore\n" }, "ok", {
+      replacements: 1,
+    }),
+  ]);
+  await runs(page).locator(".tool-run-head").click();
+  await expect(page.locator('.tool-row[data-tool="write"] .tool-add')).toHaveText("+2");
+  await expect(page.locator('.tool-row[data-tool="write"] .tool-del')).toHaveText("-0");
+  await expect(page.locator('.tool-row[data-tool="edit"] .tool-add')).toHaveText("+2");
+  await expect(page.locator('.tool-row[data-tool="edit"] .tool-del')).toHaveText("-1");
+});
+
 test("history transcripts group calls the same way", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {

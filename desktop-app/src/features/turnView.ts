@@ -24,6 +24,18 @@ import {
   retryText,
   setDividerLabel,
 } from "./chatView";
+import { createFindingsCard, paintFindings } from "./findings";
+import { createVisualCard, updateVisualCard } from "./visuals";
+
+// CARD_TOOLS draw their call as a card of its own in the flow instead
+// of a row in the tool group.
+const CARD_TOOLS: Record<
+  string,
+  { create: (sessionId: string, tool: ToolInfo) => HTMLElement; paint: (card: HTMLElement, tool: ToolInfo) => void }
+> = {
+  report_findings: { create: createFindingsCard, paint: paintFindings },
+  visual: { create: (_sessionId, tool) => createVisualCard(tool), paint: updateVisualCard },
+};
 import { ToolRun } from "./toolRun";
 import { createApprovalCard, focusApproval, paintApproval } from "./approvals";
 import { formatUsd } from "./usage";
@@ -51,6 +63,7 @@ export class TurnView {
   private segment = "";
   private reply = "";
   private readonly tools = new Map<string, ToolRun>();
+  private readonly cards = new Map<string, HTMLElement>();
   // run is the open group of consecutive calls; text closes it.
   private run: ToolRun | null = null;
   private retryNotice: HTMLElement | null = null;
@@ -191,6 +204,10 @@ export class TurnView {
     this.clearRetry();
     this.endThinking();
     this.hooks.tool(tool);
+    if (CARD_TOOLS[tool.name]) {
+      this.card(tool);
+      return;
+    }
     const owner = this.tools.get(tool.id);
     if (owner) {
       owner.upsert(tool);
@@ -206,6 +223,26 @@ export class TurnView {
       this.run = run;
       this.segment = "";
       this.segEl = this.newSegment(run.el);
+    }
+    this.tail();
+  }
+
+  // card draws a card tool's call (a review's findings, a visual) as
+  // its own card in the flow (it closes the open tool group), updated in
+  // place.
+  private card(tool: ToolInfo): void {
+    const kind = CARD_TOOLS[tool.name];
+    let card = this.cards.get(tool.id);
+    if (card) {
+      kind.paint(card, tool);
+    } else {
+      this.flushSegment();
+      card = kind.create(this.hooks.sessionId, tool);
+      this.cards.set(tool.id, card);
+      this.container.insertBefore(card, this.segEl.nextSibling);
+      this.segment = "";
+      this.segEl = this.newSegment(card);
+      this.run = null;
     }
     this.tail();
   }

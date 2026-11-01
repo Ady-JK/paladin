@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
@@ -138,6 +139,25 @@ func (e *EditTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	}
 	if res.Strategy != "" && res.Strategy != MatchExact {
 		out["note"] = "old_string did not match verbatim; matched after normalizing " + strings.ReplaceAll(res.Strategy, "_", " ") + ". Re-read the file before further edits to copy its exact text."
+	}
+	if name := formatFile(ctx, res.ResolvedPath); name != "" {
+		out["formatted"] = name
+		note := formattedNote(name)
+		if prev, ok := out["note"].(string); ok {
+			note = prev + " " + note
+		}
+		out["note"] = note
+		if data, err := os.ReadFile(res.ResolvedPath); err == nil {
+			out["bytes"], out["lines"] = len(data), CountLines(string(data))
+		}
+	}
+	if d, found := diagnose(ctx, res.ResolvedPath); found {
+		out["diagnostics"], out["diagnostics_from"], out["errors"] = d.Diagnostics, d.Server, d.Errors
+		note := diagnosticsNote(d)
+		if prev, ok := out["note"].(string); ok {
+			note = prev + " " + note
+		}
+		out["note"] = note
 	}
 	// Matches serialize as [{start_line,end_line}]; an empty list must
 	// still be present (serde emits []).

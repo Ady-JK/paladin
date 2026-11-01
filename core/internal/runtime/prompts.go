@@ -3,8 +3,12 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/inference"
 )
 
 // Prompts is the user-editable agent prompt: the system prompt file
@@ -52,4 +56,32 @@ func (r *AgentRuntime) ResetPrompt() (Prompts, error) {
 		return Prompts{}, err
 	}
 	return r.GetPrompt(), nil
+}
+
+// SuggestPrompt returns a draft only. The caller must explicitly apply and
+// save it; this method never changes the prompt file or conversation.
+func (r *AgentRuntime) SuggestPrompt(prompt, instruction, providerName, model string) (Prompts, error) {
+	if strings.TrimSpace(prompt) == "" || strings.TrimSpace(instruction) == "" {
+		return Prompts{}, fmt.Errorf("parse: prompt and instruction are required")
+	}
+	if len(prompt) > 128*1024 || len(instruction) > 4096 {
+		return Prompts{}, fmt.Errorf("parse: prompt or instruction is too long")
+	}
+	provider, err := runtimeProviders{r}.ResolveProvider(providerName, model)
+	if err != nil {
+		return Prompts{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	response, err := provider.CompleteTools(ctx,
+		"You edit coding-agent system prompts. Return only the complete revised prompt as Markdown. Preserve existing tool contracts and safety rules unless the user explicitly asks to change them. Do not wrap the result in a code fence.",
+		[]inference.LlmMessage{{Role: "user", Content: "Current prompt:\n<current_prompt>\n" + prompt + "\n</current_prompt>\n\nRequested change:\n" + instruction}}, nil, "")
+	if err != nil {
+		return Prompts{}, fmt.Errorf("prompt proposal: %w", err)
+	}
+	proposal := strings.TrimSpace(response.Content)
+	if proposal == "" {
+		return Prompts{}, fmt.Errorf("prompt proposal: model returned no text")
+	}
+	return Prompts{SystemPrompt: proposal}, nil
 }

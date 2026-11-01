@@ -29,9 +29,12 @@ type Approval struct {
 	Command string `json:"command,omitempty"`
 	Path    string `json:"path,omitempty"`
 	// Server, MCPTool and Args describe an MCP call.
-	Server      string   `json:"server,omitempty"`
-	MCPTool     string   `json:"mcpTool,omitempty"`
-	Args        string   `json:"args,omitempty"`
+	Server  string `json:"server,omitempty"`
+	MCPTool string `json:"mcpTool,omitempty"`
+	Args    string `json:"args,omitempty"`
+	// Host and URL describe a web request.
+	Host        string   `json:"host,omitempty"`
+	URL         string   `json:"url,omitempty"`
 	Reasons     []string `json:"reasons"`
 	Destructive bool     `json:"destructive,omitempty"`
 	Choices     []string `json:"choices"`
@@ -120,11 +123,17 @@ type Gate struct {
 	// ExtraWritable are more folders sandboxed shell calls may write,
 	// e.g. the shared git dir of a worktree session.
 	ExtraWritable []string
+	// Readable are folders the session owns (its own data folder with
+	// spilled tool output, job logs and screenshots): reads there run
+	// without a card. Deny rules still apply.
+	Readable []string
 	// MCP identifies tools proxied from MCP servers; nil means none.
 	MCP func(name string) (tools.MCPInfo, bool)
 	// Plan asks once/deny for every MCP call (a server cannot prove a
 	// tool is read-only); only deny rules skip the question.
 	Plan bool
+	// Extension identifies extension tools; nil means none.
+	Extension func(name string) bool
 }
 
 // Auth is the gate's answer for one call.
@@ -149,6 +158,9 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 			req, gated = ClassifyMCP(name, info, args), true
 		}
 	}
+	if !gated && g.Extension != nil && g.Extension(name) {
+		req, gated = classifyExtension(name, args), true
+	}
 	if !gated {
 		return Auth{Run: true}
 	}
@@ -157,6 +169,9 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 		rules = g.Store.Effective(g.Workspace, g.SessionID)
 	}
 	d := Decide(g.Preset, req, rules)
+	if d.Verdict == Ask && req.Kind == KindRead && g.owns(req) {
+		d = Decision{Verdict: Allow}
+	}
 	d = applyHookVerdict(ctx, d)
 	if g.Plan && req.Kind == KindMCP && d.Verdict != Deny {
 		d = Decision{Verdict: Ask, Destructive: req.Destructive,
@@ -177,7 +192,7 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 		return Auth{Run: true, Sandbox: g.policy(req, d.Sandbox)}
 	}
 	card := Approval{ID: callID, Tool: name, Kind: req.Kind, Command: req.Command, Path: req.Path,
-		Server: req.Server, MCPTool: req.MCPTool, Args: req.Args,
+		Server: req.Server, MCPTool: req.MCPTool, Args: req.Args, Host: req.Host, URL: req.URL,
 		Reasons: d.Reasons, Destructive: d.Destructive, Choices: d.Choices, Remember: d.Remember, State: StatePending}
 	reply, err := g.ask(ctx, card, notify)
 	if err != nil {
@@ -188,6 +203,21 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 	}
 	g.remember(reply, d.Remember)
 	return Auth{Run: true, Sandbox: g.policy(req, d.Sandbox)}
+}
+
+// owns reports whether a read stays inside one of the session's own
+// folders, by its symlink-resolved path.
+func (g *Gate) owns(req Request) bool {
+	real := req.Real
+	if real == "" {
+		real = tools.RealPath(req.Path)
+	}
+	for _, dir := range g.Readable {
+		if dir != "" && pathMatches(tools.RealPath(dir), real) {
+			return true
+		}
+	}
+	return false
 }
 
 // remember saves the rules a session/folder/global reply stands for.
@@ -278,6 +308,48 @@ func grantFor(path string, pol *sandbox.Policy) string {
 	return dir
 }
 
+// TrustProject decides whether tool, which the workspace itself ships (a
+// formatter or language server in node_modules/.bin or a virtualenv, or
+// a server that runs the project's build scripts), may run. It asks once
+// per folder: the answer is kept for the session or the folder, and a
+// refusal for the session, so it does not ask again. Full access trusts
+// everything a deny rule does not stop.
+func (g *Gate) TrustProject(ctx context.Context, callID, tool string, notify func(Approval)) bool {
+	var rules []Rule
+	if g.Store != nil {
+		rules = g.Store.Effective(g.Workspace, g.SessionID)
+	}
+	var allowed bool
+	for _, r := range rules {
+		if r.Tool != ToolProject || !pathMatches(r.Pattern, g.Workspace) {
+			continue
+		}
+		if r.Action == ActionDeny {
+			return false
+		}
+		allowed = true
+	}
+	if allowed || g.Preset == FullAccess {
+		return true
+	}
+	allow := Rule{Tool: ToolProject, Pattern: g.Workspace, Action: ActionAllow}
+	card := Approval{ID: callID, Tool: "project tools", Kind: KindProject, Command: tool, Path: g.Workspace,
+		Reasons: []string{"this project ships it, so it runs code from the project itself"},
+		Choices: []string{ReplySession, ReplyFolder, ReplyDeny}, Remember: []Rule{allow}, State: StatePending}
+	reply, err := g.ask(ctx, card, notify)
+	if err != nil {
+		return false
+	}
+	if reply == ReplyDeny {
+		if g.Store != nil {
+			_ = g.Store.Add(ScopeSession, g.Workspace, g.SessionID, Rule{Tool: ToolProject, Pattern: g.Workspace, Action: ActionDeny})
+		}
+		return false
+	}
+	g.remember(reply, card.Remember)
+	return true
+}
+
 func (g *Gate) ask(ctx context.Context, card Approval, notify func(Approval)) (string, error) {
 	if g.Broker == nil {
 		return "", errors.New("no approval broker")
@@ -345,6 +417,8 @@ func describe(req Request) string {
 		return "MCP tool " + req.Server + "/" + req.MCPTool
 	case KindRead:
 		return "read " + req.Path
+	case KindWeb:
+		return "visit to " + req.Host
 	}
 	return "command `" + strings.TrimSpace(req.Command) + "`"
 }

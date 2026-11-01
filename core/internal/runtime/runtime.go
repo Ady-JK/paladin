@@ -16,8 +16,10 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/lsp"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/permission"
@@ -41,7 +43,47 @@ type Settings struct {
 	// MaxSubagents caps a session's queued or running children; 0
 	// means the default.
 	MaxSubagents int `json:"maxSubagents,omitempty"`
+	// FormatOnWrite runs the project's formatter after write and edit;
+	// absent means on.
+	FormatOnWrite *bool `json:"formatOnWrite,omitempty"`
+	// VerifyNudge reminds the model once to check changed code before a
+	// turn ends; absent means on.
+	VerifyNudge *bool `json:"verifyNudge,omitempty"`
+	// LspDiagnostics asks installed language servers for errors after
+	// write and edit; absent means on.
+	LspDiagnostics *bool `json:"lspDiagnostics,omitempty"`
+	// DisabledSkills turns skills off by name (skills.Disabled reads it).
+	DisabledSkills []string `json:"disabledSkills,omitempty"`
+	// Web tunes web_fetch and the browser's external sites.
+	Web WebSettings `json:"web,omitzero"`
 }
+
+// WebSettings are the user's web access options. Which sites may be
+// reached is decided by permission rules ("web" tool), not here.
+type WebSettings struct {
+	// AllowPrivateNetwork lets web tools reach private and internal
+	// addresses (intranet sites). localhost is reachable without it, but
+	// each port asks once (web rule localhost:PORT).
+	AllowPrivateNetwork bool `json:"allowPrivateNetwork,omitempty"`
+	// TimeoutMs, MaxBytes and MaxChars bound one fetch; 0 means the
+	// defaults (30 s, 5 MB, 40 000 characters per chunk).
+	TimeoutMs int `json:"timeoutMs,omitempty"`
+	MaxBytes  int `json:"maxBytes,omitempty"`
+	MaxChars  int `json:"maxChars,omitempty"`
+}
+
+func (w WebSettings) options() tools.WebOptions {
+	return tools.WebOptions{AllowPrivate: w.AllowPrivateNetwork, TimeoutMs: w.TimeoutMs, MaxBytes: w.MaxBytes, MaxChars: w.MaxChars}
+}
+
+// formatOnWrite reports the setting, defaulting to on.
+func (s Settings) formatOnWrite() bool { return s.FormatOnWrite == nil || *s.FormatOnWrite }
+
+// lspDiagnostics reports the setting, defaulting to on.
+func (s Settings) lspDiagnostics() bool { return s.LspDiagnostics == nil || *s.LspDiagnostics }
+
+// verifyNudge reports the setting, defaulting to on.
+func (s Settings) verifyNudge() bool { return s.VerifyNudge == nil || *s.VerifyNudge }
 
 type AgentRuntime struct {
 	dataDir       string
@@ -60,6 +102,7 @@ type AgentRuntime struct {
 	agents        *agent.Registry
 	hub           *Hub
 	subagents     *subagentManager
+	lsp           *lsp.Manager
 	snaps         *snapshot.Store
 	worktrees     *worktree.Manager
 	undoMu        sync.Mutex
@@ -143,9 +186,11 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		shellTool.Observe(r.jobs)
 	}
 	r.mcp = newMCPManager(dataDir, &r.mcpSink)
+	r.lsp = lsp.NewManager(dataDir)
 	r.registerKnowledgeTools()
 	r.subagents = newSubagentManager(r)
 	r.registerAgentTools()
+	r.registerCustomizable()
 	r.hub = NewHub(r.runTurn, r.maxConcurrentTurns)
 	r.hub.SetOnDone(r.subagents.onDone)
 	return r
@@ -239,10 +284,27 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	if child != nil {
 		registry = r.childTools(sess, *child)
 	} else {
-		registry = r.turnTools(req.Cwd, req.SessionID, r.tools.With(r.mcpTools(ctx, project)...))
+		extra := r.mcpTools(ctx, project)
+		extensionTools, extensionErrors := extension.Load(ctx, r.dataDir)
+		for _, err := range extensionErrors {
+			fmt.Fprintf(os.Stderr, "extension: %v\n", err)
+		}
+		// The read-only preset leaves extension tools out: they run local
+		// code that could change anything.
+		if preset != permission.ReadOnly {
+			extra = append(extra, extensionTools...)
+		}
+		registry = r.turnTools(req.Cwd, req.SessionID, r.tools.With(extra...))
 		req.Notices = r.subagents.notices(req.SessionID, req.Cwd)
 	}
 	req.Budget = r.turnBudget(req.Cwd, req.SessionID)
+	settings := r.loadSettings()
+	req.FormatOnWrite = settings.formatOnWrite()
+	req.VerifyNudge = settings.verifyNudge()
+	req.Web = settings.Web.options()
+	if settings.lspDiagnostics() {
+		req.Diagnose, req.Warm = r.lspHooks(ctx, req.Cwd, req.SessionID)
+	}
 	req.SpendLedgers = r.subagents.spendLedgers(req.Cwd, req.SessionID)
 	built, err := template.Build(agent.Deps{
 		Sessions:  runtimeSessions{r},
@@ -273,6 +335,7 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 
 			ExtraWritable: extraWritable,
 			MCP:           registry.MCPInfo,
+			Extension:     registry.IsExtension,
 		},
 	}, req)
 	if err != nil {

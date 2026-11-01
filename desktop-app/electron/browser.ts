@@ -6,7 +6,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { app, BrowserWindow, session, WebContentsView } from "electron";
 import type { Browser, Locator, Page } from "@playwright/test";
-import { localBrowserRequest, localBrowserUrl } from "./browserPolicy";
+import { navigationAllowed, requestAllowed, siteKey, webBrowserUrl } from "./browserPolicy";
+import { EgressGuard, type Resolved } from "./browserEgress";
 import { renderBrowserAnnotationOverlay, type BrowserAnnotation } from "./browserAnnotationOverlay";
 
 export type BrowserRequest = {
@@ -22,6 +23,9 @@ export type BrowserRequest = {
   key?: string;
   value?: string;
   fullPage?: boolean;
+  // privateNetwork is the user's "Private and internal networks" switch,
+  // sent with every request from the core.
+  privateNetwork?: boolean;
 };
 
 export type BrowserReply = { id: string; ok: boolean; result?: unknown; imageBase64?: string; error?: string };
@@ -42,7 +46,23 @@ type Entry = {
   url: string;
   attached: boolean;
   binding: string;
+  // sites are the hosts opened in this session (by the agent after the
+  // user approved, or by the user); the page may navigate within them.
+  sites: Set<string>;
+  // blocked is a navigation the policy refused since the last action.
+  blocked: string;
+  // egress is the session's proxy; network settles once the session
+  // sends everything through it.
+  egress: EgressGuard;
+  network: Promise<void>;
+  // routed lists the page loads the Playwright guard saw (newest last).
+  routed: string[];
+  // refused are proxy refusals not yet reported to the agent.
+  refused: { host: string; reason: string }[];
 };
+// EgressSetup replaces name resolution for the smoke (see main.ts).
+export type EgressSetup = { lookup?: (host: string) => Promise<Resolved[]>; trusted?: ReadonlySet<string> };
+type RouteHandler = Parameters<Page["route"]>[1];
 type PlaywrightCore = { chromium: { connectOverCDP(endpoint: string): Promise<Browser> } };
 
 const sessionName = /^[A-Za-z0-9_-]{1,128}$/;
@@ -50,6 +70,7 @@ const maxImageBytes = 4 << 20;
 
 export class BrowserManager {
   private readonly entries = new Map<string, Entry>();
+  private readonly guarded = new WeakSet<Page>();
   private readonly lanes = new Map<string, Promise<void>>();
   private visible: string | null = null;
   private bounds: BrowserBounds | null = null;
@@ -60,11 +81,25 @@ export class BrowserManager {
     { page: Page; cancelEvent: string; done?: Promise<BrowserElement | null> }
   >();
   private readonly annotations = new Map<string, BrowserAnnotation[]>();
+  private privateNetwork = false;
 
   constructor(
     private readonly window: () => BrowserWindow | null,
     private readonly state: (event: BrowserState) => void,
+    private readonly egress: EgressSetup = {},
   ) {}
+
+  // setPrivateNetwork follows the user's switch for requests the core did
+  // not send (a URL typed in the pane).
+  setPrivateNetwork(on: boolean): void {
+    this.privateNetwork = on;
+  }
+
+  // routedLoads lists the page loads Playwright's navigation guard saw in
+  // a session, oldest first.
+  routedLoads(sessionId: string): string[] {
+    return [...(this.entries.get(sessionId)?.routed ?? [])];
+  }
 
   // Same-session actions stay ordered; different sessions run concurrently.
   execute(request: BrowserRequest): Promise<BrowserReply> {
@@ -111,7 +146,9 @@ export class BrowserManager {
     this.visible = null;
     if (!sessionId) return true;
     const entry = this.entries.get(sessionId);
-    if (!entry) return false;
+    // Without the pane's bounds the page would cover the app at its
+    // parking size; it stays parked until the pane reports where it is.
+    if (!entry || !this.bounds) return false;
     entry.parking.contentView.removeChildView(entry.view);
     win.contentView.addChildView(entry.view);
     entry.attached = true;
@@ -158,6 +195,7 @@ export class BrowserManager {
     } catch {
       /* already gone */
     }
+    void entry.egress.close();
     this.entries.delete(sessionId);
     this.annotations.delete(sessionId);
     this.state({ event: "browser/closed", sessionId });
@@ -386,19 +424,37 @@ export class BrowserManager {
 
   private async perform(req: BrowserRequest): Promise<{ result?: unknown; imageBase64?: string }> {
     if (!sessionName.test(req.sessionId)) throw new Error("invalid browser session id");
+    if (typeof req.privateNetwork === "boolean") this.privateNetwork = req.privateNetwork;
     if (req.action === "close") {
       this.drop(req.sessionId);
       return { result: { closed: true } };
     }
     if (req.action === "open") {
-      if (!req.url || !localBrowserUrl(req.url))
-        throw new Error("browser only opens http://localhost or http://127.0.0.1");
+      if (!req.url || !webBrowserUrl(req.url))
+        throw new Error("browser only opens http:// and https:// URLs without credentials");
       const entry = this.ensure(req.sessionId);
+      entry.sites.add(siteKey(req.url));
+      entry.blocked = "";
       this.state({ event: "browser/opened", sessionId: req.sessionId, url: req.url });
-      await entry.view.webContents.loadURL(req.url);
+      await entry.network;
+      // Attach Playwright before the page loads. A page in a pane that is
+      // not on screen sits in a hidden window, where Chromium holds back
+      // its timers and frames until Playwright (a DevTools client) attaches; a site that
+      // loads from scripts would otherwise take minutes to finish.
+      if (!entry.page) {
+        if (!entry.view.webContents.getURL()) await entry.view.webContents.loadURL("about:blank");
+        entry.targetId = await this.targetId(entry.view);
+        entry.page = await this.findPage(entry.targetId);
+      }
+      await this.guardNavigation(entry);
+      try {
+        await entry.view.webContents.loadURL(req.url);
+      } catch (error) {
+        throw this.openError(entry, req.url, error);
+      }
+      const refusedPage = this.refusedHost(entry, req.url);
+      if (refusedPage) throw new Error(`could not open ${req.url}: ${refusedPage}`);
       entry.url = entry.view.webContents.getURL();
-      entry.targetId = await this.targetId(entry.view);
-      entry.page = await this.findPage(entry.targetId);
       if (!entry.binding) {
         entry.binding = `__paladinAnnotation_${randomUUID().replace(/-/g, "")}`;
         await entry.page.exposeBinding(entry.binding, (_source, message: unknown) =>
@@ -408,7 +464,7 @@ export class BrowserManager {
       await this.renderAnnotations(req.sessionId);
       this.publishAnnotationCount(req.sessionId);
       this.state({ event: "browser/navigated", sessionId: req.sessionId, url: entry.url });
-      return { result: { url: entry.url, title: await entry.page.title() } };
+      return { result: this.withBlocked(entry, { url: entry.url, title: await entry.page.title() }) };
     }
     const entry = this.entries.get(req.sessionId);
     if (!entry?.page) throw new Error("browser has no page; use open first");
@@ -470,7 +526,85 @@ export class BrowserManager {
       await this.renderAnnotations(req.sessionId);
     }
     this.state({ event: "browser/navigated", sessionId: req.sessionId, url: entry.url });
-    return { result: { url: entry.url, title: await page.title(), action: req.action } };
+    return { result: this.withBlocked(entry, { url: entry.url, title: await page.title(), action: req.action }) };
+  }
+
+  // guardNavigation refuses top-level navigation off the session's sites
+  // through Playwright, once per page: aborting the request itself lets
+  // Playwright see the navigation end (Electron's will-navigate cancel
+  // would leave it waiting) and Chromium keeps the current page. The page
+  // counts as guarded only once the route is in place; until then, and
+  // after a failure, Electron's own checks stay on and the next open
+  // tries again.
+  private async guardNavigation(entry: Entry): Promise<void> {
+    const page = entry.page;
+    if (!page || this.guarded.has(page)) return;
+    const handler: RouteHandler = async (route) => {
+      const request = route.request();
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+        entry.routed.push(request.url());
+        if (entry.routed.length > 20) entry.routed.shift();
+        if (!navigationAllowed(request.url(), entry.sites)) {
+          entry.blocked = request.url();
+          await route.abort("aborted").catch(() => undefined);
+          return;
+        }
+      }
+      await route.fallback().catch(() => undefined);
+    };
+    try {
+      await this.installRoute(page, handler);
+    } catch (error) {
+      await page.unroute(() => true, handler).catch(() => undefined);
+      if (error instanceof Error) error.message = `could not guard the page's navigation: ${error.message}`;
+      throw error;
+    }
+    this.guarded.add(page);
+  }
+
+  // installRoute is page.route; the smoke replaces it to test a failure.
+  protected installRoute(page: Page, handler: RouteHandler): Promise<unknown> {
+    return page.route(() => true, handler);
+  }
+
+  // refusedHost is the proxy's reason for refusing url's own host, if it
+  // did since the last check.
+  private refusedHost(entry: Entry, url: string): string {
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const refused = entry.egress.takeRefusals();
+    const own = refused.find((r) => r.host === host);
+    entry.refused.push(...refused.filter((r) => r !== own));
+    return own?.reason ?? "";
+  }
+
+  private openError(entry: Entry, url: string, error: unknown): Error {
+    const reason = this.refusedHost(entry, url);
+    if (reason) return new Error(`could not open ${url}: ${reason}`);
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  // withBlocked tells the agent, once, about a link the policy refused
+  // and connections the proxy refused.
+  private withBlocked(entry: Entry, result: Record<string, unknown>): Record<string, unknown> {
+    const refused = [...entry.refused, ...entry.egress.takeRefusals()];
+    entry.refused = [];
+    const out = { ...result };
+    const notes: string[] = [];
+    if (entry.blocked) {
+      out.blocked_navigation = entry.blocked;
+      entry.blocked = "";
+      notes.push(
+        "The page tried to go to another site, which was blocked. Use the open action with that URL to ask the user first.",
+      );
+    }
+    if (refused.length) {
+      out.blocked_requests = [...new Map(refused.map((r) => [r.host, `${r.host}: ${r.reason}`])).values()].slice(0, 5);
+      notes.push(
+        "Some of the page's requests were refused because of where they lead; that part of the page may be missing.",
+      );
+    }
+    if (notes.length) out.note = notes.join(" ");
+    return out;
   }
 
   private locator(page: Page, req: BrowserRequest): Locator {
@@ -486,26 +620,75 @@ export class BrowserManager {
     if (!this.window()) throw new Error("Paladin window is closed");
     const partition = `paladin-browser-${sessionId}`;
     const jar = session.fromPartition(partition);
-    jar.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !localBrowserRequest(details.url) }));
+    const sites = new Set<string>();
+    // Everything the session loads goes through its own proxy, which
+    // checks the address each name resolves to (browserEgress.ts);
+    // <-loopback> sends even localhost through it.
+    const egress = new EgressGuard({
+      allowPrivate: () => this.privateNetwork,
+      lookup: this.egress.lookup,
+      trusted: this.egress.trusted,
+    });
+    const network = egress.listen().then((port) =>
+      jar.setProxy({
+        mode: "fixed_servers",
+        proxyRules: `http://127.0.0.1:${port}`,
+        proxyBypassRules: "<-loopback>",
+      }),
+    );
+    network.catch(() => undefined);
+    let view: WebContentsView | null = null;
+    // Until Playwright guards the page (guardNavigation), Electron does.
+    const guardedByPlaywright = () => {
+      const page = this.entries.get(sessionId)?.page;
+      return !!page && this.guarded.has(page);
+    };
+    jar.webRequest.onBeforeRequest((details, callback) => {
+      // A page load is checked as navigation (by Playwright once it guards
+      // the page, so a refusal keeps the current page instead of an error
+      // page); everything else against the page that asked for it.
+      const allowed =
+        details.resourceType === "mainFrame"
+          ? guardedByPlaywright() || navigationAllowed(details.url, sites)
+          : requestAllowed(details.url, view?.webContents.getURL() ?? "");
+      callback({ cancel: !allowed });
+    });
+    jar.on("will-download", (event) => event.preventDefault());
     jar.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     jar.setPermissionCheckHandler(() => false);
-    const view = new WebContentsView({
+    view = new WebContentsView({
       webPreferences: { partition, sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
+    const own = view;
     const parking = new BrowserWindow({
       show: false,
       width: 1200,
       height: 800,
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
-    view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    view.webContents.on("will-navigate", (details) => {
-      if (!localBrowserUrl(details.url)) details.preventDefault();
+    const refuse = (url: string) => {
+      const entry = this.entries.get(sessionId);
+      if (entry) entry.blocked = url;
+    };
+    // Pop-ups never open; one aimed at an allowed site would only hide
+    // the page from the agent, so it is reported like a blocked link.
+    own.webContents.setWindowOpenHandler(({ url }) => {
+      refuse(url);
+      return { action: "deny" };
     });
-    view.webContents.on("will-redirect", (details) => {
-      if (!localBrowserUrl(details.url)) details.preventDefault();
+    own.webContents.on("will-navigate", (details) => {
+      if (!guardedByPlaywright() && !navigationAllowed(details.url, sites)) {
+        details.preventDefault();
+        refuse(details.url);
+      }
     });
-    view.webContents.on("did-navigate", (_event, url) => this.state({ event: "browser/navigated", sessionId, url }));
+    own.webContents.on("will-redirect", (details) => {
+      if (!guardedByPlaywright() && !navigationAllowed(details.url, sites)) {
+        details.preventDefault();
+        refuse(details.url);
+      }
+    });
+    own.webContents.on("did-navigate", (_event, url) => this.state({ event: "browser/navigated", sessionId, url }));
     const restoreAnnotations = () => {
       // A navigation event can arrive before the new document accepts
       // Playwright evaluation. Retry once after its first layout frame.
@@ -514,14 +697,30 @@ export class BrowserManager {
         void this.renderAnnotations(sessionId).catch(() => undefined);
       }, 100);
     };
-    view.webContents.on("did-finish-load", restoreAnnotations);
-    view.webContents.on("did-navigate-in-page", restoreAnnotations);
+    own.webContents.on("did-finish-load", restoreAnnotations);
+    own.webContents.on("did-navigate-in-page", restoreAnnotations);
     // A detached view cannot receive real CDP pointer clicks. Give each
     // background session a hidden window with a full-size surface instead.
-    parking.contentView.addChildView(view);
-    view.setBounds({ x: 0, y: 0, width: 1200, height: 800 });
-    view.webContents.setBackgroundThrottling(false);
-    const entry: Entry = { view, parking, page: null, targetId: "", url: "", attached: false, binding: "" };
+    parking.contentView.addChildView(own);
+    own.setBounds({ x: 0, y: 0, width: 1200, height: 800 });
+    own.webContents.setBackgroundThrottling(false);
+    // WebRTC would otherwise send UDP straight to any address.
+    own.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+    const entry: Entry = {
+      view: own,
+      parking,
+      page: null,
+      targetId: "",
+      url: "",
+      attached: false,
+      binding: "",
+      sites,
+      blocked: "",
+      egress,
+      network,
+      routed: [],
+      refused: [],
+    };
     this.entries.set(sessionId, entry);
     return entry;
   }

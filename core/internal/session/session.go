@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -154,9 +155,11 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 // HistoryMessage is the client-facing history row: tool rows link back
 // to their call; reminders keep their job link instead.
 type HistoryMessage struct {
-	Arguments *string `json:"arguments,omitempty"`
-	Content   string  `json:"content"`
-	CreatedAt int64   `json:"createdAt"`
+	Arguments   *string            `json:"arguments,omitempty"`
+	Image       *media.Image       `json:"image,omitempty"`
+	Attachments []media.Attachment `json:"attachments,omitempty"`
+	Content     string             `json:"content"`
+	CreatedAt   int64              `json:"createdAt"`
 	// Index is a user row's transcript position, the handle for undo.
 	Index *int `json:"index,omitempty"`
 	// Kind tags special rows; "compaction" is a context-compaction
@@ -219,6 +222,7 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 			}
 			out = append(out, HistoryMessage{
 				Role:       "tool",
+				Image:      msg.Image,
 				Content:    msg.Content,
 				CreatedAt:  msg.CreatedAt.Unix(),
 				ToolCallID: msg.ToolCallID,
@@ -254,9 +258,10 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 			content = msg.Display
 		}
 		row := HistoryMessage{
-			Role:      role,
-			Content:   content,
-			CreatedAt: msg.CreatedAt.Unix(),
+			Role:        role,
+			Content:     content,
+			CreatedAt:   msg.CreatedAt.Unix(),
+			Attachments: msg.Attachments,
 		}
 		if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
 			idx := i

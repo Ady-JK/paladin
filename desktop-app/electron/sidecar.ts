@@ -86,6 +86,7 @@ const READ_METHODS = new Set([
   "memoryProjects",
   "listSessions",
   "sessionHistory",
+  "sessionImage",
   "sessionTodos",
   "sessionUsage",
   "budgetGet",
@@ -94,6 +95,7 @@ const READ_METHODS = new Set([
   "revertPreview",
   "sessionChanges",
   "sessionDiff",
+  "fileExcerpt",
   "worktreeStatus",
   "attach",
   "permissionsGet",
@@ -105,6 +107,8 @@ const READ_METHODS = new Set([
   "mcpConfig",
   "mcpParse",
   "toolsList",
+  "customList",
+  "customGet",
 ]);
 const LONG_METHODS = new Set(["refreshProviders", "sideQuestion"]);
 

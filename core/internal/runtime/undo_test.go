@@ -352,3 +352,77 @@ func (r *AgentRuntime) loadSteps(sessionID, cwd string) ([]Step, error) {
 	}
 	return readSteps(sess.Dir)
 }
+
+func TestReviewSessionCarriesTheSessionsOwnDiff(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "printf 'cost $1\\n' > a.txt", "")
+	turn(t, rt, sid, ws, "create a file")
+	cmds := runtimeCommands{rt}
+	got, err := cmds.LoadCommand(ws, sid, "review", "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Prompt, "```diff") || !strings.Contains(got.Prompt, "+cost $1") || strings.Contains(got.Prompt, "$SESSION_CHANGES") {
+		t.Fatalf("session review lacks the diff (or mangled $1): %s", got.Prompt)
+	}
+	if strings.Join(got.Tools, ",") != "report_findings" || got.Mode != "plan" {
+		t.Fatalf("review command: %+v", got)
+	}
+	plain, err := cmds.LoadCommand(ws, sid, "review", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.Prompt, "```diff") || strings.Contains(plain.Prompt, "$SESSION_CHANGES") {
+		t.Fatalf("a branch review carries no session diff: %s", plain.Prompt)
+	}
+}
+
+// /review session never widens to other changes: without snapshots, or
+// with nothing changed, the command stops before the model runs.
+func TestReviewSessionStopsWhenItHasNoSessionChanges(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "true", "")
+	cmds := runtimeCommands{rt}
+	snaps := rt.snaps
+	rt.snaps = nil // snapshots off (e.g. no git)
+	_, err := cmds.LoadCommand(ws, sid, "review", "session")
+	if err == nil || !strings.Contains(err.Error(), "session changes unavailable") || !strings.Contains(err.Error(), "/review") {
+		t.Fatalf("no snapshots: %v", err)
+	}
+	rt.snaps = snaps
+	turn(t, rt, sid, ws, "change nothing")
+	_, err = cmds.LoadCommand(ws, sid, "review", "session")
+	if err == nil || !strings.Contains(err.Error(), "has not changed any files") {
+		t.Fatalf("nothing changed: %v", err)
+	}
+	if _, err := cmds.LoadCommand(ws, sid, "review", ""); err != nil {
+		t.Fatalf("a plain review still works: %v", err)
+	}
+}
+
+func TestFileExcerptShowsLinesInsideTheWorkspaceOnly(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "true", "")
+	turn(t, rt, sid, ws, "noop")
+	var b strings.Builder
+	for i := 1; i <= 40; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	os.WriteFile(filepath.Join(ws, "a.go"), []byte(b.String()), 0o644)
+	ex, err := rt.FileExcerpt(sid, "", filepath.Join(ws, "a.go"), 10, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex.StartLine != 7 || len(ex.Lines) != 9 || ex.Lines[0] != "line 7" || ex.Lines[8] != "line 15" || ex.Rel != "a.go" {
+		t.Fatalf("three lines of context around 10-12: %+v", ex)
+	}
+	if ex, _ := rt.FileExcerpt(sid, "", filepath.Join(ws, "a.go"), 39, 400); ex.Lines[len(ex.Lines)-1] != "line 40" {
+		t.Fatalf("clamped to the end: %+v", ex)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	os.WriteFile(outside, []byte("secret\n"), 0o644)
+	if _, err := rt.FileExcerpt(sid, "", outside, 1, 1); err == nil {
+		t.Fatal("files outside the session workspace are refused")
+	}
+	os.WriteFile(filepath.Join(ws, "bin.dat"), []byte{0, 1, 2}, 0o644)
+	if _, err := rt.FileExcerpt(sid, "", filepath.Join(ws, "bin.dat"), 1, 1); err == nil {
+		t.Fatal("binary files are refused")
+	}
+}

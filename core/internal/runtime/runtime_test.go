@@ -677,6 +677,44 @@ func TestSystemPromptFile(t *testing.T) {
 	}
 }
 
+func TestSuggestPromptReturnsDraftWithoutSaving(t *testing.T) {
+	rt, _ := testRuntime(t)
+	if _, err := rt.SetPrompt("saved prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.SuggestPrompt("", "shorten", "", ""); err == nil {
+		t.Fatal("blank prompt accepted")
+	}
+	if _, err := rt.SuggestPrompt("saved prompt", "", "", ""); err == nil {
+		t.Fatal("blank instruction accepted")
+	}
+	var request string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		request = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"proposed prompt"}}]}`)
+	}))
+	defer server.Close()
+	pointMockAt(rt, server.URL)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := rt.SuggestPrompt("saved prompt", "shorten it", "openrouter", "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SystemPrompt != "proposed prompt" {
+		t.Fatalf("proposal: %q", result.SystemPrompt)
+	}
+	if !strings.Contains(request, "saved prompt") || !strings.Contains(request, "shorten it") {
+		t.Fatal("request omitted prompt or instruction")
+	}
+	if got := rt.GetPrompt().SystemPrompt; got != "saved prompt" {
+		t.Fatalf("prompt was saved: %q", got)
+	}
+}
+
 func TestWorkspaceSettings(t *testing.T) {
 	rt, _ := testRuntime(t)
 	ws := t.TempDir()
@@ -844,7 +882,7 @@ func TestRefreshProvidersDedupAndCatalog(t *testing.T) {
 func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 	rt, _ := testRuntime(t)
 	defs := rt.tools.Definitions()
-	if len(defs) != 16 {
+	if len(defs) != 21 {
 		t.Fatalf("got %d", len(defs))
 	}
 	names := map[string]bool{}
@@ -1324,8 +1362,13 @@ func TestListSkills(t *testing.T) {
 	write(filepath.Join(dir, "config", "skills"), "reviewer", "---\ndescription: Reviews code\n---\n# R")
 	write(filepath.Join(ws, ".paladin", "skills"), "deployer", "# Deploy")
 
-	// The workspace cwd merges both roots.
-	got := rt.ListSkills(ws)
+	// The workspace cwd merges both roots (built-ins always come too).
+	var got []SkillEntry
+	for _, s := range rt.ListSkills(ws) {
+		if s.Source != "builtin" {
+			got = append(got, s)
+		}
+	}
 	if len(got) != 2 || got[0].Name != "deployer" || got[1].Name != "reviewer" {
 		t.Fatalf("got %+v", got)
 	}
@@ -1336,8 +1379,14 @@ func TestListSkills(t *testing.T) {
 		t.Fatalf("got %+v", got[0])
 	}
 	// Empty cwd still lists global skills.
-	if got := rt.ListSkills(""); len(got) != 1 || got[0].Name != "reviewer" {
-		t.Fatalf("got %+v", got)
+	var global []string
+	for _, s := range rt.ListSkills("") {
+		if s.Source != "builtin" {
+			global = append(global, s.Name)
+		}
+	}
+	if len(global) != 1 || global[0] != "reviewer" {
+		t.Fatalf("got %+v", global)
 	}
 }
 

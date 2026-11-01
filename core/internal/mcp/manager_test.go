@@ -162,7 +162,7 @@ func TestManagerFolderServersNeedTrust(t *testing.T) {
 	if st := statusOf(m, folder, ScopeFolder, "local"); st.State != StateUntrusted {
 		t.Fatalf("status %+v", st)
 	}
-	if err := m.Trust(folder, true); err != nil {
+	if err := m.Trust(folder, true, shown(t, folder)); err != nil {
 		t.Fatal(err)
 	}
 	find(t, m.Tools(toolsCtx(), folder), "mcp__local__echo")
@@ -190,7 +190,7 @@ func TestManagerFolderShadowsGlobal(t *testing.T) {
 	local := dummyCfg(t)
 	local.AllowedTools = []string{"echo"}
 	writeJSON(t, FolderPath(folder), servers(map[string]ServerConfig{"dummy": local}))
-	if err := m.Trust(folder, true); err != nil {
+	if err := m.Trust(folder, true, shown(t, folder)); err != nil {
 		t.Fatal(err)
 	}
 	if got := exposed(m.Tools(toolsCtx(), folder)); strings.Join(got, ",") != "mcp__dummy__echo" {
@@ -419,4 +419,39 @@ func (m *Manager) pid(scope, folder, name string) int {
 		return 0
 	}
 	return s.client.PID()
+}
+
+// shown is the fingerprint of folder's mcp.json as the UI showed it.
+func shown(t *testing.T, folder string) string {
+	t.Helper()
+	data, err := os.ReadFile(FolderPath(folder))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Fingerprint(data)
+}
+
+// Trust pins the content the user reviewed: a file swapped between the
+// review and the click is not trusted.
+func TestTrustNeedsTheReviewedContent(t *testing.T) {
+	m, _, _ := newTestManager(t, nil)
+	folder := t.TempDir()
+	writeJSON(t, FolderPath(folder), servers(map[string]ServerConfig{"local": dummyCfg(t)}))
+	reviewed := shown(t, folder)
+	writeJSON(t, FolderPath(folder), servers(map[string]ServerConfig{"local": dummyCfg(t, "-page-size", "9")}))
+	if err := m.Trust(folder, true, reviewed); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("a swapped file was trusted: %v", err)
+	}
+	if err := m.Trust(folder, true, ""); err == nil {
+		t.Fatal("trust without the reviewed content")
+	}
+	if m.Trusted(folder) {
+		t.Fatal("still untrusted")
+	}
+	if err := m.Trust(folder, true, shown(t, folder)); err != nil || !m.Trusted(folder) {
+		t.Fatalf("current content: %v", err)
+	}
+	if err := m.Trust(folder, false, ""); err != nil || m.Trusted(folder) {
+		t.Fatalf("revoke needs no fingerprint: %v", err)
+	}
 }

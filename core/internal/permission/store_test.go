@@ -3,6 +3,8 @@ package permission
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +12,23 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
+
+func TestPersistedRulesAreOwnerOnly(t *testing.T) {
+	root := t.TempDir()
+	s := NewStore(root)
+	if err := s.Add(ScopeGlobal, "", "", Rule{Tool: ToolShell, Pattern: "make", Action: ActionAllow}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(root, "permissions"), s.globalPath()} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Errorf("%s has group or other access: %04o", path, info.Mode().Perm())
+		}
+	}
+}
 
 func TestStoreScopes(t *testing.T) {
 	root := t.TempDir()

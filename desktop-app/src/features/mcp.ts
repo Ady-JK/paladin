@@ -485,7 +485,7 @@ function onClick(event: MouseEvent): void {
     return;
   }
   if (t.closest("[data-mcp-trust]") && loadedCwd) {
-    void act("trust", () => api.mcpTrust(loadedCwd, true), "trust this folder");
+    void act("trust", () => api.mcpTrust(loadedCwd, true, overview?.folderFingerprint ?? ""), "trust this folder");
     return;
   }
   if (t.closest("[data-mcp-revoke]") && loadedCwd) {

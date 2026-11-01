@@ -84,6 +84,36 @@ func Discover(dataDir, cwd string) []Doc {
 	return docs
 }
 
+// Below lists the instruction file of each directory strictly under
+// workspace down to dir, outermost first; the session's system prompt
+// already holds workspace and its ancestors. Nil when dir is not
+// inside workspace.
+func Below(workspace, dir string) []string {
+	workspace, dir = filepath.Clean(workspace), filepath.Clean(dir)
+	rel, err := filepath.Rel(workspace, dir)
+	if workspace == "" || err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return nil
+	}
+	var out []string
+	cur := workspace
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		for _, name := range Candidates {
+			path := filepath.Join(cur, name)
+			if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() {
+				out = append(out, path)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// ReadCapped reads at most limit bytes of path; truncated reports a cut.
+func ReadCapped(path string, limit int) (content string, truncated, ok bool) {
+	return readCapped(path, limit)
+}
+
 // chain lists directories from the project root down to cwd.
 func chain(cwd string) []string {
 	cwd = filepath.Clean(cwd)

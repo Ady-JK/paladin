@@ -235,6 +235,8 @@ flowchart TD
 | **Doom-loop guard** | If the model keeps asking for the exact same thing (or loops A, B, A, B… through the same 2–4 calls three times), say "that won't change, try something else." The turn keeps going; the model has to adapt. |
 | **Parallel batches** | Reading 5 files? Do it at once (up to 8). Writing or running shell? One at a time, in order. |
 | **Orphan fixing** | Every "call tool" in history always gets a matching "result", even after a crash or stop, so the model never gets confused. |
+| **Check before finishing** | If a turn is about to end after it changed code and no **check** has passed since, the model gets **one** short reminder naming the changed files: run a check if one applies, or say why not. Only builds, tests, linters and type checks count (`go test`, `npm test` / `pnpm run lint`, `pytest`, `tsc`, `cargo check`, `make` targets and the like); `pwd`, `ls` or a refused or background command do not. A check that fails keeps the reminder, which then says the last check failed. The exit code decides, unless something other than `&&` follows the check (`| tail`, `; echo`), in which case the output is scanned for failures. Doc-only changes (`.md`, `.txt`, images) don't count, it never fires when tools are off (budget wrap-up), and it can be switched off in Settings → Tools → Behavior (`verifyNudge`). The reminder is saved in history as "Check before finishing". |
+| **Argument fixing** | Models sometimes send `"20"` for a number, `"true"` for a yes/no, a list written as a string, or `null` for a field they meant to skip. Paladin fixes those against the tool's schema (built-in, MCP and extension tools) before the call runs, so the permission gate and the tool see the same fixed arguments. Anything unclear is left alone for the tool to reject. |
 | **Panic catcher** | A tool crashing doesn't crash the kitchen. It becomes an error result. |
 | **No round cap** | Like Codex and OpenCode, a turn runs until the model answers without asking for a tool, you press stop, or something breaks for good. The guards above keep it from spinning. |
 | **Compaction** | When the conversation gets too long, older parts get summarized so it still fits. If compacting stops freeing space several times in a row, the turn ends with an error instead of looping. |
@@ -250,11 +252,14 @@ flowchart TD
 flowchart LR
     subgraph Builtin["🔧 Built-in tools"]
         read["read"]
+        search["grep / glob / list"]
         write["write"]
         edit["edit (fuzzy match)"]
         shell["shell (foreground/background jobs)"]
         todo["todo (plan checklist)"]
         ask["ask (asks you a question)"]
+        web["web_fetch / browser (web sites)"]
+        visual["visual (diagrams, charts)"]
         memory["memory"]
         skill["skill"]
         ss["session_search"]
@@ -269,6 +274,102 @@ flowchart LR
     Registry --> Filter --> Model["Tools the model sees<br/>this turn"]
     Plan["Plan mode?<br/>read-only only"] --> Filter
 ```
+
+### The web: web_fetch and the browser
+
+The agent can read the web two ways. **`web_fetch`** gets one http(s) page and hands the model readable Markdown (or
+plain text / raw HTML): the main content when the page marks it, headings, lists, links, code, tables, no scripts or
+page chrome. Long pages come in chunks (`start_index` / `next_index`). The **`browser`** tool and the side pane's
+browser, which used to open only `localhost`, now open web sites too, for pages that need JavaScript or clicking.
+
+- **Each new site asks first.** The first visit to a domain shows an approval card (once / this session / this folder /
+  everywhere / deny). The answer becomes a `web` permission rule (`example.com` also covers its subdomains; `*` is
+  every site), and Settings → Permissions lists them under "site", where you can add allow or deny rules by hand.
+  Full access skips the card like it does for everything else; deny rules always win. Local apps never ask.
+- **Private networks stay closed.** web_fetch checks the address a name resolves to (and connects to exactly that
+  address), so neither a URL nor DNS can lead it to `10.x`, `192.168.x`, link-local cloud metadata or this machine
+  under another name. Settings → Tools → Behavior → *Private and internal networks* opens intranet sites.
+  `localhost` and `127.0.0.1` always work. Through a corporate proxy, names only the proxy can resolve are let through.
+- **Redirects stay on the site.** A redirect to another site is reported (`redirect_to`), not followed, so the agent
+  has to ask for it.
+- **The pane is its own browser.** Each session's pane has a separate, empty, in-memory profile: no cookies from your
+  ChatGPT or Claude tabs, no logins. Inside it a page may navigate only within sites opened in that session (by you
+  in the URL bar or by the agent after you approved); other links are blocked and reported to the agent. A web page
+  can load public resources (CDNs) but never `localhost` or private addresses; a local app still loads only local
+  resources. Downloads and pop-ups are blocked.
+- **Untrusted text.** Every fetched page says it is untrusted data, and the prompt tells the agent never to follow
+  instructions found in it or send secrets to a site.
+- Limits live in `settings.json` under `"web"`: `timeoutMs` (30 s), `maxBytes` (5 MB), `maxChars` (40 000 per chunk).
+
+### Visuals
+
+The **`visual`** tool lets the agent draw in the chat: an SVG diagram, a chart, a table or a small interactive HTML
+widget, shown as a card in the turn (not folded into the tool group) and again when the session is reopened.
+
+- It runs in an iframe sandboxed to scripts only, with its own opaque origin (no access to the app, its storage or the
+  bridge) and a Content-Security-Policy that allows no network at all: no external scripts, fonts, images or fetch.
+  Frames in the app window may not navigate anywhere either.
+- The frame gets Paladin's theme as CSS variables (`--v-fg`, `--v-muted`, `--v-border`, `--v-accent`, `--v-good`,
+  `--v-warn`, `--v-bad`, `--v-series-1…6`, `--v-font`, `--v-mono`) in dark and light, and follows a theme switch.
+- The card sizes itself to the content. Its buttons show the source, open it larger (Escape closes) and save it as an
+  `.svg` or `.html` file. A copy is also kept in `<session>/visuals/`.
+- A script can call `paladin.sendPrompt(text)`: it fills your message box, it never sends.
+
+### Search tools (grep, glob, list)
+
+`grep` searches file contents, `glob` finds files by name (newest first) and `list` draws a folder tree with file counts.
+They're read-only, so they run in parallel and are available in plan mode and to subagents.
+They use **ripgrep** when it's installed and a built-in search otherwise; inside a git repo both honor `.gitignore`.
+They never follow symlinks and skip `.git` and `node_modules`. Searching a folder **outside** the workspace asks first,
+just like `read`, and "remember" grants that folder. A deny rule on anything inside it blocks the search.
+
+### Formatting after write and edit
+
+After `write` or `edit` changes a file **inside the workspace**, Paladin runs the formatter the project already uses,
+if it's installed: `gofmt` for Go, `rustfmt` for Rust, `ruff` or `black` for Python only when `pyproject.toml` (or
+`ruff.toml`) configures them, and `prettier` only from the project's own `node_modules/.bin`. Nothing is downloaded and
+`npx` is never used. The formatter reads the file on stdin inside a read-only sandbox, and its output replaces the file
+through the same conflict check as `edit`. The tool result says `formatted: "gofmt"` with a note to re-read, and the row
+shows a "formatted · gofmt" chip. A failing or slow formatter (10 s) leaves the file as written. Switch it off in
+Settings → Tools → Behavior (`formatOnWrite` in `settings.json`).
+
+### Language server errors after write and edit
+
+After `write` or `edit` changes a file **inside the workspace**, Paladin asks a language server for that file's errors
+and adds them to the tool result (`diagnostics`, at most 20, plus a note asking the model to fix them or say why
+they're expected). The row shows an "N errors · gopls" chip and lists them. Only servers that are **already installed**
+are used, nothing is downloaded: `gopls`, `typescript-language-server`, `pyright` / `basedpyright`, `rust-analyzer` and
+`clangd`, found in the project (`node_modules/.bin`, `.venv/bin`) or on PATH.
+
+- One server runs per kind and project root (the nearest `go.mod`, `package.json`, `pyproject.toml`… inside the
+  workspace). It starts when the agent first **reads** a file it handles, so it has loaded the project by the first edit.
+- An edit waits at most 1.5 s for the answer (up to 10 s while a server is still starting); a slow server adds nothing.
+- A server that fails to start is left off for a minute; idle servers stop after 10 minutes, and all of them stop with
+  the app. Settings → Tools → Behavior shows each running server and has the on/off switch (`lspDiagnostics`).
+- `<data>/config/lsp.json` can change things: `{"timeoutMs": 3000, "servers": {"gopls": {"disabled": true},
+  "mylang": {"command": ["mylang-lsp", "--stdio"], "extensions": [".ml"]}}}`. There is no per-folder `lsp.json`
+  (it would run commands from a cloned repo).
+- Files over 1 MB are never sent to a server: they can still be read in pages, they just get no diagnostics.
+
+### AGENTS.md in subfolders
+
+The system prompt holds the AGENTS.md files from the project root down to the session folder. In a monorepo the rules
+often live deeper (`services/api/AGENTS.md`). The first time `read`, `write` or `edit` touches a file in such a
+subfolder, the AGENTS.md (or AGENTS.override.md / CLAUDE.md) files between the session folder and that file ride along
+in the tool result as `nested_instructions`, so the prompt and its cache stay untouched. When that first touch is a
+`write` or `edit`, the call is **held, not run**: its result carries the instructions and asks the agent to resend it
+(changed if the rules require), so nothing in the folder changes before the agent has read them. A held call skips
+hooks and the approval card; the resent one goes through both as usual. Each file arrives once per
+session (remembered in `nested-instructions.json` next to the transcript), within a 32 KB budget. The read row shows a
+"+ folder instructions" chip when this happens.
+
+### Long output is kept, not lost
+
+A shell command or MCP tool that prints more than fits (32 KB for shell, 40 000 characters for MCP) still shows the model
+its **start and end**, but the whole output is saved to `<session>/tool-output/<call id>.txt` (blurred for secrets, up to 8 MB).
+The result names that file (`output_file`), so the model can `read` or `grep` the missing middle instead of running the
+command again. A session may always read its own folder (these files, background job logs, screenshots) without an
+approval card; a deny rule still wins. The files go away with the session.
 
 ### Tool switches (on/off)
 
@@ -506,9 +607,11 @@ flowchart LR
     Menu --> Skills["Skills<br/>(SKILL.md folders): /skill name"]
 ```
 
+- **`/review [session | branch | commit | focus]`**: a read-only (plan mode) code review. With no argument it reviews uncommitted changes; `session` reviews only what this session changed (Paladin adds the diff from its snapshots; when the session has no snapshots or changed nothing, the command stops with that message before the model runs, instead of reviewing other changes); a branch or commit reviews `git diff <it>...HEAD`. The review ends with the **`report_findings`** tool, which only exists in `/review`'s turn (a command's `tools:` frontmatter switches such command-only tools on). The chat shows a **findings card**: the verdict, then each finding by priority (P0–P3) with its file and lines. Opening one shows the code around it with those lines marked, **View in changes** jumps to the session's diff with the same lines marked (when this session changed the file), and **Fix** puts the finding into the composer so you send it as a normal turn. Adding the tool changes the tool list for that one turn, so the review turn (and the next) re-reads the prompt cache once.
+- **Customize (Settings → Customize)**: every built-in text the agent gets is editable there: the system prompt, the tool guidance ("when to use which tool"), the shell rules, the tool examples, each tool's description, plan mode and the `/btw` wrapper, the reminders (check before finishing, budget, folder instructions, formatter and language server notes, untrusted web content, switched-off tools), the subagent preamble and roles, the compaction prompts, the built-in commands (`/review`, `/init`), the built-in skills (with an on/off switch), and `settings.json` / `lsp.json` (validated before saving). Each item says what it does, which `{{placeholders}}` it fills in and where its file is; **Reset to default** deletes the override. Text edits are plain files in `<data>/config/custom/<id>.md`, so they can be edited by hand too. Overrides are global only: a cloned repository cannot rewrite the agent's instructions. The tools themselves stay fixed; their descriptions and guidance are what you edit. An edit applies from the next turn (a changed prompt section re-reads the prompt cache once).
 - **Plan mode** (`/plan`): the agent only gets read-only tools. It looks around and proposes a plan.
 - **Build mode** (`/build`): back to normal.
-- **Skills**: packs of instructions the model can pull in when needed (with the `skill` tool), or that you attach to a turn.
+- **Skills**: packs of instructions the model can pull in when needed (with the `skill` tool), or that you attach to a turn. Paladin ships eight: `debugging`, `test-driven-development`, `safe-refactoring`, `code-review`, `security-review`, `web-research`, `diagrams-and-charts` and `writing-docs`. A skill of the same name in `config/skills/` (global) or `.paladin/skills/` (this folder) replaces a built-in, and `settings.json` `disabledSkills` turns any skill off; Settings → Customize does both.
 - **`/btw [question]`**: whisper a side question to the cook without interrupting. It works **while a turn is running**: Paladin copies the conversation so far (including tools still running), asks the model once with no tools, and shows the answer in a **side chat** tab in the right-hand pane (the speech-bubble button in the title bar opens it). A bare `/btw` just opens an empty side chat, ready to type in. You can keep asking in that tab, open more tabs, and reopen old side chats from the pane's history menu. Side chats are saved next to the session (see §12) but **never added to the main conversation**; their cost counts toward usage and the budget.
 - **Terminal tabs**: the side pane's terminal icon starts a real PTY in the session workspace, with your normal OS permissions. Each tab owns its shell and keeps it running while hidden. This is separate from the agent's sandboxed `shell` tool.
 - **`! command` and `!! command`**: both run a user command outside the agent sandbox and show its output in the terminal pane. One `!` starts an agent turn after the command finishes, giving the agent the command, exit code and output. Two `!` characters never start a turn or enter agent history.
@@ -545,6 +648,9 @@ flowchart LR
 │   ├── models.json
 │   ├── settings.json       ← e.g. maxConcurrentTurns
 │   ├── SYSTEM_PROMPT.md    ← the editable system prompt
+│   ├── custom/<id>.md      ← your edits of built-in texts (Settings → Customize)
+│   ├── commands/, skills/  ← your commands and skills (and edited built-ins)
+│   ├── lsp.json            ← language server overrides
 │   ├── mcp.json            ← global MCP servers
 │   └── tools.json          ← global tool switches
 ├── permissions/
@@ -558,6 +664,7 @@ flowchart LR
 │           │                       subagent link (parent/children)…
 │           ├── usage.json       ← tokens & cost
 │           ├── summary.json     ← list cache (count, title, bytes read); rebuildable
+│           ├── tool-output/     ← full output of oversized tool results
 │           └── side-chats/
 │               └── <chat id>/chat.json  ← one /btw side chat
 │       (a subagent is a session folder of its own, beside its parent)

@@ -255,8 +255,11 @@ func (m *Manager) Trusted(folder string) bool {
 	return m.trust.Trusted(folder, Fingerprint(data))
 }
 
-// Trust approves (or revokes) folder's current mcp.json.
-func (m *Manager) Trust(folder string, trust bool) error {
+// Trust approves (or revokes) folder's mcp.json. reviewed is the
+// fingerprint of the content the user was shown (MCPOverview): trust is
+// refused if the file changed since, so what gets approved is what was
+// reviewed, not whatever is on disk at the click.
+func (m *Manager) Trust(folder string, trust bool, reviewed string) error {
 	folder = cleanFolder(folder)
 	if folder == "" {
 		return errors.New("trust needs a folder")
@@ -268,6 +271,9 @@ func (m *Manager) Trust(folder string, trust bool) error {
 			return fmt.Errorf("read %s: %w", FolderPath(folder), err)
 		}
 		fp = Fingerprint(data)
+		if reviewed == "" || reviewed != fp {
+			return fmt.Errorf("%s changed since it was shown; review it again before trusting it", FolderPath(folder))
+		}
 	}
 	if err := m.trust.Set(folder, fp); err != nil {
 		return err

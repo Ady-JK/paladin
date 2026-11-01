@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
@@ -58,7 +59,9 @@ type ShellResponse struct {
 	ExitCode  *int    `json:"exit_code,omitempty"`
 	Output    *string `json:"output,omitempty"`
 	Truncated *bool   `json:"truncated,omitempty"`
-	Log       *string `json:"log,omitempty"`
+	// OutputFile holds the whole output when it outgrew the inline cap.
+	OutputFile *string `json:"output_file,omitempty"`
+	Log        *string `json:"log,omitempty"`
 }
 
 // procTracker attributes shell children to their session for the
@@ -92,24 +95,27 @@ func shellTimeoutMs(ms int64, background bool) (time.Duration, error) {
 	return time.Duration(ms) * time.Millisecond, nil
 }
 
-func (s *ShellTool) runSync(cmd, dir, owner string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, error) {
-	out, terr := runSyncInner(cmd, dir, owner, limit, cancel, sb)
+func (s *ShellTool) runSync(cmd, dir, owner, spillPath string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, error) {
+	out, terr := runSyncInner(cmd, dir, owner, spillPath, limit, cancel, sb)
 	if terr != nil {
 		return "", terr
 	}
 	return out, nil
 }
 
-func shellResponseJSON(id, status string, exitCode *int, output *string, truncated *bool, log string) (string, error) {
-	var logPtr *string
+func shellResponseJSON(id, status string, exitCode *int, output *string, truncated *bool, log, outputFile string) (string, error) {
+	var logPtr, filePtr *string
 	if log != "" {
 		logPtr = &log
+	}
+	if outputFile != "" {
+		filePtr = &outputFile
 	}
 	if output != nil {
 		masked := redact.String(*output)
 		output = &masked
 	}
-	out := ShellResponse{Status: status, ExitCode: exitCode, Output: output, Truncated: truncated, Log: logPtr}
+	out := ShellResponse{Status: status, ExitCode: exitCode, Output: output, Truncated: truncated, OutputFile: filePtr, Log: logPtr}
 	if id != "" {
 		out.JobID = &id
 	}
@@ -120,7 +126,7 @@ func shellResponseJSON(id, status string, exitCode *int, output *string, truncat
 	return string(data), nil
 }
 
-func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, *ToolError) {
+func runSyncInner(cmdStr, dir, owner, spillPath string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, *ToolError) {
 	child, outR, errR, err := spawnPiped(cmdStr, dir, sb)
 	if err != nil {
 		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
@@ -131,12 +137,19 @@ func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context
 	}
 	defer procTracker.Track(owner, pid)()
 	capture := newShellOutputCapture(MaxShellOutput)
+	if spillPath != "" {
+		capture.spillTo(spillPath)
+	}
+	defer capture.finishSpill()
 	var readers sync.WaitGroup
 	readers.Add(2)
 	go func() { defer readers.Done(); _, _ = io.Copy(capture, outR) }()
 	go func() { defer readers.Done(); _, _ = io.Copy(capture, errR) }()
 	ioDone := make(chan struct{})
 	go func() { readers.Wait(); close(ioDone) }()
+	// Closing our read ends ends the copies; a background grandchild that
+	// still holds the pipes cannot keep the call waiting past this.
+	defer func() { _ = outR.Close(); _ = errR.Close() }()
 	waitDone := make(chan waitResult, 1)
 	go func() {
 		werr := child.Wait()
@@ -166,7 +179,7 @@ func runSyncInner(cmdStr, dir, owner string, limit time.Duration, cancel context
 			case <-time.After(10 * time.Second):
 			}
 			output, truncated := capture.result()
-			return finishSync(output, truncated, w, sb != nil)
+			return finishSync(output, truncated, capture.finishSpill(), w, sb != nil)
 		}
 	}
 }
@@ -182,6 +195,11 @@ type shellOutputCapture struct {
 	head     []byte
 	tail     []byte
 	total    int64
+	// The spill keeps every byte once output outgrows maxBytes (spill.go).
+	spillPath   string
+	spill       *os.File
+	spilled     int64
+	spillFailed bool
 }
 
 func newShellOutputCapture(maxBytes int) *shellOutputCapture {
@@ -193,6 +211,7 @@ func (c *shellOutputCapture) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := len(p)
+	c.spillLocked(p)
 	c.total += int64(n)
 	headCap := c.maxBytes / 2
 	if len(c.head) < headCap {
@@ -236,12 +255,15 @@ func (c *shellOutputCapture) result() ([]byte, bool) {
 	return []byte(strings.ToValidUTF8(string(out), "�")), false
 }
 
-func finishSync(output []byte, truncated bool, w waitResult, sandboxed bool) (string, *ToolError) {
+func finishSync(output []byte, truncated bool, outputFile string, w waitResult, sandboxed bool) (string, *ToolError) {
 	if w.signaled || w.code == nil {
 		return "", ArgsError("shell: the command exited with status 1")
 	}
 	code := *w.code
 	text := ToLF(StripANSI(string(output)))
+	if outputFile != "" {
+		text = withSpillNote(text, outputFile)
+	}
 	var truncPtr *bool
 	if truncated {
 		truncPtr = &truncated
@@ -249,13 +271,13 @@ func finishSync(output []byte, truncated bool, w waitResult, sandboxed bool) (st
 	outText := text
 	codePtr := code
 	if code == 0 {
-		text2, err := shellResponseJSON("", JobDone, &codePtr, &outText, truncPtr, "")
+		text2, err := shellResponseJSON("", JobDone, &codePtr, &outText, truncPtr, "", outputFile)
 		if err != nil {
 			return "", mustToolError(err)
 		}
 		return text2, nil
 	}
-	content, err := shellResponseJSON("", JobFailed, &codePtr, &outText, truncPtr, "")
+	content, err := shellResponseJSON("", JobFailed, &codePtr, &outText, truncPtr, "", outputFile)
 	if err != nil {
 		return "", mustToolError(err)
 	}
@@ -263,6 +285,22 @@ func finishSync(output []byte, truncated bool, w waitResult, sandboxed bool) (st
 		content = markSandboxBlocked(content)
 	}
 	return "", WithContent(content, fmt.Sprintf("shell: the command exited with status %d", code))
+}
+
+// withSpillNote names the full output file at the truncation seam and
+// gives up as much of the kept tail, so the inline output stays capped.
+func withSpillNote(text, outputFile string) string {
+	at := strings.Index(text, shellTruncatedMarker)
+	if at < 0 {
+		return text
+	}
+	note := " " + SpillNote(outputFile) + "\n"
+	tail := text[at+len(shellTruncatedMarker):]
+	cut := min(len(note), len(tail))
+	for cut < len(tail) && !utf8.RuneStart(tail[cut]) {
+		cut++
+	}
+	return text[:at] + shellTruncatedMarker + note + tail[cut:]
 }
 
 func mustToolError(err error) *ToolError {
@@ -384,7 +422,7 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 			// Background runs detach; notify arming happens per-turn.
 			return s.runBackground(args.Cmd, dir, ctx.SessionID, ctx.CallID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
 		}
-		return s.runSync(args.Cmd, dir, ctx.SessionID, limit, ctx.Cancel, ctx.Sandbox)
+		return s.runSync(args.Cmd, dir, ctx.SessionID, SpillPath(ctx), limit, ctx.Cancel, ctx.Sandbox)
 	case ShellStatus:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")

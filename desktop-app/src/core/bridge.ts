@@ -4,6 +4,10 @@
 
 export interface PaladinBridge {
   invoke: (method: string, params?: unknown) => Promise<unknown>;
+  core?: {
+    connection: () => Promise<{ mode: "local" | "ssh"; target?: string; binary?: string }>;
+    setConnection: (value: { mode: "local" | "ssh"; target?: string; binary?: string }) => Promise<unknown>;
+  };
   // onEvent subscribes to every turn event of every session.
   onEvent?: (cb: (msg: unknown) => void) => () => void;
   // A native notification was clicked: open that session.

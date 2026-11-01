@@ -23,8 +23,10 @@ import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
-import { createCompactionDivider, createTurn, renderGreeting, scrollToBottom } from "./chatView";
+import { createCompactionDivider, createTurn, mountLinkCards, renderGreeting, scrollToBottom } from "./chatView";
 import { createThinkingBlock } from "./turnView";
+import { createFindingsCard } from "./findings";
+import { createVisualCard } from "./visuals";
 import { ToolRun } from "./toolRun";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
@@ -40,6 +42,7 @@ import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
 import { loadJson, saveJson } from "../core/storage";
 import { disposeSidePanes, paintAgentTabs, refreshChanges, syncSidePane } from "./sidePane";
+import { mountImage, registerImage } from "./mediaGallery";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -542,7 +545,12 @@ function renderHistory(history: MessageInfo[]): void {
 
 // buildHistory appends a persisted transcript's rows to container.
 // Rows of a session the user cannot rewind here get no revert button.
-export function buildHistory(container: HTMLElement, history: MessageInfo[], revertable = true): void {
+export function buildHistory(
+  container: HTMLElement,
+  history: MessageInfo[],
+  revertable = true,
+  sessionId = state.sessionId,
+): void {
   let agentBody: HTMLElement | null = null;
   // run is the open group of consecutive calls; any text closes it.
   let run: ToolRun | null = null;
@@ -565,11 +573,17 @@ export function buildHistory(container: HTMLElement, history: MessageInfo[], rev
     el.className = "md agent-text";
     el.innerHTML = renderMarkdown(text);
     agentBody.append(el);
+    mountLinkCards(agentBody, text);
   };
 
   const pushAgentTool = (tool: ToolInfo): void => {
     if (!agentBody) {
       openAgent("");
+    }
+    if (tool.name === "report_findings" || tool.name === "visual") {
+      agentBody!.append(tool.name === "visual" ? createVisualCard(tool) : createFindingsCard(sessionId, tool));
+      run = null;
+      return;
     }
     // Cap the live DOM copy: the full result stays in the transcript.
     if (tool.result && tool.result.length > 8000) {
@@ -594,6 +608,15 @@ export function buildHistory(container: HTMLElement, history: MessageInfo[], rev
         revertable: revertable && message.index !== undefined,
       });
       if (message.index !== undefined) turn.wrapper.dataset.turnIndex = String(message.index);
+      for (const attachment of message.attachments ?? []) {
+        if (attachment.image) mountImage(turn.textEl, sessionId, attachment.image.path, attachment.name);
+        else {
+          const file = document.createElement("div");
+          file.className = "session-file-card";
+          file.textContent = `${attachment.name} · ${attachment.path}`;
+          turn.textEl.append(file);
+        }
+      }
       container.append(turn.wrapper);
     } else if (message.role === "assistant" && message.kind === "thinking") {
       if (!agentBody) {
@@ -612,6 +635,7 @@ export function buildHistory(container: HTMLElement, history: MessageInfo[], rev
       run = null;
       agentBody!.append(createCompactionDivider("Context compacted", message.content));
     } else if (message.role === "tool") {
+      if (message.image) registerImage(sessionId, message.image.path);
       pushAgentTool({
         id: `h${index}`,
         name: message.name || "tool",
@@ -619,6 +643,7 @@ export function buildHistory(container: HTMLElement, history: MessageInfo[], rev
         result: message.content,
         status: message.status === "failed" ? "failed" : "ok",
       });
+      if (message.image && agentBody) mountImage(agentBody, sessionId, message.image.path, "Browser screenshot");
     }
   }
 }

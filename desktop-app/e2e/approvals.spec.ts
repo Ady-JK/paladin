@@ -294,3 +294,64 @@ test("settings → permissions edits global and folder rules", async ({ page }) 
   const stored = await page.evaluate(() => localStorage.getItem("paladin.permissions.default"));
   expect(stored).toBe("read-only");
 });
+
+test("a project-tools card asks once for the folder", async ({ page }) => {
+  await script(page, [
+    {
+      event: "chat/tool",
+      tool: { id: "w1", name: "write", arguments: JSON.stringify({ path: "/ws/a.js" }), result: "", status: "running" },
+    },
+    {
+      event: "chat/approval",
+      approval: {
+        id: "w1",
+        tool: "project tools",
+        kind: "project",
+        command: "node_modules/.bin/prettier",
+        path: "/ws",
+        reasons: ["this project ships it, so it runs code from the project itself"],
+        choices: ["session", "folder", "deny"],
+        remember: [{ tool: "project", pattern: "/ws", action: "allow" }],
+        state: "pending",
+      },
+    },
+  ]);
+  await send(page, "format it");
+  const card = page.locator('.approval-card[data-approval="w1"]');
+  await expect(card).toContainText("Run this project's own tool?");
+  await expect(card).toContainText("node_modules/.bin/prettier");
+  await expect(card.locator('[data-approve="folder"]')).toContainText("Always allow this project's tools");
+  await expect(card.locator('[data-approve="deny"]')).toContainText("Don't run them");
+  await card.locator('[data-approve="folder"]').click();
+  const answers = await page.evaluate(() => (window as any).__e2eApprovalAnswers);
+  expect(answers).toEqual([{ sessionId: "sess-notify-1", callId: "w1", decision: "folder" }]);
+});
+
+test("an extension tool call asks with its arguments", async ({ page }) => {
+  await script(page, [
+    {
+      event: "chat/tool",
+      tool: { id: "x1", name: "jira_lookup", arguments: JSON.stringify({ q: "PAL-1" }), result: "", status: "running" },
+    },
+    {
+      event: "chat/approval",
+      approval: {
+        id: "x1",
+        tool: "jira_lookup",
+        kind: "extension",
+        args: JSON.stringify({ q: "PAL-1" }),
+        reasons: ["extension tool: it runs local code without the sandbox"],
+        choices: ["once", "session", "folder", "global", "deny"],
+        remember: [{ tool: "extension", pattern: "jira_lookup", action: "allow" }],
+        state: "pending",
+      },
+    },
+  ]);
+  await send(page, "look it up");
+  const card = page.locator('.approval-card[data-approval="x1"]');
+  await expect(card).toContainText("Run this extension tool?");
+  await expect(card.locator(".approval-mcp-tool")).toHaveText("jira_lookup");
+  await expect(card.locator(".approval-args")).toContainText("PAL-1");
+  await card.locator('[data-approve="once"]').click();
+  await expect(card).toHaveClass(/is-resolved/);
+});

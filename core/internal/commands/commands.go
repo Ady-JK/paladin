@@ -4,9 +4,11 @@
 //	config/commands/<name>.md              (global, under the data dir)
 //	<workspace>/.paladin/commands/<name>.md  (workspace, shadows global)
 //
-// Frontmatter keys: description, argument-hint, mode (plan|build).
-// The body may reference $ARGUMENTS (the whole argument string) and
-// $1..$9 (whitespace-split, quotes group). When the body names neither,
+// Frontmatter keys: description, argument-hint, mode (plan|build) and
+// tools (command-only tools the turn may use, e.g. report_findings).
+// The body may reference $ARGUMENTS (the whole argument string),
+// $1..$9 (whitespace-split, quotes group) and $SESSION_CHANGES (the
+// session's own diff when the argument is "session"; see runtime). When the body names neither,
 // the arguments are appended after a blank line. Built-in commands
 // (init, review) ship in the binary and can be shadowed by files.
 package commands
@@ -41,9 +43,11 @@ type Command struct {
 	Description  string `json:"description"`
 	ArgumentHint string `json:"argumentHint,omitempty"`
 	Mode         string `json:"mode,omitempty"`
-	Source       string `json:"source"`
-	Path         string `json:"path,omitempty"`
-	Body         string `json:"-"`
+	// Tools are command-only tools switched on for the command's turn.
+	Tools  []string `json:"tools,omitempty"`
+	Source string   `json:"source"`
+	Path   string   `json:"path,omitempty"`
+	Body   string   `json:"-"`
 }
 
 var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -91,6 +95,21 @@ func Load(dataDir, cwd, name string) (Command, error) {
 		}
 	}
 	return Command{}, fmt.Errorf("not found: command /%s (add %s.md under .paladin/commands/ or config/commands/)", name, name)
+}
+
+// BuiltinText is a shipped command's file, frontmatter included.
+func BuiltinText(name string) (string, bool) {
+	data, err := builtinFS.ReadFile("builtin/" + name + ".md")
+	return string(data), err == nil
+}
+
+// BuiltinNames lists the shipped commands.
+func BuiltinNames() []string {
+	var out []string
+	for _, c := range builtins() {
+		out = append(out, c.Name)
+	}
+	return out
 }
 
 func builtins() []Command {
@@ -156,6 +175,9 @@ func parse(name, content string) Command {
 		if mode := strings.ToLower(skills.FrontmatterValue(fm, "mode")); mode == "plan" || mode == "build" {
 			c.Mode = mode
 		}
+		c.Tools = strings.FieldsFunc(skills.FrontmatterValue(fm, "tools"), func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t'
+		})
 	}
 	if c.Description == "" {
 		for _, line := range strings.Split(c.Body, "\n") {

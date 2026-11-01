@@ -4,6 +4,25 @@
 
 async function __paladinBaseInvoke(cmd, args) {
   switch (cmd) {
+    case "saveAttachment": {
+      window.__e2eUploads = (window.__e2eUploads || []).concat([args]);
+      const id = `file-${window.__e2eUploads.length}`;
+      return {
+        id,
+        name: args.name,
+        path: `/sessions/${args.sessionId}/attachments/${id}`,
+        size: atob(args.data).length,
+        mimeType: "image/png",
+        image: {
+          path: `/sessions/${args.sessionId}/attachments/${id}`,
+          mimeType: "image/png",
+          size: atob(args.data).length,
+          sha256: "stub",
+        },
+      };
+    }
+    case "sessionImage":
+      return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=";
     case "terminalStart":
       window.__e2eTerminalStarts = (window.__e2eTerminalStarts || []).concat([args]);
       return "terminal-" + window.__e2eTerminalStarts.length;
@@ -164,7 +183,14 @@ async function __paladinBaseInvoke(cmd, args) {
     case "toolsList":
     case "toolsSet":
     case "toolsAccept":
+    case "toolBehaviorSet":
       return window.__e2eToolsInvoke(cmd, args || {});
+    case "customList":
+    case "customGet":
+    case "customSet":
+    case "customReset":
+    case "skillEnabledSet":
+      return window.__e2eCustomInvoke(cmd, args || {});
     case "memoryProjects":
       return [{ cwd: "/home/tester/project", key: "project-1234", entries: 1, used: 20, limit: 4000 }];
     case "memoryRefreshSnapshot":
@@ -177,6 +203,13 @@ async function __paladinBaseInvoke(cmd, args) {
       return { index: args.index, turns: 1, files: [], conflicts: [], snapshots: true, ...(window.__e2ePreview || {}) };
     case "sessionChanges":
       return window.__e2eChanges || { available: true, turns: [], files: [] };
+    case "fileExcerpt": {
+      window.__e2eExcerptCalls = (window.__e2eExcerptCalls || []).concat([args]);
+      const from = Math.max(1, args.start - 3);
+      const lines = [];
+      for (let n = from; n <= args.end + 3; n++) lines.push(`line ${n}`);
+      return { path: args.path, rel: "", startLine: from, lines, truncated: false };
+    }
     case "sessionDiff":
       window.__e2eDiffCalls = (window.__e2eDiffCalls || []).concat([args]);
       return { path: args.path, patch: window.__e2ePatch || "", truncated: false };
@@ -658,6 +691,8 @@ async function __paladinBaseInvoke(cmd, args) {
       return args.path;
     case "getPrompt":
       return window.__e2ePrompt || { systemPrompt: "stub system prompt" };
+    case "suggestPrompt":
+      return { systemPrompt: `${args.systemPrompt}\n\n${args.instruction}` };
     case "setPrompt":
       window.__e2ePrompt = { systemPrompt: args.systemPrompt || "stub system prompt" };
       return window.__e2ePrompt;
@@ -751,6 +786,7 @@ window.__e2eMcpInvoke = (cmd, args) => {
     folderPath: cwd + "/.paladin/mcp.json",
     hasFolderConfig: !!m.hasFolderConfig,
     trusted: m.trusted !== false,
+    folderFingerprint: m.hasFolderConfig ? "fp-mcp-folder" : undefined,
     errors: m.errors || undefined,
   });
   const find = () => m.servers.find((s) => s.name === args.name && s.scope === args.scope);
@@ -870,6 +906,9 @@ window.__e2eToolsInvoke = (cmd, args) => {
         return { ...x, global: g, session: s, enabled: on, pending: pending.includes(x.name) || undefined };
       }),
       pending,
+      extensionErrors: t.extensionErrors || [],
+      behavior: { formatOnWrite: true, verifyNudge: true, lspDiagnostics: true, ...(t.behavior || {}) },
+      languageServers: t.languageServers || [],
     };
   };
   switch (cmd) {
@@ -886,6 +925,9 @@ window.__e2eToolsInvoke = (cmd, args) => {
         t.pending[sid] = (t.pending[sid] || []).filter((n) => !args.names.includes(n));
       return overview();
     }
+    case "toolBehaviorSet":
+      t.behavior = { ...(t.behavior || {}), [args.key]: !!args.enabled };
+      return overview();
     case "toolsAccept": {
       const names = args.names && args.names.length ? args.names : t.pending[sid] || [];
       t.pending[sid] = (t.pending[sid] || []).filter((n) => !names.includes(n));
@@ -1076,7 +1118,7 @@ window.__e2eHooksInvoke = (cmd, args) => {
   }
   window.__e2eHooksCalls = (window.__e2eHooksCalls || []).concat([{ cmd, args: JSON.parse(JSON.stringify(args)) }]);
   const overview = () => ({
-    sources: JSON.parse(JSON.stringify(h.sources)),
+    sources: JSON.parse(JSON.stringify(h.sources)).map((s) => (s.exists ? { ...s, fingerprint: "fp-" + s.path } : s)),
     events: ["PreToolUse", "PostToolUse", "Stop"],
   });
   switch (cmd) {
@@ -1157,6 +1199,10 @@ window.__e2eRunTurn = async (params, handlers) => {
 window.paladin = {
   metrics: async () => window.__e2eAppMetrics || null,
   invoke: (method, params) => window.__paladinBaseInvoke(method, params || {}),
+  core: {
+    connection: async () => window.__e2eCoreConnection || { mode: "local" },
+    setConnection: async (value) => (window.__e2eCoreConnection = value),
+  },
   onEvent: (cb) => __e2eHub.on(cb),
   onOpenSession: (cb) => {
     window.__e2eOpenSession = cb;
@@ -1221,4 +1267,77 @@ window.paladin = {
     isMaximized: async () => false,
     onResized: () => () => {},
   },
+};
+
+// Settings → Customize: a few items of each kind, kept in memory.
+// __e2eCustomCalls records every call.
+window.__e2eCustomInvoke = (cmd, args) => {
+  const w = window;
+  w.__e2eCustomCalls = w.__e2eCustomCalls || [];
+  w.__e2eCustomCalls.push({ cmd, ...args });
+  if (!w.__e2eCustom) {
+    const item = (id, group, title, kind, def, extra) => ({
+      id,
+      group,
+      title,
+      kind,
+      description: `About ${title}.`,
+      default: def,
+      value: def,
+      ...extra,
+    });
+    w.__e2eCustom = [
+      item("prompt.tool-guidance", "Tool guidance", "When to use which tool", "text", "Tools:\n- Read before editing."),
+      item("tool.read.description", "Tool descriptions", "read", "text", "Read a file."),
+      item("reminder.verify", "Reminders", "Check before finishing", "text", "Check {{files}}.", { vars: ["files"] }),
+      item("skill.debugging", "Skills", "debugging", "skill", "# Debugging", { enabled: true }),
+      item("file.settings", "Settings files", "settings.json", "json", "{}\n"),
+    ];
+  }
+  const find = (id) => {
+    const it = w.__e2eCustom.find((x) => x.id === id);
+    if (!it) throw new Error(`not found: no customizable item "${id}"`);
+    return it;
+  };
+  const state = (it) => {
+    const missing = (it.vars || []).filter((v) => !it.value.includes(`{{${v}}}`));
+    return { ...it, customized: it.value !== it.default, path: `/data/config/custom/${it.id}.md`, missing };
+  };
+  // __e2eCustomDelay (ms) slows reads, to test typing while they load.
+  const later = (value) =>
+    w.__e2eCustomDelay ? new Promise((resolve) => setTimeout(() => resolve(value), w.__e2eCustomDelay)) : value;
+  switch (cmd) {
+    case "customList":
+      return later(
+        w.__e2eCustom.map((it) => {
+          const { value: _v, default: _d, ...row } = state(it);
+          return row;
+        }),
+      );
+    case "customGet":
+      return later(state(find(args.id)));
+    case "customSet": {
+      const it = find(args.id);
+      if (!String(args.text).trim()) throw new Error("parse: the text is empty; use Reset to restore the default");
+      if (it.kind === "json") {
+        try {
+          JSON.parse(args.text);
+        } catch {
+          throw new Error("parse: settings.json must be a JSON object");
+        }
+      }
+      it.value = args.text;
+      return state(it);
+    }
+    case "customReset": {
+      const it = find(args.id);
+      it.value = it.default;
+      return state(it);
+    }
+    case "skillEnabledSet": {
+      find("skill." + args.name).enabled = !!args.enabled;
+      return true;
+    }
+  }
+  throw new Error("unknown " + cmd);
 };

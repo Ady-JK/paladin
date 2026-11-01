@@ -58,7 +58,7 @@ func (t *mcpTool) Call(args json.RawMessage, tc *tools.ToolCtx) (string, error) 
 	if err != nil {
 		return "", failure(t.errText(parent, err, timeout))
 	}
-	out := renderResult(res)
+	out := fitResult(renderResult(res), tc)
 	if res.IsError {
 		return "", tools.WithContent(out, truncate(out, 300))
 	}

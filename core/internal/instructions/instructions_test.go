@@ -3,6 +3,7 @@ package instructions
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -77,5 +78,25 @@ func TestSizeCap(t *testing.T) {
 func TestRenderEmpty(t *testing.T) {
 	if Render(nil) != "" {
 		t.Fatal("empty should render blank")
+	}
+}
+
+func TestBelowWalksOnlyUnderTheWorkspace(t *testing.T) {
+	ws := t.TempDir()
+	for _, f := range []string{"AGENTS.md", "a/AGENTS.md", "a/b/CLAUDE.md"} {
+		path := filepath.Join(ws, f)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte("x"), 0o644)
+	}
+	os.MkdirAll(filepath.Join(ws, "a", "b", "c"), 0o755)
+	got := Below(ws, filepath.Join(ws, "a", "b", "c"))
+	want := []string{filepath.Join(ws, "a", "AGENTS.md"), filepath.Join(ws, "a", "b", "CLAUDE.md")}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for _, dir := range []string{ws, filepath.Dir(ws), filepath.Join(filepath.Dir(ws), "elsewhere")} {
+		if got := Below(ws, dir); got != nil {
+			t.Errorf("Below(%s) = %v, want nil", dir, got)
+		}
 	}
 }

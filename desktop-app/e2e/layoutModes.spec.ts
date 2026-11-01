@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function switchLayout(page: Page): Promise<void> {
-  await page.locator("#paneHistoryBtn").click();
   await page.locator("#paneLayoutBtn").click();
 }
 
@@ -16,9 +15,9 @@ test.beforeEach(async ({ page }) => {
 test("split and tabs preserve the active side chat and make each view full width", async ({ page }) => {
   const layout = page.locator("#paneLayoutBtn");
   await expect(page.locator("#paneHistoryBtn")).toBeVisible();
-  await expect(layout).toBeHidden();
+  await expect(layout).toBeVisible();
   await expect(layout).toHaveAttribute("data-layout", "split");
-  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneNewChatBtn").click();
   const splitWidth = (await page.locator("#sidePane").boundingBox())!.width;
   const fullWidth = (await page.locator("#agentSplit").boundingBox())!.width;
   expect(splitWidth).toBeLessThan(fullWidth * 0.7);
@@ -27,8 +26,7 @@ test("split and tabs preserve the active side chat and make each view full width
   await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
   await expect(page.locator("#titleBar .pane-strip")).toBeVisible();
   await expect(page.locator("#sidePane .pane-strip")).toHaveCount(0);
-  await expect(layout.locator("svg")).toHaveCount(0);
-  await expect(layout).toHaveText("Split view");
+  await expect(layout).toHaveAttribute("aria-label", "Switch to split layout");
   await expect(page.locator("#agentMain")).toBeHidden();
   expect((await page.locator("#sidePane").boundingBox())!.width).toBeGreaterThan(fullWidth * 0.9);
 
@@ -66,7 +64,7 @@ test("clicking a localhost chat link opens the session browser in either layout"
 });
 
 test("browser tab expands to full width and the layout survives a reload", async ({ page }) => {
-  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneNewChatBtn").click();
   await page.locator("#paneBrowserBtn").click();
   await page.locator("#sidePane .browser-url").fill("http://127.0.0.1:3000");
   await page.locator("#sidePane .browser-open").click();

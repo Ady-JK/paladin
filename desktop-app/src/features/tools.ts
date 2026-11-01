@@ -29,6 +29,9 @@ function toolSummary(name: string, raw: string): string {
       const job = typeof args.job_id === "string" && args.job_id ? ` ${args.job_id}` : "";
       return `${action}${job}`;
     }
+    if ((name === "grep" || name === "glob") && typeof args.pattern === "string") {
+      return short(args.pattern);
+    }
     if (typeof args.path === "string") {
       return args.path;
     }
@@ -39,6 +42,27 @@ function toolSummary(name: string, raw: string): string {
     }
   }
   return short(raw);
+}
+
+// errorsChip names the language server errors a write or edit got.
+function errorsChip(result: Record<string, unknown> | null): string {
+  const n = result && typeof result.errors === "number" ? result.errors : 0;
+  if (!n) return "";
+  const from = typeof result?.diagnostics_from === "string" ? ` · ${result.diagnostics_from}` : "";
+  return `${n} ${n === 1 ? "error" : "errors"}${from}`;
+}
+
+// diagnosticsHtml lists the language server errors under the file head.
+function diagnosticsHtml(result: Record<string, unknown> | null): string {
+  const list = result && Array.isArray(result.diagnostics) ? (result.diagnostics as Record<string, unknown>[]) : [];
+  if (!list.length) return "";
+  const rows = list
+    .map((d) => {
+      const at = `${Number(d.line) || 0}:${Number(d.column) || 0}`;
+      return `<li class="diag-row"><span class="diag-at">${escapeHtml(at)}</span><span class="diag-msg">${escapeHtml(String(d.message ?? ""))}</span></li>`;
+    })
+    .join("");
+  return `<ul class="diag-list" data-diagnostics>${rows}</ul>`;
 }
 
 // lineDiff diffs old lines against new lines with longest-common-subsequence.
@@ -104,6 +128,25 @@ function lineDiff(oldLines: string[], newLines: string[]): DiffRow[] {
     newNo++;
   }
   return rows;
+}
+
+function changedLines(tool: ToolInfo): { added: number; removed: number } | null {
+  if (tool.status !== "ok" || (tool.name !== "write" && tool.name !== "edit")) return null;
+  const args = tryParseJson(tool.arguments);
+  const result = tryParseJson(tool.result);
+  if (!args || !result) return null;
+  if (tool.name === "write") {
+    if (typeof result.lines !== "number") return null;
+    return { added: result.lines, removed: result.overwritten === true ? Number(result.old_lines ?? 0) : 0 };
+  }
+  if (typeof args.old_string !== "string" || typeof args.new_string !== "string") return null;
+  const lines = (text: string) => (text ? splitLines(text) : []);
+  const rows = lineDiff(lines(args.old_string), lines(args.new_string));
+  const count = typeof result.replacements === "number" ? result.replacements : 1;
+  return {
+    added: rows.filter((row) => row.kind === "add").length * count,
+    removed: rows.filter((row) => row.kind === "del").length * count,
+  };
 }
 
 // diffCell renders one half of a side-by-side pair row.
@@ -211,6 +254,11 @@ function richWriteHtml(tool: ToolInfo): string | null {
     if (typeof result.scope === "string" && result.scope === "outside") {
       chips.push("outside workspace");
     }
+    if (typeof result.formatted === "string" && result.formatted) {
+      chips.push(`formatted · ${result.formatted}`);
+    }
+    const diagChip = errorsChip(result);
+    if (diagChip) chips.push(diagChip);
   } else if (tool.status === "running") {
     chips.push("writing…");
   }
@@ -228,7 +276,7 @@ function richWriteHtml(tool: ToolInfo): string | null {
           `<span class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">${escapeHtml(chip)}</span>`,
       )
       .join("") +
-    `</div><div class="max-h-96 overflow-auto bg-white p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">${body}</div></div>`
+    `</div>${diagnosticsHtml(result)}<div class="max-h-96 overflow-auto bg-white p-2 font-mono text-[10px] leading-relaxed text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">${body}</div></div>`
   );
 }
 
@@ -297,6 +345,11 @@ function richEditHtml(tool: ToolInfo): string | null {
   if (result && typeof result.match_strategy === "string" && result.match_strategy !== "exact") {
     chips.push(`matched ignoring ${String(result.match_strategy).replace(/_/g, " ")}`);
   }
+  if (result && typeof result.formatted === "string" && result.formatted) {
+    chips.push(`formatted · ${result.formatted}`);
+  }
+  const diagChip = errorsChip(result);
+  if (diagChip) chips.push(diagChip);
   if (tool.status === "failed") {
     chips.push("failed");
   } else if (tool.status === "running") {
@@ -356,7 +409,7 @@ function richEditHtml(tool: ToolInfo): string | null {
           `<span class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">${escapeHtml(chip)}</span>`,
       )
       .join("") +
-    `</div><div class="max-h-96 overflow-auto bg-white p-1 font-mono text-[10px] leading-relaxed dark:bg-slate-900/60">${sections}</div>${extra}</div>`
+    `</div>${diagnosticsHtml(result)}<div class="max-h-96 overflow-auto bg-white p-1 font-mono text-[10px] leading-relaxed dark:bg-slate-900/60">${sections}</div>${extra}</div>`
   );
 }
 
@@ -397,9 +450,13 @@ const AGENT_KINDS: Record<string, ToolKind> = {
 const KINDS: Record<string, ToolKind> = {
   shell: { icon: "tl-term", past: "Ran", now: "Running", noun: plural("command", "commands") },
   read: { icon: "tl-file", past: "Read", now: "Reading", noun: plural("file", "files") },
+  grep: { icon: "tl-search", past: "Searched", now: "Searching", noun: plural("pattern", "patterns") },
+  glob: { icon: "tl-search", past: "Matched", now: "Matching", noun: plural("file pattern", "file patterns") },
+  list: { icon: "tl-folder", past: "Listed", now: "Listing", noun: plural("folder", "folders") },
   write: { icon: "tl-file-plus", past: "Wrote", now: "Writing", noun: plural("file", "files") },
   edit: { icon: "tl-pencil", past: "Edited", now: "Editing", noun: plural("file", "files") },
   ask: { icon: "tl-ask", past: "Asked", now: "Asking", noun: plural("question", "questions") },
+  web_fetch: { icon: "globe", past: "Fetched", now: "Fetching", noun: plural("page", "pages") },
   todo: {
     icon: "tl-list",
     past: "Updated",
@@ -452,6 +509,17 @@ function parseArgs(raw: string): Record<string, unknown> {
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
+// siteOf splits a URL into its host and the rest, for a row's label.
+function siteOf(raw: string): { host: string; rest: string } {
+  try {
+    const u = new URL(raw);
+    const rest = u.pathname === "/" && !u.search ? "" : `${u.pathname}${u.search}`;
+    return { host: u.host, rest: rest.length > 60 ? `${rest.slice(0, 60)}…` : rest };
+  } catch {
+    return { host: "", rest: "" };
+  }
+}
+
 // toolLabel reads one call the way a person would narrate it.
 export function toolLabel(tool: ToolInfo): ToolLabel {
   const kind = kindOf(tool.name);
@@ -473,6 +541,15 @@ export function toolLabel(tool: ToolInfo): ToolLabel {
     }
     case "ask":
       return { verb, detail: summary, chip: "" };
+    case "web_fetch": {
+      const site = siteOf(typeof args.url === "string" ? args.url : "");
+      return { verb, detail: site.host || summary, chip: site.rest };
+    }
+    case "grep":
+    case "glob":
+      return { verb, detail: summary, chip: typeof args.path === "string" ? relPath(args.path) : "" };
+    case "list":
+      return { verb, detail: typeof args.path === "string" ? relPath(args.path) : "the workspace", chip: "" };
     case "todo": {
       const todos = Array.isArray(args.todos) ? args.todos.length : 0;
       return { verb, detail: todos ? `the plan · ${todos} ${todos === 1 ? "item" : "items"}` : "the plan", chip: "" };
@@ -546,6 +623,13 @@ function paintToolHead(row: HTMLElement, head: HTMLElement, tool: ToolInfo): voi
   chip.textContent = label.chip;
   chip.hidden = !label.chip;
   chip.title = label.chip;
+  const counts = changedLines(tool);
+  const add = head.querySelector<HTMLElement>(".tool-add")!;
+  const del = head.querySelector<HTMLElement>(".tool-del")!;
+  add.textContent = counts ? `+${counts.added}` : "";
+  del.textContent = counts ? `-${counts.removed}` : "";
+  add.hidden = !counts;
+  del.hidden = !counts;
   const fail = head.querySelector<HTMLElement>(".tool-fail")!;
   fail.textContent = tool.status === "failed" ? "failed" : "";
   fail.hidden = tool.status !== "failed";
@@ -566,7 +650,7 @@ export function createToolActivity(tool: ToolInfo): ToolView {
   toggle.setAttribute("aria-expanded", "false");
   toggle.innerHTML =
     '<span class="tool-ico"></span><span class="tool-verb"></span><span class="tool-server"></span><span class="tool-detail"></span>' +
-    '<code class="tool-chip"></code><span class="tool-fail"></span>';
+    '<code class="tool-chip"></code><span class="tool-add"></span><span class="tool-del"></span><span class="tool-fail"></span>';
   paintToolHead(box, toggle, current);
 
   const details = document.createElement("div");

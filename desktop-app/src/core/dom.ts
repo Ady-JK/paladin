@@ -12,7 +12,6 @@ export const messagesEl = $("#messages");
 export const chatViewEl = $("#chatView");
 export const parentBarEl = $("#parentBar");
 export const sidePaneEl = $("#sidePane");
-export const sidePaneBtn = $<HTMLButtonElement>("#sidePaneBtn");
 export const inputEl = $<HTMLTextAreaElement>("#promptInput");
 // Tags a file or folder from the composer.
 export const attachBtnEl = $<HTMLButtonElement>("#attachBtn");
@@ -114,6 +113,8 @@ export const settingsNavHooksEl = $<HTMLButtonElement>("#settingsNavHooks");
 export const settingsPaneHooksEl = $("#settingsPaneHooks");
 export const hooksBodyEl = $("#hooksBody");
 export const settingsNavToolsEl = $<HTMLButtonElement>("#settingsNavTools");
+export const settingsNavCustomizeEl = $<HTMLButtonElement>("#settingsNavCustomize");
+export const settingsPaneCustomizeEl = $("#settingsPaneCustomize");
 export const settingsPaneToolsEl = $("#settingsPaneTools");
 export const toolsBodyEl = $("#toolsBody");
 export const memoryBodyEl = $("#memoryBody");

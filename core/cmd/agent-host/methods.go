@@ -112,6 +112,9 @@ var methods = map[string]handler{
 	"getPrompt": func(rt *runtime.AgentRuntime, _ args) (any, error) {
 		return rt.GetPrompt(), nil
 	},
+	"suggestPrompt": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SuggestPrompt(a.str("systemPrompt"), a.str("instruction"), a.str("provider"), a.str("model"))
+	},
 	"setPrompt": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SetPrompt(a.str("systemPrompt"))
 	},
@@ -156,6 +159,12 @@ var methods = map[string]handler{
 	},
 	"sessionHistory": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionHistory(a.str("sessionId"), a.str("cwd"))
+	},
+	"saveAttachment": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SaveAttachment(a.str("sessionId"), a.str("cwd"), a.str("name"), a.str("data"))
+	},
+	"sessionImage": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SessionImage(a.str("sessionId"), a.str("cwd"), a.str("path"))
 	},
 	"sessionTodos": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionTodos(a.str("sessionId"), a.str("cwd"))
@@ -206,6 +215,9 @@ var methods = map[string]handler{
 	},
 	"sessionDiff": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionDiff(a.str("sessionId"), a.str("cwd"), a.num("turn", -1), a.str("path"))
+	},
+	"fileExcerpt": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.FileExcerpt(a.str("sessionId"), a.str("cwd"), a.str("path"), a.num("start", 1), a.num("end", 0))
 	},
 	"revertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RevertSession(a.str("sessionId"), a.str("cwd"), a.num("index", -1))
@@ -316,7 +328,7 @@ var methods = map[string]handler{
 		return rt.HooksSetConfig(a.str("scope"), a.str("cwd"), a.str("text"))
 	},
 	"hooksTrust": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.HooksTrust(a.str("cwd"), a.str("path"), a.flag("trust"))
+		return rt.HooksTrust(a.str("cwd"), a.str("path"), a.flag("trust"), a.str("fingerprint"))
 	},
 	"hooksToggle": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.HooksToggle(a.str("cwd"), a.str("key"), a.flag("enabled"))
@@ -339,7 +351,7 @@ var methods = map[string]handler{
 		return rt.MCPRestart(a.str("scope"), a.str("cwd"), a.str("name"))
 	},
 	"mcpTrust": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.MCPTrust(a.str("cwd"), a.flag("trust"))
+		return rt.MCPTrust(a.str("cwd"), a.flag("trust"), a.str("fingerprint"))
 	},
 	"mcpParse": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		list, err := mcp.ParseSnippet(a.str("text"))
@@ -377,6 +389,22 @@ var methods = map[string]handler{
 			return nil, err
 		}
 		return rt.ToolsSet(p.Scope, p.Cwd, p.SessionID, p.Names, p.Enabled)
+	},
+	"customList": func(rt *runtime.AgentRuntime, _ args) (any, error) { return rt.CustomList(), nil },
+	"customGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CustomGet(a.str("id"))
+	},
+	"customSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CustomSet(a.str("id"), a.str("text"))
+	},
+	"customReset": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CustomReset(a.str("id"))
+	},
+	"skillEnabledSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return true, rt.SkillEnabledSet(a.str("name"), a.flag("enabled"))
+	},
+	"toolBehaviorSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ToolBehaviorSet(a.str("key"), a.flag("enabled"), a.str("cwd"), a.str("sessionId"))
 	},
 	"toolsAccept": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var p struct {

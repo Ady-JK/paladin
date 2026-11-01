@@ -31,6 +31,11 @@ func TestCompletionIDNamesTheChildTurn(t *testing.T) {
 	if !strings.HasPrefix(sa.CompletionID, info.ID+"#") || strings.Contains(sa.CompletionID, "#agent-") {
 		t.Fatalf("completion id = %q", sa.CompletionID)
 	}
+	// The result reaches the mailbox in the hub's done callback, which
+	// runs after the child's turn has settled.
+	if !rt.hub.SettleDone(5 * time.Second) {
+		t.Fatal("done callbacks did not settle")
+	}
 	notices := rt.subagents.notices(parentID, ws)()
 	if len(notices) != 1 || notices[0].CallID != sa.CompletionID {
 		t.Fatalf("notice call id %+v, want %q", notices, sa.CompletionID)
@@ -60,6 +65,7 @@ func TestRestartReconcilesResultsTheParentAlreadySaved(t *testing.T) {
 	}
 	savedSA := childSettled(t, rt, ws, saved.ID)
 	childSettled(t, rt, ws, lost.ID)
+	rt.hub.SettleDone(5 * time.Second)
 	rt.subagents.notices(parentID, ws)()
 	rt.ShutdownTurns(5 * time.Second)
 

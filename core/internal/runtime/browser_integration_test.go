@@ -55,4 +55,22 @@ func TestBrowserToolRoundTripsThroughRuntimeAndReturnsImage(t *testing.T) {
 	if got.SessionID != sess.SessionID || got.Action != "screenshot" || outcome.Reply != "saw screenshot" || rounds.Load() != 2 {
 		t.Fatalf("browser round trip failed: request=%+v outcome=%+v rounds=%d", got, outcome, rounds.Load())
 	}
+	history, err := rt.SessionHistory(sess.SessionID, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range history {
+		if row.Image == nil {
+			continue
+		}
+		found = true
+		dataURL, err := rt.SessionImage(sess.SessionID, workspace, row.Image.Path)
+		if err != nil || !strings.HasPrefix(dataURL, "data:image/png;base64,") {
+			t.Fatalf("saved screenshot unreadable: %v", err)
+		}
+	}
+	if !found {
+		t.Fatal("browser screenshot reference missing from session history")
+	}
 }

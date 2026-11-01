@@ -18,6 +18,11 @@ func (a *Agent) modelMessages(message string, resume bool) []inference.LlmMessag
 	messages := LlmMessages(a.history, withTools)
 	if withTools && !resume {
 		messages = append(messages, inference.LlmMessage{Role: "user", Content: message})
+		for _, attachment := range a.currentAttachments {
+			if attachment.Image != nil {
+				messages = append(messages, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
+			}
+		}
 	}
 	return messages
 }
@@ -79,6 +84,11 @@ func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMe
 		case transcript.RoleUser:
 			closeBlock()
 			out = append(out, inference.LlmMessage{Role: "user", Content: msg.Content})
+			for _, attachment := range msg.Attachments {
+				if attachment.Image != nil {
+					out = append(out, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
+				}
+			}
 		case transcript.RoleAssistant:
 			closeBlock()
 			var calls []inference.ToolCall

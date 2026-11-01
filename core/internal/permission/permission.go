@@ -8,6 +8,8 @@ package permission
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
@@ -38,18 +40,25 @@ func ParsePreset(s string) (Preset, error) {
 
 // Rule tools and actions.
 const (
-	ToolShell    = "shell"
-	ToolWrite    = "write"
-	ToolMCP      = "mcp"
-	ToolRead     = "read"
-	ActionAllow  = "allow"
-	ActionDeny   = "deny"
-	matchAnyRule = "*"
+	ToolShell = "shell"
+	ToolWrite = "write"
+	ToolMCP   = "mcp"
+	ToolRead  = "read"
+	ToolWeb   = "web"
+	// ToolProject rules trust the tools a folder ships (see
+	// Gate.TrustProject), by folder like write rules.
+	ToolProject = "project"
+	// ToolExtension rules name an extension tool (or "*").
+	ToolExtension = "extension"
+	ActionAllow   = "allow"
+	ActionDeny    = "deny"
+	matchAnyRule  = "*"
 )
 
 // Rule allows or denies shell commands by word prefix ("npm test"),
 // writes or outside-workspace reads by directory ("/etc") or MCP tools
-// by "server" / "server/*" / "server/tool". "*" matches everything of
+// by "server" / "server/*" / "server/tool", or web sites by domain
+// ("example.com" also covers its subdomains). "*" matches everything of
 // that tool. An allow-write rule also allows reading there.
 type Rule struct {
 	Tool    string `json:"tool"`
@@ -59,9 +68,10 @@ type Rule struct {
 
 func (r Rule) validate() error {
 	switch r.Tool {
-	case ToolShell, ToolWrite, ToolMCP, ToolRead:
+	case ToolShell, ToolWrite, ToolMCP, ToolRead, ToolWeb, ToolProject, ToolExtension:
 	default:
-		return fmt.Errorf("rule tool must be %q, %q, %q or %q, got %q", ToolShell, ToolWrite, ToolRead, ToolMCP, r.Tool)
+		return fmt.Errorf("rule tool must be %q, %q, %q, %q, %q, %q or %q, got %q", ToolShell, ToolWrite, ToolRead, ToolMCP,
+			ToolWeb, ToolProject, ToolExtension, r.Tool)
 	}
 	if r.Action != ActionAllow && r.Action != ActionDeny {
 		return fmt.Errorf("rule action must be %q or %q, got %q", ActionAllow, ActionDeny, r.Action)
@@ -70,8 +80,15 @@ func (r Rule) validate() error {
 	if p == "" {
 		return fmt.Errorf("rule pattern is required")
 	}
-	if (r.Tool == ToolWrite || r.Tool == ToolRead) && p != matchAnyRule && !filepath.IsAbs(p) {
+	if (r.Tool == ToolWrite || r.Tool == ToolRead || r.Tool == ToolProject) && p != matchAnyRule && !filepath.IsAbs(p) {
 		return fmt.Errorf("%s rule pattern must be an absolute directory, got %q", r.Tool, p)
+	}
+	if r.Tool == ToolWeb && p != matchAnyRule && !localPort.MatchString(strings.ToLower(p)) &&
+		!siteName.MatchString(strings.TrimPrefix(strings.ToLower(p), "*.")) {
+		return fmt.Errorf("web rule pattern must be \"*\", a domain like example.com or localhost:PORT, got %q", p)
+	}
+	if r.Tool == ToolExtension && p != matchAnyRule && !extensionName.MatchString(p) {
+		return fmt.Errorf("extension rule pattern must be \"*\" or a tool name, got %q", p)
 	}
 	if r.Tool == ToolMCP && p != matchAnyRule {
 		server, tool, hasTool := strings.Cut(p, "/")
@@ -88,6 +105,8 @@ func (r Rule) normalized() Rule {
 	case r.Tool == ToolShell:
 		r.Pattern = strings.Join(strings.Fields(r.Pattern), " ")
 	case r.Tool == ToolMCP:
+	case r.Tool == ToolWeb:
+		r.Pattern = strings.TrimSuffix(strings.TrimPrefix(strings.ToLower(r.Pattern), "*."), ".")
 	case r.Pattern != matchAnyRule:
 		r.Pattern = filepath.Clean(r.Pattern)
 	}
@@ -144,10 +163,53 @@ func Decide(p Preset, req Request, rules []Rule) Decision {
 		return decideShell(p, req, rules)
 	case KindMCP:
 		return decideMCP(p, req, rules)
+	case KindExtension:
+		return decideExtension(req, rules)
 	case KindRead:
 		return decideRead(req, rules)
+	case KindWeb:
+		return decideWeb(req, rules)
 	}
 	return Decision{Verdict: Allow}
+}
+
+// caseBlindFS: the default file systems of macOS and Windows ignore
+// case, so path rules compare case-blind there.
+var caseBlindFS = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
+// localPort is a service on this machine a web rule may name.
+var localPort = regexp.MustCompile(`^localhost:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$`)
+
+// siteName is a domain name or IP address a web rule may name.
+var siteName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.?$|^\[?[0-9a-f:.]+\]?$`)
+
+// decideWeb: a site the rules allow runs; any other asks, offering to
+// remember the host.
+func decideWeb(req Request, rules []Rule) Decision {
+	for i := range rules {
+		r := &rules[i]
+		if r.Tool == ToolWeb && r.Action == ActionAllow && siteMatches(r.Pattern, req.Host) {
+			return Decision{Verdict: Allow, Rule: r}
+		}
+	}
+	reason := "first visit to " + req.Host
+	if localPort.MatchString(req.Host) {
+		reason = "first request to " + req.Host + ", a service on this machine"
+	}
+	return Decision{Verdict: Ask, Reasons: []string{reason},
+		Remember: []Rule{{Tool: ToolWeb, Pattern: req.Host, Action: ActionAllow}}, Choices: writeChoices()}
+}
+
+// siteMatches: "*" is every site; "example.com" is it and its subdomains;
+// "localhost:PORT" is that service on this machine, which only a rule
+// naming it allows ("*" is the web, not this machine).
+func siteMatches(pattern, host string) bool {
+	pattern = strings.TrimSuffix(strings.TrimPrefix(strings.ToLower(pattern), "*."), ".")
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if localPort.MatchString(host) {
+		return pattern == host
+	}
+	return pattern == matchAnyRule || host == pattern || strings.HasSuffix(host, "."+pattern)
 }
 
 // decideRead: a read outside the workspace runs under a read or write
@@ -169,11 +231,14 @@ func readGrant(t readTarget) Rule {
 	if t.linked {
 		path = t.real
 	}
+	if t.dir {
+		return Rule{Tool: ToolRead, Pattern: path, Action: ActionAllow}
+	}
 	return Rule{Tool: ToolRead, Pattern: narrowFolder(path), Action: ActionAllow}
 }
 
 func (req Request) readTarget() readTarget {
-	return readTarget{path: req.Path, real: req.Real, linked: req.Linked}
+	return readTarget{path: req.Path, real: req.Real, linked: req.Linked, dir: req.Dir}
 }
 
 // narrowFolder is path's parent unless that is /, a top-level folder,
@@ -216,7 +281,14 @@ func deniesRead(r *Rule, t readTarget) bool {
 	if pathMatches(r.Pattern, t.path) || pathMatches(r.Pattern, t.real) {
 		return true
 	}
-	return r.Pattern != matchAnyRule && pathMatches(tools.RealPath(r.Pattern), t.real)
+	if r.Pattern == matchAnyRule {
+		return false
+	}
+	// A folder search would read a denied path beneath it.
+	if t.dir && (pathMatches(t.path, r.Pattern) || pathMatches(t.real, tools.RealPath(r.Pattern))) {
+		return true
+	}
+	return pathMatches(tools.RealPath(r.Pattern), t.real)
 }
 
 // decideMCP: allow rules run the call; destructive tools always ask
@@ -236,6 +308,22 @@ func decideMCP(p Preset, req Request, rules []Rule) Decision {
 	}
 	remember := []Rule{{Tool: ToolMCP, Pattern: req.Server + "/" + req.MCPTool, Action: ActionAllow}}
 	return Decision{Verdict: Ask, Reasons: []string{reason}, Remember: remember, Choices: allChoices()}
+}
+
+// extensionName is an extension tool's name.
+var extensionName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
+
+// decideExtension: an extension tool runs the user's local code with no
+// sandbox, so each call asks unless a rule names the tool (or "*").
+func decideExtension(req Request, rules []Rule) Decision {
+	for i := range rules {
+		r := &rules[i]
+		if r.Tool == ToolExtension && r.Action == ActionAllow && (r.Pattern == matchAnyRule || r.Pattern == req.Tool) {
+			return Decision{Verdict: Allow, Rule: r}
+		}
+	}
+	return Decision{Verdict: Ask, Reasons: []string{"extension tool: it runs local code without the sandbox"},
+		Remember: []Rule{{Tool: ToolExtension, Pattern: req.Tool, Action: ActionAllow}}, Choices: writeChoices()}
 }
 
 func allowingMCP(req Request, rules []Rule) *Rule {
@@ -259,9 +347,25 @@ func mcpMatches(pattern, server, tool string) bool {
 	return !hasTool || pt == matchAnyRule || pt == tool
 }
 
+// hiddenReason explains why a call with hidden characters always asks.
+const hiddenReason = "has invisible or direction-changing characters, so it may not do what it shows"
+
 func decideWrite(p Preset, req Request, rules []Rule) Decision {
-	if r := allowingPath(req.Path, rules); r != nil {
+	if req.Hidden {
+		return Decision{Verdict: Ask, Reasons: []string{"the path " + hiddenReason}, Choices: []string{ReplyOnce, ReplyDeny}}
+	}
+	if r := allowingPath(req.Path, rules); r != nil && (req.Protected == "" || pathMatches(req.Protected, r.Pattern)) &&
+		(req.Real == "" || req.Real == req.Path || allowingRealPath(req.Real, rules) != nil) {
+		// A rule covers a protected folder only when it names that
+		// folder (or one inside it), not a parent such as the workspace;
+		// and a grant does not follow a symlink out of its folder.
 		return Decision{Verdict: Allow, Rule: r}
+	}
+	if req.Protected != "" {
+		return Decision{Verdict: Ask, Reasons: []string{"changes " + filepath.Base(req.Protected) +
+			", whose files can make tools or agents run code later"},
+			Remember: []Rule{{Tool: ToolWrite, Pattern: req.Protected, Action: ActionAllow}},
+			Choices:  []string{ReplyOnce, ReplySession, ReplyDeny}}
 	}
 	var reasons []string
 	switch {
@@ -280,6 +384,10 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 	safeMode := sandbox.ModeWorkspaceWrite
 	if p == ReadOnly {
 		safeMode = sandbox.ModeReadOnly
+	}
+	if req.Hidden {
+		return Decision{Verdict: Ask, Destructive: req.Destructive, Reasons: []string{"the command " + hiddenReason},
+			Sandbox: sandbox.ModeWorkspaceWrite, Choices: []string{ReplyOnce, ReplyDeny}}
 	}
 	if req.Destructive {
 		return Decision{Verdict: Ask, Destructive: true, Reasons: []string{"destructive command"},
@@ -367,11 +475,19 @@ func denyingRule(req Request, rules []Rule) *Rule {
 		}
 		switch req.Kind {
 		case KindWrite:
-			if r.Tool == ToolWrite && pathMatches(r.Pattern, req.Path) {
+			if r.Tool == ToolWrite && (pathMatches(r.Pattern, req.Path) || (req.Real != "" && realMatches(r.Pattern, req.Real))) {
 				return r
 			}
 		case KindMCP:
 			if r.Tool == ToolMCP && mcpMatches(r.Pattern, req.Server, req.MCPTool) {
+				return r
+			}
+		case KindExtension:
+			if r.Tool == ToolExtension && (r.Pattern == matchAnyRule || r.Pattern == req.Tool) {
+				return r
+			}
+		case KindWeb:
+			if r.Tool == ToolWeb && (strings.TrimSpace(r.Pattern) == matchAnyRule || siteMatches(r.Pattern, req.Host)) {
 				return r
 			}
 		case KindRead:
@@ -411,9 +527,29 @@ func allowingPath(path string, rules []Rule) *Rule {
 }
 
 func allowingCommand(words []string, rules []Rule) *Rule {
+	if riskyEnvironment(words) {
+		return nil
+	}
 	for i := range rules {
 		r := &rules[i]
 		if r.Tool == ToolShell && r.Action == ActionAllow && commandMatches(r.Pattern, words) {
+			return r
+		}
+	}
+	return nil
+}
+
+// realMatches compares a symlink-resolved path with a rule, as written
+// and resolved (on macOS /var is /private/var).
+func realMatches(pattern, real string) bool {
+	return pathMatches(pattern, real) || (pattern != matchAnyRule && pathMatches(tools.RealPath(pattern), real))
+}
+
+// allowingRealPath is allowingPath for a symlink-resolved path.
+func allowingRealPath(real string, rules []Rule) *Rule {
+	for i := range rules {
+		r := &rules[i]
+		if r.Tool == ToolWrite && r.Action == ActionAllow && realMatches(r.Pattern, real) {
 			return r
 		}
 	}
@@ -425,6 +561,10 @@ func pathMatches(pattern, path string) bool {
 		return true
 	}
 	pattern = filepath.Clean(pattern)
+	if caseBlindFS {
+		// ~/.SSH is ~/.ssh on macOS's and Windows' default file systems.
+		pattern, path = strings.ToLower(pattern), strings.ToLower(path)
+	}
 	return path == pattern || strings.HasPrefix(path, strings.TrimSuffix(pattern, string(filepath.Separator))+string(filepath.Separator))
 }
 
@@ -444,3 +584,28 @@ func commandMatches(pattern string, words []string) bool {
 	}
 	return true
 }
+
+// riskyEnvironment reports leading VAR=value words (also after env) that
+// can make a program run other code: loader, shell, pager and git
+// variables. A rule approved for "git" or "make all" does not cover them.
+func riskyEnvironment(words []string) bool {
+	for _, w := range words {
+		if w == "env" || strings.HasPrefix(w, "-") {
+			continue
+		}
+		if !isAssign(w) {
+			return false
+		}
+		name := w[:strings.IndexByte(w, '=')]
+		if riskyEnvNames[name] || strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "DYLD_") ||
+			strings.HasPrefix(name, "GIT_") || strings.HasSuffix(name, "PAGER") || strings.HasSuffix(name, "EDITOR") {
+			return true
+		}
+	}
+	return false
+}
+
+var riskyEnvNames = map[string]bool{"BASH_ENV": true, "ENV": true, "LESSOPEN": true, "LESSCLOSE": true, "VISUAL": true,
+	"PROMPT_COMMAND": true, "PS4": true, "IFS": true, "PATH": true, "SHELLOPTS": true, "BASHOPTS": true, "ZDOTDIR": true,
+	"NODE_OPTIONS": true, "PYTHONSTARTUP": true, "PYTHONPATH": true, "PERL5OPT": true, "PERL5LIB": true, "RUBYOPT": true,
+	"RUBYLIB": true, "SSH_ASKPASS": true, "SUDO_ASKPASS": true}

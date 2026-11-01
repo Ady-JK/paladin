@@ -1,5 +1,5 @@
-// Package tools owns the model-facing tools (read, write, edit, shell,
-// ask, todo, skill, session_search) and the registry that serves them to
+// Package tools owns the model-facing tools (read, grep, glob, list,
+// write, edit, shell, ask, todo, skill, session_search) and the registry that serves them to
 // the agent loop. fileengine and scope are the shared file-safety layer
 // behind write and edit.
 package tools
@@ -35,6 +35,21 @@ type ToolCtx struct {
 	CallID    string
 	// Sandbox confines shell commands; nil runs them unconfined.
 	Sandbox *sandbox.Policy
+	// FormatOnWrite runs the project's formatter after write and edit
+	// (format.go).
+	FormatOnWrite bool
+	// Diagnose, when set, asks a language server for errors in a file
+	// write or edit just changed; Warm starts one for a file read. Both
+	// take TrustProject for the server binary they would start.
+	Diagnose func(path string, trust func(tool string) bool) Diagnosis
+	Warm     func(path string, trust func(tool string) bool)
+	// TrustProject, when set, says whether a tool the workspace itself
+	// ships (node_modules/.bin, a virtualenv, a server that runs the
+	// project's build scripts) may run; it may ask the user. nil trusts
+	// them, as when there is no permission gate.
+	TrustProject func(tool string) bool
+	// Web holds the user's web settings for web_fetch.
+	Web WebOptions
 }
 
 // ToolDefinition is the tool schema sent to the model.
@@ -254,6 +269,23 @@ func (r *Registry) MCPInfo(name string) (MCPInfo, bool) {
 	return m.MCPInfo(), true
 }
 
+// ExtensionTool marks a tool loaded from the user's extensions: local
+// code the permission gate asks about, and plan mode and the read-only
+// preset leave out.
+type ExtensionTool interface {
+	Extension() bool
+}
+
+// IsExtension reports whether the named tool is an extension.
+func (r *Registry) IsExtension(name string) bool {
+	resolved, ok := r.resolveName(name)
+	if !ok {
+		return false
+	}
+	e, ok := r.tools[resolved].(ExtensionTool)
+	return ok && e.Extension()
+}
+
 // With returns a copy of the registry plus extra tools, sharing the
 // existing instances. An extra never replaces a tool already present.
 func (r *Registry) With(extra ...Tool) *Registry {
@@ -283,7 +315,7 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 	} else if fixed, ok := repairArgs(call.Arguments); !ok {
 		return errorResult(result, "the arguments are not valid JSON (possibly truncated); resend the complete JSON object")
 	} else {
-		args = json.RawMessage(fixed)
+		args = coerceArgs(json.RawMessage(fixed), tool.Definition().Parameters, !r.Mutates(name))
 	}
 	// A tool bug must never take down the sidecar: the panic becomes a
 	// model-visible failure and the turn carries on.
@@ -313,7 +345,7 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 		result.IsError = true
 		return result
 	}
-	result.Content = content
+	result.Content = redact.Registered(withNestedInstructions(name, args, content, ctx))
 	return result
 }
 
@@ -331,7 +363,7 @@ func (r *Registry) Prepare(call *ToolCall) (string, json.RawMessage, bool) {
 	if !ok {
 		return "", nil, false
 	}
-	return name, json.RawMessage(fixed), true
+	return name, coerceArgs(json.RawMessage(fixed), r.tools[name].Definition().Parameters, !r.Mutates(name)), true
 }
 
 // ctxWithCall clones the turn context with the call id stamped in. Call
@@ -403,17 +435,22 @@ func (c *Catalog) Instantiate() *Registry {
 	return r
 }
 
-// BuiltinCatalog is the shipped tool template set: read, write, edit,
-// shell, ask, todo. fileengine and scope stay shared modules behind
+// BuiltinCatalog is the shipped tool template set: read, grep, glob,
+// list, write, edit, shell, ask, browser, web_fetch, visual, todo. fileengine and scope stay shared modules behind
 // write/edit. todo persists per-session, needing no shared instance.
 func BuiltinCatalog() *Catalog {
 	c := NewCatalog()
 	c.Register(Template{Name: "read", New: func() Tool { return ReadTool{} }})
+	c.Register(Template{Name: "grep", New: func() Tool { return GrepTool{} }})
+	c.Register(Template{Name: "glob", New: func() Tool { return GlobTool{} }})
+	c.Register(Template{Name: "list", New: func() Tool { return ListTool{} }})
 	c.Register(Template{Name: "write", New: func() Tool { return NewWriteTool(NewEngine()) }})
 	c.Register(Template{Name: "edit", New: func() Tool { return NewEditTool(NewEngine()) }})
 	c.Register(Template{Name: "shell", New: func() Tool { return NewShellTool() }})
 	c.Register(Template{Name: "ask", New: func() Tool { return NewAskTool() }})
 	c.Register(Template{Name: "browser", New: func() Tool { return NewBrowserTool() }})
+	c.Register(Template{Name: "web_fetch", New: func() Tool { return WebFetchTool{} }})
+	c.Register(Template{Name: "visual", New: func() Tool { return VisualTool{} }})
 	c.Register(Template{Name: "todo", New: func() Tool { return TodoTool{} }})
 	return c
 }

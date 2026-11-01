@@ -355,7 +355,7 @@ func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
 		t.Fatal("captured output split a UTF-8 character")
 	}
 	code := 0
-	encoded, failure := finishSync(bytes, wasTruncated, waitResult{code: &code}, false)
+	encoded, failure := finishSync(bytes, wasTruncated, "", waitResult{code: &code}, false)
 	if failure != nil {
 		t.Fatal(failure)
 	}

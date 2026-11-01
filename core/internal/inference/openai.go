@@ -70,6 +70,7 @@ func NewOpenAIProvider(name, model, baseURL, apiKey string) *OpenAIProvider {
 	client := openai.NewClient(
 		option.WithBaseURL(baseURL),
 		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(providerHTTPClient),
 		option.WithMaxRetries(2),
 	)
 	isOpencode := config.IsOpencodeEndpoint(baseURL)
@@ -546,7 +547,7 @@ func (p *OpenAIProvider) listOpencodeCatalog(ctx context.Context) ([]string, err
 	if key := strings.TrimSpace(p.apiKey); key != "" && !config.IsPlaceholderKey(key) {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}

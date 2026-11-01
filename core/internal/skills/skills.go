@@ -2,8 +2,13 @@
 //
 // A skill is a directory holding one skill file:
 //
+//	builtin/<skill-name>/SKILL.md                  (shipped in the binary)
 //	config/skills/<skill-name>/SKILL.md            (global, under the data dir)
 //	<workspace>/.paladin/skills/<skill-name>/SKILL.md  (workspace-local)
+//
+// A global skill replaces a built-in of the same name and a workspace
+// skill replaces both. settings.json "disabledSkills" turns skills off by
+// name, whatever their source.
 //
 // The file name matches case-insensitively, so skill.md works too, and
 // the directory name is the skill name. Two roots are scanned: the
@@ -17,15 +22,22 @@
 package skills
 
 import (
+	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
+//go:embed builtin
+var builtinFS embed.FS
+
 const (
+	SourceBuiltin   = "builtin"
 	SourceGlobal    = "global"
 	SourceWorkspace = "workspace"
 
@@ -70,11 +82,16 @@ func ValidName(name string) bool {
 	return !strings.ContainsAny(name, "/\\")
 }
 
-// List discovers skills from both roots. A workspace skill shadows a
-// global one of the same name (case-insensitively). Results sort by
+// List discovers the built-in skills and both roots. A global skill
+// shadows a built-in and a workspace skill shadows both
+// (case-insensitively); turned-off skills are left out. Results sort by
 // name.
 func List(dataDir, cwd string) []Skill {
 	byName := map[string]Skill{}
+	for _, s := range builtins() {
+		s.Content = ""
+		byName[strings.ToLower(s.Name)] = s
+	}
 	for _, root := range []struct {
 		dir    string
 		source string
@@ -87,15 +104,18 @@ func List(dataDir, cwd string) []Skill {
 		}
 		for _, s := range scanRoot(root.dir, root.source) {
 			key := strings.ToLower(s.Name)
-			if _, taken := byName[key]; taken && root.source == SourceGlobal {
+			if prev, taken := byName[key]; taken && root.source == SourceGlobal && prev.Source == SourceWorkspace {
 				continue
 			}
 			byName[key] = s
 		}
 	}
+	off := Disabled(dataDir)
 	out := make([]Skill, 0, len(byName))
-	for _, s := range byName {
-		out = append(out, s)
+	for key, s := range byName {
+		if !off[key] {
+			out = append(out, s)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -115,6 +135,9 @@ func Load(dataDir, cwd, name string) (Skill, error) {
 		{WorkspaceDir(cwd), SourceWorkspace},
 		{GlobalDir(dataDir), SourceGlobal},
 	}
+	if Disabled(dataDir)[strings.ToLower(name)] {
+		return Skill{}, fmt.Errorf("not found: skill %q is turned off in Settings", name)
+	}
 	for _, root := range roots {
 		if root.dir == "" {
 			continue
@@ -127,7 +150,66 @@ func Load(dataDir, cwd, name string) (Skill, error) {
 			return skill, nil
 		}
 	}
+	if b, ok := Builtin(name); ok {
+		return b, nil
+	}
 	return Skill{}, fmt.Errorf("not found: skill %q not found (add %s/SKILL.md under config/skills/ or .paladin/skills/)", name, name)
+}
+
+// builtins reads the shipped skills.
+func builtins() []Skill {
+	entries, err := fs.ReadDir(builtinFS, "builtin")
+	if err != nil {
+		return nil
+	}
+	var out []Skill
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		data, err := builtinFS.ReadFile("builtin/" + e.Name() + "/SKILL.md")
+		if err != nil {
+			continue
+		}
+		out = append(out, Skill{Name: e.Name(), Description: describe(string(data)), Source: SourceBuiltin,
+			Path: "builtin:" + e.Name(), Content: string(data)})
+	}
+	return out
+}
+
+// Builtin returns the shipped skill called name (case-insensitive).
+func Builtin(name string) (Skill, bool) {
+	for _, s := range builtins() {
+		if strings.EqualFold(s.Name, name) {
+			return s, true
+		}
+	}
+	return Skill{}, false
+}
+
+// Builtins lists the shipped skills with their content.
+func Builtins() []Skill { return builtins() }
+
+// Disabled reads the names settings.json turns off, lower-cased.
+func Disabled(dataDir string) map[string]bool {
+	off := map[string]bool{}
+	if dataDir == "" {
+		return off
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, "config", "settings.json"))
+	if err != nil {
+		return off
+	}
+	var cfg struct {
+		DisabledSkills []string `json:"disabledSkills"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return off
+	}
+	for _, n := range cfg.DisabledSkills {
+		off[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	return off
 }
 
 // Inject builds the model-facing user message: the typed text plus the

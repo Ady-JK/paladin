@@ -36,6 +36,9 @@ const RULE_LABEL: Record<PermissionRule["tool"], string> = {
   write: "write",
   read: "read",
   mcp: "mcp",
+  web: "site",
+  project: "project tools",
+  extension: "extension",
 };
 
 const RULE_HINT: Record<PermissionRule["tool"], string> = {
@@ -43,6 +46,9 @@ const RULE_HINT: Record<PermissionRule["tool"], string> = {
   write: "/abs/dir (sandboxed commands may write here too)",
   read: "/abs/dir outside the workspace the agent may read",
   mcp: "server/tool   or   server",
+  web: "example.com or localhost:PORT   or   *",
+  project: "/abs/project whose own tools (node_modules/.bin, .venv) may run",
+  extension: "tool_name   or   *",
 };
 
 const SANDBOX: Record<string, string> = {
@@ -246,7 +252,7 @@ function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): stri
     `<div class="mem-head"><div>${head}</div></div>` +
     `<ul class="mem-list">${rows}</ul>` +
     `<div class="perm-add">` +
-    `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option><option value="read">read</option><option value="mcp">mcp</option></select>` +
+    `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option><option value="read">read</option><option value="mcp">mcp</option><option value="web">site</option><option value="project">project tools</option><option value="extension">extension</option></select>` +
     `<input data-rule-pattern type="text" spellcheck="false" placeholder="${RULE_HINT.shell}" aria-label="Pattern" />` +
     `<select data-rule-action aria-label="Action"><option value="allow">allow</option><option value="deny">deny</option></select>` +
     `<button type="button" class="perm-add-btn" data-rule-add>Add</button>` +

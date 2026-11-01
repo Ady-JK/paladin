@@ -17,13 +17,24 @@ func writeSkill(t *testing.T, root, name, content string) {
 	}
 }
 
+// userSkills drops the built-in skills, which every listing includes.
+func userSkills(all []Skill) []Skill {
+	var out []Skill
+	for _, s := range all {
+		if s.Source != SourceBuiltin {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func TestListFindsGlobalAndWorkspaceSkills(t *testing.T) {
 	dataDir := t.TempDir()
 	ws := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "reviewer", "---\ndescription: Reviews code\n---\n# Reviewer\nDo reviews.")
 	writeSkill(t, filepath.Join(ws, ".paladin", "skills"), "deployer", "# Deployer\nShips it.")
 
-	got := List(dataDir, ws)
+	got := userSkills(List(dataDir, ws))
 	if len(got) != 2 {
 		t.Fatalf("got %d skills: %+v", len(got), got)
 	}
@@ -52,7 +63,7 @@ func TestWorkspaceShadowsGlobal(t *testing.T) {
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "helper", "global body")
 	writeSkill(t, filepath.Join(ws, ".paladin", "skills"), "HELPER", "workspace body")
 
-	got := List(dataDir, ws)
+	got := userSkills(List(dataDir, ws))
 	if len(got) != 1 {
 		t.Fatalf("want 1 skill, got %+v", got)
 	}
@@ -92,14 +103,14 @@ func TestListSkipsNonSkills(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, ".paladin", "skills", "lower", "skill.md"), []byte("low"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := List(dataDir, ws)
+	got := userSkills(List(dataDir, ws))
 	if len(got) != 1 || got[0].Name != "lower" {
 		t.Fatalf("got %+v", got)
 	}
 }
 
 func TestListMissingRoots(t *testing.T) {
-	if got := List(t.TempDir(), ""); len(got) != 0 {
+	if got := userSkills(List(t.TempDir(), "")); len(got) != 0 {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -153,11 +164,54 @@ func TestListSkipsOversizeSkills(t *testing.T) {
 	dataDir := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "huge", strings.Repeat("x", MaxContentBytes+1))
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "tiny", "# Tiny\nsmall")
-	got := List(dataDir, "")
+	got := userSkills(List(dataDir, ""))
 	if len(got) != 1 || got[0].Name != "tiny" {
 		t.Fatalf("oversize skill must not be listed: %+v", got)
 	}
 	if _, err := Load(dataDir, "", "huge"); err == nil {
 		t.Fatal("oversize skill must fail Load")
+	}
+}
+
+func TestBuiltinSkillsShipAndCanBeReplacedOrTurnedOff(t *testing.T) {
+	dataDir, ws := t.TempDir(), t.TempDir()
+	byName := map[string]Skill{}
+	for _, s := range List(dataDir, ws) {
+		byName[s.Name] = s
+	}
+	for _, name := range []string{"debugging", "test-driven-development", "safe-refactoring", "code-review",
+		"security-review", "web-research", "diagrams-and-charts", "writing-docs"} {
+		s, ok := byName[name]
+		if !ok || s.Source != SourceBuiltin || s.Description == "" || strings.HasPrefix(s.Description, "---") {
+			t.Fatalf("built-in %s: %+v", name, s)
+		}
+		loaded, err := Load(dataDir, ws, name)
+		if err != nil || !strings.Contains(loaded.Content, "# ") || loaded.Source != SourceBuiltin {
+			t.Fatalf("load %s: %v %+v", name, err, loaded.Source)
+		}
+		if b, ok := Builtin(name); !ok || b.Content != loaded.Content {
+			t.Fatalf("Builtin(%s)", name)
+		}
+	}
+	// A global file of the same name replaces the built-in.
+	writeSkill(t, GlobalDir(dataDir), "debugging", "---\ndescription: My way\n---\nMine.")
+	if s, _ := Load(dataDir, ws, "debugging"); s.Source != SourceGlobal || !strings.Contains(s.Content, "Mine.") {
+		t.Fatalf("override: %+v", s)
+	}
+	// settings.json turns skills off, whatever their source.
+	if err := os.WriteFile(filepath.Join(dataDir, "config", "settings.json"),
+		[]byte(`{"disabledSkills":["Web-Research","debugging"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range List(dataDir, ws) {
+		if s.Name == "web-research" || s.Name == "debugging" {
+			t.Fatalf("turned-off skill listed: %s", s.Name)
+		}
+	}
+	if _, err := Load(dataDir, ws, "web-research"); err == nil || !strings.Contains(err.Error(), "turned off") {
+		t.Fatalf("turned-off skill loaded: %v", err)
+	}
+	if !Disabled(dataDir)["web-research"] {
+		t.Fatal("Disabled is case-insensitive")
 	}
 }

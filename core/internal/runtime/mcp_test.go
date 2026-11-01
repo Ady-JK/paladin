@@ -219,7 +219,13 @@ func TestMCPFolderTrustFlow(t *testing.T) {
 	if ov.Trusted || !ov.HasFolderConfig || len(ov.Servers) != 1 || ov.Servers[0].State != mcp.StateUntrusted {
 		t.Fatalf("%+v", ov)
 	}
-	ov, err := rt.MCPTrust(ws, true)
+	if ov.FolderFingerprint == "" {
+		t.Fatal("the overview names the content it shows")
+	}
+	if _, err := rt.MCPTrust(ws, true, "stale"); err == nil {
+		t.Fatal("a stale fingerprint was trusted")
+	}
+	ov, err := rt.MCPTrust(ws, true, ov.FolderFingerprint)
 	if err != nil || !ov.Trusted || ov.FolderPath != mcp.FolderPath(ws) {
 		t.Fatalf("%+v %v", ov, err)
 	}

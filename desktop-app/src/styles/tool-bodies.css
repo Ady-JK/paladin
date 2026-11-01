@@ -567,3 +567,44 @@
 .dark .kv-text {
   color: var(--color-slate-300);
 }
+
+/* Language server errors on a write/edit row. */
+.diag-list {
+  margin: 0;
+  padding: 4px 8px;
+  list-style: none;
+  border-bottom: 1px solid rgb(225 86 104 / 0.25);
+  background: rgb(225 86 104 / 0.06);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.diag-row {
+  display: flex;
+  gap: 8px;
+  color: #be123c;
+}
+.dark .diag-row {
+  color: #fda4af;
+}
+.diag-at {
+  flex-shrink: 0;
+  color: var(--color-slate-400);
+  font-variant-numeric: tabular-nums;
+}
+.diag-msg {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- web_fetch ---- */
+.web-title {
+  padding: 4px 10px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-700);
+}
+.dark .web-title {
+  color: var(--color-slate-200);
+}

@@ -22,6 +22,7 @@ const ICONS: Record<string, Icon> = {
     thin: true,
   },
   code: { d: "m16 18 6-6-6-6M8 6l-6 6 6 6", line: true },
+  expand: { d: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7", line: true },
   folder: { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" },
   "folder-open": { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H6.5L3 17V7Z" },
   "folder-tree": {
@@ -140,6 +141,12 @@ const ICONS: Record<string, Icon> = {
   },
   "tl-file-plus": {
     d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Zm0 0v5h5m-7 4v6m-3-3h6",
+    line: true,
+    thin: true,
+  },
+  "tl-search": { d: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm9 2-4-4", line: true, thin: true },
+  "tl-folder": {
+    d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
     line: true,
     thin: true,
   },

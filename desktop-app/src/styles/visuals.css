@@ -1,0 +1,178 @@
+/* visual tool: an inline card around a sandboxed frame. */
+.visual-card {
+  margin: 8px 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-white);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  padding: 8px 12px 10px;
+  animation: turn-in 220ms ease-out;
+}
+.dark .visual-card {
+  border-color: var(--color-slate-800);
+  background: rgb(255 255 255 / 0.025);
+  box-shadow: none;
+}
+.visual-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  color: var(--color-slate-500);
+  font-size: 12.5px;
+}
+.visual-title {
+  font-weight: 600;
+  color: var(--color-slate-800);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dark .visual-title {
+  color: var(--color-slate-100);
+}
+.visual-format {
+  border-radius: 9999px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-slate-500);
+  background: var(--color-slate-100);
+}
+.dark .visual-format {
+  background: rgb(255 255 255 / 0.05);
+}
+.visual-format:empty {
+  display: none;
+}
+.visual-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.visual-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--color-slate-500);
+}
+.visual-btn:hover:not(:disabled),
+.visual-btn[aria-pressed="true"] {
+  color: var(--color-slate-800);
+  background: var(--color-slate-100);
+}
+.dark .visual-btn:hover:not(:disabled),
+.dark .visual-btn[aria-pressed="true"] {
+  color: var(--color-slate-100);
+  background: rgb(255 255 255 / 0.06);
+}
+.visual-btn:disabled {
+  opacity: 0.4;
+}
+.visual-stage {
+  margin-top: 6px;
+}
+.visual-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.visual-wait,
+.visual-err {
+  padding: 18px 4px;
+  font-size: 12.5px;
+  color: var(--color-slate-500);
+}
+.visual-err {
+  color: var(--color-agent-rose);
+}
+.visual-source {
+  margin: 8px 0 0;
+  max-height: 18em;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--color-slate-200);
+  background: var(--color-slate-50);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dark .visual-source {
+  border-color: var(--color-slate-700);
+  background: rgb(2 6 23 / 0.45);
+}
+.visual-caption {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-slate-500);
+}
+/* Opened larger: the card floats over the chat until closed. */
+.visual-card.is-expanded {
+  position: fixed;
+  inset: 40px 48px;
+  z-index: 60;
+  margin: 0;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
+  background: var(--color-white);
+  animation: none;
+}
+.dark .visual-card.is-expanded {
+  background: var(--color-slate-900);
+}
+/* A visual's suggested message when the composer already has a draft. */
+.visual-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+  border-radius: 9px;
+  border: 1px solid var(--color-slate-200);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--color-slate-600);
+}
+.dark .visual-suggest {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+.visual-suggest[hidden] {
+  display: none;
+}
+.visual-suggest-text {
+  flex: 1 1 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-slate-800);
+}
+.dark .visual-suggest-text {
+  color: var(--color-slate-100);
+}
+.visual-suggest-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.visual-suggest-btn {
+  border-radius: 7px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--color-slate-600);
+  background: var(--color-slate-100);
+}
+.dark .visual-suggest-btn {
+  color: var(--color-slate-300);
+  background: rgb(255 255 255 / 0.06);
+}
+.visual-suggest-btn.is-primary {
+  color: white;
+  background: var(--color-accent-600, #6658b0);
+}

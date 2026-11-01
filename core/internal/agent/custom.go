@@ -1,0 +1,24 @@
+package agent
+
+import "github.com/Ady-JK/paladin/core/internal/custom"
+
+// The agent loop's own texts, editable in Settings → Customize.
+func init() {
+	custom.Register(
+		custom.Item{ID: "reminder.verify", Group: "Reminders", Title: "Check before finishing", Order: 0,
+			Description: "Sent once when a turn is about to end after changing code with no passing build, test or linter since.",
+			Vars:        []string{"files"}, Default: func() string { return verifyDefault }},
+		custom.Item{ID: "reminder.verify-failed", Group: "Reminders", Title: "Check before finishing (last check failed)", Order: 1,
+			Description: "The same reminder when the last check the agent ran failed.",
+			Vars:        []string{"files"}, Default: func() string { return verifyFailedDefault }},
+		custom.Item{ID: "reminder.budget", Group: "Reminders", Title: "Budget reached", Order: 5,
+			Description: "Sent when a session reaches its spending budget: tools are switched off and the agent sums up.",
+			Vars:        []string{"spent", "limit"}, Default: func() string { return budgetWrapUpPrompt }},
+		custom.Item{ID: "compact.system", Group: "Compaction", Title: "Summarizer instructions", Order: 0,
+			Description: "The system prompt for summarizing a long conversation when it outgrows the context window.",
+			Default:     func() string { return compactSystemPrompt }},
+		custom.Item{ID: "compact.summary", Group: "Compaction", Title: "Summary hand-over", Order: 1,
+			Description: "How the summary is handed to the agent in place of the earlier conversation.",
+			Vars:        []string{"summary"}, Default: func() string { return compactSummaryDefault }},
+	)
+}

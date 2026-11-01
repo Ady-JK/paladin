@@ -24,6 +24,10 @@ function arm(): void {
 
 contextBridge.exposeInMainWorld("paladin", {
   invoke: (method: string, params: unknown = {}) => ipcRenderer.invoke("agent:invoke", method, params),
+  core: {
+    connection: () => ipcRenderer.invoke("core:connection"),
+    setConnection: (value: unknown) => ipcRenderer.invoke("core:setConnection", value),
+  },
 
   // onEvent subscribes to every turn event (chat/*, turn/*) for every
   // session; returns an unsubscribe.

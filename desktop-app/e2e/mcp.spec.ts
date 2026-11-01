@@ -118,7 +118,8 @@ test("an untrusted folder config asks for trust from the chip and the pane", asy
   await banner.locator("[data-mcp-trust]").click();
   await expect(page.locator('.mcp-server[data-mcp-server="local"]')).toHaveAttribute("data-state", "ready");
   await expect(page.locator(".mcp-trust")).toHaveCount(0);
-  expect(await calls(page, "mcpTrust")).toEqual([{ cwd: CWD, trust: true }]);
+  // Trust names the content that was shown, so a swapped file is refused.
+  expect(await calls(page, "mcpTrust")).toEqual([{ cwd: CWD, trust: true, fingerprint: "fp-mcp-folder" }]);
   await expect(chip).toBeHidden();
 });
 

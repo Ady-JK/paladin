@@ -233,7 +233,11 @@ function wire(): void {
       const src = sourceOf(t);
       if (!src || !loadedCwd) return;
       const trust = t.matches("[data-hook-trust]");
-      void act(src.path, () => api.hooksTrust(loadedCwd, src.path, trust), trust ? "trust the hooks" : "revoke trust");
+      void act(
+        src.path,
+        () => api.hooksTrust(loadedCwd, src.path, trust, src.fingerprint ?? ""),
+        trust ? "trust the hooks" : "revoke trust",
+      );
     } else if (t.matches("[data-hook-edit]")) {
       const src = sourceOf(t);
       if (!src) return;

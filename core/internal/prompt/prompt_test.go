@@ -112,6 +112,16 @@ func TestGuidanceIsOSSpecific(t *testing.T) {
 	if strings.Contains(winEx, "/home/user/project") || strings.Contains(winEx, "/etc/hosts") || !strings.Contains(winEx, `D:\\projects\\app`) {
 		t.Fatal("windows examples contain unix paths or lack Windows absolute paths")
 	}
+	if !strings.Contains(ToolGuidanceFor("linux"), "output_file") {
+		t.Fatal("guidance lost how to reach spilled output")
+	}
+	for _, ex := range []string{winEx, UsageExamplesFor("linux")} {
+		for _, tool := range []string{"\ngrep — ", "\nglob — ", "\nlist — "} {
+			if !strings.Contains(ex, tool) {
+				t.Fatalf("examples lost %q", strings.TrimSpace(tool))
+			}
+		}
+	}
 	nixEx := UsageExamplesFor("linux")
 	if !strings.Contains(nixEx, "find ~/") {
 		t.Fatal("unix examples lost find")

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ady-JK/paladin/core/internal/skills"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -28,7 +29,19 @@ func TestSkillToolLoadsAndListsOnMiss(t *testing.T) {
 	if !strings.Contains(cat, "- deploy: ship it") {
 		t.Fatalf("catalog = %q", cat)
 	}
-	if SkillCatalog(t.TempDir(), "", 10) != "" {
+	if !strings.Contains(SkillCatalog(t.TempDir(), "", 10), "- debugging:") {
+		t.Fatal("built-in skills are in the catalog")
+	}
+	// With every built-in turned off and no skills of its own, the
+	// catalog is blank.
+	empty := t.TempDir()
+	var names []string
+	for _, s := range skills.Builtins() {
+		names = append(names, `"`+s.Name+`"`)
+	}
+	os.MkdirAll(filepath.Join(empty, "config"), 0o755)
+	os.WriteFile(filepath.Join(empty, "config", "settings.json"), []byte(`{"disabledSkills":[`+strings.Join(names, ",")+`]}`), 0o644)
+	if SkillCatalog(empty, "", 10) != "" {
 		t.Fatal("empty catalog must be blank")
 	}
 }

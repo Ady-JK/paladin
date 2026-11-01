@@ -148,7 +148,8 @@ test("the history menu reopens and deletes saved side chats", async ({ page }) =
   await expect(page.locator("#messages")).toContainText("hello");
 
   // The pane opens on an empty side chat.
-  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneHistoryBtn").click();
+  await page.locator("#paneHistoryBtn").click();
   const pane = page.locator("#sidePane");
   await expect(pane).toBeVisible();
   await expect(pane.locator(".side-empty:visible")).toBeVisible();

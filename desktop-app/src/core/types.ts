@@ -299,6 +299,15 @@ export type MessageInfo = {
   kind?: string;
   // index is a user row's transcript position, the handle for undo.
   index?: number;
+  image?: { path: string; mimeType: string; size: number; sha256: string };
+  attachments?: {
+    id: string;
+    name: string;
+    path: string;
+    size: number;
+    mimeType: string;
+    image?: { path: string; mimeType: string; size: number; sha256: string };
+  }[];
 };
 
 // RetryInfo is a chat/retry event: a failed round runs again after
@@ -505,6 +514,8 @@ export type HookSource = {
   error?: string;
   warnings?: string[];
   text?: string;
+  // fingerprint identifies the content listed; trusting needs it back.
+  fingerprint?: string;
   handlers: HookHandler[] | null;
 };
 export type HooksOverview = { sources: HookSource[]; events: string[] };
@@ -556,7 +567,7 @@ export type PermissionPreset = "read-only" | "auto" | "full-access";
 export type ApprovalDecision = "once" | "session" | "folder" | "global" | "deny";
 
 export type PermissionRule = {
-  tool: "shell" | "write" | "read" | "mcp";
+  tool: "shell" | "write" | "read" | "mcp" | "web" | "project" | "extension";
   pattern: string;
   action: "allow" | "deny";
 };
@@ -564,13 +575,16 @@ export type PermissionRule = {
 export type Approval = {
   id: string;
   tool: string;
-  kind: "shell" | "write" | "read" | "escalate" | "mcp" | string;
+  kind: "shell" | "write" | "read" | "escalate" | "mcp" | "web" | "project" | "extension" | string;
   command?: string;
   path?: string;
   // MCP calls: the server, its own tool name and the JSON arguments.
   server?: string;
   mcpTool?: string;
   args?: string;
+  // Web requests (web_fetch, browser open): the site and full URL.
+  host?: string;
+  url?: string;
   reasons?: string[];
   destructive?: boolean;
   choices?: ApprovalDecision[];
@@ -643,6 +657,9 @@ export type MCPOverview = {
   folderPath?: string;
   hasFolderConfig: boolean;
   trusted: boolean;
+  // folderFingerprint identifies the folder mcp.json listed; trusting
+  // needs it back, so only what was shown gets trusted.
+  folderFingerprint?: string;
   errors?: Partial<Record<MCPScope, string>>;
 };
 
@@ -668,7 +685,7 @@ export type MCPNamedServer = { name: string; config: MCPServerConfig };
 export type ToolSwitch = {
   name: string;
   description?: string;
-  source: "builtin" | "mcp";
+  source: "builtin" | "mcp" | "extension";
   server?: string;
   tool?: string;
   readOnly?: boolean;
@@ -679,4 +696,67 @@ export type ToolSwitch = {
   pending?: boolean;
 };
 
-export type ToolsOverview = { tools: ToolSwitch[]; pending: string[] };
+// ToolBehavior is how the built-in tools act, app-wide (settings.json).
+export type ToolBehavior = {
+  formatOnWrite: boolean;
+  verifyNudge: boolean;
+  lspDiagnostics: boolean;
+  webPrivateNetwork?: boolean;
+};
+// LanguageServer is one running (or recently failed) language server.
+export type LanguageServer = {
+  id: string;
+  root: string;
+  state: "starting" | "ready" | "failed";
+  pid?: number;
+  error?: string;
+};
+export type ToolsOverview = {
+  tools: ToolSwitch[];
+  pending: string[];
+  extensionErrors?: string[];
+  behavior?: ToolBehavior;
+  languageServers?: LanguageServer[];
+};
+
+// Finding is one issue a /review recorded with report_findings.
+export type Finding = {
+  id: string;
+  priority: "P0" | "P1" | "P2" | "P3";
+  title: string;
+  path: string;
+  scope: "inside" | "outside";
+  start_line: number;
+  end_line: number;
+  body: string;
+  fix?: string;
+  confidence: "high" | "medium" | "low";
+};
+export type FindingsReport = {
+  verdict: "looks_good" | "merge_after_fixes" | "needs_rework";
+  summary: string;
+  findings: Finding[];
+  note?: string;
+};
+// FileExcerpt is a window of a workspace file (fileExcerpt).
+export type FileExcerpt = { path: string; rel: string; startLine: number; lines: string[]; truncated: boolean };
+
+// CustomItem is one editable built-in (Settings → Customize).
+export type CustomItem = {
+  id: string;
+  group: string;
+  title: string;
+  description: string;
+  kind: "text" | "command" | "skill" | "json";
+  vars?: string[];
+  customized: boolean;
+  enabled?: boolean;
+};
+
+// CustomState is one item with its current and default text.
+export type CustomState = CustomItem & {
+  value: string;
+  default: string;
+  path?: string;
+  missing?: string[];
+};

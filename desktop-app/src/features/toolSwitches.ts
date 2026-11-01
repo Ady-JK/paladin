@@ -7,7 +7,7 @@ import * as api from "../core/api";
 import { modelSelectBtn, settingsPaneToolsEl, toolsBodyEl } from "../core/dom";
 import { escapeHtml } from "../core/format";
 import { state } from "../core/state";
-import type { ToolSwitch, ToolsOverview } from "../core/types";
+import type { LanguageServer, ToolBehavior, ToolSwitch, ToolsOverview } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { claimPopover, registerPopover } from "../ui/popover";
@@ -91,8 +91,10 @@ type Group = { id: string; label: string; tools: ToolSwitch[] };
 
 function groups(list: ToolSwitch[]): Group[] {
   const out: Group[] = [];
-  const builtin = list.filter((t) => t.source !== "mcp");
+  const builtin = list.filter((t) => t.source === "builtin");
   if (builtin.length) out.push({ id: "builtin", label: "Built-in", tools: builtin });
+  const extensions = list.filter((t) => t.source === "extension");
+  if (extensions.length) out.push({ id: "extension", label: "Local extensions", tools: extensions });
   const servers = new Map<string, ToolSwitch[]>();
   for (const t of list) {
     if (t.source !== "mcp") continue;
@@ -130,6 +132,80 @@ const switchHtml = (on: boolean, attr: string, label: string) =>
 
 // ---- Settings → Tools ----
 
+// BEHAVIORS are the app-wide switches shown above the tool groups.
+const BEHAVIORS: { key: keyof ToolBehavior; name: string; desc: string }[] = [
+  {
+    key: "formatOnWrite",
+    name: "Format after write and edit",
+    desc: "Runs the formatter the project already has installed (gofmt, rustfmt, ruff or black when configured, prettier from node_modules). Never downloads anything.",
+  },
+  {
+    key: "verifyNudge",
+    name: "Check before finishing",
+    desc: "When a turn changed code and ran nothing since, remind the agent once to build or test before it ends.",
+  },
+  {
+    key: "lspDiagnostics",
+    name: "Language server errors",
+    desc: "After write and edit, ask an installed language server (gopls, typescript-language-server, pyright, rust-analyzer, clangd) for errors in the file and show them to the agent.",
+  },
+  {
+    key: "webPrivateNetwork",
+    name: "Private and internal networks",
+    desc: "Let web_fetch and the browser reach private addresses (intranet sites, 10.x, 192.168.x). Off by default; localhost works without it, asking once per port. Each new site still asks first.",
+  },
+];
+
+// OFF_BY_DEFAULT behaviors read as off until switched on.
+const OFF_BY_DEFAULT = new Set<keyof ToolBehavior>(["webPrivateNetwork"]);
+
+// serversHtml is the language server status under its switch.
+function serversHtml(servers: LanguageServer[] | undefined): string {
+  if (!servers?.length)
+    return `<div class="tsw-desc tsw-lsp">No language server running yet; one starts when the agent reads a file it handles.</div>`;
+  return (
+    `<ul class="tsw-lsp">` +
+    servers
+      .map(
+        (s) =>
+          `<li class="tsw-lsp-row" data-lsp="${escapeHtml(s.id)}" data-state="${escapeHtml(s.state)}" title="${escapeHtml(s.error || s.root)}">` +
+          `<span class="tsw-lsp-dot" aria-hidden="true"></span><span class="tsw-name">${escapeHtml(s.id)}</span>` +
+          `<span class="tsw-lsp-root">${escapeHtml(s.root)}</span><span class="tsw-lsp-state">${escapeHtml(s.state)}</span></li>`,
+      )
+      .join("") +
+    `</ul>`
+  );
+}
+
+function behaviorHtml(b: ToolBehavior | undefined, servers?: LanguageServer[]): string {
+  if (!b) return "";
+  const rows = BEHAVIORS.map((x) => {
+    const on = OFF_BY_DEFAULT.has(x.key) ? b[x.key] === true : b[x.key] !== false;
+    return (
+      `<li class="tsw-row" data-behavior="${x.key}" data-enabled="${on}">` +
+      `<div class="tsw-text"><div class="tsw-line"><span class="tsw-name">${escapeHtml(x.name)}</span></div>` +
+      `<div class="tsw-desc">${escapeHtml(x.desc)}</div></div>` +
+      switchHtml(on, `data-tsw-behavior="${x.key}"`, `${on ? "Switch off" : "Switch on"}: ${x.name}`) +
+      `</li>` +
+      (x.key === "lspDiagnostics" && on ? `<li class="tsw-lsp-wrap">${serversHtml(servers)}</li>` : "")
+    );
+  }).join("");
+  return (
+    `<section class="tsw-group" data-group="behavior">` +
+    `<div class="tsw-group-head"><span class="tsw-group-ico">${icon("tl-tools", "h-3.5 w-3.5")}</span>` +
+    `<span class="tsw-group-name">Behavior</span></div>` +
+    `<ul class="tsw-list">${rows}</ul></section>`
+  );
+}
+
+async function setBehavior(key: keyof ToolBehavior, on: boolean): Promise<void> {
+  try {
+    apply(await api.toolBehaviorSet(key, on, state.cwd || null, state.sessionId || null));
+  } catch (error) {
+    toast(`Could not change the setting: ${String(error)}`, "error");
+  }
+}
+
 function paintPane(): void {
   if (!toolsBodyEl.querySelector(".tsw-pane")) {
     toolsBodyEl.innerHTML =
@@ -146,7 +222,11 @@ function paintPane(): void {
     return;
   }
   host.innerHTML =
-    groups(overview.tools)
+    (overview.extensionErrors?.length
+      ? `<div class="mem-empty mem-error">${overview.extensionErrors.map(escapeHtml).join("<br>")}</div>`
+      : "") +
+    behaviorHtml(overview.behavior, overview.languageServers) +
+    (groups(overview.tools)
       .map((g) => {
         const on = g.tools.filter((t) => t.global !== false).length;
         const all = on === g.tools.length;
@@ -180,12 +260,14 @@ function paintPane(): void {
           .join("");
         return `<section class="tsw-group" data-group="${escapeHtml(g.id)}">${head}<ul class="tsw-list">${rows}</ul></section>`;
       })
-      .join("") || `<div class="mem-none">No tools.</div>`;
+      .join("") || `<div class="mem-none">No tools.</div>`);
   filterPane();
 }
 
 function filterPane(): void {
-  toolsBodyEl.querySelectorAll<HTMLElement>(".tsw-group").forEach((g) => {
+  const behavior = toolsBodyEl.querySelector<HTMLElement>('.tsw-group[data-group="behavior"]');
+  if (behavior) behavior.hidden = query.trim() !== "";
+  toolsBodyEl.querySelectorAll<HTMLElement>('.tsw-group:not([data-group="behavior"])').forEach((g) => {
     let any = false;
     g.querySelectorAll<HTMLElement>(".tsw-row").forEach((row) => {
       const t = overview?.tools.find((x) => x.name === row.dataset.tool);
@@ -209,6 +291,12 @@ function onPaneClick(event: MouseEvent): void {
   const t = event.target as HTMLElement;
   if (t.closest("[data-tsw-refresh]")) {
     void loadTools();
+    return;
+  }
+  const behavior = t.closest<HTMLElement>("[data-tsw-behavior]");
+  if (behavior) {
+    const key = behavior.dataset.tswBehavior as keyof ToolBehavior;
+    void setBehavior(key, behavior.getAttribute("aria-checked") !== "true");
     return;
   }
   const row = t.closest<HTMLElement>(".tsw-row");

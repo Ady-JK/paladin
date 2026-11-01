@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/custom"
+	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/lsp"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/toolset"
@@ -27,7 +31,7 @@ const (
 type ToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	// Source is "builtin" or "mcp"; MCP tools also name their server
+	// Source is "builtin", "extension", or "mcp"; MCP tools also name their server
 	// and the server's own name for the tool.
 	Source      string `json:"source"`
 	Server      string `json:"server,omitempty"`
@@ -45,8 +49,54 @@ type ToolInfo struct {
 
 // ToolsOverview lists every tool a folder (and session) can see.
 type ToolsOverview struct {
-	Tools   []ToolInfo `json:"tools"`
-	Pending []string   `json:"pending"`
+	Tools           []ToolInfo   `json:"tools"`
+	Pending         []string     `json:"pending"`
+	ExtensionErrors []string     `json:"extensionErrors,omitempty"`
+	Behavior        ToolBehavior `json:"behavior"`
+	// LanguageServers are the running (or recently failed) servers.
+	LanguageServers []lsp.ServerStatus `json:"languageServers"`
+}
+
+// ToolBehavior is how the built-in tools act, app-wide.
+type ToolBehavior struct {
+	// FormatOnWrite runs the project's formatter after write and edit.
+	FormatOnWrite bool `json:"formatOnWrite"`
+	// VerifyNudge reminds the model to check changed code before a turn
+	// ends.
+	VerifyNudge bool `json:"verifyNudge"`
+	// LspDiagnostics reports language server errors after write/edit.
+	LspDiagnostics bool `json:"lspDiagnostics"`
+	// WebPrivateNetwork lets web_fetch and the browser reach private and
+	// internal addresses (off by default).
+	WebPrivateNetwork bool `json:"webPrivateNetwork"`
+}
+
+func (r *AgentRuntime) toolBehavior() ToolBehavior {
+	s := r.loadSettings()
+	return ToolBehavior{FormatOnWrite: s.formatOnWrite(), VerifyNudge: s.verifyNudge(), LspDiagnostics: s.lspDiagnostics(),
+		WebPrivateNetwork: s.Web.AllowPrivateNetwork}
+}
+
+// ToolBehaviorSet switches one behavior (by its JSON name) and returns
+// the refreshed overview.
+func (r *AgentRuntime) ToolBehaviorSet(key string, on bool, cwd, sessionID string) (ToolsOverview, error) {
+	var apply func(*Settings)
+	switch key {
+	case "formatOnWrite":
+		apply = func(s *Settings) { s.FormatOnWrite = &on }
+	case "verifyNudge":
+		apply = func(s *Settings) { s.VerifyNudge = &on }
+	case "lspDiagnostics":
+		apply = func(s *Settings) { s.LspDiagnostics = &on }
+	case "webPrivateNetwork":
+		apply = func(s *Settings) { s.Web.AllowPrivateNetwork = on }
+	default:
+		return ToolsOverview{}, fmt.Errorf("unknown tool behavior %q", key)
+	}
+	if err := r.updateSettings(apply); err != nil {
+		return ToolsOverview{}, err
+	}
+	return r.ToolsList(cwd, sessionID)
 }
 
 // ToolsEvent is the tools/pending event: a turn started without the
@@ -136,6 +186,10 @@ func (r *AgentRuntime) ToolsList(cwd, sessionID string) (ToolsOverview, error) {
 			})
 		}
 	}
+	added, extensionErrors := extension.Load(context.Background(), r.dataDir)
+	for _, tool := range added {
+		list = append(list, ToolInfo{Name: tool.Name(), Description: tool.Definition().Description, Source: "extension"})
+	}
 	sort.SliceStable(list, func(i, j int) bool {
 		if list[i].Source != list[j].Source {
 			return list[i].Source == "builtin"
@@ -171,7 +225,11 @@ func (r *AgentRuntime) ToolsList(cwd, sessionID string) (ToolsOverview, error) {
 	if pending == nil {
 		pending = []string{}
 	}
-	return ToolsOverview{Tools: list, Pending: pending}, nil
+	view := ToolsOverview{Tools: list, Pending: pending, Behavior: r.toolBehavior(), LanguageServers: r.lsp.Status()}
+	for _, err := range extensionErrors {
+		view.ExtensionErrors = append(view.ExtensionErrors, err.Error())
+	}
+	return view, nil
 }
 
 // ToolsSet switches tools on (true), off (false) or back to the
@@ -282,9 +340,11 @@ func (r *AgentRuntime) switchedOffSection(meta transcript.Meta) string {
 	if len(off) == 0 {
 		return ""
 	}
-	return "## Tools switched off\nThe user switched off these tools for this session: " + strings.Join(off, ", ") +
-		". They are not available; ignore any guidance about them and work with the tools you have."
+	return custom.TextFill("section.tools-off", map[string]string{"tools": strings.Join(off, ", ")})
 }
+
+const toolsOffDefault = "## Tools switched off\nThe user switched off these tools for this session: {{tools}}. " +
+	"They are not available; ignore any guidance about them and work with the tools you have."
 
 func cleanNames(names []string) []string {
 	var out []string

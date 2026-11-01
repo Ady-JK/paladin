@@ -164,3 +164,55 @@ make app       # clean, then a static stripped sidecar + minified renderer + ele
 and packages with maximum compression into `desktop-app/release/`
 (dmg on macOS, NSIS on Windows, deb on Linux). The sidecar ships as
 `agent-host` (`agent-host.exe` on Windows) under the app resources.
+# Headless and remote core
+
+`core/bin/agent-host` is a headless JSONL process. It reads one request per
+line from stdin and writes replies and events to stdout; stderr is reserved
+for logs. For example, after building the core:
+
+```sh
+printf '%s\n' '{"id":1,"method":"ping","params":{}}' | core/bin/agent-host
+```
+
+The desktop's **Settings → Connection** page can select **Remote over SSH**.
+Enter an SSH target such as `user@host` and the absolute path to `agent-host`
+on that machine. The desktop starts one remote headless process through `ssh
+-T`; the same JSONL protocol carries chat, browser, terminal, and tool events
+in both directions. The host key must already be trusted and key-based login
+must work without a password prompt. Paladin uses `BatchMode=yes` and
+`StrictHostKeyChecking=yes`, does not change SSH configuration, and does not
+open a listening port. Quitting Paladin stops the remote process. The
+remote core uses its own data directory, provider keys, workspace paths, and
+installed tools. Each desktop connection starts its own process; shared remote
+data directories are not a multi-client session server.
+
+The agent browser stays in Electron on the desktop. To preview a development
+server running on the remote machine, forward that server's port separately
+over SSH to `127.0.0.1` on the desktop, then open that local URL in Paladin.
+
+# Local TypeScript extensions
+
+The machine running the core needs Node 24 or newer for built-in TypeScript
+type stripping. Run `agent-host extensions init` on that machine to create
+`config/extensions/hello.ts`, `config/extensions/paladin.d.ts`, and a disabled
+`config/extensions.json` manifest under Paladin's data directory. The command
+never replaces existing files. Set `PALADIN_DATA_DIR` to choose a different
+data directory.
+
+An extension exports `{ tools: [...] }` as its default value. Each tool needs a
+unique `name`, a `description`, an object JSON Schema in `parameters`, and an
+`execute(args, context)` function. The generated example is directly usable.
+To enable it, edit `config/extensions.json` to:
+
+```json
+{"enabled":["hello.ts"]}
+```
+
+The core loads only listed regular files. Tools appear as
+`extension__hello__hello` in the model tool list and Paladin's Tools settings;
+existing sessions still hold back newly introduced tools until accepted.
+Extensions run with the core user's OS permissions in separate Node processes,
+so enable only code you trust. A failed module is skipped and logged; each
+tool call has a 120 second limit and a 1 MiB output cap. TypeScript support is
+for erasable types; Node's type stripping does not compile enums or TS path
+aliases. Extension code runs on the remote machine when the core is remote.

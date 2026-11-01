@@ -106,6 +106,7 @@ test("an edit applied by a fuzzy match is labeled", async ({ page }) => {
             path: "/home/tester/project/a.go",
             replacements: 1,
             match_strategy: "whitespace",
+            formatted: "gofmt",
             note: "re-read",
           }),
           status: "ok",
@@ -117,4 +118,5 @@ test("an edit applied by a fuzzy match is labeled", async ({ page }) => {
   await page.click("#sendBtn");
   await page.locator('[data-tool="edit"] button').first().click();
   await expect(page.locator('[data-tool="edit"]')).toContainText("matched ignoring whitespace");
+  await expect(page.locator('[data-tool="edit"]')).toContainText("formatted · gofmt");
 });

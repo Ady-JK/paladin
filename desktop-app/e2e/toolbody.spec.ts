@@ -194,7 +194,7 @@ test("other tools get a key/value view of arguments and result", async ({ page }
   await setup(page);
   const body = await open(
     page,
-    tool("1", "web_fetch", { url: "https://example.com", max: 3, deep: false }, "ok", {
+    tool("1", "lookup_docs", { url: "https://example.com", max: 3, deep: false }, "ok", {
       title: "Example",
       links: ["a", "b"],
     }),
@@ -207,6 +207,30 @@ test("other tools get a key/value view of arguments and result", async ({ page }
   await expect(out.locator(".kv-key")).toHaveText(["title", "links"]);
   await expect(out.locator(".kv-val").nth(1)).toContainText("a");
   await noRawJson(body);
+});
+
+test("web_fetch shows the URL, what came back and the page text", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "web_fetch", { url: "https://docs.example.com/guide" }, "ok", {
+      url: "https://docs.example.com/guide",
+      status: 200,
+      title: "Guide",
+      format: "markdown",
+      content: "# Guide\nStep one.",
+      total_chars: 17,
+      truncated: true,
+      next_index: 17,
+      note: "untrusted",
+    }),
+  );
+  const web = body.locator('[data-body="web"]');
+  await expect(web.locator(".file-path")).toHaveText("https://docs.example.com/guide");
+  await expect(web.locator(".file-chip")).toHaveText(["HTTP 200", "17 chars", "more"]);
+  await expect(web.locator(".web-title")).toHaveText("Guide");
+  await expect(web.locator(".file-line")).toHaveText(["# Guide", "Step one."]);
+  await expect(page.locator('#messages .tool-row[data-tool="web_fetch"] .tool-detail')).toHaveText("docs.example.com");
 });
 
 test("plain-text results show as text", async ({ page }) => {
@@ -225,4 +249,101 @@ test("an open body follows the call from running to done", async ({ page }) => {
   );
   await expect(body.locator(".term-out")).toHaveText("built");
   await expect(body.locator(".term-status")).toHaveText("exit 0");
+});
+
+test("grep, glob and list read as searches with their results", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "grep", { pattern: "func New", glob: "*.go" }, "ok", {
+      path: "/home/tester/project",
+      scope: "inside",
+      engine: "rg",
+      matches: 3,
+      files: 2,
+      truncated: true,
+      output: "/home/tester/project/a.go\n  4: func NewA() {}\n",
+    }),
+  );
+  const row = page.locator('#messages .tool-row[data-tool="grep"]').last();
+  await expect(row.locator(".tool-row-head")).toContainText("Searched");
+  await expect(row.locator(".tool-row-head")).toContainText("func New");
+  const view = body.locator('[data-body="search"]');
+  await expect(view.locator(".file-path")).toHaveText("func New");
+  await expect(view).toContainText("3 matches in 2 files");
+  await expect(view).toContainText("more results");
+  await expect(view.locator(".file-lines")).toContainText("4: func NewA() {}");
+  await noRawJson(body);
+});
+
+test("glob names its pattern and list its folder", async ({ page }) => {
+  await setup(page);
+  const globBody = await open(page, tool("1", "glob", { pattern: "**/*.ts" }, "ok", { files: 1, output: "/p/a.ts\n" }));
+  await expect(page.locator('#messages .tool-row[data-tool="glob"] .tool-row-head')).toContainText("Matched**/*.ts");
+  await expect(globBody).toContainText("1 file");
+  await expect(globBody.locator(".file-lines")).toContainText("/p/a.ts");
+});
+
+test("list reads as the workspace when no folder is given", async ({ page }) => {
+  await setup(page);
+  const body = await open(page, tool("1", "list", {}, "ok", { files: 0, output: "" }));
+  await expect(page.locator('#messages .tool-row[data-tool="list"] .tool-row-head')).toContainText(
+    "Listedthe workspace",
+  );
+  await expect(body).toContainText("no results");
+});
+
+test("a spilled command names the file holding its full output", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "shell", { cmd: "go test -v ./..." }, "ok", {
+      status: "done",
+      exit_code: 0,
+      output: "=== RUN\n… [truncated] [full output saved to /s/tool-output/c1.txt]\nok",
+      truncated: true,
+      output_file: "/s/tool-output/c1.txt",
+    }),
+  );
+  await expect(body.locator(".term-note")).toContainText("full output is saved");
+  await expect(body.locator(".term-meta")).toContainText("/s/tool-output/c1.txt");
+});
+
+test("a read that brought folder instructions says so", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "read", { path: "/p/svc/a.go" }, "ok", {
+      resolved_path: "/p/svc/a.go",
+      scope: "inside",
+      content: "package svc\n",
+      start_line: 1,
+      end_line: 1,
+      nested_instructions: "Instructions for this part of the project\n--- /p/svc/AGENTS.md ---\nrules",
+    }),
+  );
+  await expect(body.locator('[data-body="read"] .file-head')).toContainText("+ folder instructions");
+});
+
+test("an edit that left language server errors lists them", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "edit", { path: "/home/tester/project/a.go", old_string: "x", new_string: "y" }, "ok", {
+      replacements: 1,
+      match_strategy: "exact",
+      matches: [{ start_line: 3, end_line: 3 }],
+      diagnostics: [
+        { line: 3, column: 9, message: "undefined: y", source: "compiler" },
+        { line: 7, column: 2, message: "missing return" },
+      ],
+      diagnostics_from: "gopls",
+      errors: 2,
+    }),
+  );
+  await expect(body).toContainText("2 errors · gopls");
+  const rows = body.locator("[data-diagnostics] .diag-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("3:9");
+  await expect(rows.first()).toContainText("undefined: y");
 });

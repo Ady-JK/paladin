@@ -31,7 +31,7 @@ test("double bang shows output without adding agent history", async ({ page }) =
 test("terminal button opens a full terminal tab beside chat", async ({ page }) => {
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
-  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneNewChatBtn").click();
   await page.locator("#paneTerminalBtn").click();
   await expect(page.locator(".pane-terminal")).toBeVisible();
   await expect(page.locator(".xterm")).toBeVisible();

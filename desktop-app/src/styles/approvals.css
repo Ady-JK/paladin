@@ -210,3 +210,51 @@
 .dark .working-bar[data-phase="approval"] .working-what {
   color: #e0b84a;
 }
+
+/* ---- web request (web_fetch, browser open) ---- */
+.approval-web {
+  margin: 8px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.approval-web-host {
+  align-self: flex-start;
+  border-radius: 9999px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-accent-700);
+  background: var(--color-accent-50);
+}
+.dark .approval-web-host {
+  color: var(--color-accent-400);
+  background: rgb(146 134 214 / 0.14);
+}
+.approval-web-url {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-slate-600);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dark .approval-web-url {
+  color: var(--color-slate-300);
+}
+.approval-web-note {
+  font-size: 11.5px;
+  color: var(--color-slate-500);
+}
+/* An invisible or direction-changing character, made visible. */
+.hidden-char {
+  border-radius: 4px;
+  padding: 0 3px;
+  font-size: 0.85em;
+  color: var(--color-amber-700, #b45309);
+  background: rgb(217 165 91 / 0.16);
+}
+.dark .hidden-char {
+  color: #e0b46e;
+}

@@ -3,6 +3,12 @@
 `agent-host` is a Go executable built from `core/cmd/agent-host`.
 Electron main spawns it with piped stdio:
 
+The same process can run headlessly from any JSONL client. In remote mode
+Electron carries these streams over `ssh -T` to an `agent-host` process on the
+remote machine; no protocol method or TCP listener changes. SSH uses batch
+authentication and strict host-key checking. `agent-host extensions init` is a
+separate setup command, not a JSONL method.
+
 - stdin: requests, one JSON object per line
 - stdout: responses + stream events, one JSON object per line
 - stderr: logs (never JSONL)
@@ -19,7 +25,7 @@ Electron main spawns it with piped stdio:
 | method | params | result |
 |---|---|---|
 | `ping` | `{}` | `{"ok":true}` |
-| `browserReply` | `{id,ok,result?,imageBase64?,error?}` | `bool`: resolves a pending `browser` tool call. The host emits `browser/request` with the same id; Electron runs Playwright and returns the result. Screenshot bytes are bounded and saved in the session before the model sees them |
+| `browserReply` | `{id,ok,result?,imageBase64?,error?}` | `bool`: resolves a pending `browser` tool call. The host emits `browser/request` with the same id; Electron runs Playwright and returns the result. Screenshot bytes are bounded and saved in the session before the model sees them. `open` takes local apps and http(s) sites (the gate asks per site first); a result may carry `blocked_navigation` when the page tried to leave the session's sites |
 | `terminalStart` | `{sessionId,cwd,cols,rows}` | `terminalId`: starts an unsandboxed interactive PTY in the workspace; output arrives as `terminal/data` events with base64 `data` |
 | `terminalWrite` | `{sessionId,terminalId,data}` | `bool`: sends UTF-8 or control characters to that PTY |
 | `terminalResize` | `{sessionId,terminalId,cols,rows}` | `bool`: resizes that PTY |
@@ -39,6 +45,8 @@ Electron main spawns it with piped stdio:
 | `openSession` | `{sessionId?,cwd?,worktree?,name?}` | `Session` (`sessionId,cwd,provider,model,revert?,worktree?,subagent?`; `subagent` is set for a subagent session, with its live `status`, see Subagents); `worktree:true` creates the session in a new git worktree of `cwd`'s repo on branch `paladin/<name>` (see Undo and worktrees) |
 | `listSessions` | `{cwd?,limit?}` | `SessionInfo[]`, newest first; only the `limit` newest sessions' transcripts are read. A session that cannot be read is still listed with `damaged` (the reason) so it can be deleted; its `cwd` may be empty (see Transcript format) |
 | `sessionHistory` | `{sessionId,cwd?}` | `HistoryMessage[]` |
+| `saveAttachment` | `{sessionId,cwd?,name,data}` (base64, up to 10 MiB decoded) | Session-owned attachment reference |
+| `sessionImage` | `{sessionId,cwd?,path}` (path must occur in session history) | Image data URL |
 | `sessionTodos` | `{sessionId,cwd?}` | `TodoEntry[]` (`content,status`): the agent's todo list for the panel above the composer; empty before it plans |
 | `sessionUsage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,lastInputTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` is the last call's input tokens over the window, omitted when the model's window is unknown) |
 | `budgetGet` | `{sessionId?,cwd?}` | `BudgetView` (`defaultUsd,sessionUsd,effectiveUsd,spentUsd,hasCost,calls`); `calls` counts model calls that reported usage, so `hasCost:false` with `calls>0` means the provider sends no cost; `sessionUsd` is `null` when the session inherits the default; `effectiveUsd` `0` means no limit. Without `sessionId` only the default is reported |
@@ -48,11 +56,12 @@ Electron main spawns it with piped stdio:
 | `overallUsage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
 | `deleteSession` | `{sessionId,cwd?,discardWorktree?}` | `bool`; a worktree session's worktree is removed with its last session if clean, or always with `discardWorktree:true` |
 | `getPrompt` | `{}` | `Prompt` (`systemPrompt` = `config/SYSTEM_PROMPT.md`; a missing/blank file seeds from the built-in default) |
+| `suggestPrompt` | `{systemPrompt, instruction, provider?, model?}` | `Prompt` proposal; does not save or start a turn |
 | `setPrompt` | `{systemPrompt}` | `Prompt` (blank rejected) |
 | `resetPrompt` | `{}` | `Prompt` (file rewritten from the built-in default) |
 | `stopChat` | `{sessionId?,cwd?}` | `bool` |
 | `listSkills` | `{cwd?}` | `SkillEntry[]` (name, description, source, path; content only at turn time) |
-| `listCommands` | `{cwd?}` | `CommandEntry[]` (`name,description,argumentHint?,mode?,source` builtin/global/workspace, `path?`) |
+| `listCommands` | `{cwd?}` | `CommandEntry[]` (`name,description,argumentHint?,mode?,tools?,source` builtin/global/workspace, `path?`); `tools` are command-only tools such as `report_findings` |
 | `memoryGet` | `{target,cwd?}` | `MemoryView` (`target` user/global/project, `cwd?`, `path`, `entries[]`, `used`, `limit` chars); `project` requires `cwd` |
 | `memorySet` | `{target,cwd?,entries[]}` | `MemoryView`; replaces the store (dedupes, enforces the limit and the threat scan) |
 | `memoryProjects` | `{}` | `Project[]` (`cwd,key,entries,used,limit`): folders that have memory |
@@ -61,6 +70,7 @@ Electron main spawns it with piped stdio:
 | `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],conflicts[],snapshots}`: what reverting to the user message at transcript `index` would restore |
 | `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's saved file snapshots |
 | `sessionDiff` | `{sessionId,cwd?,turn?,path}` | `{path,patch,truncated}`: unified diff for one changed file; `turn` is a transcript index or omitted for the session |
+| `fileExcerpt` | `{sessionId,cwd?,path,start,end}` | `{path,rel,startLine,lines,truncated}`: lines `start`..`end` plus 3 of context (at most 60) of a text file inside the session workspace; used by review findings |
 | `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],skipped[],failed?[],snapshots}`: undo from that user message on (files + conversation); `message` is its text for the composer. `failed` lists files whose restore errored (also in `skipped`; the others were still restored). Fails while a turn runs |
 | `unrevertSession` | `{sessionId,cwd?}` | same shape: redo the pending revert |
 | `gitInfo` | `{cwd}` | `{repo,root?,branch?,hasCommits}` |
@@ -71,13 +81,13 @@ Electron main spawns it with piped stdio:
 | `cancelAsk` | `{sessionId,callId}` | `bool` |
 | `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder`, `global` or `deny` (must be one of the card's `choices`); unknown calls fail |
 | `permissionsGet` | `{cwd?,sessionId?}` | `{global: Rule[], folder: Rule[], session: Rule[], folders: [{cwd,rules}], sandbox: {kind}, presets}`; `sandbox.kind` is `seatbelt`, `landlock` or `""` (approvals only) |
-| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`; `*` matches all |
+| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp\|web, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`, web patterns a domain (`example.com`, covering its subdomains); `*` matches all |
 | `mcpList` | `{cwd?}` | `MCPOverview`: `{servers: ServerStatus[], globalPath, folderPath?, hasFolderConfig, trusted, errors?: {global?, folder?}}` — global servers plus `cwd`'s own (see MCP servers) |
 | `mcpConfig` | `{scope,cwd?}` | `{path, text, exists}`: one `mcp.json` for editing (`scope` `global` or `folder`; a missing file returns a starter `text`) |
 | `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
 | `mcpSetEnabled` | `{scope,cwd?,name,enabled}` | `MCPOverview`; sets the server's `enabled` flag in its file (a trusted folder file stays trusted) |
 | `mcpRestart` | `{scope,cwd?,name}` | `MCPOverview`; stops the server, clears its failure and starts it |
-| `mcpTrust` | `{cwd,trust}` | `MCPOverview`; approves (or revokes) the folder's current `mcp.json` |
+| `mcpTrust` | `{cwd,trust,fingerprint}` | `MCPOverview`; approves (or revokes) the folder's `mcp.json`; `fingerprint` is the listed `folderFingerprint`, and trust fails if the file changed since |
 | `mcpParse` | `{text}` | `{servers: {name, config}[]}`: servers read from pasted text — launch commands (`npx`/`uvx`/`docker run`/…, `KEY=value` prefixes, one per line), a Streamable HTTP URL, `claude`/`codex mcp add …` lines or `mcp.json` JSON. Nothing is saved |
 | `mcpAdd` | `{scope,cwd?,servers,replace?}` | `MCPOverview`; adds `{name, config}[]` to one `mcp.json` (existing names fail unless `replace`) and starts them. A new or trusted folder file is trusted afterwards; an untrusted one stays untrusted |
 | `listAgents` | `{sessionId}` | `AgentInfo[]`: the session's subagents in spawn order with live status (see Subagents) |
@@ -88,10 +98,16 @@ Electron main spawns it with piped stdio:
 | `deleteSideChat` | `{sessionId,cwd?,chatId}` | `null`; removes the side chat's folder |
 | `hooksList` | `{cwd?}` | `HooksOverview`: `{sources: Source[], events}` — the global `config/hooks.json` plus, with `cwd`, the folder's `.paladin/hooks.json`, `.codex/hooks.json` and `.claude/settings.json` (see Hooks). `Source` is `{path, scope, format: paladin\|codex\|claude, exists, editable, trusted, error?, warnings?, text?, handlers: [{key, event, matcher?, command, timeout?, statusMessage?, enabled}]}` |
 | `hooksSetConfig` | `{scope,cwd?,text}` | `HooksOverview`; validates and writes the global or folder `hooks.json` (blank `text` deletes it). A folder file saved here is trusted |
-| `hooksTrust` | `{cwd,path,trust}` | `HooksOverview`; approves (or revokes) one of the folder's hooks files at its current content |
+| `hooksTrust` | `{cwd,path,trust,fingerprint}` | `HooksOverview`; approves (or revokes) one of the folder's hooks files; `fingerprint` is the listed source's, and trust fails if the file changed since |
 | `hooksToggle` | `{cwd?,key,enabled}` | `HooksOverview`; turns one handler on or off |
-| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[]}` (see Tool switches) |
+| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[], extensionErrors?: string[], behavior: {formatOnWrite, verifyNudge, lspDiagnostics, webPrivateNetwork}, languageServers: {id,root,state,pid?,error?}[]}` (see Tool switches) |
 | `toolsSet` | `{scope,cwd?,sessionId?,names,enabled}` | `ToolsOverview`; `scope` `global` or `session`; `enabled` `true`/`false`, or `null` to clear the switch |
+| `toolBehaviorSet` | `{key,enabled,cwd?,sessionId?}` | `ToolsOverview`; app-wide tool behavior saved in `settings.json`; `key` `formatOnWrite`, `verifyNudge`, `lspDiagnostics` or `webPrivateNetwork` (off by default: lets web tools reach private addresses) |
+| `customList` | `{}` | `CustomItem[]`: every editable built-in, by group (System prompt, Tool guidance, Tool descriptions, Modes, Reminders, Subagents, Compaction, Commands, Skills, Settings files): `{id, group, title, description, kind: text\|command\|skill\|json, vars?, customized, enabled?}` (`enabled` for skills) |
+| `customGet` | `{id}` | `CustomState`: the item plus `value` (current text), `default`, `customized`, `path` (the override file), `missing?` (placeholders the text no longer uses) and `enabled?` |
+| `customSet` | `{id,text}` | `CustomState`; saves an override (text items in `<data>/config/custom/<id>.md`; commands, skills, `settings.json` and `lsp.json` in their own files). Text equal to the default removes the override; JSON files are validated first |
+| `customReset` | `{id}` | `CustomState`; deletes the override so the default applies (for `settings.json`: every setting returns to its default) |
+| `skillEnabledSet` | `{name,enabled}` | `true`; turns a skill on or off by name (`settings.json` `disabledSkills`), whatever its source |
 | `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
 | `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only`, `auto` (default) or `full-access` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
@@ -183,7 +199,9 @@ guidance and examples are compiled per-OS in the core (a Windows turn
 never sees sh text, a Unix turn never sees PowerShell text) and always
 appended with the machine (OS + arch) and session workspace
 environment block. The settings UI edits the file via
-`getPrompt`/`setPrompt`/`resetPrompt`.
+`getPrompt`/`setPrompt`/`resetPrompt`. `suggestPrompt` sends the current
+editor text and instruction to the selected provider and returns a draft
+without changing the file or starting a chat turn.
 
 ## Responses (stdout)
 
@@ -418,6 +436,32 @@ starting servers, never for failed ones. A server that fails to start
 stays `failed` until its config changes or `mcpRestart`; one that dies
 after starting restarts on next use (3 times per 5 minutes).
 
+Web requests (`web_fetch`, and `browser` `open`) pass the gate as
+`kind: "web"` cards with `host` and `url`. They run under a `web` allow
+rule whose pattern is a domain (it covers its subdomains) or `*`, or ask
+once/session/folder/global/deny and remember the host. A service on
+this machine is `localhost:PORT` whichever name the URL used: only a
+rule naming that port allows it (`*` does not), so each local port asks
+once. Full access runs them; deny rules (a deny `*` included) win.
+
+A tool the workspace itself ships (a formatter or language server in
+`node_modules/.bin` or a virtualenv, or a server that runs the
+project's own code: rust-analyzer, typescript-language-server with the
+project's TypeScript) asks before it first runs, as a `kind: "project"`
+card on the call that would start it: `command` names the tool, `path`
+the folder, and the choices are session/folder/deny. A `project` rule
+(an absolute folder) remembers the answer; a refusal is kept for the
+session. Without it, Paladin uses a copy installed outside the
+workspace, or skips the tool. Writes into `.git`, `.paladin`, `.claude`,
+`node_modules` or a virtualenv ask once/session/deny in every preset but
+full access.
+
+Extension tools (local tools from `config/extensions`) run without the
+sandbox, so each call is a `kind: "extension"` card with `tool` and
+`args`, unless an `extension` rule names the tool (or `*`); answers are
+once/session/folder/global/deny. Plan mode and the read-only preset
+leave extension tools out.
+
 MCP calls pass the gate as `kind: "mcp"` cards with `server`, `mcpTool`
 and `args`. Tool annotations come from the server and are not trusted:
 `readOnlyHint` neither skips the question nor lets calls run in
@@ -441,7 +485,7 @@ Server instructions join the system prompt.
 Every tool (built-in and MCP) is on unless switched off. A session's
 switch beats the global one (`config/tools.json`); session switches and
 the tools a session has seen live in its `meta.json` under `tools`.
-`ToolInfo` is `{name, description?, source: builtin|mcp, server?, tool?,
+`ToolInfo` is `{name, description?, source: builtin|mcp|extension, server?, tool?,
 readOnly?, destructive?, global?, session?, enabled, pending?}`; MCP
 tools are listed while their server is ready. When built-in tools are
 off, the system prompt says so.

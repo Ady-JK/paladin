@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -35,12 +36,14 @@ type SideAnswer struct {
 // sideQuestionPrompt wraps a /btw question so the model answers it
 // from what it already knows instead of resuming the main task.
 func sideQuestionPrompt(question string) string {
-	return "<side_question>\nThe user is asking a quick side question about this conversation " +
-		"while the main task carries on separately. Answer it briefly and directly from what " +
-		"you already know. You have no tools here, and this exchange is not added to the main " +
-		"conversation, so do not continue the task or promise to do anything.\n\n" +
-		"Question: " + question + "\n</side_question>"
+	return custom.TextFill("side.question", map[string]string{"question": question})
 }
+
+const sideQuestionDefault = "<side_question>\nThe user is asking a quick side question about this conversation " +
+	"while the main task carries on separately. Answer it briefly and directly from what " +
+	"you already know. You have no tools here, and this exchange is not added to the main " +
+	"conversation, so do not continue the task or promise to do anything.\n\n" +
+	"Question: {{question}}\n</side_question>"
 
 // SideQuestion answers a /btw question about a session without adding
 // it to the transcript. It sees the running turn's conversation when

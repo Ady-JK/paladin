@@ -159,7 +159,7 @@ func (p *OpenAIProvider) completeGoogle(ctx context.Context, system string, mess
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: google: %v", p.name, err))
 	}
 	p.googleHeaders(req, sessionID, false)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return ToolResponse{}, CancelledError()
@@ -314,7 +314,7 @@ func (p *OpenAIProvider) streamGoogle(ctx context.Context, system string, messag
 		return RequestError(fmt.Sprintf("%s: google: %v", p.name, err))
 	}
 	p.googleHeaders(req, sessionID, true)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		if parent.Err() != nil {
 			return CancelledError()

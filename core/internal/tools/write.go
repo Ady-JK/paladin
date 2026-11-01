@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
@@ -77,6 +78,16 @@ func (w *WriteTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 			return "", WithContent(string(content), msg)
 		}
 		return "", ArgsError(err.Error())
+	}
+	if name := formatFile(ctx, res.ResolvedPath); name != "" {
+		res.Formatted, res.Note = name, formattedNote(name)
+		if data, err := os.ReadFile(res.ResolvedPath); err == nil {
+			res.Bytes, res.Lines = len(data), CountLines(string(data))
+		}
+	}
+	if d, found := diagnose(ctx, res.ResolvedPath); found {
+		res.Diagnostics, res.DiagnosticsFrom, res.Errors = d.Diagnostics, d.Server, d.Errors
+		res.Note = strings.TrimSpace(res.Note + " " + diagnosticsNote(d))
 	}
 	data, merr := jsonx.Marshal(res)
 	if merr != nil {

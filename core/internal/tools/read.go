@@ -154,6 +154,9 @@ func (ReadTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		return "", ArgsError(rerr.Error())
 	}
 	fileVersions.notePage(ctx.SessionID, resolved, info, offset, page.end, page.hasMore, page.clipped, page.hash)
+	if ctx.Warm != nil && scope == ScopeInside {
+		ctx.Warm(resolved, ctx.TrustProject)
+	}
 	next := 0
 	if page.hasMore {
 		next = page.end + 1

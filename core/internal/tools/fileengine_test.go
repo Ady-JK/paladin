@@ -37,6 +37,26 @@ func TestWriteThenEditRoundtrip(t *testing.T) {
 	}
 }
 
+func TestWriteReportsWholeFileLineCounts(t *testing.T) {
+	ws := t.TempDir()
+	path := filepath.Join(ws, "counts.txt")
+	engine := NewEngine()
+	created, err := engine.Write("line-count-session", ws, path, "one\ntwo\n", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Lines != 2 || created.OldLines != 0 {
+		t.Fatalf("create counts: %+v", created)
+	}
+	replaced, err := engine.Write("line-count-session", ws, path, "three\n", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.Lines != 1 || replaced.OldLines != 2 {
+		t.Fatalf("replacement counts: %+v", replaced)
+	}
+}
+
 func TestEditAmbiguousListsOccurrences(t *testing.T) {
 	dir := t.TempDir()
 	ws := filepath.Join(dir, "ws")

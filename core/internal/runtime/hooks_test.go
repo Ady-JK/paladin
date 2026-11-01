@@ -41,7 +41,13 @@ func TestHooksRPCsListEditToggleAndTrust(t *testing.T) {
 	if err := os.WriteFile(claude, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err = rt.HooksTrust(ws, claude, true)
+	fp := ""
+	for _, s := range rt.HooksList(ws).Sources {
+		if s.Path == claude {
+			fp = s.Fingerprint
+		}
+	}
+	view, err = rt.HooksTrust(ws, claude, true, fp)
 	if err != nil {
 		t.Fatal(err)
 	}

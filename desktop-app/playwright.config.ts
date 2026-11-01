@@ -52,7 +52,7 @@ export default defineConfig({
     launchOptions: executablePath ? { executablePath } : {},
   },
   webServer: {
-    command: "pnpm dev:renderer",
+    command: "node node_modules/vite/bin/vite.js --port 5173 --strictPort",
     port: 5173,
     reuseExistingServer: true,
   },

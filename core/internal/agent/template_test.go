@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -176,7 +178,7 @@ func TestBuildResolvesEverything(t *testing.T) {
 	if a.currentMessage != "hi" || a.currentResume {
 		t.Fatalf("input %q %v", a.currentMessage, a.currentResume)
 	}
-	if len(a.toolDefs) != 7 {
+	if len(a.toolDefs) != 12 {
 		t.Fatalf("default template should use every tool: %+v", a.toolDefs)
 	}
 	if a.shell == nil {
@@ -369,5 +371,25 @@ func TestBuildSkillErrors(t *testing.T) {
 		SessionID: sess.Meta.SessionID, Resume: true, Skill: &name,
 	}); err == nil || !strings.Contains(err.Error(), "resume") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBuildLetsTheGateReadTheSessionFolder(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000031")
+	d, _, _, _ := testDeps(t, sess)
+	shared := &permission.Gate{Preset: permission.Auto, Workspace: "/proj"}
+	d.Gate = shared
+	for _, mode := range []string{ModeBuild, ModePlan} {
+		a, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi", Cwd: "/proj", Mode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, ok := a.gate.(*permission.Gate)
+		if !ok || !slices.Contains(g.Readable, sess.Dir) {
+			t.Fatalf("%s: gate %+v should read %s", mode, a.gate, sess.Dir)
+		}
+	}
+	if len(shared.Readable) != 0 {
+		t.Fatal("Build must not mutate the caller's gate")
 	}
 }

@@ -46,7 +46,18 @@ func newHTTP(cfg ServerConfig, deliver func([]byte), fail func(error)) (*httpTra
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	tr.ResponseHeaderTimeout = 0
-	return &httpTransport{url: url, headers: cfg.Headers, client: &http.Client{Transport: tr}, deliver: deliver, fail: fail}, nil
+	client := &http.Client{Transport: tr, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("too many MCP redirects")
+		}
+		// Configured headers may contain credentials with arbitrary names.
+		// net/http only strips a few known names on cross-origin redirects.
+		if next.URL.Scheme != via[0].URL.Scheme || next.URL.Host != via[0].URL.Host {
+			return errors.New("MCP redirect changed origin")
+		}
+		return nil
+	}}
+	return &httpTransport{url: url, headers: cfg.Headers, client: client, deliver: deliver, fail: fail}, nil
 }
 
 func (t *httpTransport) send(ctx context.Context, msg []byte) error {

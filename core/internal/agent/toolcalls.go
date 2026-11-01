@@ -36,6 +36,7 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 		for k := i; k < j; k++ {
 			call, result := calls[k], results[k-i]
 			a.armNotify(&call, &result)
+			a.noteVerify(&call, &result)
 			a.appendToolResult(&call, &result)
 			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
 				a.settleAborted(calls[k+1:])
@@ -99,11 +100,17 @@ func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
 	return results
 }
 
-// callGated runs one call through the permission gate: refused calls
+// callGated runs one call through the permission gate (after a hold for
+// unseen folder instructions): refused calls
 // never reach the tool, approved shell calls run in the gate's sandbox,
 // and a sandbox block may be escalated to a rerun, confined with the
 // blocked folder granted or (once) unconfined.
 func (a *Agent) callGated(call *tools.ToolCall) tools.ToolResult {
+	// Unseen folder instructions come first: the call is not run, so it
+	// skips hooks and the gate, and the resent call goes through both.
+	if held, ok := a.tools.HoldForInstructions(call, a.toolCtx); ok {
+		return held
+	}
 	if !a.hooks.Has(hooks.PreToolUse) && !a.hooks.Has(hooks.PostToolUse) {
 		return a.authorizedCall(call, hooks.DecisionNone)
 	}
@@ -133,6 +140,9 @@ func (a *Agent) authorizedCall(call *tools.ToolCall, verdict hooks.Decision) too
 	}
 	ctx := *a.toolCtx
 	ctx.Sandbox = auth.Sandbox
+	if pt, ok := a.gate.(ProjectTrust); ok {
+		ctx.TrustProject = func(tool string) bool { return pt.TrustProject(a.ctx, call.ID, tool, notify) }
+	}
 	result := a.callTool(call, &ctx)
 	for i := 0; i < maxEscalations && ctx.Sandbox != nil && result.IsError; i++ {
 		output, blocked := tools.SandboxBlocked(result.Content)

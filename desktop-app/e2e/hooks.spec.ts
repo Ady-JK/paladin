@@ -121,7 +121,11 @@ test("a folder's Claude hooks stay off until trusted", async ({ page }) => {
   await expect(claude.locator(".hook-untrusted")).toHaveCount(0);
   await expect(claude.locator(".hook-handler")).toHaveAttribute("data-live", "true");
   const trust = (await calls(page)).find((c) => c.cmd === "hooksTrust");
-  expect(trust.args).toMatchObject({ path: "/home/tester/project/.claude/settings.json", trust: true });
+  expect(trust.args).toMatchObject({
+    path: "/home/tester/project/.claude/settings.json",
+    trust: true,
+    fingerprint: "fp-/home/tester/project/.claude/settings.json",
+  });
 });
 
 test("a turn shows a quiet row when a hook acts", async ({ page }) => {

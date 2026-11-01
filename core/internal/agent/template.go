@@ -7,9 +7,11 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/permission"
@@ -74,11 +76,13 @@ type Command struct {
 	Name   string
 	Prompt string
 	Mode   string
+	// Tools are command-only tools (tools.CommandTool) for this turn.
+	Tools []string
 }
 
-// CommandSource resolves `/name args` prompt commands.
+// CommandSource resolves `/name args` prompt commands for a session.
 type CommandSource interface {
-	LoadCommand(cwd, name, args string) (Command, error)
+	LoadCommand(cwd, sessionID, name, args string) (Command, error)
 }
 
 // PromptSource supplies the runtime default prompt. The file content
@@ -160,6 +164,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 
 	message := req.Message
 	display := req.Display
+	var commandTools []string
 	if command != "" {
 		if req.Resume {
 			return nil, fmt.Errorf("command %q cannot be used with resume", command)
@@ -167,7 +172,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		if d.Commands == nil {
 			return nil, fmt.Errorf("command %q is not available: the runtime has no command source", command)
 		}
-		cmd, err := d.Commands.LoadCommand(sess.Meta.Cwd, command, strings.TrimSpace(req.Message))
+		cmd, err := d.Commands.LoadCommand(sess.Meta.Cwd, sess.Meta.SessionID, command, strings.TrimSpace(req.Message))
 		if err != nil {
 			return nil, err
 		}
@@ -178,6 +183,12 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		if cmd.Mode != "" && mode == "" {
 			mode = cmd.Mode
 		}
+		for _, name := range cmd.Tools {
+			if _, ok := tools.CommandTool(name); !ok {
+				return nil, fmt.Errorf("command /%s asks for unknown tool %q", cmd.Name, name)
+			}
+		}
+		commandTools = cmd.Tools
 	}
 	if name := strings.TrimSpace(strVal(req.Skill)); name != "" {
 		if req.Resume {
@@ -211,12 +222,23 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 			shell, _ = raw.(*tools.ShellTool)
 		}
 	}
+	for _, name := range commandTools {
+		t, _ := tools.CommandTool(name)
+		registry = registry.With(t)
+	}
 
 	gate := d.Gate
+	// The session may always read its own folder (spilled output, job
+	// logs, screenshots); the copy keeps the caller's gate untouched.
+	if g, ok := gate.(*permission.Gate); ok && g != nil && sess.Dir != "" {
+		owned := *g
+		owned.Readable = append(slices.Clip(g.Readable), sess.Dir)
+		gate = &owned
+	}
 	if mode == ModePlan || t.ReadOnly {
 		registry, shell = planRegistry(registry, shell)
 		if !t.ReadOnly {
-			system += "\n\n" + prompt.PlanMode
+			system += "\n\n" + custom.Text("prompt.plan-mode")
 		}
 		if g, ok := gate.(*permission.Gate); ok && g != nil {
 			planned := *g
@@ -246,9 +268,15 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		steer:       req.Steer,
 		budget:      req.Budget,
 		notices:     req.Notices,
+		format:      req.FormatOnWrite,
+		web:         req.Web,
+		verify:      req.VerifyNudge,
+		diagnose:    req.Diagnose,
+		warm:        req.Warm,
 		ledgers:     req.SpendLedgers,
 		message:     message,
 		display:     display,
+		attachments: req.Attachments,
 		resume:      req.Resume,
 		compactOnly: req.Compact,
 
@@ -277,7 +305,7 @@ func FormatSkillMessage(message, name, content string) string {
 
 func toolDefinitions(registry *tools.Registry) []inference.ToolDefinition {
 	var out []inference.ToolDefinition
-	for _, def := range registry.Definitions() {
+	for _, def := range tools.Described(registry.Definitions()) {
 		out = append(out, inference.ToolDefinition{
 			Name:        def.Name,
 			Description: def.Description,
@@ -352,14 +380,15 @@ func (r *Registry) Default() (Template, bool) {
 // planWriteTools are dropped in plan mode.
 var planWriteTools = map[string]bool{"write": true, "edit": true}
 
-// planRegistry is the read-only view of a registry: no file writers and
-// a shell that refuses anything but inspection commands. MCP tools stay;
-// the plan-mode gate asks for each call. The real shell stays as the
-// agent's job-notice source.
+// planRegistry is the read-only view of a registry: no file writers, no
+// extension tools (local code that may change anything) and a shell that
+// refuses anything but inspection commands. MCP tools stay; the
+// plan-mode gate asks for each call. The real shell stays as the agent's
+// job-notice source.
 func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *tools.ShellTool) {
 	out := tools.NewRegistry()
 	for _, name := range r.Names() {
-		if planWriteTools[name] {
+		if planWriteTools[name] || r.IsExtension(name) {
 			continue
 		}
 		t, _ := r.Get(name)

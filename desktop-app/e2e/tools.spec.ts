@@ -84,6 +84,56 @@ test("Settings → Tools groups tools and switches them globally", async ({ page
   ]);
 });
 
+test("Settings → Tools switches how the built-in tools behave", async ({ page }) => {
+  await seed(page);
+  await boot(page);
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavTools");
+  const group = page.locator('#settingsPaneTools .tsw-group[data-group="behavior"]');
+  await expect(group).toBeVisible();
+  const fmt = group.locator('.tsw-row[data-behavior="formatOnWrite"]');
+  await expect(fmt).toContainText("Format after write and edit");
+  const sw = fmt.locator("[data-tsw-behavior]");
+  await expect(sw).toHaveAttribute("aria-checked", "true");
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "false");
+  const verify = group.locator('.tsw-row[data-behavior="verifyNudge"] [data-tsw-behavior]');
+  await expect(group.locator('.tsw-row[data-behavior="verifyNudge"]')).toContainText("Check before finishing");
+  await expect(verify).toHaveAttribute("aria-checked", "true");
+  await verify.click();
+  await expect(verify).toHaveAttribute("aria-checked", "false");
+  expect(await calls(page, "toolBehaviorSet")).toEqual([
+    { key: "formatOnWrite", enabled: false, cwd: CWD, sessionId: null },
+    { key: "verifyNudge", enabled: false, cwd: CWD, sessionId: null },
+  ]);
+  const lsp = group.locator('.tsw-row[data-behavior="lspDiagnostics"]');
+  await expect(lsp).toContainText("Language server errors");
+  await expect(group.locator(".tsw-lsp")).toContainText("No language server running yet");
+  // Behavior is not a tool, so a tool search hides it.
+  await page.fill("#toolsSearch", "echo");
+  await expect(group).toBeHidden();
+});
+
+test("Settings → Tools lists running language servers under their switch", async ({ page }) => {
+  await seed(page, {
+    languageServers: [
+      { id: "gopls", root: "/home/tester/project/core", state: "ready", pid: 42 },
+      { id: "pyright", root: "/home/tester/project/tools", state: "failed", error: "pyright exited" },
+    ],
+  });
+  await boot(page);
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavTools");
+  const group = page.locator('#settingsPaneTools .tsw-group[data-group="behavior"]');
+  await expect(group.locator('.tsw-lsp-row[data-lsp="gopls"]')).toHaveAttribute("data-state", "ready");
+  await expect(group.locator('.tsw-lsp-row[data-lsp="gopls"]')).toContainText("/home/tester/project/core");
+  await expect(group.locator('.tsw-lsp-row[data-lsp="pyright"]')).toHaveAttribute("title", "pyright exited");
+  const sw = group.locator('[data-tsw-behavior="lspDiagnostics"]');
+  await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", "false");
+  await expect(group.locator(".tsw-lsp")).toHaveCount(0);
+});
+
 test("Settings → Tools search filters rows", async ({ page }) => {
   await seed(page);
   await boot(page);
@@ -92,6 +142,19 @@ test("Settings → Tools search filters rows", async ({ page }) => {
   await page.fill("#toolsSearch", "echo");
   await expect(page.locator("#settingsPaneTools .tsw-row:visible")).toHaveCount(1);
   await expect(page.locator('#settingsPaneTools .tsw-group[data-group="builtin"]')).toBeHidden();
+});
+
+test("enabled local extensions have their own group and show load errors", async ({ page }) => {
+  await seed(page, {
+    tools: [...TOOLS, { name: "extension__hello__hello", source: "extension", description: "Return a greeting" }],
+    extensionErrors: ["extension broken.ts: failed to import"],
+  });
+  await boot(page);
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavTools");
+  const pane = page.locator("#settingsPaneTools");
+  await expect(pane.locator('.tsw-group[data-group="extension"]')).toContainText("extension__hello__hello");
+  await expect(pane.locator(".mem-error")).toContainText("extension broken.ts: failed to import");
 });
 
 test("the composer Tools popover sets session switches that beat global", async ({ page }) => {

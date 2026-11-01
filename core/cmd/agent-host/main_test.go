@@ -45,12 +45,19 @@ func callUnary(rt *runtime.AgentRuntime, id, method string, params any) Response
 // is idle again.
 func runTurnOut(t *testing.T, rt *runtime.AgentRuntime, p ChatParams) string {
 	t.Helper()
-	installTurnSink(rt)
+	done := make(chan struct{}, 1)
+	rt.SetTurnSink(func(e runtime.TurnEvent) {
+		emit(e)
+		if e.Event == "turn/done" {
+			done <- struct{}{}
+		}
+	})
 	return captureStdout(t, func() {
 		emit(callUnary(rt, "submit", "submitChat", p))
-		deadline := time.Now().Add(20 * time.Second)
-		for len(rt.Turns()) > 0 && time.Now().Before(deadline) {
-			time.Sleep(5 * time.Millisecond)
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+			t.Error("timed out waiting for turn/done event")
 		}
 	})
 }

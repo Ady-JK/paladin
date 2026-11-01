@@ -217,3 +217,31 @@ func TestRemoveRefusesDirtyAndKeepsUnmergedBranches(t *testing.T) {
 		t.Fatal("status still sees removed worktree")
 	}
 }
+
+// Paladin's own git work (create, commit, merge) never runs the
+// repository's hooks or fsmonitor: hook files are workspace files the
+// agent can write, and these commands run outside the sandbox.
+func TestWorktreeGitRunsNoRepositoryHooks(t *testing.T) {
+	repo := newRepo(t)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hooks := filepath.Join(repo, ".husky")
+	os.MkdirAll(hooks, 0o755)
+	for _, name := range []string{"pre-commit", "post-commit", "post-checkout", "post-merge", "pre-merge-commit", "commit-msg"} {
+		os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\necho "+name+" >> "+marker+"\n"), 0o755)
+	}
+	git(t, repo, "config", "core.hooksPath", ".husky")
+	git(t, repo, "config", "core.fsmonitor", "echo fsmonitor >> "+marker+"; true")
+	m := New(t.TempDir())
+	ctx := context.Background()
+	info, _, err := m.Create(ctx, repo, "feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(info.Path, "new.txt"), []byte("feature\n"), 0o644)
+	if res, err := Merge(ctx, info, "Add feature"); err != nil || !res.Merged {
+		t.Fatalf("merge %+v %v", res, err)
+	}
+	if got := read(t, marker); got != "<missing>" {
+		t.Fatalf("repository hooks ran: %q", got)
+	}
+}

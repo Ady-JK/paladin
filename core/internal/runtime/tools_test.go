@@ -180,3 +180,45 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestToolBehaviorDefaultsOnAndPersists(t *testing.T) {
+	rt, _ := testRuntime(t)
+	ov, err := rt.ToolsList("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ov.Behavior.FormatOnWrite || !ov.Behavior.VerifyNudge || !ov.Behavior.LspDiagnostics {
+		t.Fatalf("behaviors default on: %+v", ov.Behavior)
+	}
+	if ov.LanguageServers == nil {
+		t.Fatal("language server status is always a list")
+	}
+	if ov, err := rt.ToolBehaviorSet("lspDiagnostics", false, "", ""); err != nil || ov.Behavior.LspDiagnostics {
+		t.Fatalf("lspDiagnostics off: %+v %v", ov.Behavior, err)
+	}
+	if rt.loadSettings().lspDiagnostics() {
+		t.Fatal("lspDiagnostics not saved")
+	}
+	if ov, err := rt.ToolBehaviorSet("verifyNudge", false, "", ""); err != nil || ov.Behavior.VerifyNudge || !ov.Behavior.FormatOnWrite {
+		t.Fatalf("verifyNudge off alone: %+v %v", ov.Behavior, err)
+	}
+	ov, err = rt.ToolBehaviorSet("formatOnWrite", false, "", "")
+	if err != nil || ov.Behavior.FormatOnWrite {
+		t.Fatalf("switched off: %+v %v", ov.Behavior, err)
+	}
+	if rt.loadSettings().formatOnWrite() {
+		t.Fatal("not saved in settings.json")
+	}
+	if ov.Behavior.WebPrivateNetwork {
+		t.Fatal("private networks are off by default")
+	}
+	if ov, err := rt.ToolBehaviorSet("webPrivateNetwork", true, "", ""); err != nil || !ov.Behavior.WebPrivateNetwork {
+		t.Fatalf("webPrivateNetwork on: %+v %v", ov.Behavior, err)
+	}
+	if !rt.loadSettings().Web.options().AllowPrivate {
+		t.Fatal("webPrivateNetwork not saved")
+	}
+	if _, err := rt.ToolBehaviorSet("nope", true, "", ""); err == nil {
+		t.Fatal("unknown behaviors are rejected")
+	}
+}

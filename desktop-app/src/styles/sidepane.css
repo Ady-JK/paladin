@@ -3,6 +3,7 @@
 
 /* ---- split pane ---- */
 .side-pane {
+  position: relative;
   display: flex;
   flex: 0 0 50%;
   min-width: 0;
@@ -23,6 +24,28 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  order: 2;
+  margin-left: auto;
+  margin-right: 14px;
+}
+.pane-inner-close {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  right: 8px;
+}
+.side-pane > .pane-strip {
+  padding-right: 42px;
+}
+#agentView.is-tab-layout.is-side-tab .side-pane > .pane-body {
+  padding-top: 30px;
+}
+#headerStatusActions {
+  order: 3;
+}
+#headerIdentity {
+  order: 1;
+  margin-left: auto;
 }
 #mainCard:has(#agentView.hidden) .pane-actions {
   display: none;
@@ -106,12 +129,68 @@
   background: rgb(255 255 255 / 0.08);
   color: var(--color-slate-100);
 }
+.turn-change-card {
+  display: flex;
+  width: min(100%, 48rem);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  margin: 12px auto 20px;
+  padding: 0;
+  overflow: hidden;
+  white-space: normal;
+  text-align: left;
+  border-radius: 16px;
+}
+.turn-change-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.turn-change-view {
+  margin-left: auto;
+  padding: 6px 9px;
+  border: 1px solid var(--color-slate-700);
+  border-radius: 9px;
+  font-weight: 400;
+}
+.turn-change-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-weight: 400;
+}
+.turn-change-undo + .turn-change-view {
+  margin-left: 6px;
+}
+.turn-change-files {
+  display: block;
+  border-top: 1px solid var(--color-slate-700);
+}
+.turn-change-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px;
+}
+.turn-change-file + .turn-change-file {
+  border-top: 1px solid rgb(128 128 128 / 0.1);
+}
+.turn-change-file > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* In Tabs mode the pane strip joins the single app header. */
 #titleBar:has(.pane-strip) {
   gap: 10px;
 }
 #titleBar .pane-strip {
+  order: 1;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -253,14 +332,6 @@
 .parent-back:focus-visible {
   outline: 2px solid rgb(146 134 214 / 0.6);
   outline-offset: 1px;
-}
-#sidePaneBtn.is-on {
-  background: var(--color-slate-100);
-  color: var(--color-slate-800);
-}
-.dark #sidePaneBtn.is-on {
-  background: rgb(255 255 255 / 0.08);
-  color: var(--color-slate-100);
 }
 
 .pane-body {

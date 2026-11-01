@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("a session opens a local browser beside its conversation", async ({ page }) => {
-  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneNewChatBtn").click();
   await page.locator("#paneBrowserBtn").click();
   const pane = page.locator("#sidePane");
   await expect(pane).toBeVisible();
@@ -34,7 +34,7 @@ test("agent browser event opens the pane and keeps the URL", async ({ page }) =>
 });
 
 test("page annotations hand off saved comments without a separate comment panel", async ({ page }) => {
-  await page.locator("#sidePaneBtn").click();
+  await page.locator("#paneNewChatBtn").click();
   await page.locator("#paneBrowserBtn").click();
   await page.locator(".browser-url").fill("http://127.0.0.1:8080");
   await page.locator(".browser-open").click();
@@ -74,7 +74,6 @@ test("page annotations hand off saved comments without a separate comment panel"
     });
     (window as any).__e2eHub.emit({ event: "browser/annotations", sessionId, count: 2 });
   });
-  await page.locator("#paneHistoryBtn").click();
   await page.locator("#paneLayoutBtn").click();
   await expect(page.getByRole("button", { name: "Pass to agent" })).toBeEnabled();
   await page.getByRole("button", { name: "Pass to agent" }).click();

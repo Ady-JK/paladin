@@ -4,6 +4,10 @@
 
 import type {
   BudgetView,
+  CustomItem,
+  CustomState,
+  FileExcerpt,
+  ToolBehavior,
   ThinkingView,
   HookScope,
   HooksOverview,
@@ -241,6 +245,15 @@ export function getPrompt(): Promise<AgentPrompt> {
   return invoke<AgentPrompt>("getPrompt");
 }
 
+export function suggestPrompt(request: {
+  systemPrompt: string;
+  instruction: string;
+  provider?: string;
+  model?: string;
+}): Promise<AgentPrompt> {
+  return invoke<AgentPrompt>("suggestPrompt", request);
+}
+
 // setPrompt replaces the prompt file. Turns started afterwards use the
 // new text immediately.
 export function setPrompt(prompt: { systemPrompt: string }): Promise<AgentPrompt> {
@@ -304,7 +317,25 @@ export type SubmitArgs = {
   mode?: "build" | "plan";
   compact?: boolean;
   permissions?: PermissionPreset;
+  attachmentIds?: string[];
 };
+
+export type SessionAttachment = {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  image?: { path: string; mimeType: string; size: number; sha256: string };
+};
+
+export function saveAttachment(sessionId: string, cwd: string, name: string, data: string): Promise<SessionAttachment> {
+  return invoke<SessionAttachment>("saveAttachment", { sessionId, cwd, name, data });
+}
+
+export function sessionImage(sessionId: string, path: string): Promise<string> {
+  return invoke<string>("sessionImage", { sessionId, path });
+}
 
 // submitChat queues a turn and returns at once: it runs now, or after
 // the session's running turn (and within the concurrency cap). Its
@@ -420,9 +451,10 @@ export function mcpRestart(scope: MCPScope, cwd: string | null, name: string): P
   return invoke<MCPOverview>("mcpRestart", { scope, cwd, name });
 }
 
-// mcpTrust approves (or revokes) the folder's current mcp.json.
-export function mcpTrust(cwd: string, trust: boolean): Promise<MCPOverview> {
-  return invoke<MCPOverview>("mcpTrust", { cwd, trust });
+// mcpTrust approves (or revokes) the folder's mcp.json as shown:
+// fingerprint is the overview's folderFingerprint.
+export function mcpTrust(cwd: string, trust: boolean, fingerprint = ""): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpTrust", { cwd, trust, fingerprint });
 }
 
 // mcpParse turns a pasted command line, URL or mcp.json snippet into
@@ -479,6 +511,52 @@ export function thinkingGet(provider: string | null, model: string | null): Prom
 // the provider default.
 export function thinkingSet(provider: string, model: string, level: string): Promise<ThinkingView> {
   return invoke<ThinkingView>("thinkingSet", { provider, model, level });
+}
+
+// fileExcerpt reads lines start..end (plus context) of a workspace file.
+export function fileExcerpt(
+  sessionId: string,
+  cwd: string | null,
+  path: string,
+  start: number,
+  end: number,
+): Promise<FileExcerpt> {
+  return invoke<FileExcerpt>("fileExcerpt", { sessionId, cwd, path, start, end });
+}
+
+// customList lists every editable built-in (prompts, tool guidance,
+// reminders, commands, skills, settings files).
+export function customList(): Promise<CustomItem[]> {
+  return invoke<CustomItem[]>("customList", {});
+}
+
+export function customGet(id: string): Promise<CustomState> {
+  return invoke<CustomState>("customGet", { id });
+}
+
+// customSet saves an override; text equal to the default removes it.
+export function customSet(id: string, text: string): Promise<CustomState> {
+  return invoke<CustomState>("customSet", { id, text });
+}
+
+// customReset deletes an override so the built-in default applies.
+export function customReset(id: string): Promise<CustomState> {
+  return invoke<CustomState>("customReset", { id });
+}
+
+// skillEnabledSet turns a skill on or off by name.
+export function skillEnabledSet(name: string, enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("skillEnabledSet", { name, enabled });
+}
+
+// toolBehaviorSet switches one app-wide tool behavior, e.g. formatOnWrite.
+export function toolBehaviorSet(
+  key: keyof ToolBehavior,
+  enabled: boolean,
+  cwd: string | null,
+  sessionId: string | null,
+): Promise<ToolsOverview> {
+  return invoke<ToolsOverview>("toolBehaviorSet", { key, enabled, cwd, sessionId });
 }
 
 // toolsSet switches tools on or off globally or for one session; null
@@ -572,8 +650,8 @@ export function hooksSetConfig(scope: HookScope, cwd: string | null, text: strin
   return invoke<HooksOverview>("hooksSetConfig", { scope, cwd, text });
 }
 
-export function hooksTrust(cwd: string, path: string, trust: boolean): Promise<HooksOverview> {
-  return invoke<HooksOverview>("hooksTrust", { cwd, path, trust });
+export function hooksTrust(cwd: string, path: string, trust: boolean, fingerprint = ""): Promise<HooksOverview> {
+  return invoke<HooksOverview>("hooksTrust", { cwd, path, trust, fingerprint });
 }
 
 export function hooksToggle(cwd: string | null, key: string, enabled: boolean): Promise<HooksOverview> {

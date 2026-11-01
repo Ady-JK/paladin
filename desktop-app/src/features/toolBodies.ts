@@ -119,11 +119,15 @@ function shellHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | nul
   if (str(res.log)) {
     meta.push(`<span><b>log</b> <code>${escapeHtml(str(res.log))}</code></span>`);
   }
+  if (str(res.output_file)) {
+    meta.push(`<span><b>full output</b> <code>${escapeHtml(str(res.output_file))}</code></span>`);
+  }
   if (num(args.timeout_ms)) {
     meta.push(`<span><b>timeout</b> ${Math.round((num(args.timeout_ms) as number) / 1000)}s</span>`);
   }
   if (res.truncated === true) {
-    html += `<div class="term-note">Output truncated: only the first part was kept.</div>`;
+    const kept = str(res.output_file) ? "the full output is saved in the session" : "the middle was dropped";
+    html += `<div class="term-note">Output truncated: showing the start and end; ${kept}.</div>`;
   }
   if (meta.length) {
     html += `<div class="term-meta">${meta.join("")}</div>`;
@@ -146,6 +150,11 @@ function readHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null
   }
   if (str(res.scope) === "outside") {
     chips.push(`<span class="file-chip is-warn">outside workspace</span>`);
+  }
+  if (str(res.nested_instructions)) {
+    chips.push(
+      `<span class="file-chip" title="AGENTS.md files from this folder were added for the agent">+ folder instructions</span>`,
+    );
   }
   if (res.has_more === true) {
     const next = num(res.next_offset);
@@ -193,7 +202,7 @@ function todoHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null
     .slice(0, MAX_ITEMS)
     .map((t) => {
       const st = str(t.status) || "not_started";
-      return `<li data-state="${escapeHtml(st)}" title="${TODO_MARK[st] ?? st}">${escapeHtml(str(t.content))}</li>`;
+      return `<li data-state="${escapeHtml(st)}" title="${escapeHtml(TODO_MARK[st] ?? st)}">${escapeHtml(str(t.content))}</li>`;
     })
     .join("");
   return `<ul data-body="todo" class="todo-check">${items}</ul>`;
@@ -326,6 +335,91 @@ function genericHtml(tool: ToolInfo, args: unknown, result: unknown, err: string
   return html + section("Returned", out);
 }
 
+// searchHtml renders grep, glob and list: the query, a count line and
+// the result lines as the tool printed them.
+function searchHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null): string {
+  const res = isObj(result) ? result : {};
+  const query = tool.name === "list" ? relPath(str(args.path) || str(res.path)) || "workspace" : str(args.pattern);
+  const files = num(res.files) ?? 0;
+  const matches = num(res.matches);
+  const fileNoun = `${files} ${files === 1 ? "file" : "files"}`;
+  const chips: string[] = [];
+  if (tool.status === "running") {
+    chips.push(`<span class="file-chip">searching…</span>`);
+  } else if (!err) {
+    const count = matches !== null ? `${matches} ${matches === 1 ? "match" : "matches"} in ${fileNoun}` : fileNoun;
+    chips.push(`<span class="file-chip">${escapeHtml(count)}</span>`);
+  }
+  if (str(res.scope) === "outside") {
+    chips.push(`<span class="file-chip is-warn">outside workspace</span>`);
+  }
+  if (res.truncated === true) {
+    chips.push(`<span class="file-chip file-more" title="Capped at the result limit">more results</span>`);
+  }
+  let html =
+    `<div data-body="search" class="file-view">` +
+    `<div class="file-head"><span class="file-path">${escapeHtml(query)}</span>${chips.join("")}</div>`;
+  if (err) {
+    return `${html}${errBlock(err)}</div>`;
+  }
+  const output = str(res.output).replace(/\n$/, "");
+  if (!output) {
+    return tool.status === "running" ? `${html}</div>` : `${html}<div class="file-empty">no results</div></div>`;
+  }
+  const lines = output.split("\n");
+  const shown = lines.slice(0, MAX_LINES);
+  html += `<div class="file-lines">`;
+  for (const line of shown) {
+    html += `<div class="file-line"><code>${escapeHtml(line) || " "}</code></div>`;
+  }
+  if (lines.length > shown.length) {
+    html += `<div class="file-empty">… ${lines.length - shown.length} more lines in the history</div>`;
+  }
+  return `${html}</div></div>`;
+}
+
+// webHtml renders web_fetch: the URL, what came back (status, title,
+// size, a redirect not followed) and the start of the page text.
+function webHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null): string {
+  const res = isObj(result) ? result : {};
+  const url = str(res.final_url) || str(res.url) || str(args.url);
+  const chips: string[] = [];
+  if (tool.status === "running") {
+    chips.push(`<span class="file-chip">fetching…</span>`);
+  } else if (num(res.status) !== null) {
+    const status = num(res.status)!;
+    chips.push(`<span class="file-chip${status >= 400 ? " is-warn" : ""}">HTTP ${status}</span>`);
+  }
+  const total = num(res.total_chars);
+  if (total !== null && !err) chips.push(`<span class="file-chip">${total.toLocaleString()} chars</span>`);
+  if (res.truncated === true) {
+    const next = num(res.next_index);
+    chips.push(
+      `<span class="file-chip file-more" title="${next ? `Continues at character ${next}` : "Cut at the size limit"}">more</span>`,
+    );
+  }
+  let html =
+    `<div data-body="web" class="file-view">` +
+    `<div class="file-head"><span class="file-path" title="${escapeHtml(url)}">${escapeHtml(url)}</span>${chips.join("")}</div>`;
+  const title = str(res.title);
+  if (title) html += `<div class="web-title">${escapeHtml(title)}</div>`;
+  if (str(res.redirect_to)) {
+    html += `<div class="file-empty">Redirects to another site, not followed: ${escapeHtml(str(res.redirect_to))}</div>`;
+  }
+  if (err) return `${html}${errBlock(err)}</div>`;
+  const content = str(res.content).replace(/\n$/, "");
+  if (!content)
+    return tool.status === "running" || str(res.redirect_to)
+      ? `${html}</div>`
+      : `${html}<div class="file-empty">empty page</div></div>`;
+  const lines = content.split("\n");
+  const shown = lines.slice(0, MAX_LINES);
+  html += `<div class="file-lines">`;
+  for (const line of shown) html += `<div class="file-line"><code>${escapeHtml(line) || " "}</code></div>`;
+  if (lines.length > shown.length) html += `<div class="file-empty">… ${lines.length - shown.length} more lines</div>`;
+  return `${html}</div></div>`;
+}
+
 // toolBodyHtml renders a call's body. Write and edit keep their own rich
 // file views (passed in); everything else is handled here.
 export function toolBodyHtml(tool: ToolInfo, rich: string | null = null): string {
@@ -341,10 +435,16 @@ export function toolBodyHtml(tool: ToolInfo, rich: string | null = null): string
       return shellHtml(tool, args, result, err);
     case "read":
       return readHtml(tool, args, result, err);
+    case "grep":
+    case "glob":
+    case "list":
+      return searchHtml(tool, args, result, err);
     case "todo":
       return todoHtml(tool, args, result, err);
     case "ask":
       return askHtml(tool, args, result, err);
+    case "web_fetch":
+      return webHtml(tool, args, result, err);
     default:
       return genericHtml(tool, rawArgs, result, err);
   }

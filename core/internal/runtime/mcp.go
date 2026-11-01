@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync/atomic"
 
@@ -21,9 +22,12 @@ type MCPOverview struct {
 	GlobalPath string             `json:"globalPath"`
 	FolderPath string             `json:"folderPath,omitempty"`
 	// HasFolderConfig and Trusted describe the folder's mcp.json.
-	HasFolderConfig bool              `json:"hasFolderConfig"`
-	Trusted         bool              `json:"trusted"`
-	Errors          map[string]string `json:"errors,omitempty"`
+	HasFolderConfig bool `json:"hasFolderConfig"`
+	Trusted         bool `json:"trusted"`
+	// FolderFingerprint identifies the folder mcp.json listed; mcpTrust
+	// needs it back, so only the reviewed content is trusted.
+	FolderFingerprint string            `json:"folderFingerprint,omitempty"`
+	Errors            map[string]string `json:"errors,omitempty"`
 }
 
 type mcpSink struct{ fn func(mcp.ServerStatus) }
@@ -73,6 +77,9 @@ func (r *AgentRuntime) MCPList(cwd string) MCPOverview {
 		cfg, err := r.mcp.Config(mcp.ScopeFolder, cwd)
 		ov.HasFolderConfig = err == nil && cfg.Exists
 		ov.Trusted = r.mcp.Trusted(cwd)
+		if data, err := os.ReadFile(mcp.FolderPath(cwd)); err == nil {
+			ov.FolderFingerprint = mcp.Fingerprint(data)
+		}
 	}
 	return ov
 }
@@ -115,8 +122,8 @@ func (r *AgentRuntime) MCPRestart(scope, cwd, name string) (MCPOverview, error) 
 }
 
 // MCPTrust approves or revokes the folder's mcp.json.
-func (r *AgentRuntime) MCPTrust(cwd string, trust bool) (MCPOverview, error) {
-	if err := r.mcp.Trust(cwd, trust); err != nil {
+func (r *AgentRuntime) MCPTrust(cwd string, trust bool, fingerprint string) (MCPOverview, error) {
+	if err := r.mcp.Trust(cwd, trust, fingerprint); err != nil {
 		return MCPOverview{}, err
 	}
 	return r.MCPList(cwd), nil

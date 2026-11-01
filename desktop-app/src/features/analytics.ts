@@ -1,7 +1,6 @@
 // analytics.ts owns the fleet-wide dashboard inside Settings >
 // Analytics: every session's usage.json rolled up via `overallUsage`.
-// Charts are hand-rolled SVG (no CDN deps) in the NexusHarness glass
-// style: hero KPIs, token banner, daily timeline, model donuts,
+// Charts are hand-rolled SVG (no CDN deps): hero KPIs, token banner, daily timeline, model donuts,
 // composition bars, heatmap and the top-sessions audit table.
 
 import * as api from "../core/api";
@@ -11,7 +10,6 @@ import { state } from "../core/state";
 import type { DailyPoint, OverallUsage } from "../core/types";
 import { icon } from "../icons";
 import {
-  NEON,
   areaChart,
   cacheHitRate,
   compactTokens,
@@ -23,6 +21,15 @@ import {
   trimNum,
 } from "./usage";
 
+const PALETTE = {
+  blue: "#8d98b4",
+  purple: "#a69ac4",
+  rose: "#b69ca5",
+  emerald: "#95ad9e",
+  amber: "#b7aa8d",
+  cyan: "#91aab1",
+};
+
 let cache: OverallUsage | null = null;
 let modelFilter = "all";
 let metric: "tokens" | "cost" = "tokens";
@@ -33,17 +40,15 @@ function hero(opts: {
   value: string;
   sub: string;
   iconName: "dollar-sign" | "microchip" | "terminal" | "zap";
-  iconBox: string;
   glow: string;
 }): string {
-  return `<div class="glass-panel glow-${opts.glow} relative overflow-hidden rounded-2xl p-5">
-    <div class="absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/5 blur-2xl"></div>
+  return `<div class="glass-panel settings-stat relative overflow-hidden rounded-2xl p-5" data-tone="${opts.glow}">
     <div class="mb-3 flex items-start justify-between">
       <div>
         <div class="text-xs font-medium uppercase tracking-wider text-slate-400">${opts.label}</div>
         <div class="mt-1 font-mono text-2xl font-bold text-slate-900 dark:text-white">${escapeHtml(opts.value)}</div>
       </div>
-      <div class="rounded-xl border p-2.5 ${opts.iconBox}">${icon(opts.iconName, "h-5 w-5")}</div>
+      <div class="settings-stat-icon rounded-xl border p-2.5">${icon(opts.iconName, "h-5 w-5")}</div>
     </div>
     <div class="truncate font-mono text-xs text-slate-500 dark:text-slate-400">${opts.sub}</div>
   </div>`;
@@ -59,11 +64,11 @@ function banner(u: OverallUsage): string {
       <div class="mt-0.5 font-mono text-[10px] text-slate-400">${sub}</div>
     </div>`;
   return `<div class="glass-panel grid grid-cols-2 gap-3 rounded-2xl p-4 font-mono sm:grid-cols-3 lg:grid-cols-5">
-    ${cell(NEON.blue, "Input tokens", u.promptTokens.toLocaleString(), `${share(u.promptTokens)} of total`)}
-    ${cell(NEON.purple, "Output tokens", u.completionTokens.toLocaleString(), `${share(u.completionTokens)} of total`)}
-    ${cell(NEON.rose, "Reasoning tokens", u.reasoningTokens.toLocaleString(), u.reasoningTokens > 0 ? `${share(u.reasoningTokens)} of total` : "no thinking billed")}
-    ${cell(NEON.emerald, "Cache read tokens", u.cacheReadTokens.toLocaleString(), u.cacheReadTokens > 0 ? `${share(u.cacheReadTokens)} · 90% off` : "no cache hits")}
-    ${cell(NEON.amber, "Cache write tokens", u.cacheWriteTokens.toLocaleString(), u.cacheWriteTokens > 0 ? `${share(u.cacheWriteTokens)} of total` : "no cache writes")}
+    ${cell(PALETTE.blue, "Input tokens", u.promptTokens.toLocaleString(), `${share(u.promptTokens)} of total`)}
+    ${cell(PALETTE.purple, "Output tokens", u.completionTokens.toLocaleString(), `${share(u.completionTokens)} of total`)}
+    ${cell(PALETTE.rose, "Reasoning tokens", u.reasoningTokens.toLocaleString(), u.reasoningTokens > 0 ? `${share(u.reasoningTokens)} of total` : "no thinking billed")}
+    ${cell(PALETTE.emerald, "Cache read tokens", u.cacheReadTokens.toLocaleString(), u.cacheReadTokens > 0 ? `${share(u.cacheReadTokens)} · 90% off` : "no cache hits")}
+    ${cell(PALETTE.amber, "Cache write tokens", u.cacheWriteTokens.toLocaleString(), u.cacheWriteTokens > 0 ? `${share(u.cacheWriteTokens)} of total` : "no cache writes")}
   </div>`;
 }
 
@@ -74,7 +79,7 @@ function modelDonut(u: OverallUsage): string {
   if (source.length === 0) {
     return "";
   }
-  const palette = [NEON.purple, NEON.cyan, NEON.blue, NEON.emerald, NEON.amber];
+  const palette = [PALETTE.purple, PALETTE.cyan, PALETTE.blue, PALETTE.emerald, PALETTE.amber];
   const top = source.slice(0, 5);
   const sum = (m: (typeof source)[number]): number => (useTokens ? m.totalTokens : m.cost);
   const rest = source.slice(5).reduce((n, m) => n + sum(m), 0);
@@ -134,7 +139,7 @@ function sessionsTable(u: OverallUsage, filter: string): string {
   return `<div class="glass-panel rounded-2xl p-5">
     <div class="mb-1 flex items-center justify-between">
       <div class="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">${icon("terminal", "h-4 w-4 text-accent-400")} Recent sessions</div>
-      <span class="rounded-full border border-accent-500/20 bg-accent-500/10 px-2.5 py-1 font-mono text-[10px] text-accent-400">Live audit trail</span>
+      <span class="text-[11px] text-slate-400">Recent activity</span>
     </div>
     <div class="mb-3 font-mono text-xs text-slate-400">top ${rows.length} sessions by tokens · showing ${filter === "all" ? "every model" : escapeHtml(filter)}</div>
     <div class="overflow-x-auto"><table class="w-full text-left font-mono text-xs">
@@ -190,7 +195,6 @@ function render(u: OverallUsage): void {
             ? `avg ${formatCost(filtered.calls > 0 ? filtered.cost / filtered.calls : 0)}/run`
             : `${filtered.sessionCount} sessions`,
       iconName: "dollar-sign",
-      iconBox: "bg-accent-500/10 text-accent-400 border border-accent-500/20",
       glow: "blue",
     }),
     hero({
@@ -198,7 +202,6 @@ function render(u: OverallUsage): void {
       value: compactTokens(filtered.totalTokens),
       sub: `${filtered.totalTokens.toLocaleString()} · ${filtered.calls} calls`,
       iconName: "microchip",
-      iconBox: "bg-purple-500/10 text-purple-400 border border-purple-500/20",
       glow: "purple",
     }),
     hero({
@@ -206,7 +209,6 @@ function render(u: OverallUsage): void {
       value: `${filtered.sessionsWithUsage}`,
       sub: `${filtered.sessionCount} total · ${filtered.models?.length ?? 0} models`,
       iconName: "terminal",
-      iconBox: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
       glow: "emerald",
     }),
     hero({
@@ -217,7 +219,6 @@ function render(u: OverallUsage): void {
           ? `${compactTokens(filtered.cacheReadTokens)} read · 90% off`
           : "no cache hits recorded",
       iconName: "zap",
-      iconBox: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
       glow: "amber",
     }),
   ].join("");

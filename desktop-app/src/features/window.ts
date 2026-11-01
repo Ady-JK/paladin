@@ -7,20 +7,38 @@ import { bridge, hasBridge } from "../core/bridge";
 import { icon } from "../icons";
 import { paintSideVisibility } from "./sites";
 
+export type ColorMode = "system" | "light" | "dark";
+const colorKey = "paladin.colorMode";
+const colorModes: ColorMode[] = ["system", "light", "dark"];
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+let colorMode: ColorMode = colorModes.includes(localStorage.getItem(colorKey) as ColorMode)
+  ? (localStorage.getItem(colorKey) as ColorMode)
+  : "dark";
+
+export function getColorMode(): ColorMode {
+  return colorMode;
+}
+export function setColorMode(mode: ColorMode): void {
+  colorMode = mode;
+  localStorage.setItem(colorKey, mode);
+  state.dark = mode === "system" ? systemDark.matches : mode === "dark";
+  applyShellTheme();
+  paintIcons();
+}
+
 // applyShellTheme updates the renderer and the native guest surfaces. The
 // guest pages paint their own content, but until they commit the view
 // background is what the user sees, so it must follow the shell.
 function applyShellTheme(): void {
   document.documentElement.classList.toggle("dark", state.dark);
+  document.documentElement.classList.toggle("light", !state.dark);
   if (hasBridge()) {
     api.setExternalTheme(state.dark).catch(() => undefined);
   }
 }
 
 function toggleTheme(): void {
-  state.dark = !state.dark;
-  applyShellTheme();
-  paintIcons();
+  setColorMode(state.dark ? "light" : "dark");
 }
 
 // The sidebar is a floating drawer over the agent view: the main card
@@ -142,7 +160,10 @@ async function setupWindow(): Promise<void> {
 
 // initWindow wires the shell controls and sets up the native window.
 export function initWindow(): void {
-  applyShellTheme();
+  setColorMode(colorMode);
+  systemDark.addEventListener("change", () => {
+    if (colorMode === "system") setColorMode("system");
+  });
   $("#themeToggleBtn").addEventListener("click", toggleTheme);
   wireDrawer();
 

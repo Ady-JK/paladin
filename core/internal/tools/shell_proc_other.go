@@ -17,15 +17,8 @@ func spawnPiped(cmdStr, dir string, sb *sandbox.Policy) (*exec.Cmd, io.ReadClose
 	}
 	cmd.Dir = dir
 	cmd.Env = shellEnv("TERM=dumb")
-	outR, err := cmd.StdoutPipe()
+	outR, errR, err := startPiped(cmd)
 	if err != nil {
-		return nil, nil, nil, err
-	}
-	errR, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if err := cmd.Start(); err != nil {
 		return nil, nil, nil, err
 	}
 	return cmd, outR, errR, nil

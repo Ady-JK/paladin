@@ -28,6 +28,24 @@ test("settings nav switches panes", async ({ page }) => {
   await expect(page.locator("#settingsPaneProviders")).toBeHidden();
 });
 
+test("remote core settings keep their values and filter navigation", async ({ page }) => {
+  await page.click("#settingsBtn");
+  await page.fill("#settingsSearch", "connection");
+  await expect(page.locator("#settingsNavConnection")).toBeVisible();
+  await expect(page.locator("#settingsNavWorkspace")).toBeHidden();
+  await page.click("#settingsNavConnection");
+  await page.selectOption("#settingsCoreMode", "ssh");
+  await page.fill("#settingsRemoteTarget", "dev@example.internal");
+  await page.fill("#settingsRemoteBinary", "/opt/paladin/agent-host");
+  await page.click("#settingsRemoteSave");
+  await expect(page.locator("#settingsRemoteError")).toBeEmpty();
+  expect(await page.evaluate(() => (window as any).__e2eCoreConnection)).toEqual({
+    mode: "ssh",
+    target: "dev@example.internal",
+    binary: "/opt/paladin/agent-host",
+  });
+});
+
 test("providers pane lists shipped providers and lets LiteLLM use a custom URL", async ({ page }) => {
   await page.click("#settingsBtn");
   await page.click("#settingsNavProviders");
@@ -104,6 +122,8 @@ test("prompt pane loads, saves, and resets the agent prompt", async ({ page }) =
   await page.click("#settingsNavPrompt");
   await expect(page.locator("#settingsNavPrompt")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("#settingsPaneTitle")).toHaveText("Prompt");
+  await expect(page.locator("#settingsPromptPreview")).toContainText("stub system prompt");
+  await page.click("#settingsPromptEditTab");
   await expect(page.locator("#settingsSystemPrompt")).toHaveValue("stub system prompt");
 
   await page.fill("#settingsSystemPrompt", "custom sys");
@@ -114,4 +134,68 @@ test("prompt pane loads, saves, and resets the agent prompt", async ({ page }) =
   await page.click("#settingsPromptResetBtn");
   await expect(page.locator("#toast")).toContainText("Prompt reset to default");
   await expect(page.locator("#settingsSystemPrompt")).toHaveValue("stub system prompt");
+});
+
+test("prompt helper proposes a reviewable edit without saving it", async ({ page }) => {
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavPrompt");
+  await page.click("#settingsPromptEditTab");
+  await page.fill("#settingsPromptInstruction", "Make it more concise");
+  await page.click("#settingsPromptSuggestBtn");
+  await expect(page.locator("#settingsPromptProposal")).toContainText("Make it more concise");
+  await expect(page.locator("#settingsSystemPrompt")).toHaveValue("stub system prompt");
+  await page.click("#settingsPromptApplyBtn");
+  await expect(page.locator("#settingsSystemPrompt")).toHaveValue(/Make it more concise/);
+});
+
+test("settings content uses its width and tools search is one field", async ({ page }) => {
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavTools");
+  const pane = await page.locator("#settingsPaneTools").boundingBox();
+  const body = await page.locator("#settingsContentBody").boundingBox();
+  expect(pane!.width).toBeGreaterThan(body!.width * 0.85);
+  const search = page.locator(".tsw-search");
+  await expect(search).toBeVisible();
+  expect(await search.locator("input").evaluate((input) => getComputedStyle(input).backgroundColor)).toBe(
+    "rgba(0, 0, 0, 0)",
+  );
+});
+
+test("every settings section keeps the shared layout", async ({ page }) => {
+  await page.click("#settingsBtn");
+  const sections = [
+    ["Workspace", "Workspace"],
+    ["Providers", "Providers"],
+    ["Prompt", "Prompt"],
+    ["Connection", "Connection"],
+    ["Analytics", "Analytics"],
+    ["Appearance", "Appearance"],
+    ["Resources", "Resources"],
+    ["Memory", "Memory"],
+    ["Permissions", "Permissions"],
+    ["Mcp", "MCP servers"],
+    ["Hooks", "Hooks"],
+    ["Tools", "Tools"],
+  ] as const;
+  for (const [id, title] of sections) {
+    await page.locator(`#settingsNav${id}`).click();
+    await expect(page.locator("#settingsPaneTitle")).toHaveText(title);
+    await expect(page.locator(`#settingsPane${id}`)).toBeVisible();
+    await expect(page.locator("#settingsPaneSubtitle")).not.toBeEmpty();
+    const pane = await page.locator(`#settingsPane${id}`).boundingBox();
+    const body = await page.locator("#settingsContentBody").boundingBox();
+    expect(pane!.width).toBeGreaterThan(body!.width * 0.85);
+  }
+});
+
+test("appearance theme and text size persist", async ({ page }) => {
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavAppearance");
+  await page.selectOption("#settingsColorMode", "light");
+  await page.selectOption("#settingsFontSize", "large");
+  await expect(page.locator("html")).toHaveAttribute("data-font-size", "large");
+  await expect(page.locator("html")).toHaveClass(/light/);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-font-size", "large");
+  await expect(page.locator("html")).toHaveClass(/light/);
 });

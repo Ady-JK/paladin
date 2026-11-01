@@ -39,16 +39,18 @@ func folderFiles(folder string) []struct{ path, format string } {
 
 // Source is one hooks file as the settings UI shows it.
 type Source struct {
-	Path     string        `json:"path"`
-	Scope    string        `json:"scope"`
-	Format   string        `json:"format"`
-	Exists   bool          `json:"exists"`
-	Editable bool          `json:"editable"`
-	Trusted  bool          `json:"trusted"`
-	Error    string        `json:"error,omitempty"`
-	Warnings []string      `json:"warnings,omitempty"`
-	Text     string        `json:"text,omitempty"`
-	Handlers []HandlerInfo `json:"handlers"`
+	Path     string   `json:"path"`
+	Scope    string   `json:"scope"`
+	Format   string   `json:"format"`
+	Exists   bool     `json:"exists"`
+	Editable bool     `json:"editable"`
+	Trusted  bool     `json:"trusted"`
+	Error    string   `json:"error,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	Text     string   `json:"text,omitempty"`
+	// Fingerprint identifies the content listed; Trust needs it back.
+	Fingerprint string        `json:"fingerprint,omitempty"`
+	Handlers    []HandlerInfo `json:"handlers"`
 
 	config Config
 }
@@ -121,6 +123,7 @@ func readSource(path, scope, format string, st state) Source {
 		return src
 	}
 	src.Exists = true
+	src.Fingerprint = fingerprint(data)
 	if src.Editable {
 		src.Text = string(data)
 	}
@@ -240,8 +243,10 @@ func (m *Manager) SetConfig(scope, cwd, text string) error {
 }
 
 // Trust approves (or revokes) a folder hooks file. Trust is pinned to
-// the file's current content; any later edit needs approval again.
-func (m *Manager) Trust(cwd, path string, trust bool) error {
+// the content the user reviewed (reviewed is the listed Fingerprint):
+// a file that changed since is refused, and any later edit needs
+// approval again.
+func (m *Manager) Trust(cwd, path string, trust bool, reviewed string) error {
 	known := false
 	if strings.TrimSpace(cwd) != "" {
 		for _, f := range folderFiles(filepath.Clean(cwd)) {
@@ -263,6 +268,9 @@ func (m *Manager) Trust(cwd, path string, trust bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
+	}
+	if reviewed == "" || reviewed != fingerprint(data) {
+		return fmt.Errorf("%s changed since it was shown; review it again before trusting it", path)
 	}
 	st.Trusted[path] = fingerprint(data)
 	return m.saveState(st)

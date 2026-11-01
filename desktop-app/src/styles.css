@@ -19,6 +19,8 @@
 @import "./styles/memory.css";
 @import "./styles/row-menu.css";
 @import "./styles/approvals.css";
+@import "./styles/findings.css";
+@import "./styles/visuals.css";
 @import "./styles/permissions.css";
 @import "./styles/undo.css";
 @import "./styles/worktrees.css";
@@ -30,3 +32,5 @@
 @import "./styles/sidepane.css";
 @import "./styles/browser.css";
 @import "./styles/terminal.css";
+@import "./styles/settings.css";
+@import "./styles/customize.css";

@@ -35,6 +35,13 @@ func TestToolsMethods(t *testing.T) {
 	if len(ov.Tools) == 0 || ov.Pending == nil {
 		t.Fatalf("%+v", ov)
 	}
+	if !ov.Behavior.FormatOnWrite {
+		t.Fatalf("behavior defaults: %+v", ov.Behavior)
+	}
+	ov = decodeAs[runtime.ToolsOverview](t, callUnary(rt, "1b", "toolBehaviorSet", map[string]any{"key": "formatOnWrite", "enabled": false, "cwd": ws}))
+	if ov.Behavior.FormatOnWrite {
+		t.Fatalf("toolBehaviorSet: %+v", ov.Behavior)
+	}
 	_ = decodeAs[runtime.ToolsOverview](t, callUnary(rt, "2", "toolsSet", map[string]any{"scope": "global", "cwd": ws, "names": []string{"shell"}, "enabled": false}))
 	ov = decodeAs[runtime.ToolsOverview](t, callUnary(rt, "3", "toolsSet", map[string]any{"scope": "session", "cwd": ws, "sessionId": sess.SessionID, "names": []string{"shell"}, "enabled": true}))
 	for _, ti := range ov.Tools {

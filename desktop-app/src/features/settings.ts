@@ -3,6 +3,7 @@
 // memory and permissions.
 
 import * as api from "../core/api";
+import { bridge } from "../core/bridge";
 import {
   $,
   providerCardEl,
@@ -29,6 +30,8 @@ import {
   settingsPaneHooksEl,
   settingsNavToolsEl,
   settingsPaneToolsEl,
+  settingsNavCustomizeEl,
+  settingsPaneCustomizeEl,
   settingsPaneAppearanceEl,
   settingsPaneResourcesEl,
   motionOptionsEl,
@@ -54,7 +57,7 @@ import {
   workspaceInputEl,
   workspaceLabelEl,
 } from "../core/dom";
-import { escapeAttr, escapeHtml, shortPath } from "../core/format";
+import { escapeAttr, escapeHtml, renderMarkdown, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { ProviderInfo } from "../core/types";
 import { toast } from "../ui/toast";
@@ -72,7 +75,9 @@ import { initPermissionsPane, loadPermissions } from "./permissions";
 import { initMcp, loadMcp, syncMcp } from "./mcp";
 import { loadHooks } from "./hooks";
 import { initToolSwitches, loadTools, syncTools } from "./toolSwitches";
+import { initCustomize, loadCustomize } from "./customize";
 import { motionPref, setMotionPref, type MotionPref } from "../ui/motion";
+import { getColorMode, setColorMode, type ColorMode } from "./window";
 
 export type SettingsNav =
   | "workspace"
@@ -86,9 +91,37 @@ export type SettingsNav =
   | "permissions"
   | "mcp"
   | "hooks"
-  | "tools";
+  | "tools"
+  | "customize";
+
+type FontSize = "small" | "default" | "large";
+const fontSizeKey = "paladin.fontSize";
+function fontSize(): FontSize {
+  const saved = localStorage.getItem(fontSizeKey);
+  return saved === "small" || saved === "large" ? saved : "default";
+}
+function setFontSize(size: FontSize): void {
+  document.documentElement.dataset.fontSize = size;
+  localStorage.setItem(fontSizeKey, size);
+}
 
 const paintSettingsNav = (tab: SettingsNav): void => {
+  const descriptions: Record<SettingsNav, string> = {
+    workspace: "Choose where new sessions start and browse your project folders.",
+    providers: "Connect models and choose the default provider.",
+    prompt: "Preview, edit, and refine the agent's instructions.",
+    connection: "Choose the local or remote core and inspect its status.",
+    analytics: "Review usage, spend, and session activity.",
+    appearance: "Set the app's color, text size, and motion.",
+    resources: "Inspect processes and resources used by the current session.",
+    memory: "Review the context Paladin carries into future turns.",
+    permissions: "Control what the agent may run or change.",
+    mcp: "Manage connected tool servers.",
+    hooks: "Manage actions that run at defined points in a turn.",
+    tools: "Choose which tools are available to the agent.",
+    customize:
+      "Edit every built-in text the agent gets: prompts, tool guidance, reminders, subagents, commands, skills and settings files.",
+  };
   const tabs: [SettingsNav, HTMLButtonElement, HTMLElement, string][] = [
     ["workspace", settingsNavWorkspaceEl, settingsPaneWorkspaceEl, "Workspace"],
     ["providers", settingsNavProvidersEl, settingsPaneProvidersEl, "Providers"],
@@ -102,6 +135,7 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     ["mcp", settingsNavMcpEl, settingsPaneMcpEl, "MCP servers"],
     ["hooks", settingsNavHooksEl, settingsPaneHooksEl, "Hooks"],
     ["tools", settingsNavToolsEl, settingsPaneToolsEl, "Tools"],
+    ["customize", settingsNavCustomizeEl, settingsPaneCustomizeEl, "Customize"],
   ];
   for (const [name, btn, pane, title] of tabs) {
     const active = name === tab;
@@ -116,6 +150,7 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     pane.classList.toggle("hidden", !active);
     if (active) {
       settingsPaneTitleEl.textContent = title;
+      $("#settingsPaneSubtitle").textContent = descriptions[name];
     }
   }
 };
@@ -129,11 +164,64 @@ const loadPrompt = async (): Promise<void> => {
   try {
     const prompt = await api.getPrompt();
     settingsSystemPromptEl.value = prompt.systemPrompt;
+    promptProposal = "";
+    $("#settingsPromptProposalWrap").classList.add("hidden");
+    paintPromptPreview();
   } catch (error) {
     settingsPromptErrorEl.textContent = String(error);
     settingsPromptErrorEl.classList.remove("hidden");
   }
 };
+
+let promptProposal = "";
+function paintPromptPreview(): void {
+  $("#settingsPromptPreview").innerHTML = renderMarkdown(settingsSystemPromptEl.value);
+}
+function paintPromptModel(): void {
+  const provider = state.selectedProvider || "default provider";
+  const model = state.selectedModel ? ` · ${state.selectedModel}` : "";
+  $("#settingsPromptModelLabel").textContent = `Using ${provider}${model}`;
+}
+function showPromptTab(tab: "preview" | "edit"): void {
+  const preview = tab === "preview";
+  $("#settingsPromptPreview").classList.toggle("hidden", !preview);
+  $("#settingsPromptEditor").classList.toggle("hidden", preview);
+  $("#settingsPromptPreviewTab").setAttribute("aria-selected", String(preview));
+  $("#settingsPromptEditTab").setAttribute("aria-selected", String(!preview));
+  if (preview) paintPromptPreview();
+}
+
+async function suggestPrompt(): Promise<void> {
+  const instruction = $<HTMLTextAreaElement>("#settingsPromptInstruction").value.trim();
+  const button = $<HTMLButtonElement>("#settingsPromptSuggestBtn");
+  if (!instruction) {
+    settingsPromptErrorEl.textContent = "Describe what you want to change first.";
+    settingsPromptErrorEl.classList.remove("hidden");
+    return;
+  }
+  settingsPromptErrorEl.classList.add("hidden");
+  promptProposal = "";
+  $("#settingsPromptProposalWrap").classList.add("hidden");
+  button.disabled = true;
+  button.textContent = "Generating…";
+  try {
+    const result = await api.suggestPrompt({
+      systemPrompt: settingsSystemPromptEl.value,
+      instruction,
+      provider: state.selectedProvider || undefined,
+      model: state.selectedModel || undefined,
+    });
+    promptProposal = result.systemPrompt;
+    $("#settingsPromptProposal").innerHTML = renderMarkdown(promptProposal);
+    $("#settingsPromptProposalWrap").classList.remove("hidden");
+  } catch (error) {
+    settingsPromptErrorEl.textContent = String(error);
+    settingsPromptErrorEl.classList.remove("hidden");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Generate proposal";
+  }
+}
 
 // savePrompt writes the editor back to the prompt file. Turns started
 // afterwards use the new text immediately.
@@ -143,6 +231,7 @@ const savePrompt = async (): Promise<void> => {
   try {
     const updated = await api.setPrompt({ systemPrompt: settingsSystemPromptEl.value });
     settingsSystemPromptEl.value = updated.systemPrompt;
+    paintPromptPreview();
     toast("Prompt saved");
   } catch (error) {
     const message = String(error);
@@ -159,6 +248,7 @@ const resetPrompt = async (): Promise<void> => {
   try {
     const updated = await api.resetPrompt();
     settingsSystemPromptEl.value = updated.systemPrompt;
+    paintPromptPreview();
     toast("Prompt reset to default");
   } catch (error) {
     const message = String(error);
@@ -245,6 +335,20 @@ const paintSettingsConnection = (): void => {
     .join("");
 };
 
+async function loadCoreConnection(): Promise<void> {
+  if (!bridge().core) return;
+  try {
+    const value = await bridge().core!.connection();
+    const mode = $<HTMLSelectElement>("#settingsCoreMode");
+    mode.value = value.mode;
+    $<HTMLInputElement>("#settingsRemoteTarget").value = value.target ?? "";
+    $<HTMLInputElement>("#settingsRemoteBinary").value = value.binary ?? "";
+    $("#settingsRemoteFields").classList.toggle("hidden", value.mode !== "ssh");
+  } catch (error) {
+    $("#settingsRemoteError").textContent = String(error);
+  }
+}
+
 // statusDotElClass reads the sidebar dot color for the connection pane.
 function statusDotElClass(): string {
   return statusDotEl.className.split(" ").slice(-1)[0] ?? "bg-slate-300";
@@ -322,13 +426,19 @@ export const openSettings = (tab: SettingsNav = "workspace"): void => {
     void loadHooks();
   } else if (tab === "tools") {
     void loadTools();
+  } else if (tab === "customize") {
+    void loadCustomize();
   } else if (tab === "resources") {
     refreshResources();
   } else if (tab === "analytics") {
     void loadDefaultBudget();
+  } else if (tab === "prompt") {
+    paintPromptModel();
+    void loadPrompt();
   }
   renderProviderList();
   paintSettingsConnection();
+  void loadCoreConnection();
   void (async () => {
     try {
       workspaceInputEl.value = await api.getWorkspace();
@@ -352,7 +462,14 @@ function clearWorkspaceError(): void {
 
 // initSettings wires the settings modal. reconnect re-runs bootstrap connect().
 export function initSettings(reconnect: () => Promise<void>): void {
+  setFontSize(fontSize());
   initBudgetSettings();
+  $<HTMLInputElement>("#settingsSearch").addEventListener("input", (event) => {
+    const query = (event.target as HTMLInputElement).value.trim().toLowerCase();
+    document.querySelectorAll<HTMLButtonElement>("#settingsSidebar button[role=tab]").forEach((button) => {
+      button.classList.toggle("hidden", !button.textContent?.toLowerCase().includes(query));
+    });
+  });
   state.onProvidersChanged = () => {
     if (!settingsModalEl.classList.contains("hidden")) {
       renderProviderList();
@@ -364,11 +481,38 @@ export function initSettings(reconnect: () => Promise<void>): void {
   settingsNavProvidersEl.addEventListener("click", () => paintSettingsNav("providers"));
   settingsNavPromptEl.addEventListener("click", () => {
     paintSettingsNav("prompt");
+    paintPromptModel();
     void loadPrompt();
   });
   settingsNavConnectionEl.addEventListener("click", () => {
     paintSettingsConnection();
     paintSettingsNav("connection");
+    void loadCoreConnection();
+  });
+  $<HTMLSelectElement>("#settingsCoreMode").addEventListener("change", (event) => {
+    $("#settingsRemoteFields").classList.toggle("hidden", (event.target as HTMLSelectElement).value !== "ssh");
+  });
+  $<HTMLButtonElement>("#settingsRemoteSave").addEventListener("click", async () => {
+    const errorEl = $("#settingsRemoteError");
+    errorEl.textContent = "";
+    const mode = $<HTMLSelectElement>("#settingsCoreMode").value;
+    try {
+      if (!bridge().core) throw new Error("remote connections require the desktop app");
+      await bridge().core!.setConnection(
+        mode === "ssh"
+          ? {
+              mode: "ssh",
+              target: $<HTMLInputElement>("#settingsRemoteTarget").value.trim(),
+              binary: $<HTMLInputElement>("#settingsRemoteBinary").value.trim(),
+            }
+          : { mode: "local" },
+      );
+      toast("Core connection updated");
+      await reconnect();
+      paintSettingsConnection();
+    } catch (error) {
+      errorEl.textContent = String(error);
+    }
   });
   settingsNavAnalyticsEl.addEventListener("click", () => {
     paintSettingsNav("analytics");
@@ -380,7 +524,15 @@ export function initSettings(reconnect: () => Promise<void>): void {
     for (const input of Array.from(motionOptionsEl.querySelectorAll<HTMLInputElement>("input[name=motion]"))) {
       input.checked = input.value === pref;
     }
+    $<HTMLSelectElement>("#settingsColorMode").value = getColorMode();
+    $<HTMLSelectElement>("#settingsFontSize").value = fontSize();
     paintSettingsNav("appearance");
+  });
+  $<HTMLSelectElement>("#settingsColorMode").addEventListener("change", (event) => {
+    setColorMode((event.target as HTMLSelectElement).value as ColorMode);
+  });
+  $<HTMLSelectElement>("#settingsFontSize").addEventListener("change", (event) => {
+    setFontSize((event.target as HTMLSelectElement).value as FontSize);
   });
   motionOptionsEl.addEventListener("change", (event) => {
     const input = event.target as HTMLInputElement;
@@ -398,6 +550,11 @@ export function initSettings(reconnect: () => Promise<void>): void {
   settingsNavToolsEl.addEventListener("click", () => {
     paintSettingsNav("tools");
     void loadTools();
+  });
+  initCustomize();
+  settingsNavCustomizeEl.addEventListener("click", () => {
+    paintSettingsNav("customize");
+    void loadCustomize();
   });
   settingsNavMcpEl.addEventListener("click", () => {
     paintSettingsNav("mcp");
@@ -463,6 +620,21 @@ export function initSettings(reconnect: () => Promise<void>): void {
   });
   $("#settingsPromptResetBtn").addEventListener("click", () => {
     void resetPrompt();
+  });
+  $("#settingsPromptPreviewTab").addEventListener("click", () => showPromptTab("preview"));
+  $("#settingsPromptEditTab").addEventListener("click", () => showPromptTab("edit"));
+  $("#settingsPromptSuggestBtn").addEventListener("click", () => {
+    void suggestPrompt();
+  });
+  $("#settingsPromptApplyBtn").addEventListener("click", () => {
+    settingsSystemPromptEl.value = promptProposal;
+    promptProposal = "";
+    $("#settingsPromptProposalWrap").classList.add("hidden");
+    toast("Proposal applied to editor. Save to use it on future turns.");
+  });
+  $("#settingsPromptDiscardBtn").addEventListener("click", () => {
+    promptProposal = "";
+    $("#settingsPromptProposalWrap").classList.add("hidden");
   });
 
   settingsWorkspaceBrowseBtn.addEventListener("click", () => {

@@ -132,13 +132,16 @@ function paintMenu(): void {
     `<div class="perm-menu-head">Spend budget</div>` +
     `<div class="budget-spent">${escapeHtml(spent)}</div>` +
     noCost +
-    `<form class="budget-form" onsubmit="return false">` +
+    `<form class="budget-form">` +
     `<span class="budget-dollar">$</span><input type="number" min="0" step="0.5" inputmode="decimal" placeholder="e.g. 2.50" aria-label="Session budget in USD" value="${own && own > 0 ? own : ""}" />` +
     `<button type="button" class="budget-save" data-budget="save">Set</button>` +
     `</form>` +
     `<button type="button" class="perm-item${own === null ? " is-on" : ""}" data-budget="inherit"><span class="perm-item-text"><span class="perm-item-label">Use app default (${escapeHtml(dflt)})</span></span><span class="perm-item-check">${mark(own === null)}</span></button>` +
     `<button type="button" class="perm-item${own === 0 ? " is-on" : ""}" data-budget="off"><span class="perm-item-text"><span class="perm-item-label">No limit</span></span><span class="perm-item-check">${mark(own === 0)}</span></button>` +
     `<div class="budget-foot">A tracked-cost limit, not a guaranteed cap: it counts the cost the provider reports, calls with no reported cost aren't counted, and spend can go past it, since the call that crosses it and the closing summary still run. At the limit the agent stops using tools and writes a summary of what's done and what's left.</div>`;
+  // Enter in the field must not submit (and reload) the page; the app's
+  // CSP allows no inline handler for this.
+  menu.querySelector("form")?.addEventListener("submit", (event) => event.preventDefault());
 }
 
 export function openBudgetMenu(): void {

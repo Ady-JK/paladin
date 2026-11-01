@@ -222,7 +222,7 @@ function renderDashboard(): void {
 }
 
 // Neon palette shared with the fleet dashboard.
-export const NEON = {
+const NEON = {
   blue: "#3b82f6",
   purple: "#a855f7",
   rose: "#f43f5e",

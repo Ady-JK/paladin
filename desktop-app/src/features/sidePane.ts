@@ -7,7 +7,7 @@ import * as api from "../core/api";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { $, inputEl, sidePaneBtn, sidePaneEl } from "../core/dom";
+import { $, inputEl, sidePaneEl } from "../core/dom";
 import { bridge, hasBridge } from "../core/bridge";
 import { escapeAttr, escapeHtml, renderMarkdown } from "../core/format";
 import { state } from "../core/state";
@@ -15,6 +15,7 @@ import { loadText, saveText } from "../core/storage";
 import type { ChangedFile, SessionChanges, SideChatMessage } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
+import { registerChangesLink } from "./findings";
 import { abortAttach, beginAttach, finishAttach, liveBadge, liveRoot, onResync } from "./live";
 import { agentStatus, agentStatusHtml, buildHistory, openSession, refreshSessions } from "./sessions";
 
@@ -76,6 +77,8 @@ type ChangesTab = {
   turn: number | null;
   selected: string | null;
   request: number;
+  // mark highlights new-side lines of one file (a review finding).
+  mark: { path: string; start: number; end: number } | null;
 };
 
 type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | TerminalTab;
@@ -243,7 +246,7 @@ function browserSet(sessionId: string): TabSet {
 function newBrowserTab(sessionId: string): BrowserTab {
   const body = document.createElement("div");
   body.className = "pane-browser";
-  body.innerHTML = `<form class="browser-toolbar"><input class="browser-url" type="url" inputmode="url" spellcheck="false" placeholder="http://localhost:8080" aria-label="Local browser URL" /><button class="browser-open" type="submit">Open</button><button class="browser-annotate" type="button" aria-label="Comment on elements" aria-pressed="false" title="Comment on elements">${icon("comments", "h-4 w-4")}<span>Comment</span></button><button class="browser-pass" type="button" disabled>Pass to agent</button></form><p class="browser-status" role="status">Open a local development server to preview it here.</p><div class="browser-surface" aria-label="Local browser page"></div>`;
+  body.innerHTML = `<form class="browser-toolbar"><input class="browser-url" type="url" inputmode="url" spellcheck="false" placeholder="http://localhost:8080 or https://…" aria-label="Browser URL" /><button class="browser-open" type="submit">Open</button><button class="browser-annotate" type="button" aria-label="Comment on elements" aria-pressed="false" title="Comment on elements">${icon("comments", "h-4 w-4")}<span>Comment</span></button><button class="browser-pass" type="button" disabled>Pass to agent</button></form><p class="browser-status" role="status">Open a local app or a web site. Web pages use their own empty profile.</p><div class="browser-surface" aria-label="Browser page"></div>`;
   const tab: BrowserTab = {
     kind: "browser",
     key: `t${++nextKey}`,
@@ -345,7 +348,7 @@ function navigateBrowser(tab: BrowserTab, url: string): void {
   stopBrowserPick(tab);
   const status = tab.body.querySelector<HTMLElement>(".browser-status")!;
   if (!url) {
-    status.textContent = "Enter a localhost URL.";
+    status.textContent = "Enter a URL.";
     return;
   }
   tab.body.querySelector<HTMLInputElement>(".browser-url")!.value = url;
@@ -441,25 +444,68 @@ function paintChangesHeader(data: SessionChanges | undefined): void {
   changesBtn.title = `View ${count} ${count === 1 ? "file" : "files"} changed in this session`;
 }
 
-function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[]): void {
-  let button = row.querySelector<HTMLButtonElement>(".turn-changes");
+type ChangeTotal = { added: number; removed: number; files?: Record<string, { added: number; removed: number }> };
+
+function countPatch(patch: string): ChangeTotal {
+  let added = 0;
+  let removed = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added++;
+    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+  }
+  return { added, removed };
+}
+
+const changeTotals = new Map<string, { signature: string; total: ChangeTotal | null }>();
+
+async function turnTotal(sessionId: string, turn: SessionChanges["turns"][number]): Promise<ChangeTotal | null> {
+  const key = `${sessionId}:${turn.turn}`;
+  const signature = JSON.stringify([turn.files, turn.callIds]);
+  const cached = changeTotals.get(key);
+  if (cached?.signature === signature) return cached.total;
+  try {
+    const patches = await Promise.all(turn.files.map((file) => api.sessionDiff(sessionId, null, turn.turn, file.path)));
+    if (patches.some((patch) => patch.truncated)) return null;
+    const total: ChangeTotal = { added: 0, removed: 0, files: {} };
+    for (const patch of patches) {
+      const count = countPatch(patch.patch);
+      total.added += count.added;
+      total.removed += count.removed;
+      total.files![patch.path] = count;
+    }
+    changeTotals.set(key, { signature, total });
+    return total;
+  } catch {
+    return null;
+  }
+}
+
+function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[], total?: ChangeTotal | null): void {
+  let button = row.parentElement?.querySelector<HTMLElement>(`.turn-changes[data-change-turn="${turn}"]`);
   if (!files.length) {
     button?.remove();
     return;
   }
   if (!button) {
-    button = document.createElement("button");
-    button.type = "button";
-    button.className = "turn-changes";
-    row.prepend(button);
+    button = document.createElement("div");
+    button.className = "turn-changes turn-change-card";
+    let anchor = row;
+    while (anchor.nextElementSibling && !anchor.nextElementSibling.hasAttribute("data-turn-index")) {
+      anchor = anchor.nextElementSibling as HTMLElement;
+    }
+    anchor.after(button);
   }
   button.dataset.changeTurn = String(turn);
-  button.title = "View this turn's file changes";
-  button.setAttribute(
-    "aria-label",
-    `View ${files.length} ${files.length === 1 ? "file" : "files"} changed in this turn`,
-  );
-  button.innerHTML = `${icon("tl-file", "h-3.5 w-3.5")}<span>${files.length} ${files.length === 1 ? "file" : "files"}</span>`;
+  button.innerHTML = `<span class="turn-change-heading">${icon("tl-file", "h-4 w-4")}<span>Edited ${files.length} ${files.length === 1 ? "file" : "files"}</span>${total ? `<span class="tool-add">+${total.added}</span><span class="tool-del">-${total.removed}</span>` : ""}<button type="button" class="turn-change-undo">Undo ${icon("tl-undo", "h-3.5 w-3.5")}</button><button type="button" class="turn-change-view">View changes</button></span><span class="turn-change-files">${files
+    .map((file) => {
+      const count = total?.files?.[file.path];
+      return `<span class="turn-change-file"><span>${escapeHtml(file.path)}</span><span>${count ? `<b class="tool-add">+${count.added}</b> <b class="tool-del">-${count.removed}</b>` : escapeHtml(file.status)}</span></span>`;
+    })
+    .join("")}</span>`;
+  button.querySelector<HTMLButtonElement>(".turn-change-undo")!.addEventListener("click", (event) => {
+    event.stopPropagation();
+    row.querySelector<HTMLElement>("[data-revert]")?.click();
+  });
 }
 
 let changeRequest = 0;
@@ -482,13 +528,17 @@ export async function refreshChanges(
     if (sessionId !== state.sessionId || request !== changeRequest) return;
     paintChangesHeader(data);
     const byTurn = new Map(data.turns.map((turn) => [turn.turn, turn.files]));
+    const totals = new Map(
+      await Promise.all(data.turns.map(async (turn) => [turn.turn, await turnTotal(sessionId, turn)] as const)),
+    );
+    if (sessionId !== state.sessionId || request !== changeRequest) return;
     for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
       const turn = Number(row.dataset.turnIndex);
-      paintTurnMarker(row, turn, byTurn.get(turn) ?? []);
+      paintTurnMarker(row, turn, byTurn.get(turn) ?? [], totals.get(turn));
     }
     if (liveRow && callId) {
       const turn = data.turns.find((item) => item.callIds?.includes(callId));
-      if (turn) paintTurnMarker(liveRow, turn.turn, turn.files);
+      if (turn) paintTurnMarker(liveRow, turn.turn, turn.files, totals.get(turn.turn));
     }
     const tab = sets.get(sessionId)?.tabs.find((t): t is ChangesTab => t.kind === "changes");
     if (tab) paintChangesTab(tab, data);
@@ -510,6 +560,7 @@ function newChangesTab(sessionId: string): ChangesTab {
     turn: null,
     selected: null,
     request: 0,
+    mark: null,
   };
   body.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
@@ -522,6 +573,7 @@ function newChangesTab(sessionId: string): ChangesTab {
     const file = target.closest<HTMLElement>("[data-change-file]")?.dataset.changeFile;
     if (file) {
       tab.selected = file;
+      if (tab.mark?.path !== file) tab.mark = null;
       paintChangesTab(tab, changesCache.get(sessionId));
       void loadChangeDiff(tab, file);
     }
@@ -569,6 +621,9 @@ async function loadChangeDiff(tab: ChangesTab, path: string): Promise<void> {
     }
     const lines = diff.patch.split("\n");
     const fragment = document.createDocumentFragment();
+    const mark = tab.mark?.path === path ? tab.mark : null;
+    let newLine = 0;
+    let firstMark: HTMLElement | null = null;
     for (const line of lines.slice(0, 5000)) {
       const el = document.createElement("div");
       el.className =
@@ -579,14 +634,46 @@ async function loadChangeDiff(tab: ChangesTab, path: string): Promise<void> {
             : line.startsWith("@@")
               ? "change-hunk"
               : "";
+      // Track the new file's line numbers from each hunk header so a
+      // finding's lines can be marked.
+      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line);
+      if (hunk) {
+        newLine = Number(hunk[1]);
+      } else if (newLine && !line.startsWith("-")) {
+        if (mark && newLine >= mark.start && newLine <= mark.end && !line.startsWith("\\")) {
+          el.classList.add("change-mark");
+          firstMark ??= el;
+        }
+        if (!line.startsWith("\\")) newLine++;
+      }
       el.textContent = line || " ";
       fragment.append(el);
     }
     preview.append(fragment);
+    firstMark?.scrollIntoView({ block: "center" });
     if (diff.truncated || lines.length > 5000) preview.append("\nDiff preview truncated.");
   } catch (error) {
     if (request === tab.request) preview.textContent = `Could not load diff: ${errorText(error)}`;
   }
+}
+
+// hasSessionChange reports whether the session changed rel (a path
+// relative to its workspace), from the cached change list.
+function hasSessionChange(sessionId: string, rel: string): boolean {
+  return !!changesCache.get(sessionId)?.files.some((f) => f.path === rel);
+}
+
+// openChangeAt opens the session's Changes tab on rel with lines
+// start..end marked (a review finding).
+function openChangeAt(sessionId: string, rel: string, start: number, end: number): void {
+  if (sessionId !== state.sessionId) return;
+  openChangesTab(null);
+  const tab = currentSet()?.tabs.find((t): t is ChangesTab => t.kind === "changes");
+  if (!tab) return;
+  tab.selected = rel;
+  tab.mark = { path: rel, start, end };
+  paintChangesTab(tab, changesCache.get(sessionId));
+  void loadChangeDiff(tab, rel);
 }
 
 function openChangesTab(turn: number | null): void {
@@ -600,6 +687,7 @@ function openChangesTab(turn: number | null): void {
   }
   tab.turn = turn;
   tab.selected = null;
+  tab.mark = null;
   set.active = tab.key;
   showPane();
   paintChangesTab(tab, changesCache.get(sessionId));
@@ -845,7 +933,7 @@ function loadAgent(tab: AgentTab): Promise<void> {
       const snap = await api.attachSession(tab.agentId);
       const history = view.querySelector<HTMLElement>(".pane-agent-history")!;
       history.replaceChildren();
-      buildHistory(history, snap.history ?? [], false);
+      buildHistory(history, snap.history ?? [], false, tab.agentId);
       finishAttach(tab.agentId, snap);
       if (state.sessionId !== tab.agentId) view.append(root);
       view.scrollTop = view.scrollHeight;
@@ -955,9 +1043,6 @@ function render(): void {
   layoutBtn.dataset.layout = layoutMode;
   layoutBtn.setAttribute("aria-label", layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout");
   layoutBtn.title = layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout";
-  layoutBtn.textContent = layoutMode === "tabs" ? "Split view" : "Tabs view";
-  sidePaneBtn.setAttribute("aria-pressed", String(paneOpen));
-  sidePaneBtn.classList.toggle("is-on", paneOpen);
   if (!paneOpen && layoutMode === "split") {
     closeMenu();
     tabsEl.innerHTML = "";
@@ -1179,6 +1264,7 @@ async function deleteChat(chatId: string, row: HTMLElement): Promise<void> {
 }
 
 export function initSidePane(): void {
+  registerChangesLink({ has: hasSessionChange, open: openChangeAt });
   if (hasBridge()) {
     bridge().onEvent?.(browserEvent);
     bridge().onEvent?.(terminalEvent);
@@ -1207,15 +1293,14 @@ export function initSidePane(): void {
       syncNativeBrowser();
     }
   }).observe(document.body, { childList: true });
-  sidePaneBtn.addEventListener("click", () => (paneOpen ? closePane() : showPane()));
   changesBtn.addEventListener("click", () => openChangesTab(null));
   $("#messages").addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest(".turn-change-undo")) return;
     const button = (event.target as HTMLElement).closest<HTMLElement>("[data-change-turn]");
     if (button?.dataset.changeTurn) openChangesTab(Number(button.dataset.changeTurn));
   });
   layoutBtn.addEventListener("click", () => {
     toggleLayout();
-    closeMenu();
   });
   $("#paneBrowserBtn").addEventListener("click", () => {
     if (!state.sessionId) return showPane();

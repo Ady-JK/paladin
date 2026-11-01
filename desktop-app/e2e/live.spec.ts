@@ -38,6 +38,7 @@ async function setup(page: Page): Promise<void> {
     w.__release = (message: string, reply = "") => w.__held[message].resolve({ sessionId: "", reply, stopped: false });
   }, SESSIONS);
   await page.goto("/");
+  await showSidebar(page);
   await expect(page.locator('[data-session="sess-b"]')).toBeVisible();
 }
 

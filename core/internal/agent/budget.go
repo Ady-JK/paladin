@@ -8,6 +8,7 @@ package agent
 import (
 	"fmt"
 
+	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
 )
@@ -32,7 +33,7 @@ type BudgetNotice struct {
 	Ended bool `json:"ended,omitempty"`
 }
 
-const budgetWrapUpPrompt = "[budget] This session has used its spending budget ($%.2f of $%.2f), so your tools are now disabled. " +
+const budgetWrapUpPrompt = "[budget] This session has used its spending budget (${{spent}} of ${{limit}}), so your tools are now disabled. " +
 	"Do not call any tools. Reply with a short summary: what you finished, what remains to be done, and the next steps, " +
 	"so the user can decide whether to raise the budget."
 
@@ -105,7 +106,8 @@ func (a *Agent) checkBudget() (end bool, err error) {
 	}
 	a.budgetWrapUp = true
 	a.toolDefs = nil
-	a.messages = append(a.messages, inference.LlmMessage{Role: "user", Content: fmt.Sprintf(budgetWrapUpPrompt, spent, limit)})
+	a.messages = append(a.messages, inference.LlmMessage{Role: "user", Content: custom.TextFill("reminder.budget",
+		map[string]string{"spent": fmt.Sprintf("%.2f", spent), "limit": fmt.Sprintf("%.2f", limit)})})
 	return false, nil
 }
 

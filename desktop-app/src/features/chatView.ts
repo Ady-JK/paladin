@@ -98,6 +98,29 @@ export function initMessageLinks(): void {
     }
   });
 }
+
+export function mountLinkCards(target: HTMLElement, text: string): void {
+  const urls = [...new Set(text.match(/https?:\/\/[^\s<>)\]]+/g) ?? [])].slice(0, 4);
+  for (const raw of urls) {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (!["http:", "https:"].includes(url.protocol)) continue;
+    const card = document.createElement("a");
+    card.className = "session-link-card";
+    card.href = "#";
+    card.dataset.ext = url.href;
+    const label = document.createElement("span");
+    label.textContent = url.hostname;
+    const detail = document.createElement("small");
+    detail.textContent = "Website";
+    card.append(label, detail);
+    target.append(card);
+  }
+}
 // addTurn appends one message row. Codex-style split: user bubbles dock
 // right, agent text docks left, errors read left in red. No names or
 // avatars — the side alone says who is talking.

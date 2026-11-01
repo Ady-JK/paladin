@@ -3,7 +3,8 @@
 // pattern match (ported from Hermes' redact.py): known key prefixes,
 // bearer tokens, URL credentials, secret-named KEY=value assignments,
 // PEM private keys and registered values such as stored provider keys.
-// File contents returned by `read` are not masked, so edits still match.
+// File contents returned by `read` get only the registered values masked
+// (Registered), so edits still match everything else.
 package redact
 
 import (
@@ -68,6 +69,21 @@ func String(s string) string {
 	s = replaceGroup(bearerRE, s, 2)
 	s = replaceGroup(urlCredRE, s, 2)
 	s = replaceGroup(envRE, s, 4)
+	return s
+}
+
+// Registered masks only the exact registered values (the user's stored
+// keys). Every tool result goes through it: those values must never
+// reach the model, whichever tool would carry them.
+func Registered(s string) string {
+	mu.RLock()
+	vals := ordered
+	mu.RUnlock()
+	for _, v := range vals {
+		if strings.Contains(s, v) {
+			s = strings.ReplaceAll(s, v, "[redacted]")
+		}
+	}
 	return s
 }
 

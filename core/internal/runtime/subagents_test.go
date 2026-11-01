@@ -287,7 +287,7 @@ func TestSpawnFreshChildRunsWithOneSlotAndReportsOnce(t *testing.T) {
 		t.Fatalf("fresh child should see only its task, got %q", childCall.Users)
 	}
 	for _, name := range childCall.Tools {
-		if name != "read" && name != "shell" {
+		if !slices.Contains([]string{"read", "grep", "glob", "list", "shell"}, name) {
 			t.Fatalf("child was offered %q (tools %v)", name, childCall.Tools)
 		}
 	}
@@ -427,8 +427,8 @@ func TestChildToolsAreReadOnlyAndNarrowedByTheParent(t *testing.T) {
 		}
 	}
 	for _, c := range calls() {
-		if c.Child && !slices.Equal(c.Tools, []string{"shell"}) {
-			t.Fatalf("child tools = %v, want only shell (parent switched read off)", c.Tools)
+		if c.Child && !slices.Equal(c.Tools, []string{"glob", "grep", "list", "shell"}) {
+			t.Fatalf("child tools = %v, want the search tools and shell (parent switched read off)", c.Tools)
 		}
 	}
 }
@@ -716,6 +716,7 @@ func TestRestartKeepsChildrenAndDeliversUnreportedResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	childSettled(t, rt, ws, stale.ID)
+	rt.hub.SettleDone(5 * time.Second)
 	// Drain everything the first runtime would have delivered.
 	rt.subagents.notices(parentID, ws)()
 	rt.ShutdownTurns(5 * time.Second)

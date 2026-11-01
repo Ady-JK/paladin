@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  visual-frame.html hosts one visual (src/features/visuals.ts). It is its
+  own page so it keeps this policy instead of inheriting the app's: no
+  network, inline code only. The app sends the visual once, by
+  postMessage, after this page says it is ready.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'"
+    />
+    <script>
+      (function () {
+        var drawn = false;
+        addEventListener("message", function (event) {
+          var data = event.data;
+          if (drawn || event.source !== parent || !data || data.type !== "paladin-visual-render") return;
+          if (typeof data.doc !== "string") return;
+          drawn = true;
+          document.open();
+          document.write(data.doc);
+          document.close();
+        });
+        parent.postMessage({ type: "paladin-visual-ready" }, "*");
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>
