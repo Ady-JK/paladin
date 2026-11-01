@@ -72,7 +72,7 @@ func itemLabel(provider string) string {
 }
 
 func keychainErr(err error) error {
-	return fmt.Errorf("keychain unavailable: %v", err)
+	return fmt.Errorf("keychain unavailable: %w", err)
 }
 
 // searchAll runs a service-wide search (like keyring-rs) and unlocks any

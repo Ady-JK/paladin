@@ -128,7 +128,7 @@ func restrict(roots []string) error {
 	attr := handled
 	fd, _, errno := syscall.Syscall(sysLandlockCreateRuleset, uintptr(unsafe.Pointer(&attr)), 8, 0)
 	if errno != 0 {
-		return fmt.Errorf("landlock_create_ruleset: %v", errno)
+		return fmt.Errorf("landlock_create_ruleset: %w", errno)
 	}
 	defer syscall.Close(int(fd))
 
@@ -147,10 +147,10 @@ func restrict(roots []string) error {
 		}
 	}
 	if _, _, errno := syscall.Syscall6(syscall.SYS_PRCTL, prSetNoNewPrivs, 1, 0, 0, 0, 0); errno != 0 {
-		return fmt.Errorf("prctl(NO_NEW_PRIVS): %v", errno)
+		return fmt.Errorf("prctl(NO_NEW_PRIVS): %w", errno)
 	}
 	if _, _, errno := syscall.Syscall(sysLandlockRestrictSelf, fd, 0, 0); errno != 0 {
-		return fmt.Errorf("landlock_restrict_self: %v", errno)
+		return fmt.Errorf("landlock_restrict_self: %w", errno)
 	}
 	return nil
 }
@@ -168,7 +168,7 @@ func addPath(ruleset int, path string, allowed uint64) error {
 	_, _, errno := syscall.Syscall6(sysLandlockAddRule, uintptr(ruleset), landlockRulePathBeneath,
 		uintptr(unsafe.Pointer(&attr[0])), 0, 0, 0)
 	if errno != 0 {
-		return fmt.Errorf("landlock_add_rule %s: %v", path, errno)
+		return fmt.Errorf("landlock_add_rule %s: %w", path, errno)
 	}
 	return nil
 }

@@ -155,9 +155,13 @@ function listen(): void {
   window.addEventListener("message", (event) => {
     const frame = frameOf(event.source);
     const card = frame?.closest<HTMLElement>(".visual-card");
-    const data = event.data as
-      | { __paladinVisual?: string; type?: string; height?: number; text?: string; gesture?: number }
-      | null;
+    const data = event.data as {
+      __paladinVisual?: string;
+      type?: string;
+      height?: number;
+      text?: string;
+      gesture?: number;
+    } | null;
     if (!frame || !card || !data || typeof data !== "object") return;
     if (data.type === "paladin-visual-ready") {
       const doc = pages.get(frame);
