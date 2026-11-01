@@ -11,8 +11,9 @@
 // window, matched to its token: its height (so the card fits) and
 // paladin.sendPrompt(text), which suggests a message for the composer.
 // A suggestion counts only right after the user clicked inside that
-// visual, and never replaces a draft without asking. Nothing here keeps
-// a card or frame alive once it leaves the page.
+// visual (the frame stamps the pointer/key gesture it saw), and never
+// replaces a draft without asking. Nothing here keeps a card or frame
+// alive once it leaves the page.
 
 import { inputEl } from "../core/dom";
 import { escapeHtml, tryParseJson } from "../core/format";
@@ -106,8 +107,10 @@ function visualDocument(v: Visual, token: string, theme: "dark" | "light"): stri
     .map(([k, val]) => `${k}: ${val};`)
     .join(" ");
   const bridge =
-    `(function(){var t=${JSON.stringify(token)};function send(m){m.__paladinVisual=t;parent.postMessage(m,"*");}` +
-    `window.paladin=Object.freeze({sendPrompt:function(text){send({type:"prompt",text:String(text).slice(0,${MAX_PROMPT})});},theme:${JSON.stringify(theme)}});` +
+    `(function(){var t=${JSON.stringify(token)},g=0;function send(m){m.__paladinVisual=t;parent.postMessage(m,"*");}` +
+    `function gesture(){g=Date.now();}` +
+    `addEventListener("pointerdown",gesture,true);addEventListener("keydown",gesture,true);` +
+    `window.paladin=Object.freeze({sendPrompt:function(text){send({type:"prompt",text:String(text).slice(0,${MAX_PROMPT}),gesture:g});},theme:${JSON.stringify(theme)}});` +
     `function size(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);send({type:"size",height:h});}` +
     `addEventListener("load",size);new ResizeObserver(size).observe(document.documentElement);` +
     `addEventListener("error",function(e){send({type:"error",message:String(e.message||e)});});})();`;
@@ -152,7 +155,9 @@ function listen(): void {
   window.addEventListener("message", (event) => {
     const frame = frameOf(event.source);
     const card = frame?.closest<HTMLElement>(".visual-card");
-    const data = event.data as { __paladinVisual?: string; type?: string; height?: number; text?: string } | null;
+    const data = event.data as
+      | { __paladinVisual?: string; type?: string; height?: number; text?: string; gesture?: number }
+      | null;
     if (!frame || !card || !data || typeof data !== "object") return;
     if (data.type === "paladin-visual-ready") {
       const doc = pages.get(frame);
@@ -164,7 +169,7 @@ function listen(): void {
       const max = card.classList.contains("is-expanded") ? window.innerHeight - 120 : MAX_INLINE_HEIGHT;
       frame.style.height = `${Math.max(MIN_HEIGHT, Math.min(max, data.height + 4))}px`;
     } else if (data.type === "prompt" && typeof data.text === "string" && data.text.trim()) {
-      suggest(card, frame, data.text.slice(0, MAX_PROMPT));
+      suggest(card, data.text.slice(0, MAX_PROMPT), data.gesture);
     } else if (data.type === "error") {
       card.dataset.scriptError = "true";
     }
@@ -182,12 +187,14 @@ function listen(): void {
 }
 
 // suggest takes a visual's message only right after the user clicked
-// inside that visual: the frame has focus and the page has fresh user
-// activation (a click in a frame activates the page too). A message on
-// load or from a timer has neither. A draft is never replaced unasked.
-function suggest(card: HTMLElement, frame: HTMLIFrameElement, text: string): void {
-  const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
-  if (document.activeElement !== frame || !activation?.isActive) return;
+// inside that visual: the frame stamps the pointer or key event it saw,
+// and a message on load or from a timer carries no fresh stamp. (Parent
+// focus is not reliable here: clicking inside a sandboxed frame does not
+// always make the frame the page's activeElement.) A draft is never
+// replaced unasked.
+function suggest(card: HTMLElement, text: string, gesture: unknown): void {
+  const at = typeof gesture === "number" ? gesture : 0;
+  if (!at || Date.now() - at > 2000) return;
   const draft = inputEl.value.trim();
   if (!draft || draft === text.trim()) {
     fillComposer(text);

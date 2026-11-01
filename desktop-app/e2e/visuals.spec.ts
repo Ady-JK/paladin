@@ -91,6 +91,12 @@ test("sendPrompt fills the composer for the user to send", async ({ page }) => {
   await liveTurn(page);
   await emit(page, "ok");
   const frame = page.frameLocator('.visual-card[data-visual="v1"] iframe');
+  // The card is taller than the visible chat; wait for the frame to
+  // reach its content height, then scroll it clear of the composer, or
+  // the click lands on the footer instead of the button.
+  const frameEl = page.locator('.visual-card[data-visual="v1"] iframe');
+  await expect.poll(async () => (await frameEl.boundingBox())?.height ?? 0).toBeGreaterThan(300);
+  await page.locator('.visual-card[data-visual="v1"]').evaluate((el) => el.scrollIntoView({ block: "end" }));
   await frame.locator("#ask").click();
   await expect(page.locator("#promptInput")).toHaveValue("Break revenue down by region");
   // Nothing was sent: only the first turn reached the core.

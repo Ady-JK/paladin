@@ -148,10 +148,14 @@ test.beforeEach(async ({ page }) => {
   await showSidebar(page);
   await page.click(`[data-session="${SESSION}"]`);
   await expect(page.locator("#messages")).toContainText("Port bumped");
-  // Consecutive calls fold into summary groups; open them all.
-  const heads = page.locator(".tool-run-head");
-  for (let i = 0; i < (await heads.count()); i++) {
-    await heads.nth(i).click();
+  // Consecutive calls fold into summary groups; open them all. Click
+  // only closed heads and re-query each time: a run can gain its head
+  // while the history paints, which used to shift indices and toggle
+  // one group twice (leaving it shut) and skip another.
+  const closed = page.locator('.tool-run-head[aria-expanded="false"]');
+  await expect(page.locator(".tool-run-head").first()).toBeVisible();
+  while ((await closed.count()) > 0) {
+    await closed.first().click();
   }
 });
 
