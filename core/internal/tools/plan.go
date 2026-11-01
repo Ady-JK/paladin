@@ -35,6 +35,28 @@ var readOnlyGit = map[string]bool{
 
 var readOnlyGo = map[string]bool{"list": true, "version": true, "doc": true, "vet": true}
 
+// ShellReadOnly reports whether a shell call cannot change the
+// workspace: a foreground run the plan-mode allowlist accepts, or a
+// status/cancel that only talks to job bookkeeping. Undo snapshots skip
+// these, which avoids two whole-folder git scans per `ls` or `rg`.
+func ShellReadOnly(raw string) bool {
+	var args ShellArgs
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return false
+	}
+	if args.Action == ShellStatus || args.Action == ShellCancel {
+		return true
+	}
+	if args.Action != "" && args.Action != ShellRun {
+		return false
+	}
+	if args.Background {
+		return false
+	}
+	cmd := strings.TrimSpace(args.CommandLine())
+	return cmd != "" && ReadOnlyCommand(cmd) == nil
+}
+
 // ReadOnlyCommand reports why cmd is not safe in plan mode, or nil.
 // It is a conservative allowlist: anything it does not understand is
 // refused, and the model is told to ask the user to switch to build mode.

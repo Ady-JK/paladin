@@ -164,7 +164,7 @@ flowchart TB
 
 Say you click from session A to session B while A is still cooking. **A keeps cooking.**
 When you come back to A, the UI calls `attach`, and the kitchen hands over:
-- everything already saved (history)
+- the newest page of saved history (older rows load from `sessionHistoryPage` when you ask)
 - everything the live turn has shouted **so far** (snapshotted with the current `seq`)
 - anything still waiting in line
 
@@ -522,6 +522,7 @@ flowchart LR
 
 - **Revert preview** shows which files would change, and warns about **conflicts** (files you edited by hand since).
 - **Unrevert** brings it all back, as long as you haven't sent a new message yet.
+- **Cheap photos:** a foreground command the plan-mode read-only allowlist accepts is not photographed at all, and `write`/`edit` photograph only the file they touch. Only a shell command that may write does a whole-folder scan.
 
 ### Worktrees
 

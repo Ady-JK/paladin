@@ -3,6 +3,7 @@
 
 import * as api from "../core/api";
 import {
+  chatViewEl,
   confirmModalEl,
   confirmTitleEl,
   inputEl,
@@ -17,7 +18,7 @@ import {
 } from "../core/dom";
 import { escapeAttr, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
-import type { AgentInfo, AgentStatus, MessageInfo, SessionInfo, ToolInfo } from "../core/types";
+import type { AgentInfo, AgentStatus, HistoryPage, MessageInfo, SessionInfo, ToolInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
@@ -56,6 +57,17 @@ export async function refreshSessions(): Promise<void> {
   }
 
   renderSessions();
+}
+
+// scheduleRefreshSessions coalesces the list reloads that follow one
+// turn (or a burst of subagent turns) into a single listSessions.
+let sessionsRefreshTimer = 0;
+export function scheduleRefreshSessions(delay = 250): void {
+  if (sessionsRefreshTimer) return;
+  sessionsRefreshTimer = window.setTimeout(() => {
+    sessionsRefreshTimer = 0;
+    void refreshSessions();
+  }, delay);
 }
 
 const FOLD_KEY = "paladin.foldedProjects";
@@ -158,6 +170,11 @@ function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
 // their project folder (newest project first, foldable), then a short
 // Recents list across projects. Search narrows projects and hides
 // Recents.
+// lastSessionListHtml lets renderSessions skip the DOM work when a
+// burst of status updates produces the same sidebar (the common case
+// after refreshSessions).
+let lastSessionListHtml = "";
+
 export function renderSessions(): void {
   // The parent bar and pane heads show the same live agent status.
   paintParentBar();
@@ -180,9 +197,11 @@ export function renderSessions(): void {
   const visible = filter ? tops.filter(matches) : tops;
 
   if (visible.length === 0) {
-    sessionListEl.innerHTML = `<p class="px-2 py-1 text-slate-400">${
-      filter ? "no session matches" : "no sessions yet"
-    }</p>`;
+    const empty = `<p class="px-2 py-1 text-slate-400">${filter ? "no session matches" : "no sessions yet"}</p>`;
+    if (empty !== lastSessionListHtml) {
+      lastSessionListHtml = empty;
+      sessionListEl.innerHTML = empty;
+    }
     return;
   }
 
@@ -230,8 +249,12 @@ export function renderSessions(): void {
 
   const focused =
     document.activeElement instanceof HTMLInputElement && document.activeElement.matches(".session-rename");
-  sessionListEl.innerHTML = html;
-  if (renaming) {
+  const changed = html !== lastSessionListHtml;
+  if (changed) {
+    lastSessionListHtml = html;
+    sessionListEl.innerHTML = html;
+  }
+  if (changed && renaming) {
     const input = sessionListEl.querySelector<HTMLInputElement>(`input[data-rename="${CSS.escape(renaming.id)}"]`);
     if (input) {
       wireRename(input, focused);
@@ -475,7 +498,7 @@ export async function openSession(id: string): Promise<void> {
       abortAttach(session.sessionId);
       return;
     }
-    renderHistory(snap.history ?? []);
+    renderHistory(snap.history);
     finishAttach(session.sessionId, snap);
 
     renderSessions();
@@ -520,19 +543,81 @@ export function onAgentsChanged(agent: AgentInfo): void {
   renderSessions();
 }
 
+// HISTORY_PAGE is how many transcript rows are painted at once. Long
+// sessions used to fetch, parse and build every message before the
+// first pixels; older rows now load on demand.
+const HISTORY_PAGE = 120;
+let historyStart = 0;
+let historyHasMore = false;
+let historyLoading = false;
+
 export async function loadHistory(id: string): Promise<void> {
   // Null cwd searches every workspace namespace, matching openSession.
-  renderHistory(await api.sessionHistory(id, null));
+  renderHistory(await api.sessionHistoryPage(id, null, HISTORY_PAGE, 0));
 }
 
-// renderHistory paints a persisted transcript.
-function renderHistory(history: MessageInfo[]): void {
+function earlierRow(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "history-earlier";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "history-earlier-btn";
+  btn.textContent = "Load earlier messages";
+  btn.addEventListener("click", () => void loadEarlierHistory());
+  wrap.append(btn);
+  return wrap;
+}
+
+// loadEarlierHistory prepends the page before the first painted row.
+// Row ordinals count from the start of the session, so a turn landing
+// at the end meanwhile does not shift what `historyStart` points at.
+async function loadEarlierHistory(): Promise<void> {
+  const id = state.sessionId;
+  if (!id || historyLoading || !historyHasMore) return;
+  historyLoading = true;
+  const btn = messagesEl.querySelector<HTMLButtonElement>(".history-earlier-btn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Loading…";
+  }
+  try {
+    const page = await api.sessionHistoryPage(id, null, HISTORY_PAGE, historyStart);
+    if (id !== state.sessionId) return;
+    const holder = document.createElement("div");
+    buildHistory(holder, page.messages, !state.subagent);
+    const anchor = messagesEl.querySelector(".history-earlier");
+    const prevHeight = chatViewEl.scrollHeight;
+    const prevTop = chatViewEl.scrollTop;
+    for (const node of Array.from(holder.children)) {
+      messagesEl.insertBefore(node, anchor);
+    }
+    anchor?.remove();
+    historyStart = page.start;
+    historyHasMore = page.hasMore;
+    if (page.hasMore) messagesEl.insertBefore(earlierRow(), messagesEl.firstChild);
+    // Keep the row the user was reading under the cursor.
+    chatViewEl.scrollTop = prevTop + (chatViewEl.scrollHeight - prevHeight);
+  } finally {
+    historyLoading = false;
+  }
+}
+
+// renderHistory paints a persisted transcript page. An older core may
+// still answer with a bare array; accept both shapes.
+function renderHistory(raw: HistoryPage | MessageInfo[]): void {
+  const page: HistoryPage = Array.isArray(raw) ? { messages: raw, start: 0, hasMore: false, total: raw.length } : raw;
+  historyStart = page.start ?? 0;
+  historyHasMore = page.hasMore === true;
+  historyLoading = false;
   messagesEl.innerHTML = "";
   // One layout for the whole transcript: keep the container display:none
   // while rows are appended, then paint once.
   messagesEl.style.display = "none";
+  if (historyHasMore) {
+    messagesEl.append(earlierRow());
+  }
   // A subagent's conversation is driven by its parent: no rewinding it.
-  buildHistory(messagesEl, history, !state.subagent);
+  buildHistory(messagesEl, page.messages ?? [], !state.subagent);
   void refreshChanges(state.sessionId);
   messagesEl.style.display = "";
 

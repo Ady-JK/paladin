@@ -106,6 +106,34 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	return session.HistoryView(visibleMessages(sess.Meta, msgs)), nil
 }
 
+// SessionHistoryPage is SessionHistory limited to one window of rows:
+// the newest limit rows, or the window ending just before before.
+func (r *AgentRuntime) SessionHistoryPage(sessionID, cwd string, limit, before int) (session.HistoryPage, error) {
+	rows, err := r.SessionHistory(sessionID, cwd)
+	if err != nil {
+		return session.HistoryPage{}, err
+	}
+	return session.PageHistory(rows, limit, before), nil
+}
+
+// SessionImages reports just the image references in a transcript.
+// The renderer uses it after a turn instead of re-reading (and
+// re-sending) the whole history to find a screenshot.
+func (r *AgentRuntime) SessionImages(sessionID, cwd string) (session.ImagesView, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return session.ImagesView{}, fmt.Errorf("session id is required")
+	}
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return session.ImagesView{}, err
+	}
+	msgs, err := sess.History()
+	if err != nil {
+		return session.ImagesView{}, err
+	}
+	return session.ImagesViewOf(visibleMessages(sess.Meta, msgs)), nil
+}
+
 // SessionTodos returns the session's activity list for the UI's todo
 // hat above the composer: empty when the agent has not planned yet,
 // never an error for a missing file.

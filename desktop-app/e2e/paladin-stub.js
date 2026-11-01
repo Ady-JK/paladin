@@ -325,6 +325,29 @@ async function __paladinBaseInvoke(cmd, args) {
         { role: "assistant", content: "It printed hi.", createdAt: at },
       ];
     }
+    case "sessionHistoryPage": {
+      const all = await window.paladin.invoke("sessionHistory", { sessionId: args && args.sessionId, cwd: null });
+      const rows = Array.isArray(all) ? all : [];
+      const limit = args && args.limit > 0 ? args.limit : 120;
+      const before = args && args.before > 0 && args.before <= rows.length ? args.before : rows.length;
+      const start = Math.max(0, before - limit);
+      return { messages: rows.slice(start, before), start, hasMore: start > 0, total: rows.length };
+    }
+    case "sessionImages": {
+      const all = await window.paladin.invoke("sessionHistory", { sessionId: args && args.sessionId, cwd: null });
+      const rows = Array.isArray(all) ? all : [];
+      const images = [];
+      let latestUser = -1;
+      rows.forEach((message, index) => {
+        if (message.role === "user") latestUser = index;
+        if (message.image) images.push({ index, role: message.role, path: message.image.path });
+        for (const attachment of message.attachments || []) {
+          if (attachment.image)
+            images.push({ index, role: message.role, path: attachment.image.path, name: attachment.name });
+        }
+      });
+      return { latestUser, images };
+    }
     case "sessionUsage":
       return (
         window.__e2eUsage || {
@@ -1061,7 +1084,11 @@ const __e2eHub = (() => {
       return turns.map(info);
     },
     async attach(args) {
-      const history = await window.paladin.invoke("sessionHistory", { sessionId: args.sessionId, cwd: null });
+      const history = await window.paladin.invoke("sessionHistoryPage", {
+        sessionId: args.sessionId,
+        cwd: null,
+        limit: args.limit || 120,
+      });
       const running = turns.find((t) => t.sessionId === args.sessionId && t.state === "running");
       return {
         history,

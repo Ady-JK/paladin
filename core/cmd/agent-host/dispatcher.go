@@ -40,6 +40,7 @@ var methodClass = map[string]runClass{
 	"listProviders": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
 	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead,
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
+	"sessionHistoryPage": runRead, "sessionImages": runRead,
 	"sessionImage": runRead,
 	"sessionTodos": runRead, "sessionUsage": runRead, "budgetGet": runRead, "thinkingGet": runRead,
 	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "fileExcerpt": runRead, "worktreeStatus": runRead, "attach": runRead,

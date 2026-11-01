@@ -602,11 +602,28 @@ export type PermissionsView = {
   presets: PermissionPreset[];
 };
 
+// HistoryPage is one window of a transcript. Start is the row ordinal
+// of messages[0]; ordinals count from the start of the session, so an
+// appended turn never shifts an older page.
+export type HistoryPage = {
+  messages: MessageInfo[];
+  start: number;
+  hasMore: boolean;
+  total: number;
+};
+
+// SessionImages is the image-only view of a transcript: latestUser is
+// the index of the last user row (-1 when none).
+export type SessionImages = {
+  latestUser: number;
+  images: { index: number; role: string; path: string; name?: string }[];
+};
+
 // AttachSnapshot is a session's persisted history plus whatever is
 // live: the running turn (if not yet persisted) with its events so
 // far, and the turns queued behind it. Events with seq > seq follow.
 export type AttachSnapshot = {
-  history: MessageInfo[];
+  history: HistoryPage;
   turn?: TurnInfo | null;
   events?: TurnEvent[] | null;
   queued?: TurnInfo[] | null;

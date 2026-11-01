@@ -536,3 +536,36 @@
 .session-link-card small {
   color: var(--color-slate-500);
 }
+
+/* Paged transcripts: one quiet control above the oldest painted row. */
+.history-earlier {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 8px;
+}
+.history-earlier-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--color-slate-300);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-slate-500);
+  font-size: 12px;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.history-earlier-btn:hover:not(:disabled) {
+  border-color: var(--color-slate-400);
+  color: var(--color-slate-700);
+}
+.history-earlier-btn:disabled {
+  opacity: 0.6;
+}
+.dark .history-earlier-btn {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-400);
+}
+.dark .history-earlier-btn:hover:not(:disabled) {
+  border-color: var(--color-slate-500);
+  color: var(--color-slate-200);
+}

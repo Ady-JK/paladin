@@ -25,6 +25,8 @@ import type {
   WorktreeStatus,
   ApprovalDecision,
   AttachSnapshot,
+  HistoryPage,
+  SessionImages,
   MCPConfigFile,
   MCPNamedServer,
   MCPOverview,
@@ -277,8 +279,27 @@ export function listSessions(cwd: string | null, limit = 100): Promise<SessionIn
   return invoke<SessionInfo[]>("listSessions", { cwd, limit });
 }
 
+// sessionHistory reads the whole transcript. The renderer paints a
+// page instead; this is for undo and other whole-history decisions.
 export function sessionHistory(sessionId: string, cwd: string | null): Promise<MessageInfo[]> {
   return invoke<MessageInfo[]>("sessionHistory", { sessionId, cwd });
+}
+
+// sessionHistoryPage reads one window of the transcript: the newest
+// `limit` rows, or the rows ending just before `before`.
+export function sessionHistoryPage(
+  sessionId: string,
+  cwd: string | null,
+  limit = 120,
+  before = 0,
+): Promise<HistoryPage> {
+  return invoke<HistoryPage>("sessionHistoryPage", { sessionId, cwd, limit, before });
+}
+
+// sessionImages reads just the image rows, so a finished turn does not
+// re-download its whole transcript to mount a screenshot.
+export function sessionImages(sessionId: string, cwd: string | null): Promise<SessionImages> {
+  return invoke<SessionImages>("sessionImages", { sessionId, cwd });
 }
 
 // sessionTodos reads the session's activity list (todos.json) for the
@@ -350,8 +371,10 @@ export function listTurns(): Promise<TurnInfo[]> {
 }
 
 // attachSession is the atomic history + live snapshot of a session.
-export function attachSession(sessionId: string): Promise<AttachSnapshot> {
-  return invoke<AttachSnapshot>("attach", { sessionId });
+// attachSession joins a session: its newest history page, the live
+// turn and the queue. limit <= 0 uses the core's default page size.
+export function attachSession(sessionId: string, limit = 0): Promise<AttachSnapshot> {
+  return invoke<AttachSnapshot>("attach", { sessionId, ...(limit > 0 ? { limit } : {}) });
 }
 
 // cancelTurn drops a queued turn, or stops it if it already runs.

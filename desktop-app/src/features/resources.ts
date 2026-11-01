@@ -8,7 +8,7 @@
 
 import * as api from "../core/api";
 import { bridge } from "../core/bridge";
-import { escapeAttr, escapeHtml } from "../core/format";
+import { escapeAttr } from "../core/format";
 import { state } from "../core/state";
 import type { ResourceSnapshot, ResourceUsage } from "../core/types";
 
@@ -86,23 +86,27 @@ function paintRows(): void {
     if (!id) {
       continue;
     }
-    const html = resBadge(id);
+    const u = sessionUsage(id);
     const old = row.querySelector<HTMLElement>(".session-res");
-    if (!html) {
+    if (!u) {
       old?.remove();
       continue;
     }
-    const tpl = document.createElement("template");
-    tpl.innerHTML = html.trim();
-    const next = tpl.content.firstElementChild as HTMLElement;
+    const text = fmt(u);
+    const title = `CPU ${fmtCpu(u.cpu)} · memory ${fmtBytes(u.rss)} · ${plural(u.procs, "process")}`;
     if (old) {
-      if (old.textContent !== next.textContent || old.title !== next.title) {
-        old.textContent = next.textContent;
-        old.title = next.title;
-      }
-    } else {
-      row.insertBefore(next, row.querySelector(".session-count"));
+      // The 3s poll usually changes only the numbers; patch them
+      // instead of rebuilding the badge (and its layout) every tick.
+      if (old.textContent !== text) old.textContent = text;
+      if (old.title !== title) old.title = title;
+      continue;
     }
+    const badge = document.createElement("span");
+    badge.className = "session-res";
+    badge.dataset.resFor = id;
+    badge.title = title;
+    badge.textContent = text;
+    row.insertBefore(badge, row.querySelector(".session-count"));
   }
 }
 
@@ -140,7 +144,66 @@ function paintFooter(): void {
   }
 }
 
-// paintPane fills Settings > Resources when it is open.
+type PaneRow = { key: string; name: string; sub: string; u: ResourceUsage };
+
+// paneRows lists what Settings > Resources should show, busiest first.
+function paneRows(): PaneRow[] {
+  const rows: PaneRow[] = [];
+  if (app) {
+    rows.push({ key: "app", name: "App window", sub: "Electron: UI, GPU and pages", u: app });
+  }
+  if (!core) {
+    return rows;
+  }
+  rows.push({ key: "core", name: "Core", sub: "agent-host: every session's agent loop", u: core.self });
+  const busy = Object.entries(core.sessions).filter(([, u]) => u.procs > 0);
+  busy.sort((a, b) => b[1].cpu - a[1].cpu || b[1].rss - a[1].rss);
+  for (const [id, u] of busy) {
+    const title = state.sessions.find((s) => s.sessionId === id)?.title || id.slice(0, 8);
+    rows.push({ key: id, name: title, sub: "shell commands of this session", u });
+  }
+  const t = total();
+  if (t) {
+    rows.push({ key: "total", name: "Total", sub: "everything above", u: t });
+  }
+  return rows;
+}
+
+function paneRowEl(key: string): HTMLTableRowElement {
+  const tr = document.createElement("tr");
+  tr.dataset.resRow = key;
+  const name = document.createElement("td");
+  name.className = "res-name";
+  const title = document.createElement("div");
+  title.className = "truncate";
+  const sub = document.createElement("div");
+  sub.className = "res-sub";
+  name.append(title, sub);
+  tr.append(name);
+  for (let i = 0; i < 3; i++) {
+    const cell = document.createElement("td");
+    cell.className = "res-num";
+    tr.append(cell);
+  }
+  return tr;
+}
+
+function paintPaneRow(tr: HTMLTableRowElement, row: PaneRow): void {
+  const name = tr.children[0] as HTMLTableCellElement;
+  const title = name.firstElementChild as HTMLElement;
+  const sub = name.lastElementChild as HTMLElement;
+  if (title.textContent !== row.name) title.textContent = row.name;
+  if (sub.textContent !== row.sub) sub.textContent = row.sub;
+  const values = [fmtCpu(row.u.cpu), fmtBytes(row.u.rss), String(row.u.procs)];
+  for (let i = 0; i < values.length; i++) {
+    const cell = tr.children[i + 1] as HTMLTableCellElement;
+    if (cell.textContent !== values[i]) cell.textContent = values[i];
+  }
+}
+
+// paintPane updates Settings > Resources in place: rebuilding the table
+// with innerHTML every 3s re-parsed the DOM and reset anything the user
+// had selected.
 function paintPane(): void {
   const body = document.getElementById("resourcesBody");
   if (!body || body.closest(".hidden")) {
@@ -150,29 +213,53 @@ function paintPane(): void {
     body.innerHTML = `<p class="text-slate-400">Process usage is not available on this platform.</p>`;
     return;
   }
-  const row = (key: string, name: string, sub: string, u: ResourceUsage) =>
-    `<tr data-res-row="${escapeAttr(key)}">` +
-    `<td class="res-name"><div class="truncate">${escapeHtml(name)}</div><div class="res-sub">${escapeHtml(sub)}</div></td>` +
-    `<td class="res-num">${fmtCpu(u.cpu)}</td><td class="res-num">${fmtBytes(u.rss)}</td><td class="res-num">${u.procs}</td></tr>`;
-  let rows = "";
-  if (app) {
-    rows += row("app", "App window", "Electron: UI, GPU and pages", app);
+  let table = body.querySelector<HTMLTableElement>(".res-table");
+  if (!table) {
+    body.replaceChildren();
+    table = document.createElement("table");
+    table.className = "res-table";
+    table.innerHTML = `<thead><tr><th>Process</th><th>CPU</th><th>Memory</th><th>Procs</th></tr></thead><tbody></tbody>`;
+    body.append(table);
   }
-  rows += row("core", "Core", "agent-host: every session's agent loop", core.self);
-  const busy = Object.entries(core.sessions).filter(([, u]) => u.procs > 0);
-  busy.sort((a, b) => b[1].cpu - a[1].cpu || b[1].rss - a[1].rss);
-  for (const [id, u] of busy) {
-    const title = state.sessions.find((s) => s.sessionId === id)?.title || id.slice(0, 8);
-    rows += row(id, title, "shell commands of this session", u);
+  const tbody = table.tBodies[0];
+  const rows = paneRows();
+  const existing = new Map<string, HTMLTableRowElement>();
+  for (const tr of Array.from(tbody.rows)) {
+    if (tr.dataset.resRow) existing.set(tr.dataset.resRow, tr);
   }
-  const t = total();
-  if (t) {
-    rows += row("total", "Total", "everything above", t);
+  const keep = new Set<string>();
+  for (const row of rows) {
+    keep.add(row.key);
+    let tr = existing.get(row.key);
+    if (!tr) {
+      tr = paneRowEl(row.key);
+    }
+    paintPaneRow(tr, row);
+    tbody.append(tr); // moves it into the new order without a rebuild
   }
-  body.innerHTML =
-    `<table class="res-table"><thead><tr><th>Process</th><th>CPU</th><th>Memory</th><th>Procs</th></tr></thead><tbody>${rows}</tbody></table>` +
-    (busy.length === 0 ? `<p class="mt-3 text-slate-400">No session is running commands right now.</p>` : "") +
-    `<p class="mt-3 text-[10px] text-slate-400">CPU is a percentage of one core. Sampled every ${Math.round(interval() / 1000)}s while the window is visible.</p>`;
+  for (const [key, tr] of existing) {
+    if (!keep.has(key)) tr.remove();
+  }
+  const busy = rows.some((row) => row.key !== "app" && row.key !== "core" && row.key !== "total");
+  let empty = body.querySelector<HTMLElement>("#resEmpty");
+  if (busy) {
+    empty?.remove();
+  } else if (!empty) {
+    empty = document.createElement("p");
+    empty.id = "resEmpty";
+    empty.className = "mt-3 text-slate-400";
+    empty.textContent = "No session is running commands right now.";
+    body.append(empty);
+  }
+  const note = `CPU is a percentage of one core. Sampled every ${Math.round(interval() / 1000)}s while the window is visible.`;
+  let footnote = body.querySelector<HTMLElement>("#resNote");
+  if (!footnote) {
+    footnote = document.createElement("p");
+    footnote.id = "resNote";
+    footnote.className = "mt-3 text-[10px] text-slate-400";
+    body.append(footnote);
+  }
+  if (footnote.textContent !== note) footnote.textContent = note;
 }
 
 // paintResources repaints every surface from the last sample.

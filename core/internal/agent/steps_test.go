@@ -17,7 +17,7 @@ type fakeSteps struct {
 	calls []string
 }
 
-func (f *fakeSteps) Track(_ context.Context, callID, name string, run func() tools.ToolResult) tools.ToolResult {
+func (f *fakeSteps) Track(_ context.Context, callID, name string, _ []string, run func() tools.ToolResult) tools.ToolResult {
 	f.mu.Lock()
 	f.calls = append(f.calls, callID+":"+name)
 	f.mu.Unlock()
@@ -70,6 +70,26 @@ func TestStepRecorderWrapsOnlyMutatingCalls(t *testing.T) {
 	}
 }
 
+func TestStepRecorderSkipsReadOnlyShell(t *testing.T) {
+	rec := &fakeSteps{}
+	prov := &mockProvider{streams: []streamScript{
+		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
+			{ID: "r1", Name: "shell", Arguments: `{"command":"ls"}`},
+		}}}},
+		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
+	}}
+	a, _, tx, done := testAgent(t, prov)
+	defer close(done)
+	a.steps = rec
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	drainChunks(tx)
+	if len(rec.calls) != 0 {
+		t.Fatalf("read-only shell was snapshot-bracketed: %v", rec.calls)
+	}
+}
+
 func TestStepRecorderSkipsDeniedCallsAndTracksEscalatedRerun(t *testing.T) {
 	rec := &fakeSteps{}
 	stepRun(t, &fakeGate{auth: permission.Auth{Content: `{"error":"denied"}`}}, rec, &mutProbe{})
@@ -94,6 +114,30 @@ func TestRegistryMutates(t *testing.T) {
 	for name, want := range map[string]bool{"write": true, "edit": true, "shell": true, "read": false, "nope": false} {
 		if got := r.Mutates(name); got != want {
 			t.Errorf("Mutates(%q) = %v", name, got)
+		}
+	}
+}
+
+func TestMutatingPathsNamesTheTouchedFile(t *testing.T) {
+	cases := []struct {
+		call tools.ToolCall
+		want string
+	}{
+		{tools.ToolCall{Name: "write", Arguments: `{"path":"src/a.go"}`}, "src/a.go"},
+		{tools.ToolCall{Name: "edit", Arguments: `{"path":"src/b.go","old":"x"}`}, "src/b.go"},
+		{tools.ToolCall{Name: "write", Arguments: `{}`}, ""},
+		{tools.ToolCall{Name: "shell", Arguments: `{"command":"touch x"}`}, ""},
+	}
+	for _, tc := range cases {
+		got := mutatingPaths(&tc.call)
+		if len(got) == 0 {
+			if tc.want != "" {
+				t.Errorf("%s %s: no paths, want %q", tc.call.Name, tc.call.Arguments, tc.want)
+			}
+			continue
+		}
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("%s %s: paths = %q, want %q", tc.call.Name, tc.call.Arguments, got, tc.want)
 		}
 	}
 }

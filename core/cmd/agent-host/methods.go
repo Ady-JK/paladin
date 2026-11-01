@@ -160,6 +160,12 @@ var methods = map[string]handler{
 	"sessionHistory": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionHistory(a.str("sessionId"), a.str("cwd"))
 	},
+	"sessionHistoryPage": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SessionHistoryPage(a.str("sessionId"), a.str("cwd"), a.num("limit", runtime.HistoryLimit), a.num("before", 0))
+	},
+	"sessionImages": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SessionImages(a.str("sessionId"), a.str("cwd"))
+	},
 	"saveAttachment": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SaveAttachment(a.str("sessionId"), a.str("cwd"), a.str("name"), a.str("data"))
 	},
@@ -248,7 +254,7 @@ var methods = map[string]handler{
 		return rt.Turns(), nil
 	},
 	"attach": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.Attach(a.str("sessionId"), a.str("cwd"))
+		return rt.Attach(a.str("sessionId"), a.str("cwd"), a.num("limit", 0))
 	},
 	"cancelTurn": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.CancelTurn(a.str("turnId")), nil

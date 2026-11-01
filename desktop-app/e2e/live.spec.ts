@@ -226,11 +226,12 @@ test("after a reload a running turn is re-attached and keeps streaming", async (
     w.__paladinBaseInvoke = async (cmd: string, args: any) => {
       if (cmd === "turns") return [turn];
       if (cmd === "attach") {
+        const rows = [
+          { role: "user", content: "earlier", createdAt: 1 },
+          { role: "assistant", content: "Earlier answer.", createdAt: 1 },
+        ];
         return {
-          history: [
-            { role: "user", content: "earlier", createdAt: 1 },
-            { role: "assistant", content: "Earlier answer.", createdAt: 1 },
-          ],
+          history: { messages: rows, start: 0, hasMore: false, total: rows.length },
           turn,
           events: [{ event: "chat/delta", seq: 5, sessionId: turn.sessionId, turnId: "t-9", delta: "halfway" }],
           queued: [],

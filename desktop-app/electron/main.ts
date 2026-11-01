@@ -214,7 +214,65 @@ function liveWindow(): BrowserWindow | null {
   return win && !win.isDestroyed() ? win : null;
 }
 
+// Streaming deltas are merged for one short tick before crossing IPC.
+// Each event used to be its own renderer wake-up even though the
+// renderer coalesces paints anyway; a fast model can emit dozens per
+// second per turn.
+const STREAM_FLUSH_MS = 16;
+type StreamMessage = HostMessage & { delta?: string; reasoning?: string };
+let streamQueue: StreamMessage[] = [];
+let streamTimer: NodeJS.Timeout | null = null;
+
+function flushStreamEvents(): void {
+  if (streamTimer) {
+    clearTimeout(streamTimer);
+    streamTimer = null;
+  }
+  const queued = streamQueue;
+  streamQueue = [];
+  for (const msg of queued) sendToRenderer(msg);
+}
+
+function queueStreamEvent(msg: HostMessage): void {
+  const next = msg as StreamMessage;
+  const field = next.event === "chat/delta" ? "delta" : "reasoning";
+  const last = streamQueue[streamQueue.length - 1];
+  if (last && last.event === next.event && last.sessionId === next.sessionId && last.turnId === next.turnId) {
+    const before = typeof last[field] === "string" ? last[field] : "";
+    const more = typeof next[field] === "string" ? next[field] : "";
+    last[field] = before + more;
+    last.seq = next.seq;
+  } else {
+    streamQueue.push({ ...next });
+  }
+  if (!streamTimer) streamTimer = setTimeout(flushStreamEvents, STREAM_FLUSH_MS);
+}
+
+function sendToRenderer(msg: HostMessage): void {
+  const w = liveWindow();
+  if (w) {
+    try {
+      w.webContents.send("agent:event", msg);
+    } catch {
+      // Renderer is reloading; it re-attaches on boot.
+    }
+  }
+  if (w && w.isFocused()) return;
+  const note = noteFor(msg);
+  if (!note || !Notification.isSupported()) return;
+  const n = new Notification({ title: note.title, body: note.body, silent: false });
+  n.on("click", () => openSessionFromNotification(note.sessionId));
+  n.show();
+}
+
 function forwardEvent(msg: HostMessage): void {
+  if (msg.event === "chat/delta" || msg.event === "chat/reasoning") {
+    queueStreamEvent(msg);
+    return;
+  }
+  // Anything that is not streamed text must arrive after the text that
+  // preceded it, so drain the queue first.
+  flushStreamEvents();
   if (msg.event === "browser/request") {
     if (typeof msg.id !== "string" || typeof msg.sessionId !== "string" || typeof msg.action !== "string") return;
     const req = msg as BrowserRequest;
@@ -236,20 +294,7 @@ function forwardEvent(msg: HostMessage): void {
       );
     return;
   }
-  const w = liveWindow();
-  if (w) {
-    try {
-      w.webContents.send("agent:event", msg);
-    } catch {
-      // Renderer is reloading; it re-attaches on boot.
-    }
-  }
-  if (w && w.isFocused()) return;
-  const note = noteFor(msg);
-  if (!note || !Notification.isSupported()) return;
-  const n = new Notification({ title: note.title, body: note.body, silent: false });
-  n.on("click", () => openSessionFromNotification(note.sessionId));
-  n.show();
+  sendToRenderer(msg);
 }
 
 function openSessionFromNotification(sessionId: string): void {

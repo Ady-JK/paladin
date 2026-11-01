@@ -44,7 +44,9 @@ separate setup command, not a JSONL method.
 | `fileComplete` | `{query,cwd?,limit?}` | `FileEntry[]` (`path` chat path, `resolvedPath` OS-absolute path to insert, `outside`, `isDir`; gitignored paths never suggested; `../` completes from the workspace parent) |
 | `openSession` | `{sessionId?,cwd?,worktree?,name?}` | `Session` (`sessionId,cwd,provider,model,revert?,worktree?,subagent?`; `subagent` is set for a subagent session, with its live `status`, see Subagents); `worktree:true` creates the session in a new git worktree of `cwd`'s repo on branch `paladin/<name>` (see Undo and worktrees) |
 | `listSessions` | `{cwd?,limit?}` | `SessionInfo[]`, newest first; only the `limit` newest sessions' transcripts are read. A session that cannot be read is still listed with `damaged` (the reason) so it can be deleted; its `cwd` may be empty (see Transcript format) |
-| `sessionHistory` | `{sessionId,cwd?}` | `HistoryMessage[]` |
+| `sessionHistory` | `{sessionId,cwd?}` | `HistoryMessage[]` (the whole transcript; the renderer paints a page instead) |
+| `sessionHistoryPage` | `{sessionId,cwd?,limit?,before?}` | `HistoryPage` (`messages`, `start`, `hasMore`, `total`); `before` is the row ordinal to end at (`0` = newest), so appending a turn never shifts an older page. `limit` defaults to 120. The renderer uses this for the initial paint and for "load earlier" |
+| `sessionImages` | `{sessionId,cwd?}` | `ImagesView` (`latestUser`, `images[]` of `{index,role,path,name?}`): just the image rows, so a finished turn does not re-download the transcript to find a screenshot |
 | `saveAttachment` | `{sessionId,cwd?,name,data}` (base64, up to 10 MiB decoded) | Session-owned attachment reference |
 | `sessionImage` | `{sessionId,cwd?,path}` (path must occur in session history) | Image data URL |
 | `sessionTodos` | `{sessionId,cwd?}` | `TodoEntry[]` (`content,status`): the agent's todo list for the panel above the composer; empty before it plans |
@@ -113,7 +115,7 @@ separate setup command, not a JSONL method.
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
 | `resources` | `{}` | `{at, supported, self:{cpu,rss,procs}, sessions:{[id]:{cpu,rss,procs}}}`: the core process plus each session's running shell process trees (one `ps` sample, cached 1.5s; `cpu` is % of one core, `rss` bytes). `supported:false` off unix |
-| `attach` | `{sessionId,cwd?}` | `{history: HistoryMessage[], turn: TurnInfo\|null, events: Event[], queued: TurnInfo[], seq}` |
+| `attach` | `{sessionId,cwd?,limit?}` | `{history: HistoryPage, turn: TurnInfo\|null, events: Event[], queued: TurnInfo[], seq}`; `history` is the newest page (`sessionHistoryPage`), `limit` defaults to 120; older rows load with `sessionHistoryPage` |
 | `cancelTurn` | `{turnId}` | `bool`: drops a queued turn (or stops it if already running) |
 
 ### Turns run in the background
@@ -581,6 +583,16 @@ skip the project's ignored files, dependency/cache folders, binaries
 and files over 10 MiB, and turn off for `/`, the home folder or folders
 with more than 50,000 files; `PALADIN_SNAPSHOTS=off` disables them.
 Without git, undo reverts only the conversation (`snapshots:false`).
+A foreground shell run the plan-mode read-only allowlist accepts is not
+bracketed at all, and `write`/`edit` snapshot only their target path
+(falling back to the whole folder when the path leaves the workspace),
+so a busy agent does not pay two full git scans per command.
+
+The renderer paints transcripts in pages: `attach` and
+`sessionHistoryPage` return one `HistoryPage`, and `sessionHistoryPage`
+with the previous `start` loads older rows. `sessionImages` returns
+just the image rows, which is what a finished turn needs to mount a
+screenshot without downloading the transcript.
 
 `sessionHistory` user rows carry `index`, their transcript position.
 `revertSession` restores each file the session changed from that

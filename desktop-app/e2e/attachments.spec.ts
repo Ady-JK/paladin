@@ -25,6 +25,54 @@ test("dropped image appears as a removable card and is copied into the session o
   expect(await page.evaluate(() => (window as any).__e2eSubmits[0].attachmentIds)).toEqual(["file-1"]);
 });
 
+test("a finished turn mounts the user's image from sessionImages", async ({ page }) => {
+  await page.addInitScript(() => {
+    const at = Math.floor(Date.now() / 1000);
+    const w = window as any;
+    const base = w.__paladinBaseInvoke;
+    let sent = false;
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "submitChat") sent = true;
+      if (cmd === "sessionHistory") {
+        if (!sent) return [];
+        return [
+          {
+            role: "user",
+            content: "look",
+            createdAt: at,
+            index: 0,
+            attachments: [
+              {
+                id: "a1",
+                name: "look.png",
+                path: "/sessions/sess-notify-1/attachments/look.png",
+                size: 4,
+                mimeType: "image/png",
+                image: {
+                  path: "/sessions/sess-notify-1/attachments/look.png",
+                  mimeType: "image/png",
+                  size: 4,
+                  sha256: "stub",
+                },
+              },
+            ],
+          },
+          { role: "assistant", content: "done", createdAt: at },
+        ];
+      }
+      return base(cmd, args);
+    };
+  });
+  await page.reload();
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await page.fill("#promptInput", "look");
+  await page.click("#sendBtn");
+  // The live row had no attachments; finishTurn asks sessionImages and
+  // mounts the stored one.
+  await expect(page.locator("#messages .session-image-thumb")).toHaveCount(1);
+});
+
 test("stored screenshots render small and open in the session image viewer", async ({ page }) => {
   await page.addInitScript(() => {
     const at = Math.floor(Date.now() / 1000);

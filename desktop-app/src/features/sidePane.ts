@@ -16,7 +16,7 @@ import type { ChangedFile, SessionChanges, SideChatMessage } from "../core/types
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { registerChangesLink } from "./findings";
-import { abortAttach, beginAttach, finishAttach, liveBadge, liveRoot, onResync } from "./live";
+import { abortAttach, beginAttach, finishAttach, liveBadge, liveRoot, onResync, repaintLive } from "./live";
 import { agentStatus, agentStatusHtml, buildHistory, openSession, refreshSessions } from "./sessions";
 
 type ChatTab = {
@@ -512,6 +512,23 @@ let changeRequest = 0;
 
 // Refresh after a tool settles or a session is opened. Persisted user
 // rows carry transcript indices; the current live row is passed in.
+// noteToolChange coalesces the live changes marker after a mutating
+// tool run. A busy turn used to call refreshChanges on every command,
+// and each call re-reads every recorded step (two git invocations per
+// step) even when the command changed nothing.
+let toolChangeTimer = 0;
+let toolChangePending: { sessionId: string; liveRow: HTMLElement | null; callId?: string } | null = null;
+export function noteToolChange(sessionId: string, liveRow: HTMLElement | null | undefined, callId?: string): void {
+  toolChangePending = { sessionId, liveRow: liveRow ?? null, callId };
+  if (toolChangeTimer) return;
+  toolChangeTimer = window.setTimeout(() => {
+    toolChangeTimer = 0;
+    const pending = toolChangePending;
+    toolChangePending = null;
+    if (pending) void refreshChanges(pending.sessionId, pending.liveRow, pending.callId);
+  }, 400);
+}
+
 export async function refreshChanges(
   sessionId = state.sessionId,
   liveRow?: HTMLElement | null,
@@ -930,13 +947,15 @@ function loadAgent(tab: AgentTab): Promise<void> {
   tab.loading = (async () => {
     beginAttach(tab.agentId);
     try {
-      const snap = await api.attachSession(tab.agentId);
+      const snap = await api.attachSession(tab.agentId, 1000);
       const history = view.querySelector<HTMLElement>(".pane-agent-history")!;
       history.replaceChildren();
-      buildHistory(history, snap.history ?? [], false, tab.agentId);
+      const rows = Array.isArray(snap.history) ? snap.history : (snap.history?.messages ?? []);
+      buildHistory(history, rows, false, tab.agentId);
       finishAttach(tab.agentId, snap);
       if (state.sessionId !== tab.agentId) view.append(root);
       view.scrollTop = view.scrollHeight;
+      repaintLive(tab.agentId);
     } catch (error) {
       abortAttach(tab.agentId);
       view.querySelector(".pane-agent-history")!.innerHTML =

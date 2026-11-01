@@ -18,11 +18,11 @@ import { TurnView } from "./turnView";
 import { handleAskToolEvent } from "./ask";
 import { handleTodoToolEvent, refreshTodos } from "./todos";
 import { refreshUsage } from "./usage";
-import { onAgentsChanged, refreshSessions, renderSessions } from "./sessions";
+import { onAgentsChanged, renderSessions, scheduleRefreshSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget } from "./budget";
-import { refreshChanges } from "./sidePane";
+import { noteToolChange, refreshChanges } from "./sidePane";
 import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
 
 export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "approval";
@@ -52,7 +52,14 @@ type Entry = {
   tools: Map<string, string>;
   phase: WorkingPhase;
   since: number;
+  // lastUsed orders idle live roots for eviction.
+  lastUsed: number;
 };
+
+// MAX_IDLE_ENTRIES bounds detached live roots kept in memory. A root
+// holds every row that streamed while the session was off screen; only
+// the visible session and a handful of recent ones need to stay hot.
+const MAX_IDLE_ENTRIES = 12;
 
 const entries = new Map<string, Entry>();
 const defaultPlaceholder = inputEl.placeholder;
@@ -81,10 +88,41 @@ function entry(sessionId: string): Entry {
       tools: new Map(),
       phase: "thinking",
       since: 0,
+      lastUsed: Date.now(),
     };
     entries.set(sessionId, e);
+    trimIdleEntries();
   }
+  e.lastUsed = Date.now();
   return e;
+}
+
+// trimIdleEntries drops detached roots that are idle: no turn, no
+// queued work, no pending question or approval and no unread outcome
+// badge. Roots still mounted (main view or a side-pane tab) are never
+// touched, and reopening a dropped session rebuilds it from history.
+function trimIdleEntries(): void {
+  const idle: Entry[] = [];
+  for (const e of entries.values()) {
+    if (
+      e.root.isConnected ||
+      e.running ||
+      e.queued.length > 0 ||
+      e.asks.size > 0 ||
+      e.approvals.size > 0 ||
+      e.badge !== "" ||
+      e.attaching
+    ) {
+      continue;
+    }
+    idle.push(e);
+  }
+  if (idle.length <= MAX_IDLE_ENTRIES) return;
+  idle.sort((a, b) => a.lastUsed - b.lastUsed);
+  for (const e of idle.slice(0, idle.length - MAX_IDLE_ENTRIES)) {
+    e.root.remove();
+    entries.delete(e.sessionId);
+  }
 }
 
 function visible(sessionId: string): boolean {
@@ -112,6 +150,17 @@ function mount(e: Entry): void {
     dismissGreeting();
   }
   messagesEl.append(e.root);
+  for (const view of e.views.values()) view.repaint();
+  trimIdleEntries();
+}
+
+// repaintLive catches a turn up after its root is mounted somewhere
+// new (the main transcript or a side-pane subagent tab): deltas that
+// arrived while it was detached were buffered, not rendered.
+export function repaintLive(sessionId: string): void {
+  const e = entries.get(sessionId);
+  if (!e) return;
+  for (const view of e.views.values()) view.repaint();
 }
 
 // liveBadge is the sidebar indicator for a session.
@@ -194,7 +243,7 @@ function newView(e: Entry): TurnView {
 
 function onTool(e: Entry, tool: ToolInfo): void {
   if (tool.status !== "running" && ["shell", "write", "edit"].includes(tool.name) && visible(e.sessionId)) {
-    void refreshChanges(e.sessionId, e.running ? e.users.get(e.running.turnId) : null, tool.id);
+    noteToolChange(e.sessionId, e.running ? e.users.get(e.running.turnId) : null, tool.id);
   }
   if (tool.name === "ask") {
     if (tool.status === "running") {
@@ -213,6 +262,13 @@ function onTool(e: Entry, tool: ToolInfo): void {
   if (tool.name === "todo" && visible(e.sessionId)) {
     handleTodoToolEvent(tool);
   }
+}
+
+// hasImage reports whether a row already shows this attachment.
+function hasImage(root: HTMLElement, path: string): boolean {
+  return Array.from(root.querySelectorAll<HTMLElement>("[data-image-path]")).some(
+    (el) => el.dataset.imagePath === path,
+  );
 }
 
 // startTurn renders a running turn: its user row (a queued bubble is
@@ -432,36 +488,22 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
   if (view && turn.reply) mountLinkCards(view.wrapper, turn.reply);
   if (view && turn.persisted)
     void api
-      .sessionHistory(e.sessionId, null)
-      .then((history) => {
-        let latestUser = -1;
-        history.forEach((message, index) => {
-          if (message.role === "user") latestUser = index;
-        });
-        for (const message of history) {
-          if (message.image) registerImage(e.sessionId, message.image.path);
-          for (const attachment of message.attachments ?? [])
-            if (attachment.image) registerImage(e.sessionId, attachment.image.path);
-        }
-        const user = history[latestUser];
-        if (userRow && user)
-          for (const attachment of user.attachments ?? []) {
-            if (
-              attachment.image &&
-              !Array.from(userRow.querySelectorAll<HTMLElement>("[data-image-path]")).some(
-                (el) => el.dataset.imagePath === attachment.image!.path,
-              )
-            )
-              mountImage(userRow, e.sessionId, attachment.image.path, attachment.name);
+      .sessionImages(e.sessionId, null)
+      .then((seen) => {
+        for (const image of seen.images) registerImage(e.sessionId, image.path);
+        if (userRow) {
+          for (const image of seen.images) {
+            if (image.index !== seen.latestUser || image.role !== "user") continue;
+            if (hasImage(userRow, image.path)) continue;
+            mountImage(userRow, e.sessionId, image.path, image.name ?? "");
           }
-        for (const message of history.slice(latestUser + 1))
-          if (
-            message.image &&
-            !Array.from(view.wrapper.querySelectorAll<HTMLElement>("[data-image-path]")).some(
-              (el) => el.dataset.imagePath === message.image!.path,
-            )
-          )
-            mountImage(view.wrapper, e.sessionId, message.image.path, "Browser screenshot");
+        }
+        if (!view) return;
+        for (const image of seen.images) {
+          if (image.index <= seen.latestUser || image.role === "user") continue;
+          if (hasImage(view.wrapper, image.path)) continue;
+          mountImage(view.wrapper, e.sessionId, image.path, "Browser screenshot");
+        }
       })
       .catch(() => {});
   if (failure) {
@@ -489,19 +531,32 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
       statusDetailEl.textContent = "READY";
     }
     syncComposer();
-    // Tokens bill even on failed turns; todos may have settled after
-    // the last live event.
+    // Tokens bill even on failed turns; that one read is immediate so
+    // the header pill updates with the turn. Budget/todos/worktree are
+    // coalesced into one refresh instead of a burst of RPCs.
     void refreshUsage();
-    void syncBudget();
-    void refreshTodos();
-    void refreshWorktreeBar();
+    scheduleTurnMeta();
   } else if (!quiet && !turn.parentSessionId) {
     // A subagent's outcome goes to its parent agent, which reports it.
     e.badge = failure ? "error" : "done";
     const what = failure ? "failed" : "finished";
     toast(`“${titleOf(e.sessionId)}” ${what}`, failure ? "error" : "ok");
   }
-  void refreshSessions();
+  scheduleRefreshSessions();
+}
+
+// scheduleTurnMeta refreshes the budget, todos and worktree chip once
+// per burst; rapid turns and subagents used to fire three RPCs each.
+let turnMetaTimer = 0;
+function scheduleTurnMeta(): void {
+  if (turnMetaTimer) return;
+  turnMetaTimer = window.setTimeout(() => {
+    turnMetaTimer = 0;
+    if (!state.sessionId) return;
+    void syncBudget();
+    void refreshTodos();
+    void refreshWorktreeBar();
+  }, 200);
 }
 
 // noteSubmitted reconciles a submit reply with the event stream: the

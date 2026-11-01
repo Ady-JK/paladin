@@ -67,11 +67,16 @@ type PlaywrightCore = { chromium: { connectOverCDP(endpoint: string): Promise<Br
 
 const sessionName = /^[A-Za-z0-9_-]{1,128}$/;
 const maxImageBytes = 4 << 20;
+// A browser page the agent has not touched for this long goes back to
+// normal background throttling; without it every left-open tab kept its
+// timers and animations at full speed in a hidden window.
+const IDLE_THROTTLE_MS = 60_000;
 
 export class BrowserManager {
   private readonly entries = new Map<string, Entry>();
   private readonly guarded = new WeakSet<Page>();
   private readonly lanes = new Map<string, Promise<void>>();
+  private readonly idleTimers = new Map<string, NodeJS.Timeout>();
   private visible: string | null = null;
   private bounds: BrowserBounds | null = null;
   private browser: Browser | null = null;
@@ -101,8 +106,34 @@ export class BrowserManager {
     return [...(this.entries.get(sessionId)?.routed ?? [])];
   }
 
+  // touch re-arms full-speed execution for a page the agent is using,
+  // then lets it throttle once the action burst is over.
+  private touch(sessionId: string): void {
+    const entry = this.entries.get(sessionId);
+    if (!entry) return;
+    try {
+      entry.view.webContents.setBackgroundThrottling(false);
+    } catch {
+      return; // page already gone
+    }
+    const previous = this.idleTimers.get(sessionId);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      this.idleTimers.delete(sessionId);
+      const live = this.entries.get(sessionId);
+      if (!live) return;
+      try {
+        live.view.webContents.setBackgroundThrottling(true);
+      } catch {
+        // already gone
+      }
+    }, IDLE_THROTTLE_MS);
+    this.idleTimers.set(sessionId, timer);
+  }
+
   // Same-session actions stay ordered; different sessions run concurrently.
   execute(request: BrowserRequest): Promise<BrowserReply> {
+    this.touch(request.sessionId);
     const previous = this.lanes.get(request.sessionId) ?? Promise.resolve();
     const work = previous.catch(() => undefined).then(() => this.perform(request));
     const tail = work.then(
@@ -153,6 +184,7 @@ export class BrowserManager {
     win.contentView.addChildView(entry.view);
     entry.attached = true;
     this.visible = sessionId;
+    this.touch(sessionId);
     this.layout();
     return true;
   }
@@ -183,6 +215,11 @@ export class BrowserManager {
   drop(sessionId: string): void {
     const entry = this.entries.get(sessionId);
     if (!entry) return;
+    const idle = this.idleTimers.get(sessionId);
+    if (idle) {
+      clearTimeout(idle);
+      this.idleTimers.delete(sessionId);
+    }
     void this.cancelPick(sessionId);
     if (this.visible === sessionId) this.show(null);
     try {
@@ -722,6 +759,7 @@ export class BrowserManager {
       refused: [],
     };
     this.entries.set(sessionId, entry);
+    this.touch(sessionId);
     return entry;
   }
 

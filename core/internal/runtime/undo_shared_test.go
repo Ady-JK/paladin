@@ -30,7 +30,7 @@ func TestConcurrentStepsInOneFolderAreAttributedCorrectly(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		recA.Track(context.Background(), "a1", "write", func() tools.ToolResult {
+		recA.Track(context.Background(), "a1", "write", []string{filepath.Join(ws, "a.txt")}, func() tools.ToolResult {
 			os.WriteFile(filepath.Join(ws, "a.txt"), []byte("a\n"), 0o644)
 			close(started)
 			time.Sleep(300 * time.Millisecond)
@@ -40,7 +40,7 @@ func TestConcurrentStepsInOneFolderAreAttributedCorrectly(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-started
-		recB.Track(context.Background(), "b1", "write", func() tools.ToolResult {
+		recB.Track(context.Background(), "b1", "write", []string{filepath.Join(ws, "b.txt")}, func() tools.ToolResult {
 			os.WriteFile(filepath.Join(ws, "b.txt"), []byte("b\n"), 0o644)
 			return tools.ToolResult{}
 		})
@@ -64,7 +64,7 @@ func TestTrackWaitHonoursCancellation(t *testing.T) {
 	rec := &stepRecorder{repo: repo, path: filepath.Join(t.TempDir(), stepsFile)}
 	release := make(chan struct{})
 	holding := make(chan struct{})
-	go rec.Track(context.Background(), "hold", "shell", func() tools.ToolResult {
+	go rec.Track(context.Background(), "hold", "shell", nil, func() tools.ToolResult {
 		close(holding)
 		<-release
 		return tools.ToolResult{}
@@ -74,7 +74,7 @@ func TestTrackWaitHonoursCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	ran := false
-	res := rec.Track(ctx, "c2", "write", func() tools.ToolResult { ran = true; return tools.ToolResult{} })
+	res := rec.Track(ctx, "c2", "write", []string{filepath.Join(ws, "c.txt")}, func() tools.ToolResult { ran = true; return tools.ToolResult{} })
 	if ran || !res.IsError {
 		t.Fatalf("ran=%v result=%+v", ran, res)
 	}

@@ -86,6 +86,8 @@ const READ_METHODS = new Set([
   "memoryProjects",
   "listSessions",
   "sessionHistory",
+  "sessionHistoryPage",
+  "sessionImages",
   "sessionImage",
   "sessionTodos",
   "sessionUsage",

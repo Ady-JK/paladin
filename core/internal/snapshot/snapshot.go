@@ -354,6 +354,103 @@ func (r *Repo) Snapshot(ctx context.Context) (string, error) {
 			add = append(add, p)
 		}
 	}
+	return r.commit(ctx, add, skip)
+}
+
+// SnapshotPaths is Snapshot narrowed to paths already relative to the
+// workspace. Tools that know what they write (write/edit) use it so a
+// large folder is not scanned twice per call. An empty list falls back
+// to the full snapshot.
+func (r *Repo) SnapshotPaths(ctx context.Context, paths []string) (string, error) {
+	if len(paths) == 0 {
+		return r.Snapshot(ctx)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.disabled != nil {
+		return "", r.disabled
+	}
+	if err := r.init(ctx); err != nil {
+		return "", err
+	}
+	// Split present paths from deletions first: a path that does not
+	// exist yet (a write creating a file) has nothing to stage, while a
+	// tracked one that vanished must be staged as a deletion.
+	var present, missing []string
+	for _, p := range paths {
+		if _, err := os.Lstat(filepath.Join(r.work, filepath.FromSlash(p))); err == nil {
+			present = append(present, p)
+		} else {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) > 0 {
+		out, err := r.git(ctx, nil, append([]string{"ls-files", "-z", "--"}, missing...)...)
+		if err != nil {
+			return "", err
+		}
+		tracked := map[string]bool{}
+		for _, p := range splitNul(out) {
+			tracked[p] = true
+		}
+		for _, p := range missing {
+			if tracked[p] {
+				present = append(present, p)
+			}
+		}
+	}
+	// git add refuses ignored paths, and the full scan never reaches
+	// them because ls-files --exclude-standard hides them. Keep that
+	// rule for scoped snapshots too, or editing a generated/ignored
+	// file would fail every snapshot.
+	if len(present) > 0 {
+		out, err := r.git(ctx, nil, append([]string{"ls-files", "-z", "--"}, present...)...)
+		if err != nil {
+			return "", err
+		}
+		tracked := map[string]bool{}
+		for _, p := range splitNul(out) {
+			tracked[p] = true
+		}
+		var untracked []string
+		for _, p := range present {
+			if !tracked[p] {
+				untracked = append(untracked, p)
+			}
+		}
+		if len(untracked) > 0 {
+			out, err := r.git(ctx, nil,
+				append([]string{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--"}, untracked...)...)
+			if err != nil {
+				return "", err
+			}
+			ignored := map[string]bool{}
+			for _, p := range splitNul(out) {
+				ignored[p] = true
+			}
+			kept := make([]string, 0, len(present))
+			for _, p := range present {
+				if !ignored[p] {
+					kept = append(kept, p)
+				}
+			}
+			present = kept
+		}
+	}
+	var add, skip []string
+	for _, p := range present {
+		if r.skippable(p) {
+			skip = append(skip, p)
+		} else {
+			add = append(add, p)
+		}
+	}
+	return r.commit(ctx, add, skip)
+}
+
+// commit stages the given paths and writes the tree. The caller holds
+// r.mu.
+func (r *Repo) commit(ctx context.Context, add, skip []string) (string, error) {
 	if len(skip) > 0 {
 		var info bytes.Buffer
 		for _, p := range skip {
@@ -377,6 +474,31 @@ func (r *Repo) Snapshot(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(tree)), nil
+}
+
+// RelPaths maps absolute or workspace-relative paths to clean paths
+// under the folder. It returns nil when any path escapes the workspace
+// or is empty, so callers fall back to a full snapshot.
+func (r *Repo) RelPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return nil
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(r.work, p)
+		}
+		rel, err := filepath.Rel(r.work, filepath.Clean(p))
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil
+		}
+		out = append(out, filepath.ToSlash(rel))
+	}
+	return out
 }
 
 // skippable reports files snapshots leave out: too large or binary.

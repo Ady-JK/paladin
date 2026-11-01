@@ -161,11 +161,11 @@ func TestRuntimeAttachMidTurn(t *testing.T) {
 	a := openIn(t, rt)
 	_, done, _ := rt.SubmitTurn(agent.Request{SessionID: a, Message: "go", Cwd: cwdOf(t, rt, a)}, SubmitOpts{Display: "go!"})
 	log.waitFor(t, "delta", func(evs []TurnEvent) bool { return countEvents(evs, "chat/delta") >= 1 })
-	att, err := rt.Attach(a, "")
+	att, err := rt.Attach(a, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hist := att.History.([]session.HistoryMessage)
+	hist := att.History.(session.HistoryPage).Messages
 	if len(hist) != 0 {
 		t.Fatalf("in-flight turn must not be in history yet: %+v", hist)
 	}
@@ -174,8 +174,8 @@ func TestRuntimeAttachMidTurn(t *testing.T) {
 	}
 	model.releaseAll()
 	<-done
-	att, _ = rt.Attach(a, "")
-	if att.Turn != nil || len(att.History.([]session.HistoryMessage)) != 2 {
+	att, _ = rt.Attach(a, "", 0)
+	if att.Turn != nil || len(att.History.(session.HistoryPage).Messages) != 2 {
 		t.Fatalf("after done %+v", att)
 	}
 }

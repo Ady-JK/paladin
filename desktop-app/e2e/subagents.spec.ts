@@ -75,8 +75,9 @@ async function runChild(page: Page): Promise<Record<string, unknown>> {
     w.paladin.invoke = (cmd: string, args: any) => {
       if (cmd === "attach" && args?.sessionId === "sess-child-1" && w.__childTurn) {
         const events = w.__childEvents;
+        const rows = w.__e2eHistories["sess-child-1"] || [];
         return Promise.resolve({
-          history: w.__e2eHistories["sess-child-1"],
+          history: { messages: rows, start: 0, hasMore: false, total: rows.length },
           turn: w.__childTurn,
           events,
           queued: [],

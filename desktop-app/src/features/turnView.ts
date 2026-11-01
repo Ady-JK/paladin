@@ -52,6 +52,10 @@ export interface TurnViewHooks {
 }
 
 const SEGMENT_CLASS = "md agent-text";
+// SEGMENT_PAINT_MS coalesces streamed deltas: markdown is re-parsed as a
+// whole, so a full pass per animation frame is wasted work (and much
+// worse for long replies). 50ms still reads as live text.
+const SEGMENT_PAINT_MS = 50;
 
 export class TurnView {
   readonly wrapper: HTMLElement;
@@ -69,6 +73,11 @@ export class TurnView {
   private retryNotice: HTMLElement | null = null;
   private divider: HTMLElement | null = null;
   private paintQueued = false;
+  private paintTimer = 0;
+  // dirty means the streamed text changed while this turn was detached;
+  // repaint() renders it once the view is mounted again.
+  private dirty = false;
+  private thinkDirty = false;
   private readonly approvals = new Map<string, HTMLElement>();
   private readonly approvalState = new Map<string, Approval>();
   // think is the open thinking block; answer text or a tool closes it.
@@ -143,8 +152,64 @@ export class TurnView {
   // divider starts a new one; a paint still queued for the next frame
   // would otherwise land in the new, empty segment and drop this text.
   private flushSegment(): void {
-    this.paintQueued = false;
+    this.stopPaintTimer();
     this.segEl.innerHTML = renderMarkdown(this.segment);
+    this.dirty = false;
+  }
+
+  private stopPaintTimer(): void {
+    this.paintQueued = false;
+    if (this.paintTimer) {
+      window.clearTimeout(this.paintTimer);
+      this.paintTimer = 0;
+    }
+  }
+
+  // schedulePaint coalesces a burst of deltas into one markdown pass.
+  // While detached there is nothing to paint: mark the turn dirty and
+  // let repaint() catch up when it is mounted again. Re-parsing the
+  // whole message per token (what this used to do) made background
+  // subagents pay for text nobody was looking at.
+  private schedulePaint(): void {
+    if (!this.wrapper.isConnected) {
+      this.dirty = true;
+      return;
+    }
+    if (this.paintQueued) {
+      return;
+    }
+    this.paintQueued = true;
+    this.paintTimer = window.setTimeout(() => {
+      this.paintQueued = false;
+      this.paintTimer = 0;
+      if (this.wrapper.isConnected) {
+        this.dirty = false;
+        this.segEl.innerHTML = renderMarkdown(this.segment);
+        this.tail();
+      } else {
+        this.dirty = true;
+      }
+    }, SEGMENT_PAINT_MS);
+  }
+
+  // repaint renders whatever streamed in while the turn was detached.
+  repaint(): void {
+    if (!this.wrapper.isConnected) {
+      return;
+    }
+    const pending = this.paintQueued;
+    if (pending) {
+      this.stopPaintTimer();
+    }
+    if (this.dirty || pending) {
+      this.dirty = false;
+      this.segEl.innerHTML = renderMarkdown(this.segment);
+    }
+    if (this.thinkDirty && this.think) {
+      this.thinkDirty = false;
+      paintThinking(this.think.el, this.think.text);
+    }
+    this.tail();
   }
 
   private newSegment(after: Node): HTMLElement {
@@ -180,24 +245,7 @@ export class TurnView {
     if (this.segment.trim()) {
       this.run = null;
     }
-    if (!this.wrapper.isConnected) {
-      // Detached: no frame to wait for, and no layout cost.
-      this.segEl.innerHTML = renderMarkdown(this.segment);
-      return;
-    }
-    // Deltas arrive in bursts; one paint per frame keeps it O(n).
-    if (this.paintQueued) {
-      return;
-    }
-    this.paintQueued = true;
-    requestAnimationFrame(() => {
-      if (!this.paintQueued) {
-        return;
-      }
-      this.paintQueued = false;
-      this.segEl.innerHTML = renderMarkdown(this.segment);
-      this.tail();
-    });
+    this.schedulePaint();
   }
 
   private tool(tool: ToolInfo): void {
@@ -300,7 +348,7 @@ export class TurnView {
     const think = this.think;
     think.text += text;
     if (!this.wrapper.isConnected) {
-      paintThinking(think.el, think.text);
+      this.thinkDirty = true;
       return;
     }
     if (think.queued) return;
@@ -308,6 +356,7 @@ export class TurnView {
     requestAnimationFrame(() => {
       think.queued = false;
       if (this.think === think) {
+        this.thinkDirty = false;
         paintThinking(think.el, think.text);
         this.tail();
       }
@@ -404,7 +453,7 @@ export class TurnView {
       const card = this.approvals.get(id);
       if (card && ap.state === "pending") paintApproval(card, { ...ap, state: "denied", decision: "interrupted" });
     }
-    if (this.paintQueued) {
+    if (this.paintQueued || this.dirty) {
       this.flushSegment();
     }
     if (turn.error) {

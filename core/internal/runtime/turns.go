@@ -65,9 +65,19 @@ func (r *AgentRuntime) CancelTurn(turnID string) bool { return r.hub.Cancel(turn
 
 // Attach returns the session's history plus its live turn and queue,
 // atomically, so a client can render it and resume streaming.
-func (r *AgentRuntime) Attach(sessionID, cwd string) (Attachment, error) {
+// HistoryLimit is how many transcript rows an attach paints at once;
+// older rows load in pages.
+const HistoryLimit = 120
+
+// Attach joins a session with its newest history page. limit <= 0 uses
+// HistoryLimit; a subagent side pane asks for more because it has no
+// "load earlier" control.
+func (r *AgentRuntime) Attach(sessionID, cwd string, limit int) (Attachment, error) {
+	if limit <= 0 {
+		limit = HistoryLimit
+	}
 	return r.hub.Attach(sessionID, func() (any, error) {
-		return r.SessionHistory(sessionID, cwd)
+		return r.SessionHistoryPage(sessionID, cwd, limit, 0)
 	})
 }
 

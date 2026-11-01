@@ -55,16 +55,19 @@ type stepRecorder struct {
 // so a concurrent call from another session in the same folder cannot
 // land between the snapshots and be attributed to this one. Waiting for
 // the bracket ends with the turn: the call then does not run.
-func (s *stepRecorder) Track(ctx context.Context, callID, name string, run func() tools.ToolResult) tools.ToolResult {
+func (s *stepRecorder) Track(ctx context.Context, callID, name string, paths []string, run func() tools.ToolResult) tools.ToolResult {
 	release, err := s.repo.Exclusive(ctx)
 	if err != nil {
 		return tools.ToolResult{CallID: callID, Name: name, IsError: true,
 			Content: `{"error":"interrupted while waiting for another session's change in this folder to finish; it did not run"}`}
 	}
 	defer release()
+	// write/edit know their path; shell does not, so it keeps the full
+	// scan. RelPaths returns nil for outside paths (full snapshot).
+	scoped := s.repo.RelPaths(paths)
 	snapCtx, cancel := context.WithTimeout(context.Background(), snapTimeout)
 	defer cancel()
-	before, err := s.repo.Snapshot(snapCtx)
+	before, err := s.repo.SnapshotPaths(snapCtx, scoped)
 	result := run()
 	if err != nil {
 		log.Printf("undo: snapshot before %s: %v", callID, err)
@@ -72,7 +75,7 @@ func (s *stepRecorder) Track(ctx context.Context, callID, name string, run func(
 	}
 	snapCtx2, cancel2 := context.WithTimeout(context.Background(), snapTimeout)
 	defer cancel2()
-	after, err := s.repo.Snapshot(snapCtx2)
+	after, err := s.repo.SnapshotPaths(snapCtx2, scoped)
 	if err != nil {
 		log.Printf("undo: snapshot after %s: %v", callID, err)
 		return result

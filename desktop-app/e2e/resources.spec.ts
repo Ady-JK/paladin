@@ -122,6 +122,11 @@ test("settings lists the app, the core and each busy session", async ({ page }) 
   await expect(body.locator('[data-res-row="sess-busy"]')).toContainText("busy one");
   await expect(body.locator('[data-res-row="sess-busy"]')).toContainText("20%");
   await expect(body.locator('[data-res-row="total"]')).toContainText("350 MB");
+  // The 3s poll patches the same rows instead of rebuilding the table.
+  const coreRow = body.locator('[data-res-row="core"]');
+  await coreRow.evaluate((el) => ((el as unknown as { __keep?: boolean }).__keep = true));
+  await page.waitForTimeout(500);
+  expect(await coreRow.evaluate((el) => (el as unknown as { __keep?: boolean }).__keep)).toBe(true);
 });
 
 test("an unsupported core hides the figures instead of showing zeros", async ({ page }) => {

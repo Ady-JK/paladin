@@ -103,7 +103,10 @@ cycle-free. `src/core/api.ts` is the only place allowed to call `window.paladin.
 feature modules go through it. Event routing lives in `src/features/live.ts`, which keeps
 a detached DOM root per session so background sessions keep rendering, and
 `turnView.ts`, which ignores any event with `seq <= lastSeq` so a re-attach never
-double-paints. Coalesce delta paints to one per animation frame.
+double-paints. Coalesce delta paints to one per ~50 ms, and skip them entirely while a
+turn is detached (repaint on attach). Transcripts are paged:
+`attach` returns a `HistoryPage`, older rows come from `sessionHistoryPage`, and a
+finished turn fetches only `sessionImages` instead of the whole transcript.
 
 **Styling.** Tailwind v4 with CSS-first `@theme` tokens in `src/styles/base.css`. New
 sheets must be imported into `src/styles.css` — cascade order is load-bearing (later

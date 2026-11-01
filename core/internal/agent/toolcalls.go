@@ -165,7 +165,29 @@ func (a *Agent) callTool(call *tools.ToolCall, ctx *tools.ToolCtx) tools.ToolRes
 	if a.steps == nil || !a.tools.Mutates(call.Name) {
 		return a.tools.Call(call, ctx)
 	}
-	return a.steps.Track(a.ctx, call.ID, call.Name, func() tools.ToolResult { return a.tools.Call(call, ctx) })
+	// A read-only command cannot change files, so bracketing it with
+	// two snapshots only burns git scans.
+	if call.Name == "shell" && tools.ShellReadOnly(call.Arguments) {
+		return a.tools.Call(call, ctx)
+	}
+	return a.steps.Track(a.ctx, call.ID, call.Name, mutatingPaths(call), func() tools.ToolResult {
+		return a.tools.Call(call, ctx)
+	})
+}
+
+// mutatingPaths names the file a tool is about to change, so the step
+// recorder can snapshot just that path instead of the whole folder.
+func mutatingPaths(call *tools.ToolCall) []string {
+	switch call.Name {
+	case "write", "edit":
+		var args struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal([]byte(call.Arguments), &args) == nil && args.Path != "" {
+			return []string{args.Path}
+		}
+	}
+	return nil
 }
 
 // settleAborted answers calls that will never run so the transcript

@@ -167,7 +167,7 @@ type ProjectTrust interface {
 // workspace snapshots for undo. It must call run exactly once and return
 // its result; recording is best-effort and must never fail the call.
 type StepRecorder interface {
-	Track(ctx context.Context, callID, name string, run func() tools.ToolResult) tools.ToolResult
+	Track(ctx context.Context, callID, name string, paths []string, run func() tools.ToolResult) tools.ToolResult
 }
 
 // ChatOutcome is the summary returned when a turn finishes.

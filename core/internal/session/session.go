@@ -329,3 +329,79 @@ func notifyHistoryArgs(content string) string {
 	}
 	return NotifyArgs(wire.JobID)
 }
+
+// HistoryPage is one window of the transcript. Start is the row
+// ordinal of Messages[0]; rows are numbered from the start of the
+// session, so appending a turn never shifts an older page.
+type HistoryPage struct {
+	Messages []HistoryMessage `json:"messages"`
+	Start    int              `json:"start"`
+	HasMore  bool             `json:"hasMore"`
+	Total    int              `json:"total"`
+}
+
+// PageHistory slices rows into the window ending just before before
+// (0 means the newest rows) and at most limit long.
+func PageHistory(rows []HistoryMessage, limit, before int) HistoryPage {
+	if limit <= 0 {
+		limit = 120
+	}
+	total := len(rows)
+	if before <= 0 || before > total {
+		before = total
+	}
+	start := before - limit
+	if start < 0 {
+		start = 0
+	}
+	if rows == nil {
+		rows = []HistoryMessage{}
+	}
+	return HistoryPage{
+		Messages: rows[start:before],
+		Start:    start,
+		HasMore:  start > 0,
+		Total:    total,
+	}
+}
+
+// ImageRef points at one image a transcript row carries. Index is the
+// row's position in the visible transcript (the same numbering user
+// rows use for undo).
+type ImageRef struct {
+	Index int    `json:"index"`
+	Role  string `json:"role"`
+	Path  string `json:"path"`
+	Name  string `json:"name,omitempty"`
+}
+
+// ImagesView is what the renderer needs to mount and register images
+// without downloading the whole transcript after every turn.
+type ImagesView struct {
+	LatestUser int        `json:"latestUser"`
+	Images     []ImageRef `json:"images"`
+}
+
+// ImagesViewOf collects image references from a visible transcript.
+// LatestUser is the index of the last user row (-1 when there is none),
+// so a finished turn can mount just that row's attachments.
+func ImagesViewOf(msgs []transcript.Message) ImagesView {
+	out := ImagesView{LatestUser: -1, Images: []ImageRef{}}
+	for i, m := range msgs {
+		if m.Replay || !m.Visible() {
+			continue
+		}
+		if m.Role == transcript.RoleUser {
+			out.LatestUser = i
+		}
+		if m.Image != nil {
+			out.Images = append(out.Images, ImageRef{Index: i, Role: string(m.Role), Path: m.Image.Path})
+		}
+		for _, a := range m.Attachments {
+			if a.Image != nil {
+				out.Images = append(out.Images, ImageRef{Index: i, Role: string(m.Role), Path: a.Image.Path, Name: a.Name})
+			}
+		}
+	}
+	return out
+}
