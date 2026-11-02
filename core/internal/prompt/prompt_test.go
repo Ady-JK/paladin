@@ -153,3 +153,34 @@ func TestMachineDetailsAlwaysInjected(t *testing.T) {
 		t.Fatal("compiled prompt lost the OS name")
 	}
 }
+
+// TestExplorationBudgetGuidance pins the efficiency rules taken from the
+// other harnesses (hermes' "touch only what the task needs", codex's
+// narrowest-test-first, opencode's dedicated-tool preference): the model
+// must know how much to explore, that one read per file is enough, and
+// that a check runs once per change.
+func TestExplorationBudgetGuidance(t *testing.T) {
+	for _, want := range []string{
+		"Exploration budget",
+		"Read a file once per turn",
+		"roughly ten tool calls",
+		"Run a check once per change",
+	} {
+		if !strings.Contains(SystemPrompt, want) {
+			t.Fatalf("system prompt lost %q", want)
+		}
+	}
+	examples := UsageExamples()
+	for _, want := range []string{
+		"Listing the same folder twice",
+		"re-reading a file you already read this turn",
+		"paging through whole files hunting for a name",
+	} {
+		if !strings.Contains(examples, want) {
+			t.Fatalf("tool examples lost %q", want)
+		}
+	}
+	if !strings.Contains(ToolGuidance(), "A read you already made this turn is current") {
+		t.Fatal("tool guidance lost the one-read rule")
+	}
+}
