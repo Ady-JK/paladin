@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/errlog"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -139,10 +141,27 @@ func (m *subagentManager) submit(child transcript.Session, settings turnSettings
 		m.mu.Lock()
 		delete(m.inflight, childID)
 		m.mu.Unlock()
+		// The turn never started, so the child's own agent never logged
+		// it: write it beside the child (and point the parent at it).
+		errlog.Append(child.Dir, "subagent:submit", err)
+		m.noteChildFailure(child, err)
 		m.logged("record failed submit", m.record(childID, settings.Cwd, outcome{Status: AgentFailed, Error: err.Error(), Reported: true}))
 		return err
 	}
 	return nil
+}
+
+// noteChildFailure makes a child's failure discoverable from the parent:
+// the child keeps the raw error, and the parent's log names the child
+// and where its log is, so debugging a parent turn does not require
+// hunting through sibling folders.
+func (m *subagentManager) noteChildFailure(child transcript.Session, err error) {
+	parentDir := m.r.SessionDir(child.Meta.Subagent.ParentID, child.Meta.Cwd)
+	if parentDir == "" || err == nil {
+		return
+	}
+	errlog.Appendf(parentDir, "subagent:"+child.Meta.SessionID,
+		"child %s failed: %v (full log: %s)", child.Meta.SessionID, err, filepath.Join(child.Dir, errlog.FileName))
 }
 
 // outcome is a child's recorded state.
@@ -326,6 +345,10 @@ func (m *subagentManager) onDone(info TurnInfo) {
 		errMsg = "interrupted before finishing"
 	case info.Error != "":
 		status, errMsg = AgentFailed, info.Error
+		// A child that failed records it in its own session log; name it
+		// in the parent's log too so one grep finds the whole story.
+		errlog.Append(child.Dir, "subagent:turn", errors.New(info.Error))
+		m.noteChildFailure(child, errors.New(info.Error))
 	}
 	result := lastReply(child)
 	if result == "" {

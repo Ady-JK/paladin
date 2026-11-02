@@ -12,6 +12,10 @@ import (
 
 var logger *logWriter
 
+// dataRoot is where sessions and logs live; set once at startup so error
+// logging from request handlers can reach <data>/logs/errors.log.
+var dataRoot string
+
 // logWriter timestamps each line and tees it to stderr and
 // <dataDir>/logs/paladin.log.
 type logWriter struct {
@@ -43,6 +47,7 @@ func logf(format string, args ...any) {
 }
 
 func initLogging(dataDir string) {
+	dataRoot = dataDir
 	logsDir := filepath.Join(dataDir, "logs")
 	_ = os.MkdirAll(logsDir, 0o755)
 	f, err := os.OpenFile(filepath.Join(logsDir, "paladin.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)

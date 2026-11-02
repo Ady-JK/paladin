@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/Ady-JK/paladin/core/internal/errlog"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
@@ -58,13 +59,40 @@ func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
 func runHandler(rt *runtime.AgentRuntime, req *Request, a args) Response {
 	handle, ok := methods[req.Method]
 	if !ok {
+		// A method the host does not know is a protocol mismatch worth a
+		// record: it names exactly what the client asked for.
+		errlog.Global(dataRoot, "rpc:unknown", req.Method+" "+string(req.Params))
 		return errResponse(req.ID, fmt.Sprintf("unknown method %q", req.Method))
 	}
 	result, err := handle(rt, a)
 	if err != nil {
+		logRequestError(rt, req.Method, a, err)
 		return errResponse(req.ID, err.Error())
 	}
 	return okResponse(req.ID, result)
+}
+
+// logRequestError records a failed request. Anything with a session id
+// lands in that session's error.log; everything else (startup, config,
+// listing) goes to <data>/logs/errors.log. Both keep the raw text: this
+// is the trail a later bug report reads.
+func logRequestError(rt *runtime.AgentRuntime, method string, a args, err error) {
+	source := "rpc:" + method
+	if id := a.str("sessionId"); id != "" {
+		if dir := rt.SessionDir(id, a.str("cwd")); dir != "" {
+			errlog.Append(dir, source, err)
+			return
+		}
+	}
+	for _, key := range []string{"session", "id"} {
+		if id := a.str(key); id != "" {
+			if dir := rt.SessionDir(id, a.str("cwd")); dir != "" {
+				errlog.Append(dir, source, err)
+				return
+			}
+		}
+	}
+	errlog.Global(dataRoot, source, err.Error())
 }
 
 // installTurnSink streams every hub event (chat/* and turn/*) to the client.

@@ -31,6 +31,17 @@ type Session struct {
 // runtimeSessions adapts the transcript store to agent.SessionSource.
 type runtimeSessions struct{ r *AgentRuntime }
 
+// SessionDir returns a session's folder on disk, or "" when it cannot be
+// found. Logging uses it to find where a session's error.log lives
+// without opening the session.
+func (r *AgentRuntime) SessionDir(sessionID, cwd string) string {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return ""
+	}
+	return sess.Dir
+}
+
 func (s runtimeSessions) LoadSession(cwd, sessionID string) (transcript.Session, error) {
 	return s.r.transcripts.Load(cwd, sessionID)
 }

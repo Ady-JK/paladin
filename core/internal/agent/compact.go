@@ -244,7 +244,9 @@ func (a *Agent) maybeCompact() {
 	if !a.overThreshold(est) {
 		return
 	}
-	_ = a.compact("auto", est)
+	if err := a.compact("auto", est); err != nil {
+		a.logError("compact:auto", err)
+	}
 }
 
 // overThreshold reports whether est fills 85% of the window.

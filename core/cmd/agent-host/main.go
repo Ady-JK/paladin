@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/errlog"
 	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
@@ -78,12 +79,14 @@ func main() {
 		var req Request
 		if err := json.Unmarshal(line, &req); err != nil {
 			logf("WARN bad request line: %v", err)
+			errlog.Global(dataRoot, "protocol:bad-request", err.Error()+"\n"+string(line))
 			continue
 		}
 		requests.dispatch(&req)
 	}
 	if err := scanner.Err(); err != nil {
 		logf("WARN read stdin: %v", err)
+		errlog.Global(dataRoot, "protocol:stdin", err.Error())
 	}
 	// The client is gone: stop every turn and let them persist.
 	rt.ShutdownTurns(20 * time.Second)

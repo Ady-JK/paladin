@@ -450,6 +450,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	a.settleNotices(nil)
 	stopped := errors.As(err, new(turnStop))
 	if err != nil && !stopped {
+		a.logError("turn", err)
 		// The transcript is the only record of a failed turn: if it
 		// cannot persist either, say so instead of silently dropping
 		// the whole turn while the UI shows only the first error.
@@ -475,7 +476,9 @@ func (a *Agent) Run() (ChatOutcome, error) {
 func (a *Agent) safeLoop() (err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			fmt.Fprintf(os.Stderr, "agent loop panicked: %v\n%s", p, debug.Stack())
+			stack := debug.Stack()
+			fmt.Fprintf(os.Stderr, "agent loop panicked: %v\n%s", p, stack)
+			a.logErrorf("panic", "agent loop panicked: %v\n%s", p, stack)
 			err = turnFailed{msg: fmt.Sprintf("internal error: %v", p)}
 		}
 	}()

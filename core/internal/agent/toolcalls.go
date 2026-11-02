@@ -65,6 +65,9 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			call := calls[k]
 			a.noteEditResult(&call, &results[k-i])
 			result := results[k-i]
+			if result.IsError {
+				a.logErrorf("tool:"+result.Name, "%s %s\n%s", call.ID, call.Arguments, result.Content)
+			}
 			a.armNotify(&call, &result)
 			a.noteVerify(&call, &result)
 			a.appendToolResult(&call, &result)

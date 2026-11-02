@@ -447,6 +447,37 @@ func TestChildFailureIsReportedAsFailed(t *testing.T) {
 	}
 }
 
+// TestChildFailureLogsInBothFolders pins the subagent debugging trail:
+// a child keeps its own session folder with its own error.log, and the
+// parent's log names the child and its log path.
+func TestChildFailureLogsInBothFolders(t *testing.T) {
+	rt, ws, parentID, _ := agentRuntime(t, spawnThenWait(
+		map[string]any{"agent_type": "explore", "task": "boom"},
+		func(modelCall) modelReply { return modelReply{Status: http.StatusBadRequest} }))
+	if info := runParent(t, rt, parentID, ws, "delegate"); !strings.Contains(info.Reply, `"status":"failed"`) {
+		t.Fatalf("parent saw %q", info.Reply)
+	}
+	child := loadChild(t, rt, ws, childIDs(t, rt, ws, parentID)[0])
+	childLog, err := os.ReadFile(filepath.Join(child.Dir, "error.log"))
+	if err != nil {
+		t.Fatalf("child has no error.log in its own folder: %v", err)
+	}
+	if !strings.Contains(string(childLog), "status 400") {
+		t.Fatalf("child log lacks the raw provider error: %q", childLog)
+	}
+	parent, err := rt.transcripts.Load(ws, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentLog, err := os.ReadFile(filepath.Join(parent.Dir, "error.log"))
+	if err != nil {
+		t.Fatalf("parent has no error.log: %v", err)
+	}
+	if !strings.Contains(string(parentLog), child.Meta.SessionID) || !strings.Contains(string(parentLog), "full log:") {
+		t.Fatalf("parent log does not point at the child: %q", parentLog)
+	}
+}
+
 // blockingChild blocks every child call until its request is
 // cancelled or release is closed.
 func blockingChild(release <-chan struct{}, started chan<- struct{}) func(modelCall) modelReply {

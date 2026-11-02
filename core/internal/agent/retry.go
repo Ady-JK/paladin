@@ -71,6 +71,7 @@ func (a *Agent) retryRound(err error, noProgress bool) bool {
 		wait = d.RetryAfter
 	}
 	a.retries++
+	a.logError("retry", err)
 	_ = a.emit(ChatChunk{Retry: &RetryStatus{
 		Attempt: a.retries, Max: maxRetries,
 		DelayMs: wait.Milliseconds(), Reason: retryReason(err),

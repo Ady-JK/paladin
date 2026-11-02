@@ -672,10 +672,12 @@ flowchart LR
 │           │                       subagent link (parent/children)…
 │           ├── usage.json       ← tokens & cost
 │           ├── summary.json     ← list cache (count, title, bytes read); rebuildable
+│           ├── error.log        ← every error of this session, raw (see below)
 │           ├── tool-output/     ← full output of oversized tool results
 │           └── side-chats/
 │               └── <chat id>/chat.json  ← one /btw side chat
-│       (a subagent is a session folder of its own, beside its parent)
+│       (a subagent is a session folder of its own, beside its parent,
+│        with its own error.log)
 ├── memory/
 │   ├── USER.md
 │   ├── MEMORY.md
@@ -685,6 +687,30 @@ flowchart LR
 
 Files are written **atomically**: a temp file first, then renamed into place.
 So a crash in the middle never leaves a half-written file.
+
+### error.log — the debugging trail
+
+Every session folder keeps `error.log`, and so does every subagent session
+(a child is a session with its own folder). Each line is
+`time<TAB>source<TAB>raw error`, UTC, **unfiltered**: no redaction, no
+truncation, no dedup, multi-line stack traces kept whole. Sources:
+
+| Source | What lands there |
+|---|---|
+| `turn` | A turn that ended in failure (the exact error the UI showed). |
+| `retry` | Every provider retry and why it happened. |
+| `tool:<name>` | Every failed tool call: call id, arguments, raw result. |
+| `compact:auto` | A compaction attempt that failed (the turn continues). |
+| `panic` | A recovered panic with its full stack. |
+| `subagent:<child id>` | In the parent's log: the child failed, with the path of the child's own log. |
+| `rpc:<method>` | A request that failed outside a turn (open/rename/config…). |
+| `rpc:unknown` | The client asked for a method this build does not have. |
+
+Host errors with no session (bad request lines, startup, panics in a
+request) go to `<data>/logs/errors.log`. `error.log` rotates to
+`error.log.1` at 16 MiB so a runaway loop cannot fill the disk; nothing
+else is ever dropped. A clean turn writes nothing, so an absent file
+means "no errors" rather than "logging was off".
 
 ---
 
