@@ -30,9 +30,11 @@ func (WriteTool) Definition() ToolDefinition {
 			"absolute path; bare relative paths are rejected. " +
 			"Missing parent directories are created. " +
 			"When the file already exists the call fails unless overwrite is true, " +
-			"in which case the file is replaced wholesale; replacing requires that you read " +
-			"the whole current file first (every page) in this session, and fails with a conflict " +
-			"if it changed since, so re-read, merge and retry. Writes outside the " +
+			"in which case the file is replaced wholesale; replacing requires current " +
+			"knowledge of the whole file — read every page first, unless you wrote it " +
+			"yourself earlier in this turn and nothing has changed it since (the write " +
+			"result confirms what landed, so do not re-read to check). A conflict means " +
+			"it changed, so re-read, merge and retry. Writes outside the " +
 			"workspace are allowed but reported as outside. Read the file first " +
 			"when replacing one, and prefer edit for small changes to an existing file.",
 		Parameters: map[string]any{

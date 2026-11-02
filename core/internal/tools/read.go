@@ -58,7 +58,9 @@ func (ReadTool) Definition() ToolDefinition {
 			"absolute path; bare relative paths are rejected. " +
 			"The reply holds the file content, the line range that " +
 			"was returned, and whether more lines follow: when has_more is true, " +
-			"call read again with offset set to next_offset. Reads outside the workspace are allowed but reported as outside. " +
+			"call read again with offset set to next_offset. Prefer one larger read " +
+			"over many small slices, and use grep to locate content in large files " +
+			"first. Reads outside the workspace are allowed but reported as outside. " +
 			"Use read to inspect a file before describing or changing it.",
 		Parameters: map[string]any{
 			"type": "object",

@@ -287,9 +287,15 @@ type Agent struct {
 	// turn fails. Any round progress resets it alongside emptyRounds.
 	retries        int
 	timeoutRetries int
-	// window is the model's context window in tokens; 0 when unknown,
-	// which disables proactive compaction (overflow still compacts).
+	// window is the model's context window in tokens; unknown models
+	// fall back to unknownWindowTokens so proactive compaction still
+	// bounds the context.
 	window int64
+	// editStreaks counts consecutive unproductive edit/write results
+	// per path this turn (failures or lingering diagnostics); at the
+	// warning threshold the result carries an escalation note instead
+	// of failing silently into another identical round.
+	editStreaks map[string]int
 	// noticed holds tool rows announced while the model was still
 	// streaming the call; any that never execute are settled as failed
 	// so the UI never keeps a spinner for a call that won't run.
@@ -350,9 +356,17 @@ type Agent struct {
 
 func newAgent(c runConfig) *Agent {
 	window := c.window
-	if window <= 0 && c.provider != nil {
-		if w, known := inference.ContextWindow(c.provider.Model()); known {
-			window = w
+	if window <= 0 {
+		// Prefer the model's own window; without any listing at all,
+		// fall back to a conservative default so proactive compaction
+		// still bounds the context instead of staying disabled.
+		if c.provider != nil {
+			if w, known := inference.ContextWindow(c.provider.Model()); known {
+				window = w
+			}
+		}
+		if window <= 0 {
+			window = unknownWindowTokens
 		}
 	}
 	return &Agent{

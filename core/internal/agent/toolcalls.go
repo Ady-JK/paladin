@@ -47,7 +47,9 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 		j := a.batchEnd(calls, i)
 		results := a.execBatch(calls[i:j])
 		for k := i; k < j; k++ {
-			call, result := calls[k], results[k-i]
+			call := calls[k]
+			a.noteEditResult(&call, &results[k-i])
+			result := results[k-i]
 			a.armNotify(&call, &result)
 			a.noteVerify(&call, &result)
 			a.appendToolResult(&call, &result)

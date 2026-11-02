@@ -337,3 +337,34 @@ func TestReactiveCompactionWithLargeSystemPrompt(t *testing.T) {
 		t.Fatal("the fixed system prompt must not swallow the keep budget")
 	}
 }
+
+func TestCompactThresholdCapsLargeWindows(t *testing.T) {
+	// Small windows keep the classic 85% trigger; very large windows
+	// compact at the absolute cap instead of dragging ~1M tokens.
+	a := &Agent{window: 200_000}
+	if !a.overThreshold(170_000) {
+		t.Fatal("85% of a 200k window should trip")
+	}
+	if a.overThreshold(169_999) {
+		t.Fatal("below 85% of a 200k window should not trip")
+	}
+	a.window = 1_048_576
+	if !a.overThreshold(maxProactiveContextTokens) {
+		t.Fatalf("a 1M window should trip at the %d cap", maxProactiveContextTokens)
+	}
+	if a.overThreshold(maxProactiveContextTokens - 1) {
+		t.Fatalf("a 1M window should not trip below the %d cap", maxProactiveContextTokens)
+	}
+}
+
+func TestUnknownWindowFallsBack(t *testing.T) {
+	prov := &mockProvider{}
+	sess := testSession(t, "00000000-0000-4000-8000-000000000042")
+	a, _, _ := newAgentForTest(t, prov, sess, "hi", false, true)
+	if a.window != unknownWindowTokens {
+		t.Fatalf("unknown model window = %d, want fallback %d", a.window, unknownWindowTokens)
+	}
+	if !a.overThreshold(unknownWindowTokens*compactThresholdPct/100 + 1) {
+		t.Fatal("fallback window should still trigger proactive compaction")
+	}
+}

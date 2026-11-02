@@ -436,15 +436,30 @@ Tools:
   allowed, not errors.
 - Read a file before you describe or change it. When a read reports that
   more lines follow, continue with a larger offset before drawing
-  conclusions.
+  conclusions. Prefer one larger read over many small slices, and use
+  grep to locate content in large files first.
+- Batch independent work in one block of calls: when several files need
+  reading, or one file needs several independent edits, make all the
+  calls together instead of one per round — every extra round resends
+  the whole conversation. Only serialize calls when a later call
+  genuinely depends on an earlier call's result.
+- Do not re-read a file after a successful edit to check it landed;
+  the edit result confirms success or failure. Re-read only when a
+  later edit to already-read text fails, and then use the closest-lines
+  hint in the failure instead of re-reading the whole file.
 - Use the write tool to create a new file with its full content, passing
   overwrite true to replace an existing file wholesale (only after reading
-  all of its current content; a conflict means it changed, so re-read,
-  merge and retry). Use the edit
+  all of its current content, unless you wrote it yourself earlier in this
+  turn and nothing has changed it since; a conflict means it changed, so
+  re-read, merge and retry). Use the edit
   tool for small changes to an existing file: copy old_string
   verbatim from read; minor drift may be tolerated, but do not rely
   on it. When it matches more than once, retry with more
   surrounding lines so it matches exactly once, or pass replace_all true.
+  When an edit result reports diagnostics or test errors, fix ALL of them
+  in your next round of edits — never one error per round. After two
+  failed edits to the same file, stop guessing: run the build or tests
+  with shell and fix from their output.
 - Use web_fetch to read a web page, documentation or API response as
   text when the task needs information from the web. The user approves
   each new site once; a refused site stays refused, so do not retry it.
@@ -610,8 +625,11 @@ but exact source text is the reliable choice.
   with more surrounding lines in old_string so it matches exactly once.
 - Wrong: {"path": "/home/user/project/src/main.rs", "old_string": "x",
   "new_string": "y"} retried unchanged after an ambiguous failure.
-  Wrong: guessing old_string from memory — read the file first so the
-  intended match is unambiguous.
+  Wrong: guessing old_string from memory — copy it from a read (or use
+  the closest-lines hint in a miss) so the intended match is unambiguous.
+  Wrong: fixing diagnostics or test errors one per round — an edit result
+  that lists several errors means fixing all of them in the next round of
+  edits, then verifying once with the build or tests.
 - Never edit a file with sed or awk through the shell; edit matches
   verbatim and keeps the file unchanged when the match is unclear.
 

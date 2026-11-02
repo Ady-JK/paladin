@@ -29,7 +29,12 @@ func (EditTool) Definition() ToolDefinition {
 		Description: "Replace text verbatim in an existing file. Pass the path as a full " +
 			"absolute path; bare relative paths are rejected. " +
 			"old_string should match " +
-			"exactly as it appears in the file, so read the file first; small drift " +
+			"exactly as it appears in the file, copying it verbatim from a read " +
+			"of that file. Trust the read output you already have: do not " +
+			"re-read before every edit, only when a later edit reports the text " +
+			"changed (then use its closest-lines hint). Batch several " +
+			"independent edits to one file as multiple edit calls in one block " +
+			"instead of one per round; small drift " +
 			"(line endings, trailing whitespace, typographic quotes/dashes, " +
 			"indentation level) is tolerated and reported as match_strategy. When " +
 			"old_string occurs more than once the call fails and lists every " +
@@ -75,13 +80,17 @@ func (e *EditTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 			case "conflict":
 				return "", conflictError(eeng)
 			case "notfound":
-				content, _ := jsonx.Marshal(map[string]any{
-					"error":          "edit: old text not found in file; read the file and copy the exact text",
+				miss := map[string]any{
+					"error":          "edit: old text not found in file; use the closest lines below to retry without re-reading the whole file",
 					"requested_path": eeng.RequestedPath,
 					"resolved_path":  eeng.ResolvedPath,
 					"scope":          eeng.Scope,
-				})
-				return "", WithContent(string(content), "edit: old text not found in file; read the file and copy the exact text")
+				}
+				if len(eeng.Hint) > 0 {
+					miss["closest_lines"] = eeng.Hint
+				}
+				content, _ := jsonx.Marshal(miss)
+				return "", WithContent(string(content), "edit: old text not found in file; use the closest lines to retry")
 			case "ambiguous":
 				type wireLine struct {
 					Line int    `json:"line"`
@@ -138,7 +147,7 @@ func (e *EditTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		"match_strategy":   res.Strategy,
 	}
 	if res.Strategy != "" && res.Strategy != MatchExact {
-		out["note"] = "old_string did not match verbatim; matched after normalizing " + strings.ReplaceAll(res.Strategy, "_", " ") + ". Re-read the file before further edits to copy its exact text."
+		out["note"] = "old_string did not match verbatim; matched after normalizing " + strings.ReplaceAll(res.Strategy, "_", " ") + ". Copy exact text from your last read before further edits to this region."
 	}
 	if name := formatFile(ctx, res.ResolvedPath); name != "" {
 		out["formatted"] = name

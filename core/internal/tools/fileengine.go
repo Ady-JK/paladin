@@ -85,6 +85,9 @@ type EngineError struct {
 	// Reason qualifies a "conflict": ConflictUnread, ConflictStale or
 	// ConflictChanged.
 	Reason string
+	// Hint carries the closest matching lines for a "notfound" miss,
+	// so the next attempt can use them instead of re-reading the file.
+	Hint []string
 }
 
 func (e *EngineError) Error() string { return e.Message }
@@ -292,10 +295,11 @@ func (eng Engine) Edit(session, workspace, requestedPath, oldText, newText strin
 	if len(spans) == 0 {
 		return EditResult{}, &EngineError{
 			Kind:          "notfound",
-			Message:       "edit: old text not found in file; read the file and copy the exact text",
+			Message:       "edit: old text not found in file; use the closest lines below instead of re-reading the whole file",
 			RequestedPath: requestedPath,
 			ResolvedPath:  resolved,
 			Scope:         scope,
+			Hint:          closestLines(content, oldText),
 		}
 	}
 	count := len(spans)

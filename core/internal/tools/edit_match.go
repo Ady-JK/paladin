@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -199,4 +200,75 @@ func spanOccurrences(content string, spans []editSpan) []Occurrence {
 		})
 	}
 	return out
+}
+
+// closestLineRadius is how many lines around the best match a miss hint
+// shows (13 lines like opencode's hint window); each line is clipped to
+// closestLineMaxChars so the hint stays small.
+const (
+	closestLineRadius   = 6
+	closestLineMaxChars = 200
+)
+
+// closestLines returns numbered lines around the content line sharing
+// the most tokens with oldText's first non-blank line, so a missed
+// old_string can be retried without re-reading the whole file. No
+// shared tokens means no hint.
+func closestLines(content, oldText string) []string {
+	var target string
+	for _, ln := range strings.Split(oldText, "\n") {
+		if strings.TrimSpace(ln) != "" {
+			target = ln
+			break
+		}
+	}
+	want := map[string]bool{}
+	for _, tok := range splitIdent(target) {
+		want[tok] = true
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	lines := strings.Split(content, "\n")
+	best, bestScore := -1, 0
+	for i, ln := range lines {
+		score := 0
+		for _, tok := range splitIdent(ln) {
+			if want[tok] {
+				score++
+			}
+		}
+		if score > bestScore {
+			best, bestScore = i, score
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	from := best - closestLineRadius
+	if from < 0 {
+		from = 0
+	}
+	to := best + closestLineRadius
+	if to >= len(lines) {
+		to = len(lines) - 1
+	}
+	out := make([]string, 0, to-from+1)
+	for i := from; i <= to; i++ {
+		text := strings.ReplaceAll(lines[i], "\t", " ")
+		if len(text) > closestLineMaxChars {
+			text = text[:closestLineMaxChars] + "…"
+		}
+		out = append(out, strconv.Itoa(i+1)+": "+text)
+	}
+	return out
+}
+
+// splitIdent splits s into lowercase identifier-ish tokens, so near
+// misses (Println vs print, camelCase vs snake_case) still score
+// overlap when hunting the closest lines.
+func splitIdent(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_')
+	})
 }

@@ -28,6 +28,18 @@ const (
 	// compactThresholdPct is the window fill that triggers proactive
 	// compaction before the next round.
 	compactThresholdPct = 85
+	// maxProactiveContextTokens caps the working set proactive
+	// compaction defends, no matter how large the model window is.
+	// Past ~256k tokens of live context each round costs a fortune and
+	// quality-per-token collapses; the summary plus the kept tail carry
+	// the work forward instead. Small-window models are unaffected: 85%
+	// of a 200k window is already below this cap.
+	maxProactiveContextTokens = 256_000
+	// unknownWindowTokens stands in when no window is known (no catalog
+	// entry and no built-in table row), so a missing listing cannot
+	// silently disable proactive compaction. Same role as opencode's
+	// UNKNOWN_WINDOW.
+	unknownWindowTokens = 200_000
 	// maxUnproductiveCompactions bounds back-to-back compactions that
 	// did not make room (failed, or the context is still over the
 	// threshold). A turn has no round cap and may compact any number of
@@ -241,9 +253,21 @@ func (a *Agent) maybeCompact() {
 	_ = a.compact("auto", est)
 }
 
+// compactThreshold reports the token count that triggers proactive
+// compaction: 85% of the window, but never above
+// maxProactiveContextTokens, so very large windows still compact early
+// instead of dragging a hugely expensive context through every round.
+func (a *Agent) compactThreshold() int64 {
+	t := a.window * compactThresholdPct / 100
+	if t > maxProactiveContextTokens {
+		t = maxProactiveContextTokens
+	}
+	return t
+}
+
 // overThreshold reports whether est fills most of a known window.
 func (a *Agent) overThreshold(est int64) bool {
-	return a.window > 0 && est*100 >= a.window*compactThresholdPct
+	return a.window > 0 && est >= a.compactThreshold()
 }
 
 // noteRoundSucceeded ends a compaction streak once a round got through
