@@ -130,5 +130,9 @@ func droppable(event string) bool {
 // eventSize approximates an event's encoded size.
 func eventSize(e TurnEvent) int {
 	const envelope = 160
-	return envelope + len(e.Delta) + len(e.Reasoning)
+	n := envelope + len(e.Delta) + len(e.Reasoning)
+	if e.Compaction != nil {
+		n += len(e.Compaction.Summary)
+	}
+	return n
 }

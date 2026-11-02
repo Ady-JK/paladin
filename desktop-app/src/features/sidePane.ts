@@ -488,7 +488,7 @@ function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[], t
   }
   if (!button) {
     button = document.createElement("div");
-    button.className = "turn-changes turn-change-card";
+    button.className = "turn-changes turn-change-card turn-change-collapsed";
     let anchor = row;
     while (anchor.nextElementSibling && !anchor.nextElementSibling.hasAttribute("data-turn-index")) {
       anchor = anchor.nextElementSibling as HTMLElement;
@@ -496,7 +496,10 @@ function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[], t
     anchor.after(button);
   }
   button.dataset.changeTurn = String(turn);
-  button.innerHTML = `<span class="turn-change-heading">${icon("tl-file", "h-4 w-4")}<span>Edited ${files.length} ${files.length === 1 ? "file" : "files"}</span>${total ? `<span class="tool-add">+${total.added}</span><span class="tool-del">-${total.removed}</span>` : ""}<button type="button" class="turn-change-undo">Undo ${icon("tl-undo", "h-3.5 w-3.5")}</button><button type="button" class="turn-change-view">View changes</button></span><span class="turn-change-files">${files
+  button.setAttribute("role", "button");
+  button.tabIndex = 0;
+  button.setAttribute("aria-expanded", String(!button.classList.contains("turn-change-collapsed")));
+  button.innerHTML = `<span class="turn-change-heading">${icon("rl-chevron", "h-3.5 w-3.5 turn-change-caret")}${icon("tl-file", "h-4 w-4")}<span>Edited ${files.length} ${files.length === 1 ? "file" : "files"}</span>${total ? `<span class="tool-add">+${total.added}</span><span class="tool-del">-${total.removed}</span>` : ""}<button type="button" class="turn-change-undo">Undo ${icon("tl-undo", "h-3.5 w-3.5")}</button><button type="button" class="turn-change-view">View changes</button></span><span class="turn-change-files">${files
     .map((file) => {
       const count = total?.files?.[file.path];
       return `<span class="turn-change-file"><span>${escapeHtml(file.path)}</span><span>${count ? `<b class="tool-add">+${count.added}</b> <b class="tool-del">-${count.removed}</b>` : escapeHtml(file.status)}</span></span>`;
@@ -1313,10 +1316,28 @@ export function initSidePane(): void {
     }
   }).observe(document.body, { childList: true });
   changesBtn.addEventListener("click", () => openChangesTab(null));
+  // Clicking the card expands or collapses the file list in place;
+  // "View changes" still opens the diff tab. Undo keeps its own
+  // button and never expands.
   $("#messages").addEventListener("click", (event) => {
     if ((event.target as HTMLElement).closest(".turn-change-undo")) return;
-    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-change-turn]");
-    if (button?.dataset.changeTurn) openChangesTab(Number(button.dataset.changeTurn));
+    const card = (event.target as HTMLElement).closest<HTMLElement>(".turn-change-card[data-change-turn]");
+    if (!card?.dataset.changeTurn) return;
+    if ((event.target as HTMLElement).closest(".turn-change-view")) {
+      openChangesTab(Number(card.dataset.changeTurn));
+      return;
+    }
+    card.classList.toggle("turn-change-collapsed");
+    card.setAttribute("aria-expanded", String(!card.classList.contains("turn-change-collapsed")));
+  });
+  $("#messages").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target as HTMLElement;
+    const card = target.closest<HTMLElement>(".turn-change-card[data-change-turn]");
+    if (!card || target.closest("button")) return;
+    event.preventDefault();
+    card.classList.toggle("turn-change-collapsed");
+    card.setAttribute("aria-expanded", String(!card.classList.contains("turn-change-collapsed")));
   });
   layoutBtn.addEventListener("click", () => {
     toggleLayout();

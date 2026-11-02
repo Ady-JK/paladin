@@ -149,34 +149,19 @@
   font-size: 0.8125rem;
   color: var(--color-slate-500);
 }
-.chat-divider > .chat-divider-label,
-.chat-divider summary {
+.chat-divider > .chat-divider-label {
   display: flex;
   align-items: center;
   gap: 12px;
   cursor: default;
 }
-.chat-divider summary {
-  cursor: pointer;
-  list-style: none;
-}
-.chat-divider summary::-webkit-details-marker {
-  display: none;
-}
 .chat-divider > .chat-divider-label::before,
-.chat-divider > .chat-divider-label::after,
-.chat-divider summary::before,
-.chat-divider summary::after {
+.chat-divider > .chat-divider-label::after {
   content: "";
   flex: 1;
   height: 1px;
   background: currentColor;
   opacity: 0.3;
-}
-.chat-divider summary:focus-visible {
-  outline: 2px solid rgb(146 134 214 / 0.55);
-  outline-offset: 2px;
-  border-radius: 4px;
 }
 .chat-divider-summary {
   margin-top: 8px;

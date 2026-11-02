@@ -55,13 +55,16 @@ Include, as applicable:
 Be specific and factual; never invent details. Output only the summary.`
 
 // CompactionStatus tells the UI a context compaction is running or
-// finished. Phase is "start", "done" or "failed".
+// finished. Phase is "start", "done" or "failed". Summary carries the
+// model-written summary on "done" so the UI can show what was kept
+// without re-reading the transcript.
 type CompactionStatus struct {
 	Phase        string `json:"phase"`
 	Reason       string `json:"reason"`
 	TokensBefore int64  `json:"tokensBefore"`
 	TokensAfter  int64  `json:"tokensAfter,omitempty"`
 	Error        string `json:"error,omitempty"`
+	Summary      string `json:"summary,omitempty"`
 }
 
 var errNothingToCompact = errors.New("nothing older than the current exchange to compact")
@@ -350,7 +353,7 @@ func (a *Agent) compact(reason string, before int64) error {
 	summaryMsg := inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)}
 	a.messages = append([]inference.LlmMessage{summaryMsg}, tail...)
 	a.promptTokens, a.promptLen = 0, 0
-	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: a.estimateContext()}})
+	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: a.estimateContext(), Summary: summary}})
 	post := a.hookInput(hooks.PostCompact)
 	post.Trigger = trigger
 	a.runHooks(post)

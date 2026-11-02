@@ -21,6 +21,7 @@ import {
   createRetryNotice,
   createTurn,
   followTail,
+  paintDividerSummary,
   retryText,
   setDividerLabel,
 } from "./chatView";
@@ -421,18 +422,20 @@ export class TurnView {
     this.tail();
   }
 
-  // Compaction gets a divider in the turn; later text streams below it.
+  // Compaction gets a divider in the turn; the done event carries the
+  // summary so the user sees what was kept, later text streams below.
   private compact(info: CompactionInfo): void {
     this.clearRetry();
     if (info.phase === "start" || !this.divider) {
       this.flushSegment();
       this.run = null;
-      this.divider = createCompactionDivider(compactionText(info));
+      this.divider = createCompactionDivider(compactionText(info), info.summary);
       this.container.insertBefore(this.divider, this.segEl.nextSibling);
       this.segment = "";
       this.segEl = this.newSegment(this.divider);
     } else {
       setDividerLabel(this.divider, compactionText(info));
+      if (info.summary) paintDividerSummary(this.divider, info.summary);
     }
     if (info.phase === "start") {
       this.status("compacting context…");

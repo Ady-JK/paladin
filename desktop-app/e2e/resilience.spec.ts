@@ -30,7 +30,13 @@ test("a compaction streams a divider with the token change", async ({ page }) =>
       { event: "chat/compact", compaction: { phase: "start", reason: "auto", tokensBefore: 170000 } },
       {
         event: "chat/compact",
-        compaction: { phase: "done", reason: "auto", tokensBefore: 170000, tokensAfter: 30500 },
+        compaction: {
+          phase: "done",
+          reason: "auto",
+          tokensBefore: 170000,
+          tokensAfter: 30500,
+          summary: "Kept: the user asked for X; Y is done.",
+        },
         waitMs: 600,
       },
     ];
@@ -40,7 +46,38 @@ test("a compaction streams a divider with the token change", async ({ page }) =>
   const divider = page.locator('#messages [data-notice="compaction"]');
   await expect(divider).toContainText("Compacting context");
   await expect(divider).toContainText("Context compacted · 170k → 31k tokens");
+  // The done event carries the summary, so it shows inline with no
+  // reload and no twistie to open.
+  await expect(divider.locator(".chat-divider-summary")).toContainText("Kept: the user asked for X; Y is done.");
   await expect(page.locator("#messages")).toContainText("Stub reply to: keep going");
+});
+
+test("a /compact turn shows its summary inline", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eChatEvents = [
+      { event: "chat/compact", compaction: { phase: "start", reason: "manual", tokensBefore: 90000 } },
+      {
+        event: "chat/compact",
+        compaction: {
+          phase: "done",
+          reason: "manual",
+          tokensBefore: 90000,
+          tokensAfter: 12000,
+          summary: "Kept: auth flow mapped; login.go read.",
+        },
+        waitMs: 600,
+      },
+    ];
+  });
+  // /compact needs a session open; it has no message of its own.
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await page.fill("#promptInput", "/compact");
+  await page.keyboard.press("Enter");
+  const divider = page.locator('#messages [data-notice="compaction"]');
+  await expect(divider).toContainText("Compacting context");
+  await expect(divider).toContainText("Context compacted · 90k → 12k tokens");
+  await expect(divider.locator(".chat-divider-summary")).toContainText("Kept: auth flow mapped; login.go read.");
 });
 
 test("a failed compaction says so without failing the turn", async ({ page }) => {
@@ -59,7 +96,7 @@ test("a failed compaction says so without failing the turn", async ({ page }) =>
   await expect(page.locator("#messages")).toContainText("Stub reply to: keep going");
 });
 
-test("history renders a compaction divider with an expandable summary", async ({ page }) => {
+test("history renders a compaction divider with the summary inline", async ({ page }) => {
   await page.evaluate(() => {
     const w = window as any;
     const base = w.paladin.invoke;
@@ -81,9 +118,9 @@ test("history renders a compaction divider with an expandable summary", async ({
   await expect(page.locator("#messages")).toContainText("Continuing after compaction.");
   const divider = page.locator('#messages [data-notice="compaction"]');
   await expect(divider).toContainText("Context compacted");
-  await expect(divider.locator("details")).not.toHaveAttribute("open", "");
-  await divider.locator("summary").click();
-  await expect(divider).toContainText("The user asked for X; Y is done.");
+  // No twistie: the summary is part of the divider itself.
+  await expect(divider.locator("details")).toHaveCount(0);
+  await expect(divider.locator(".chat-divider-summary")).toContainText("The user asked for X; Y is done.");
   const text = (await page.locator("#messages").textContent()) ?? "";
   expect(text.indexOf("Did the first part.")).toBeLessThan(text.indexOf("Context compacted"));
   expect(text.indexOf("Context compacted")).toBeLessThan(text.indexOf("Continuing after compaction."));

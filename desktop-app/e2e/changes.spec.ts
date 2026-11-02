@@ -32,7 +32,18 @@ test("a turn's files open a snapshot diff and the header opens session changes",
   await expect(turnChange).toContainText("2 files");
   await expect(turnChange).toContainText("+2");
   await expect(turnChange).toContainText("-0");
+  // The file list is collapsed by default: one summary line with the
+  // counts, no visible per-file rows until the card is opened.
+  await expect(turnChange.locator(".turn-change-file:visible")).toHaveCount(0);
+  await expect(turnChange).toHaveAttribute("aria-expanded", "false");
   await turnChange.click();
+  await expect(turnChange.locator(".turn-change-file:visible")).toHaveCount(2);
+  await expect(turnChange).toHaveAttribute("aria-expanded", "true");
+  await turnChange.click();
+  await expect(turnChange.locator(".turn-change-file:visible")).toHaveCount(0);
+  // Expanding first, then View changes opens the diff tab.
+  await turnChange.click();
+  await turnChange.locator(".turn-change-view").click();
   await expect(page.locator("#sidePane .pane-changes")).toBeVisible();
   await page.locator('#sidePane [data-change-file="index.html"]').click();
   await expect(page.locator("#sidePane .change-diff")).toContainText("+<h1>Hello</h1>");

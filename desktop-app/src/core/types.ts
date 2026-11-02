@@ -321,12 +321,15 @@ export type RetryInfo = {
 
 // CompactionInfo is a chat/compact event. reason is "auto" (near the
 // context window) or "overflow" (provider rejected the prompt).
+// summary is the model-written summary on a done phase, so the UI can
+// show what was kept without re-reading the transcript.
 export type CompactionInfo = {
   phase: "start" | "done" | "failed";
   reason: string;
   tokensBefore: number;
   tokensAfter?: number;
   error?: string;
+  summary?: string;
 };
 
 export type ToolInfo = {

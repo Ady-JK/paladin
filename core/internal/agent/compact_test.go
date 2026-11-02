@@ -145,6 +145,9 @@ func TestReactiveCompactionRecoversOverflow(t *testing.T) {
 	if len(st) != 2 || st[0].Phase != "start" || st[1].Phase != "done" || st[1].Reason != "overflow" {
 		t.Fatalf("status %+v", st)
 	}
+	if st[1].Summary != "SUM" {
+		t.Fatalf("done event must carry the summary for the UI, got %+v", st[1])
+	}
 	// Reloading from disk yields the same model view as the retried round.
 	h, err := sess.History()
 	if err != nil {

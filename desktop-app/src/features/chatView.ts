@@ -230,8 +230,9 @@ export function compactionText(info: CompactionInfo): string {
 }
 
 // createCompactionDivider builds the full-width divider marking where
-// older conversation was replaced by a summary. A summary (history
-// view) sits in a collapsed <details>.
+// older conversation was replaced by a summary. The summary (live text
+// or history rows) sits below the label, expanded: the point is to read
+// what was kept, not to hide it behind a twistie.
 export function createCompactionDivider(label: string, summary?: string): HTMLElement {
   const el = document.createElement("div");
   el.className = "chat-divider";
@@ -240,20 +241,26 @@ export function createCompactionDivider(label: string, summary?: string): HTMLEl
   const text = document.createElement("span");
   text.className = "chat-divider-label";
   text.textContent = label;
+  el.append(text);
   if (summary) {
-    const details = document.createElement("details");
-    details.className = "chat-divider-details";
-    const sum = document.createElement("summary");
-    sum.append(text);
     const body = document.createElement("div");
     body.className = "md chat-divider-summary";
     body.innerHTML = renderMarkdown(summary);
-    details.append(sum, body);
-    el.append(details);
-  } else {
-    el.append(text);
+    el.append(body);
   }
   return el;
+}
+
+// paintDividerSummary sets the summary on a live divider once the done
+// event carries it.
+export function paintDividerSummary(el: HTMLElement, summary: string): void {
+  let body = el.querySelector<HTMLElement>(".chat-divider-summary");
+  if (!body) {
+    body = document.createElement("div");
+    body.className = "md chat-divider-summary";
+    el.append(body);
+  }
+  body.innerHTML = renderMarkdown(summary);
 }
 
 // setDividerLabel updates a live divider's text.

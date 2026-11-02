@@ -274,7 +274,7 @@ More streaming events:
 ```json
 {"event": "chat/retry", "sessionId": "...", "retry": {"attempt": 1, "max": 6, "delayMs": 2000, "reason": "status 503: overloaded"}}
 {"event": "chat/compact", "sessionId": "...", "compaction": {"phase": "start", "reason": "auto", "tokensBefore": 170000}}
-{"event": "chat/compact", "sessionId": "...", "compaction": {"phase": "done", "reason": "auto", "tokensBefore": 170000, "tokensAfter": 30000}}
+{"event": "chat/compact", "sessionId": "...", "compaction": {"phase": "done", "reason": "auto", "tokensBefore": 170000, "tokensAfter": 30000, "summary": "..."}}
 ```
 
 - `chat/retry`: a round failed with a transient provider error (429,
@@ -282,9 +282,11 @@ More streaming events:
   after `delayMs` (exponential backoff, or the server's Retry-After).
   Any progress resets the retry budget.
 - `chat/compact`: context compaction. `reason` is `auto` (the next
-  request would fill 85% of a known context window) or `overflow` (the
-  provider rejected the prompt as too long). `phase` is `start`, then
-  `done` or `failed` (with `error`). The older conversation is replaced
+  request would fill 85% of a known context window), `overflow` (the
+  provider rejected the prompt as too long), or `manual` (the user ran
+  `/compact`). `phase` is `start`, then `done` (with `summary`, the
+  model-written summary) or `failed` (with `error`). The older
+  conversation is replaced
   by a model-written summary; the transcript keeps everything, and
   `sessionHistory` shows a `{"role": "system", "kind": "compaction",
   "content": "<summary>"}` divider where it happened. A turn may

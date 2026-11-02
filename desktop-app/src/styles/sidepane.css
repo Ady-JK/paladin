@@ -149,6 +149,19 @@
   padding: 14px 16px;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
+}
+.turn-change-caret {
+  color: var(--color-slate-400);
+  transform: rotate(-90deg);
+  transition: transform 160ms ease;
+  flex-shrink: 0;
+}
+.turn-change-card:not(.turn-change-collapsed) .turn-change-caret {
+  transform: none;
+}
+.turn-change-card.turn-change-collapsed .turn-change-files {
+  display: none;
 }
 .turn-change-view {
   margin-left: auto;
