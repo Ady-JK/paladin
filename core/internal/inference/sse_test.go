@@ -6,8 +6,11 @@ package inference
 
 import (
 	"bufio"
+	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -83,5 +86,36 @@ func TestSSEFilterOnlyWrapsEventStreams(t *testing.T) {
 	}
 	if _, wrapped := resp.Body.(*sseFilter); wrapped {
 		t.Fatal("plain JSON response must not be wrapped")
+	}
+}
+
+// TestStreamSurvivesGatewayKeepalives is the end-to-end proof through
+// the real SDK client: a keepalive frame with no data mid-reply must
+// not end the stream with "unexpected end of JSON input".
+func TestStreamSurvivesGatewayKeepalives(t *testing.T) {
+	sse := "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n" +
+		"data:\n\n" + // gateway ping, exactly what killed the stream
+		"event: ping\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sse)
+	}))
+	defer server.Close()
+	p := providerFor(server.URL)
+	tx := make(chan Chunk, 64)
+	done := make(chan struct{})
+	defer close(done)
+	if err := p.StreamTools(context.Background(), "sys", nil, nil, "sess", tx, done); err != nil {
+		t.Fatalf("a keepalive must not fail the stream: %v", err)
+	}
+	close(tx)
+	var text strings.Builder
+	for chunk := range tx {
+		text.WriteString(chunk.Text)
+	}
+	if text.String() != "Hello" {
+		t.Fatalf("reply truncated by a keepalive: %q", text.String())
 	}
 }
