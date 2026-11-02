@@ -83,7 +83,8 @@ func compactionUserContent(summary string) string {
 }
 
 const compactSummaryDefault = "This session was compacted to fit the model's context window. Summary of the earlier conversation:\n\n" +
-	"{{summary}}\n\n(The conversation continues below. Re-read files before relying on exact contents.)"
+	"{{summary}}\n\n(The conversation continues below. Re-read files before relying on exact contents.)\n\n" +
+	"(Persistent memory is unaffected by compaction: the user profile, global notes and folder memory are still in your system prompt.)"
 
 // estimateTokens is a cheap chars/4 estimate, used only where no
 // provider-reported count exists.

@@ -45,7 +45,7 @@ func (r *AgentRuntime) registerCustomizable() {
 			File:        "lsp.json", Default: func() string { return "{\n  \"timeoutMs\": 1500,\n  \"servers\": {}\n}\n" },
 			Validate: lsp.ValidateConfig},
 		custom.Item{ID: "file.memory", Group: "Settings files", Title: "memory.json", Order: 2, Kind: custom.KindJSON,
-			Description: "Persistent memory: per-target char budgets, which scopes are switched on, the backend provider, and how many turns may pass without a write before a review is suggested. Reset deletes the file, so every setting returns to its default.",
+			Description: "Persistent memory: per-target char budgets, which scopes are switched on, the backend provider, reviewTurns (turns without a write before one short reminder joins the prompt) and autoReview (fork a memory-review subagent after a turn; off by default because it is a second model request). Reset deletes the file, so every setting returns to its default.",
 			File:        "memory.json", Default: memory.DefaultConfigText, Validate: memory.ValidateConfig},
 	)
 	for i, k := range subagentKinds {

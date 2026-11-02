@@ -134,7 +134,9 @@ func (m *subagentManager) spawnCall(raw json.RawMessage, ctx *tools.ToolCtx) (an
 		return nil, err
 	}
 	kind, ok := findSubagentKind(strings.TrimSpace(a.AgentType))
-	if !ok {
+	// A runtime-spawned kind is never a delegation target: the model
+	// naming it would be a wasted turn, not a capability.
+	if !ok || !subagentKindVisible(kind.Name) {
 		return nil, fmt.Errorf("agent_type must be one of %s, got %q", strings.Join(subagentKindNames(), ", "), a.AgentType)
 	}
 	task := strings.TrimSpace(a.Task)

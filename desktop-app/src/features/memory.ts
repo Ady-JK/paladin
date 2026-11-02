@@ -27,6 +27,9 @@ let projectCwd = "";
 let loading = 0;
 let snapshot: MemorySnapshotState = { frozen: false, stale: false, changed: [] };
 let config: MemoryConfigView | null = null;
+// filter narrows the entries shown in every section, so a store with a
+// hundred entries is browsable without leaving the pane.
+let filter = "";
 
 function keyOf(target: MemoryTarget, cwd: string): string {
   return target === "project" ? `project:${cwd}` : target;
@@ -89,23 +92,31 @@ function sectionHtml(s: Section, idx: number): string {
     v.target === "project" && v.cwd
       ? `<span class="mem-cwd" title="${escapeHtml(v.cwd)}">${escapeHtml(shortPath(v.cwd))}</span>`
       : "";
+  const needle = filter.trim().toLowerCase();
+  // Keep the original index: edits and removals address the store, not
+  // the filtered view.
+  const visible = v.entries.map((e, i) => ({ e, i })).filter(({ e }) => !needle || e.toLowerCase().includes(needle));
   const rows = v.entries.length
-    ? v.entries
-        .map(
-          (e, i) =>
-            `<li class="mem-entry" data-mem-entry="${i}">` +
-            `<span class="mem-entry-text" data-mem-edit="${i}" title="Click to edit">${escapeHtml(e)}</span>` +
-            `<button type="button" class="mem-x" data-mem-remove="${i}" title="Forget this" aria-label="Forget this entry">${icon("xmark", "h-3 w-3")}</button></li>`,
-        )
-        .join("")
+    ? visible.length
+      ? visible
+          .map(
+            ({ e, i }) =>
+              `<li class="mem-entry" data-mem-entry="${i}">` +
+              `<span class="mem-entry-text" data-mem-edit="${i}" title="Click to edit">${escapeHtml(e)}</span>` +
+              `<button type="button" class="mem-x" data-mem-remove="${i}" title="Forget this" aria-label="Forget this entry">${icon("xmark", "h-3 w-3")}</button></li>`,
+          )
+          .join("")
+      : `<li class="mem-none" data-mem-nomatch>No entry matches “${escapeHtml(filter.trim())}”.</li>`
     : `<li class="mem-none">Nothing remembered yet.</li>`;
+  const moved = snapshot.stale && snapshot.changed.includes(v.target);
+  const dot = moved ? `<span class="mem-dot" data-mem-moved title="Changed outside this session"></span>` : "";
   const off = v.enabled === false;
   const addRow = off
     ? `<div class="mem-off" data-mem-off>Switched off in memory.json — Paladin will not read or write this store.</div>`
     : `<input type="text" class="mem-add" data-mem-add placeholder="Add a memory and press Enter…" spellcheck="false" />`;
   return (
     `<section class="mem-section${off ? " is-off" : ""}" data-mem-target="${v.target}" data-mem-idx="${idx}">` +
-    `<header class="mem-head"><div><div class="mem-title">${title}${where}</div><div class="mem-blurb">${blurb}</div></div>${usage(v)}</header>` +
+    `<header class="mem-head"><div><div class="mem-title">${dot}${title}${where}</div><div class="mem-blurb">${blurb}</div></div>${usage(v)}</header>` +
     `<ul class="mem-list">${rows}</ul>` +
     addRow +
     `</section>`
@@ -137,11 +148,25 @@ function paint(): void {
     config && config.provider !== "file"
       ? ` <span class="mem-provider" title="Set in memory.json">provider: ${escapeHtml(config.provider)}</span>`
       : "";
+  const total = sections.reduce((n, s) => n + s.view.entries.length, 0);
+  const finder =
+    total > 6
+      ? `<input type="search" class="mem-filter" data-mem-filter value="${escapeHtml(filter)}" ` +
+        `placeholder="Filter ${total} entries…" aria-label="Filter memory entries" spellcheck="false" />`
+      : "";
   memoryBodyEl.innerHTML =
     `<div class="mem-intro"><p>Paladin saves durable facts here through its memory tool. Sessions read a snapshot when they start.${provider}</p>${refresh}</div>` +
     stale +
+    finder +
     sections.map(sectionHtml).join("") +
     folderPick;
+  // Repainting rebuilt the input, so restore focus and caret for the
+  // keystroke that triggered it.
+  if (filter && finder) {
+    const input = memoryBodyEl.querySelector<HTMLInputElement>("[data-mem-filter]");
+    input?.focus();
+    input?.setSelectionRange(filter.length, filter.length);
+  }
 }
 
 async function save(idx: number, entries: string[]): Promise<void> {
@@ -219,6 +244,7 @@ export function initMemory(): void {
     }
     const folder = t.closest<HTMLElement>("[data-mem-folder]");
     if (folder?.dataset.memFolder) {
+      filter = "";
       void loadMemory(folder.dataset.memFolder);
       return;
     }
@@ -229,8 +255,22 @@ export function initMemory(): void {
         .catch((error) => toast(`Refresh failed: ${String(error)}`, "error"));
     }
   });
+  memoryBodyEl.addEventListener("input", (event) => {
+    const t = event.target as HTMLElement;
+    if (!(t instanceof HTMLInputElement) || !t.matches("[data-mem-filter]")) return;
+    filter = t.value;
+    paint();
+  });
   memoryBodyEl.addEventListener("keydown", (event) => {
     const t = event.target as HTMLElement;
+    if (t instanceof HTMLInputElement && t.matches("[data-mem-filter]")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        filter = "";
+        paint();
+      }
+      return;
+    }
     if (!(t instanceof HTMLInputElement) || !t.matches("[data-mem-add]") || event.key !== "Enter") return;
     event.preventDefault();
     const text = t.value.trim();

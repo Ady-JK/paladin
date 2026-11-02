@@ -4,6 +4,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
+	"github.com/Ady-JK/paladin/core/internal/sessionindex"
 	"github.com/Ady-JK/paladin/core/internal/skills"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -86,11 +88,29 @@ func SkillCatalog(dataDir, cwd string, max int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// SessionSearchTool searches past session transcripts.
-type SessionSearchTool struct{ store *transcript.Store }
+// SessionSearchTool searches past session transcripts. It prefers the
+// SQLite FTS index when one is attached (ranked, and it does not read the
+// corpus) and falls back to substring matching over the transcripts when
+// the index is missing or fails, so recall never disappears entirely.
+type SessionSearchTool struct {
+	store *transcript.Store
+	index *sessionindex.Index
+	// beforeSearch, when set, brings the index up to date. It runs at
+	// most once per turn (the runtime guards it), so recall pays the
+	// refresh cost only when it is actually used.
+	beforeSearch func(context.Context)
+}
 
 func NewSessionSearchTool(store *transcript.Store) *SessionSearchTool {
 	return &SessionSearchTool{store: store}
+}
+
+// WithIndex attaches the FTS index and the hook that keeps it current. A
+// nil index keeps the substring path.
+func (t *SessionSearchTool) WithIndex(idx *sessionindex.Index, beforeSearch func(context.Context)) *SessionSearchTool {
+	t.index = idx
+	t.beforeSearch = beforeSearch
+	return t
 }
 
 func (*SessionSearchTool) Name() string       { return "session_search" }
@@ -100,8 +120,8 @@ func (*SessionSearchTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "session_search",
 		Description: "Search the user's past Paladin sessions (other conversations, not this one) for " +
-			"earlier decisions, fixes, commands, or context. Matches sessions containing every query " +
-			"word (case-insensitive) and returns titles with matching snippets. Scope `folder` (default) " +
+			"earlier decisions, fixes, commands, or context. Full-text: every query word must appear, " +
+			"ranked by relevance, with a snippet from the best-matching message. Scope `folder` (default) " +
 			"searches sessions of the current workspace; `all` searches every folder.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -161,6 +181,10 @@ func (t *SessionSearchTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, err
 			cwd = ctx.Workspace
 		}
 	}
+	if hits, err := t.searchIndex(ctx, args.Query, cwd, self, limit); err == nil && hits != nil {
+		data, _ := jsonx.Marshal(map[string]any{"query": args.Query, "matches": len(hits), "results": hits, "source": "fts"})
+		return string(data), nil
+	}
 	infos, err := t.store.List(cwd, searchMaxSessions)
 	if err != nil {
 		return "", ArgsError("session_search: " + err.Error())
@@ -198,8 +222,36 @@ func (t *SessionSearchTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, err
 	if hits == nil {
 		hits = []searchHit{}
 	}
-	data, _ := jsonx.Marshal(map[string]any{"query": args.Query, "matches": total, "results": hits, "searched": len(infos)})
+	data, _ := jsonx.Marshal(map[string]any{"query": args.Query, "matches": total, "results": hits, "searched": len(infos), "source": "scan"})
 	return string(data), nil
+}
+
+// searchIndex answers from the FTS index. It returns (nil, nil) when there
+// is no index, which sends the caller down the substring path; a real
+// error is also a fallback, never a failed search.
+func (t *SessionSearchTool) searchIndex(ctx *ToolCtx, query, cwd, self string, limit int) ([]searchHit, error) {
+	if t.index == nil {
+		return nil, nil
+	}
+	ctxv := context.Background()
+	if ctx != nil && ctx.Cancel != nil {
+		ctxv = ctx.Cancel
+	}
+	if t.beforeSearch != nil {
+		t.beforeSearch(ctxv)
+	}
+	hits, err := t.index.Search(ctxv, query, cwd, self, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]searchHit, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, searchHit{
+			SessionID: h.SessionID, Title: h.Title, Cwd: h.Cwd, Created: h.Created,
+			Score: h.Score, Snippets: []searchSnippet{{Role: h.Role, Text: h.Snippet}},
+		})
+	}
+	return out, nil
 }
 
 // matchSession requires every term somewhere in the session's user and

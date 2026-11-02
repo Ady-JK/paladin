@@ -24,6 +24,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
+	"github.com/Ady-JK/paladin/core/internal/sessionindex"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -91,6 +92,8 @@ type AgentRuntime struct {
 	settingsMu    sync.Mutex
 	store         *config.Store
 	transcripts   *transcript.Store
+	sessionIndex  *sessionindex.Index
+	indexOnce     *sync.Once
 	catalog       *tools.Catalog
 	tools         *tools.Registry
 	shell         *tools.ShellTool
@@ -192,7 +195,13 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	r.registerAgentTools()
 	r.registerCustomizable()
 	r.hub = NewHub(r.runTurn, r.maxConcurrentTurns)
-	r.hub.SetOnDone(r.subagents.onDone)
+	// One done-listener, chained: the subagent bookkeeping runs first
+	// (results are delivered before anything else looks at the turn),
+	// then the memory review loop.
+	r.hub.SetOnDone(func(info TurnInfo) {
+		r.subagents.onDone(info)
+		r.afterTurn(info)
+	})
 	return r
 }
 

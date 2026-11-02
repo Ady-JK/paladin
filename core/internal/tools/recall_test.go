@@ -1,12 +1,14 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Ady-JK/paladin/core/internal/sessionindex"
 	"github.com/Ady-JK/paladin/core/internal/skills"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -95,5 +97,60 @@ func TestSnippetUnicodeSafe(t *testing.T) {
 	s := snippet(text, []string{"needle"})
 	if !strings.Contains(s, "needle") || !strings.HasPrefix(s, "…") {
 		t.Fatalf("snippet = %q", s)
+	}
+}
+
+// TestSessionSearchPrefersTheIndex checks the FTS path answers from the
+// index, and that a missing index still finds the same session by
+// scanning — the fallback that keeps recall from disappearing.
+func TestSessionSearchPrefersTheIndex(t *testing.T) {
+	data := t.TempDir()
+	store := transcript.NewStore(filepath.Join(data, "sessions"))
+	sess, err := store.Create("/w", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Append(transcript.RoleUser, "we run the litellm proxy on port 4000"); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := sessionindex.Open(sessionindex.Path(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = idx.Close() }()
+	refreshed := 0
+	tool := NewSessionSearchTool(store).WithIndex(idx, func(context.Context) {
+		refreshed++
+		if _, err := idx.Refresh(context.Background(), sessionindex.Source{Store: store, DataDir: data}); err != nil {
+			t.Errorf("refresh: %v", err)
+		}
+	})
+	out, err := tool.Call(json.RawMessage(`{"query":"litellm port"}`), &ToolCtx{Workspace: "/w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Source  string
+		Results []searchHit
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Source != "fts" || len(res.Results) != 1 || res.Results[0].SessionID != sess.Meta.SessionID {
+		t.Fatalf("index path = %s", out)
+	}
+	if refreshed != 1 {
+		t.Fatalf("index refreshed %d times, want 1 per search", refreshed)
+	}
+
+	// Without an index, the same query still finds the session.
+	plain := NewSessionSearchTool(store)
+	out, err = plain.Call(json.RawMessage(`{"query":"litellm port"}`), &ToolCtx{Workspace: "/w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal([]byte(out), &res)
+	if res.Source != "scan" || len(res.Results) != 1 {
+		t.Fatalf("fallback path = %s", out)
 	}
 }

@@ -42,9 +42,12 @@ type Config struct {
 	// Provider names the storage backend. Empty means ProviderFile.
 	Provider string `json:"provider,omitempty"`
 	// ReviewTurns is how many turns may pass without a memory write
-	// before the runtime nudges for a background review. Zero means the
+	// before one short nudge paragraph joins the prompt. Zero means the
 	// built-in default; see ReviewTurnsDefault.
 	ReviewTurns int `json:"reviewTurns,omitempty"`
+	// AutoReview, when true, runs the background review fork after a
+	// turn finishes. Off by default: a review is a second model request.
+	AutoReview bool `json:"autoReview,omitempty"`
 }
 
 // Limits holds the per-scope budgets.
@@ -188,8 +191,17 @@ func (c Config) validate() error {
 	if c.ReviewTurns < 0 {
 		return errors.New("memory.json: reviewTurns must be zero (default) or positive")
 	}
+	if c.AutoReview {
+		if err := c.autoReviewDepsOnly(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
+// autoReviewDepsOnly is where a future backend constraint would land.
+// The file provider needs nothing extra, so it accepts.
+func (c Config) autoReviewDepsOnly() error { return nil }
 
 // DefaultConfigText is what Settings → Customize shows for a reset.
 func DefaultConfigText() string {
@@ -198,7 +210,8 @@ func DefaultConfigText() string {
 		Disabled    []string `json:"disabled"`
 		Provider    string   `json:"provider"`
 		ReviewTurns int      `json:"reviewTurns"`
-	}{Limits: Limits{User: LimitUser, Global: LimitGlobal, Project: LimitProject}, Disabled: []string{}, Provider: ProviderFile, ReviewTurns: ReviewTurnsDefault}, "", "  ")
+		AutoReview  bool     `json:"autoReview"`
+	}{Limits: Limits{User: LimitUser, Global: LimitGlobal, Project: LimitProject}, Disabled: []string{}, Provider: ProviderFile, ReviewTurns: ReviewTurnsDefault, AutoReview: false}, "", "  ")
 	if err != nil {
 		return "{}\n"
 	}

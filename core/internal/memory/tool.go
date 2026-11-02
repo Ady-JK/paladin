@@ -82,6 +82,11 @@ func (t *Tool) Call(raw json.RawMessage, ctx *tools.ToolCtx) (string, error) {
 		res, err = t.bank.Read(target, cwd)
 	} else {
 		res, err = t.apply(target, cwd, args.Operations)
+		if err == nil && ctx != nil && ctx.SessionDir != "" {
+			// The turn counter lives beside the transcript: a write resets
+			// the review nudge, a turn without one advances it.
+			_ = NoteWrite(ctx.SessionDir)
+		}
 	}
 	if err != nil {
 		msg := "memory: " + err.Error()

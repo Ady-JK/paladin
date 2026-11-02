@@ -194,3 +194,42 @@ test("the sidebar row menu renames inline and forks", async ({ page }) => {
   await menu.getByRole("menuitem", { name: "Fork", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eForks?.[0]?.sessionId)).toBe("sess-notify-1");
 });
+
+test("a large memory store can be filtered without losing entry addresses", async ({ page }) => {
+  // Enough entries in one scope for the pane to offer its filter box.
+  await page.evaluate(() => {
+    (window as any).__e2eMemory = {
+      "global:": [
+        "uses pnpm workspaces",
+        "tests run via make test",
+        "playwright drives the renderer",
+        "go tests are plain TestXxx",
+        "lint runs golangci-lint",
+        "prettier is 120 columns",
+        "anthropic dialect is not wired",
+      ],
+    };
+  });
+  await page.fill("#promptInput", "/memories");
+  await page.keyboard.press("Enter");
+  const pane = page.locator("#settingsPaneMemory");
+  await expect(pane).toBeVisible();
+
+  const filter = pane.locator("[data-mem-filter]");
+  await expect(filter).toBeVisible();
+  await filter.fill("playwright");
+  await expect(pane.locator('[data-mem-target="global"] .mem-entry')).toHaveCount(1);
+  await expect(pane.locator('[data-mem-target="global"] .mem-entry')).toContainText("playwright");
+  // The filter is a view, not a rewrite: the surviving row keeps its
+  // original index so editing it addresses the right entry.
+  await expect(pane.locator('[data-mem-target="global"] [data-mem-entry]').first()).toHaveAttribute(
+    "data-mem-entry",
+    "2",
+  );
+
+  await filter.fill("nothing matches this");
+  await expect(pane.locator('[data-mem-target="global"] [data-mem-nomatch]')).toBeVisible();
+
+  await filter.press("Escape");
+  await expect(pane.locator('[data-mem-target="global"] .mem-entry')).toHaveCount(7);
+});

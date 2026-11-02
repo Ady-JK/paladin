@@ -5,11 +5,15 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/instructions"
 	"github.com/Ady-JK/paladin/core/internal/memory"
+	"github.com/Ady-JK/paladin/core/internal/sessionindex"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -20,10 +24,18 @@ const skillCatalogMax = 40
 // registerKnowledgeTools adds the tools that need the data dir or the
 // transcript store to the shared registry.
 func (r *AgentRuntime) registerKnowledgeTools() {
+	r.indexOnce = new(sync.Once)
 	r.memory = memory.NewBankWithConfig(r.dataDir, memory.LoadConfigOr(r.dataDir))
 	r.tools.Register(memory.NewTool(r.memory))
 	r.tools.Register(tools.NewSkillTool(r.dataDir))
-	r.tools.Register(tools.NewSessionSearchTool(r.transcripts))
+	search := tools.NewSessionSearchTool(r.transcripts)
+	if idx, err := sessionindex.Open(sessionindex.Path(r.dataDir)); err == nil {
+		search.WithIndex(idx, r.refreshSessionIndex)
+		r.sessionIndex = idx
+	} else {
+		fmt.Fprintf(os.Stderr, "session_search: full-text index unavailable, falling back to scanning: %v\n", err)
+	}
+	r.tools.Register(search)
 }
 
 // runtimeSections adapts the knowledge sources to agent.SectionSource.
@@ -40,12 +52,31 @@ func (s runtimeSections) SystemSections(sess transcript.Session) []string {
 	out = append(out, mcpSection(s.r.mcp, sess.Meta.ProjectCwd()))
 	if s.r.memory != nil {
 		out = append(out, s.r.memory.SessionSnapshot(sess.Dir, sess.Meta.ProjectCwd()))
+		// Turn-count staleness: after enough turns with no memory write,
+		// one short reminder joins the prompt. It is empty (and the
+		// prompt unchanged) on every other turn.
+		out = append(out, s.r.memory.DueForNudge(sess.Dir))
 	}
 	if wt := sess.Meta.Worktree; wt != nil {
 		out = append(out, worktreeSection(wt))
 	}
 	out = append(out, s.r.switchedOffSection(sess.Meta))
 	return out
+}
+
+// refreshSessionIndex brings the FTS cache up to date at most once per
+// turn, and only when something in the corpus changed. It runs on the
+// search path, never on the turn path, so a slow disk costs recall
+// latency rather than turn latency.
+func (r *AgentRuntime) refreshSessionIndex(ctx context.Context) {
+	if r.sessionIndex == nil {
+		return
+	}
+	r.indexOnce.Do(func() {
+		if _, err := r.sessionIndex.Refresh(ctx, sessionindex.Source{Store: r.transcripts, DataDir: r.dataDir}); err != nil {
+			fmt.Fprintf(os.Stderr, "session_search: index refresh: %v\n", err)
+		}
+	})
 }
 
 // MemoryView is one memory store as the settings pane shows it.

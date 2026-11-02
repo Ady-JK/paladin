@@ -49,6 +49,25 @@ Report concrete findings: where things live, how they connect, and anything surp
 Do not propose large redesigns unless asked.`,
 	},
 	{
+		// The memory review fork: it may read to check a fact, but the
+		// only thing it can change is memory. It never edits the
+		// workspace, so a review can never race the user's own edits.
+		Name:        "memory-review",
+		Description: "Review a conversation for durable facts and save them to memory. Memory writes only: it cannot change the workspace.",
+		Tools:       []string{"memory", "read", "grep", "glob", "list"},
+		Role: `## Role: memory review
+The conversation above is finished. Decide what, if any, durable facts it
+produced, then save them with the memory tool.
+
+You cannot change the workspace: no write, no edit, no shell. Reading is
+allowed to confirm a fact you are about to save (the version in go.mod,
+the command in the Makefile) — do it instead of guessing.
+
+Prefer quality over volume. One precise entry beats five vague ones. Patch
+an existing entry that is now wrong or incomplete rather than adding a
+near-duplicate. Save nothing when nothing clears the bar.`,
+	},
+	{
 		Name:        "reviewer",
 		Description: "Read-only code review: inspect a diff or files for bugs, regressions, missing tests and risky changes.",
 		Tools:       []string{"read", "grep", "glob", "list", "shell"},
@@ -59,6 +78,26 @@ regressions, security issues, missing error handling or tests. For each,
 give the file and line, why it is wrong, and a suggested fix. Skip style
 nits. If you find nothing significant, say so plainly.`,
 	},
+}
+
+// reviewKind is the memory review fork's kind. Looked up by name so the
+// runtime and the customize pane agree on one definition.
+func reviewKind() subagentKind {
+	k, ok := findSubagentKind("memory-review")
+	if !ok {
+		return subagentKind{Name: "memory-review", Tools: []string{"memory"}}
+	}
+	return k
+}
+
+// hiddenSubagentKinds are spawned by the runtime, not offered to the
+// model: they would only waste a delegation on work the runtime starts
+// itself.
+var hiddenSubagentKinds = []string{"memory-review"}
+
+// subagentKindVisible reports whether the model may spawn a kind.
+func subagentKindVisible(name string) bool {
+	return !slices.Contains(hiddenSubagentKinds, name)
 }
 
 func findSubagentKind(name string) (subagentKind, bool) {
@@ -73,7 +112,9 @@ func findSubagentKind(name string) (subagentKind, bool) {
 func subagentKindNames() []string {
 	names := make([]string, 0, len(subagentKinds))
 	for _, k := range subagentKinds {
-		names = append(names, k.Name)
+		if subagentKindVisible(k.Name) {
+			names = append(names, k.Name)
+		}
 	}
 	sort.Strings(names)
 	return names
