@@ -133,6 +133,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     chevron: true,
   },
   {
+    name: "thinking",
+    label: "Thinking",
+    desc: "Set how hard the model thinks, or show the options",
+    hint: "/thinking [level]",
+    icon: "zap-line",
+    args: "optional",
+    chevron: true,
+  },
+  {
     name: "budget",
     label: "Budget",
     desc: "Set this session's spend limit",

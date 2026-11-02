@@ -37,7 +37,7 @@ test("the thinking card is exclusive with the other popovers", async ({ page }) 
   await page.press("#modelSearch", "Enter");
   await page.click("#budgetChip");
   await expect(page.locator("#budgetMenu")).toBeVisible();
-  await page.click("#thinkingChip");
+  await page.click("#thinkingMore");
   await expect(page.locator("#thinkingMenu")).toBeVisible();
   await expect(page.locator("#budgetMenu")).toBeHidden();
   await page.click("#toolsChip");

@@ -179,6 +179,37 @@ func TestConfiguredKeyStillReadsTheListing(t *testing.T) {
 	}
 }
 
+// A cached provider was built with the metadata known at the time, so a
+// refresh must drop it: otherwise the new listing's dialect and levels
+// would not reach a turn for the rest of the process.
+func TestRefreshEvictsTheCachedProvider(t *testing.T) {
+	rt, _ := testRuntime(t)
+	rt.SetCatalogFetcher(catalogFetcher(CatalogFetch{
+		Models: []string{"m"},
+		Meta:   map[string]config.ModelMeta{"m": {Protocol: "chat", ThinkingLevels: []string{"low"}, ThinkingKnown: true}},
+	}))
+	if _, err := rt.RefreshProvider(config.DefaultProviderName); err != nil {
+		t.Fatal(err)
+	}
+	rt.cacheMu.Lock()
+	rt.providerCache["Opencode Go\x00m"] = nil
+	rt.cacheMu.Unlock()
+
+	rt.SetCatalogFetcher(catalogFetcher(CatalogFetch{
+		Models: []string{"m"},
+		Meta:   map[string]config.ModelMeta{"m": {Protocol: "anthropic", ThinkingLevels: []string{"low", "high"}, ThinkingKnown: true}},
+	}))
+	if _, err := rt.RefreshProvider(config.DefaultProviderName); err != nil {
+		t.Fatal(err)
+	}
+	rt.cacheMu.Lock()
+	_, cached := rt.providerCache["Opencode Go\x00m"]
+	rt.cacheMu.Unlock()
+	if cached {
+		t.Fatal("a refresh must evict the provider built with the old metadata")
+	}
+}
+
 // A listing that publishes no metadata leaves what was learned before
 // standing, so refreshing a provider that never describes its models
 // cannot erase an earlier answer.

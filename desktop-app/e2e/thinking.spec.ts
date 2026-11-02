@@ -31,65 +31,134 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#promptInput")).toBeVisible();
 });
 
-test("the thinking chip opens a slider card that sets the model's level", async ({ page }) => {
+test("the thinking strip above the composer sets a level in one click", async ({ page }) => {
   await pickModel(page, "claude-3-opus");
-  const chip = page.locator("#thinkingChip");
-  await expect(chip).toBeVisible();
-  await expect(chip).toContainText("Default");
+  const strip = page.locator(".think-inline");
+  await expect(strip).toBeVisible();
+  // Every level the model takes is a click away, in order.
+  const pills = strip.locator(".think-pill");
+  await expect(pills).toHaveText(["Low", "Medium", "High", "Extra High", "Max"]);
+  // Nothing chosen yet, so no pill is on: the provider decides.
+  await expect(strip.locator(".think-pill.is-on")).toHaveCount(0);
 
-  await chip.click();
+  await strip.locator('.think-pill[data-level="medium"]').click();
+  await expect(strip.locator('.think-pill[data-level="medium"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(strip.locator(".think-pill.is-on")).toHaveCount(1);
+  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("medium");
+  expect((await sets(page)).at(-1).model).toBe("anthropic/claude-3-opus");
+});
+
+test("the More button opens the slider card for keyboard work", async ({ page }) => {
+  await pickModel(page, "claude-3-opus");
   const card = page.locator("#thinkingMenu");
+  await page.click("#thinkingMore");
   await expect(card).toBeVisible();
   await expect(card.locator(".think-level")).toHaveText("Default");
   await expect(card.locator(".think-model")).toContainText("claude-3-opus");
   const slider = card.locator('input[type="range"]');
   await expect(slider).toHaveAttribute("aria-valuetext", "Default");
-  await expect(slider).toHaveAttribute("max", "6");
+  // Five levels plus the provider default.
+  await expect(slider).toHaveAttribute("max", "5");
 
   await slider.focus();
+  // Stop 0 is the provider default, so two steps in is Medium.
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
-  await expect(card.locator(".think-level")).toHaveText("Low");
-  await expect(chip).toContainText("Low");
-  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("low");
-  const last = (await sets(page)).at(-1);
-  expect(last.model).toBe("anthropic/claude-3-opus");
+  await expect(card.locator(".think-level")).toHaveText("Medium");
+  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("medium");
+  // The strip mirrors the card's choice.
+  await expect(page.locator('.think-pill[data-level="medium"]')).toHaveAttribute("aria-pressed", "true");
 
   await page.keyboard.press("End");
-  await expect(card.locator(".think-level")).toHaveText("Max");
   await expect(card).toHaveAttribute("data-level", "max");
   await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("max");
 
   await card.locator(".think-reset").click();
   await expect(card.locator(".think-level")).toHaveText("Default");
-  await expect(chip).toContainText("Default");
+  await expect(page.locator(".think-inline .think-pill.is-on")).toHaveCount(0);
   await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("");
 
   await page.keyboard.press("Escape");
   await expect(card).toBeHidden();
 });
 
+test("the strip says so for a model with no adjustable thinking", async ({ page }) => {
+  await pickModel(page, "gpt-4o");
+  const strip = page.locator(".think-inline");
+  // Visible and explicit rather than hidden: a hidden control reads as
+  // broken, and the model may still be reasoning without levels.
+  await expect(strip).toBeVisible();
+  await expect(strip.locator(".think-inline-none")).toContainText("gpt-4o has no thinking levels");
+  await expect(strip.locator(".think-pill")).toHaveCount(0);
+  await expect(page.locator("#thinkingMore")).toBeHidden();
+});
+
+test("levels are remembered per model", async ({ page }) => {
+  await pickModel(page, "claude-3-opus");
+  await page.locator('.think-pill[data-level="max"]').click();
+  await expect(page.locator('.think-pill[data-level="max"]')).toHaveAttribute("aria-pressed", "true");
+
+  await pickModel(page, "gpt-4o");
+  await expect(page.locator(".think-inline .think-pill")).toHaveCount(0);
+
+  await pickModel(page, "claude-3-opus");
+  await expect(page.locator('.think-pill[data-level="max"]')).toHaveAttribute("aria-pressed", "true");
+});
+
 test("the card's model name opens the model picker", async ({ page }) => {
   await pickModel(page, "claude-3-opus");
-  await page.click("#thinkingChip");
+  await page.click("#thinkingMore");
   await page.click("#thinkingMenu .think-model");
   await expect(page.locator("#thinkingMenu")).toBeHidden();
   await expect(page.locator("#modelMenu")).toBeVisible();
 });
 
-test("the chip hides for a model without adjustable thinking and remembers levels per model", async ({ page }) => {
+test("thinking levels appear after a catalog refresh, without switching models", async ({ page }) => {
+  // The pick is a model the first listing describes with no levels to
+  // pick. The second listing (a refresh) teaches the app three.
+  await pickModel(page, "claude-fable");
+  await expect(page.locator(".think-inline")).toBeVisible();
+  await expect(page.locator(".think-inline-none")).toBeVisible();
+  await expect(page.locator(".think-pill")).toHaveCount(0);
+
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavProviders");
+  await page.locator('[data-refresh="Opencode Go"]').click();
+  await page.click("#settingsCloseBtn");
+  // Same model id, new metadata: the control must follow the catalog,
+  // not wait for the user to switch models.
+  await expect(page.locator('.think-pill[data-level="high"]')).toBeVisible();
+  await expect(page.locator(".think-inline-none")).toBeHidden();
+});
+
+test("/thinking opens the options and /thinking <level> sets one", async ({ page }) => {
   await pickModel(page, "claude-3-opus");
-  await page.click("#thinkingChip");
-  await page.locator('#thinkingMenu input[type="range"]').focus();
-  await page.keyboard.press("End");
-  await expect(page.locator("#thinkingChip")).toContainText("Max");
+
+  await page.fill("#promptInput", "/thinking");
+  await page.press("#promptInput", "Enter");
+  await expect(page.locator("#thinkingMenu")).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.locator("#thinkingMenu")).toBeHidden();
 
-  await pickModel(page, "gpt-4o");
-  await expect(page.locator("#thinkingChip")).toBeHidden();
+  await page.fill("#promptInput", "/thinking high");
+  await page.press("#promptInput", "Enter");
+  await expect(page.locator('.think-pill[data-level="high"]')).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("high");
+  // A local command never becomes a turn.
+  const chats = await page.evaluate(() => ((window as any).__e2eChats || []).length);
+  expect(chats).toBe(0);
 
-  await pickModel(page, "claude-3-opus");
-  await expect(page.locator("#thinkingChip")).toContainText("Max");
+  // A level the model does not take is refused, naming what it does take.
+  await page.fill("#promptInput", "/thinking minimal");
+  await page.press("#promptInput", "Enter");
+  await expect(page.locator("#toast")).toContainText("claude-3-opus: Low, Medium, High, Extra High, Max");
+  await expect(page.locator('.think-pill[data-level="high"]')).toHaveAttribute("aria-pressed", "true");
+
+  // And `default` clears it back to the provider's own.
+  await page.fill("#promptInput", "/thinking default");
+  await page.press("#promptInput", "Enter");
+  await expect(page.locator(".think-inline .think-pill.is-on")).toHaveCount(0);
+  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("");
 });
 
 test("thinking streams in a block that folds away once the answer starts", async ({ page }) => {

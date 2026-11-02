@@ -112,6 +112,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("children nest under their parent, not as sessions of their own", async ({ page }) => {
+  // The sidebar is a drawer: closed on first paint, so open it before
+  // reaching into it.
+  await showSidebar(page);
   const parent = page.locator('.session-row:has([data-session="sess-parent"])');
   await expect(parent).toBeVisible();
   await expect(page.locator('[data-session="sess-child-1"]')).toHaveCount(0);

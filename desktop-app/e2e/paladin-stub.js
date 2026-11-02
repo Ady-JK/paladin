@@ -554,7 +554,7 @@ async function __paladinBaseInvoke(cmd, args) {
           ],
         }
       );
-    case "listProviders":
+    case "listProviders": {
       window.__e2eLists = (window.__e2eLists || 0) + 1;
       if (!window.__e2eProviders) {
         window.__e2eProviders = [
@@ -602,7 +602,17 @@ async function __paladinBaseInvoke(cmd, args) {
           : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
       // Catalog metadata as a provider listing publishes it: the picker's
       // detail pane shows the limits, thinking levels and prices.
+      // claude-fable is only described with levels by the second listing,
+      // so a refresh is what teaches the app them.
+      const fable = window.__e2eLists > 1 ? "anthropic/claude-fable-20990101" : "anthropic/claude-fable";
       window.__e2eProviders[0].meta = {
+        [fable]: {
+          contextWindow: 200000,
+          maxOutput: 64000,
+          protocol: "anthropic",
+          thinkingLevels: window.__e2eLists > 1 ? ["low", "medium", "high"] : [],
+          thinkingKnown: true,
+        },
         "anthropic/claude-3-opus": {
           contextWindow: 1000000,
           maxOutput: 128000,
@@ -625,6 +635,7 @@ async function __paladinBaseInvoke(cmd, args) {
         },
       };
       return window.__e2eProviders;
+    }
     case "refreshProviders":
       if (args && args.name) {
         return { name: args.name, count: 3, models: [] };
@@ -657,11 +668,15 @@ async function __paladinBaseInvoke(cmd, args) {
       return __e2eHub.steer(args || {});
     case "thinkingGet":
     case "thinkingSet": {
-      // Models named like gpt-4o or llama have no adjustable thinking.
+      // Levels come from the catalog metadata the provider published,
+      // exactly as the real sidecar resolves them: metadata first, and
+      // nothing when the listing said nothing about the model.
       const store = (window.__e2eThinking = window.__e2eThinking || {});
       const provider = (args && args.provider) || "Opencode Go";
       const model = (args && args.model) || "";
-      const levels = /gpt-4o|llama/.test(model) ? [] : ["none", "low", "medium", "high", "xhigh", "max"];
+      const info = (window.__e2eProviders || []).find((p) => p.name === provider);
+      const meta = (info && info.meta && info.meta[model]) || {};
+      const levels = meta.thinkingKnown ? meta.thinkingLevels || [] : [];
       const key = provider + "\u0000" + model;
       if (cmd === "thinkingSet") {
         window.__e2eThinkingSets = (window.__e2eThinkingSets || []).concat([JSON.parse(JSON.stringify(args))]);

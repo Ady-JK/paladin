@@ -64,6 +64,7 @@ import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { icon } from "../icons";
 import { loadProviders, syncModelSelects } from "./models";
+import { refreshThinkingOptions } from "./thinking";
 import { refreshExternalVisibility } from "./sites";
 import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
@@ -298,6 +299,10 @@ const refreshOneProvider = async (btn: HTMLButtonElement, name: string): Promise
     }
     // loadProviders remaps the saved pick onto the fresh catalog.
     await loadProviders();
+    // The listing's metadata (thinking levels, dialect, prices) changed
+    // under the picked model, and the model id did not: re-read it, or
+    // the thinking control keeps saying the model has no levels.
+    refreshThinkingOptions();
   } catch (error) {
     toast(String(error), "error");
   } finally {

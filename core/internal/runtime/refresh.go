@@ -170,6 +170,10 @@ func (r *AgentRuntime) RefreshProvider(name string) (RefreshResult, error) {
 	if err != nil {
 		return RefreshResult{}, err
 	}
+	// A cached provider was built with the metadata known at the time, so
+	// its wire dialect and thinking levels would otherwise stay stale for
+	// the rest of the process: the catalog now says something new.
+	r.evictProviderCache()
 	return results[0], nil
 }
 

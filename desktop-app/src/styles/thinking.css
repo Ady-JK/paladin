@@ -1,6 +1,127 @@
-/* thinking.css: the composer's thinking chip, its slider card (a
-   blue-to-purple flowing track whose motion grows with the level) and
+/* thinking.css: the composer's inline thinking strip, the card it opens
+   (a blue-to-purple flowing track whose motion grows with the level) and
    the "Thinking" blocks in a turn. --think-i is 0..1 along the slider. */
+
+/* The inline strip above the composer text: the setting is visible where
+   you type, and one click picks a level. */
+.think-inline {
+  padding: 6px 12px 0;
+}
+.think-inline.hidden,
+.think-inline-bar.hidden {
+  display: none;
+}
+.think-inline-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.think-inline-icon {
+  display: grid;
+  place-items: center;
+  color: var(--color-slate-400);
+}
+.think-inline[data-level="default"] .think-inline-icon {
+  color: var(--color-slate-400);
+}
+.think-inline:not([data-level="default"]) .think-inline-icon {
+  color: #8b5cf6;
+}
+.think-inline-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+}
+.think-inline-levels {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+/* One click per level: no slider needed for the common case. */
+.think-pill {
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.think-pill:hover {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .think-pill {
+  color: var(--color-slate-400);
+}
+.dark .think-pill:hover {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.think-pill.is-on {
+  border-color: rgb(139 92 246 / 0.45);
+  background: rgb(139 92 246 / 0.12);
+  color: #6d28d9;
+  font-weight: 600;
+}
+.dark .think-pill.is-on {
+  border-color: rgb(167 139 250 / 0.5);
+  background: rgb(139 92 246 / 0.2);
+  color: #c4b5fd;
+}
+.think-inline-none {
+  font-size: 11px;
+  color: var(--color-slate-400);
+  font-style: italic;
+}
+.dark .think-inline-none {
+  color: var(--color-slate-500);
+}
+.think-inline-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  border-radius: 9999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: var(--color-slate-400);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.think-inline-more:hover,
+.think-inline-more[aria-expanded="true"] {
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .think-inline-more:hover,
+.dark .think-inline-more[aria-expanded="true"] {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+.think-inline-more.hidden {
+  display: none;
+}
+/* The card hangs off the strip, which is wider than the old chip's spot. */
+.think-inline {
+  position: relative;
+}
+.think-inline .think-card {
+  bottom: calc(100% + 6px);
+  left: 8px;
+}
 
 .think-wrap {
   position: relative;

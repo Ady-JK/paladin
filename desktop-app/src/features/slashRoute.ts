@@ -16,6 +16,7 @@ import { openToolsMenu } from "./toolSwitches";
 import { openUsageDashboard } from "./usage";
 import { askSideQuestion, openSideChat } from "./sidePane";
 import { openBudgetMenu, parseBudget, setSessionBudget } from "./budget";
+import { openThinkingCard, setThinkingLevel } from "./thinking";
 import { loadPrompts, promptArgs, setComposer, slashHelp } from "./slashCommands";
 
 // AgentRoute is a slash line that still goes to the agent, with the
@@ -139,6 +140,21 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
       clear();
       openSettings("providers");
       return "local";
+    case "thinking": {
+      clear();
+      if (!rest) {
+        openThinkingCard();
+        return "local";
+      }
+      // One word picks a level; anything else is a hint, not a level.
+      if (/\s/.test(rest)) {
+        setComposer("/thinking ");
+        toast("Usage: /thinking <level> — or /thinking to see the options", "error");
+        return "local";
+      }
+      void setThinkingLevel(rest);
+      return "local";
+    }
     case "budget": {
       clear();
       if (!rest) {

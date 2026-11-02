@@ -269,15 +269,20 @@ func toSDKTools(tools []ToolDefinition) []openai.ChatCompletionToolParam {
 	return out
 }
 
-func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) openai.ChatCompletionNewParams {
+func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, streaming bool) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model:    p.model,
 		Messages: toSDKMessages(messages),
-		// The usage-bearing final chunk only arrives when asked for; it is
-		// a standard field, harmless on plain OpenAI endpoints too.
-		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+	}
+	if streaming {
+		// The usage-bearing final chunk only arrives when asked for; it
+		// is a standard field, harmless on plain OpenAI endpoints too.
+		// It must only ride on streaming calls: upstreams reject a
+		// non-streaming request carrying stream_options (this broke
+		// /compact, which summarizes over the non-streaming call).
+		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 			IncludeUsage: openai.Bool(true),
-		},
+		}
 	}
 	if system != "" {
 		sys := openai.SystemMessage(system)
@@ -305,7 +310,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 	defer cancel()
 	var httpRes *http.Response
 	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
-	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID), opts...)
+	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID, false), opts...)
 	if err != nil {
 		return ToolResponse{}, p.mapError("chat completion", err)
 	}
@@ -365,7 +370,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	parent := ctx
 	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID), p.streamOptions(sessionID)...)
+	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID, true), p.streamOptions(sessionID)...)
 	defer stream.Close()
 	var usage Usage
 	accs := map[int64]*callAcc{}

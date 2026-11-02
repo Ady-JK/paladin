@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -246,15 +247,15 @@ func TestToSDKToolsShapes(t *testing.T) {
 
 func TestNewParamsPrependsSystem(t *testing.T) {
 	p := providerFor("http://x")
-	params := p.newParams("sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "")
+	params := p.newParams("sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "", false)
 	if len(params.Messages) != 2 {
 		t.Fatalf("got %d", len(params.Messages))
 	}
-	bare := p.newParams("", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "")
+	bare := p.newParams("", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "", false)
 	if len(bare.Messages) != 1 {
 		t.Fatalf("got %d", len(bare.Messages))
 	}
-	withTools := p.newParams("", nil, []ToolDefinition{{Name: "read"}}, "")
+	withTools := p.newParams("", nil, []ToolDefinition{{Name: "read"}}, "", false)
 	if len(withTools.Tools) != 1 {
 		t.Fatal("tools missing")
 	}
@@ -262,7 +263,7 @@ func TestNewParamsPrependsSystem(t *testing.T) {
 
 func TestOpencodePromptCacheKey(t *testing.T) {
 	oc := NewOpenAIProvider("n", "m", "https://opencode.ai/inference/go/openai/v1", "k")
-	raw, err := json.Marshal(oc.newParams("", nil, nil, " session-1 "))
+	raw, err := json.Marshal(oc.newParams("", nil, nil, " session-1 ", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,16 +271,52 @@ func TestOpencodePromptCacheKey(t *testing.T) {
 		t.Fatalf("missing cache key: %s", raw)
 	}
 	// A blank conversation id is not a cache bucket.
-	raw, _ = json.Marshal(oc.newParams("", nil, nil, " "))
+	raw, _ = json.Marshal(oc.newParams("", nil, nil, " ", false))
 	if strings.Contains(string(raw), "prompt_cache_key") {
 		t.Fatalf("blank cache key sent: %s", raw)
 	}
 	// Plain OpenAI-compatible endpoints must not receive OpenCode's
 	// extension fields.
 	plain := providerFor("https://api.openai.com/v1")
-	raw, _ = json.Marshal(plain.newParams("", nil, nil, "session-1"))
+	raw, _ = json.Marshal(plain.newParams("", nil, nil, "session-1", false))
 	if strings.Contains(string(raw), "prompt_cache_key") {
 		t.Fatalf("cache key leaked to plain openai: %s", raw)
+	}
+}
+
+// TestStreamOptionsOnlyOnStreaming guards the /compact failure where the
+// non-streaming summary call carried stream_options without stream:true
+// and the upstream rejected it with 400 ("stream_options should be set
+// along with stream = true"). Normal turns stream, so only the manual
+// compaction path (CompleteTools) tripped it.
+func TestStreamOptionsOnlyOnStreaming(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = json.Marshal(map[string]any{})
+		raw, _ := io.ReadAll(r.Body)
+		body = raw
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices": [{"message": {"content": "summary"}}]}`)
+	}))
+	defer server.Close()
+	p := providerFor(server.URL)
+	resp, err := p.CompleteTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "summary" {
+		t.Fatalf("got %+v", resp)
+	}
+	if strings.Contains(string(body), "stream_options") {
+		t.Fatalf("non-streaming call sent stream_options: %s", body)
+	}
+	// The streaming path still asks for the usage-bearing final chunk.
+	raw, err := json.Marshal(p.newParams("", nil, nil, "sess", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"include_usage":true`) {
+		t.Fatalf("streaming call lost stream_options: %s", raw)
 	}
 }
 
