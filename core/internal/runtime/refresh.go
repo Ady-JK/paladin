@@ -21,9 +21,21 @@ import (
 // pin the refresh.
 const refreshTimeout = 30 * time.Second
 
-// ModelFetcher lists the model ids one provider serves. Injected so
+// CatalogFetch is one provider's listing: the model ids plus whatever
+// metadata the provider publishes about them (nil when it publishes
+// none, which is every provider but OpenCode Go today).
+type CatalogFetch struct {
+	Models []string
+	Meta   map[string]config.ModelMeta
+}
+
+// ModelFetcher lists the models one provider serves. Injected so
 // tests never touch the network.
 type ModelFetcher func(ctx context.Context, p config.Provider, apiKey string) ([]string, error)
+
+// CatalogFetcher lists the models one provider serves along with their
+// metadata. Injected so tests never touch the network.
+type CatalogFetcher func(ctx context.Context, p config.Provider, apiKey string) (CatalogFetch, error)
 
 // RefreshResult is the outcome of refreshing one provider's catalog.
 type RefreshResult struct {
@@ -33,19 +45,60 @@ type RefreshResult struct {
 	Error  string   `json:"error,omitempty"`
 }
 
-func networkModelFetcher(ctx context.Context, p config.Provider, apiKey string) ([]string, error) {
-	if config.IsPlaceholderKey(apiKey) {
+func networkModelFetcher(ctx context.Context, p config.Provider, apiKey string) (CatalogFetch, error) {
+	// BuildProvider refuses a placeholder key, but the listing is public:
+	// the catalog read only needs a provider to talk to. A placeholder is
+	// not a real credential, so it must not be sent as one — the gateway
+	// answers a bogus Bearer token with 401 while a header-less request
+	// succeeds.
+	publicListing := config.IsPlaceholderKey(apiKey)
+	if publicListing {
 		apiKey = "public-listing"
 	}
 	provider, err := inference.BuildProvider(p.ApiType, p.Name, p.Model, p.ApiURL, apiKey)
 	if err != nil {
-		return nil, err
+		return CatalogFetch{}, err
 	}
-	return provider.ListModels(ctx)
+	if publicListing {
+		provider = inference.WithPublicListing(provider)
+	}
+	lister, ok := provider.(interface {
+		ListCatalog(context.Context) ([]string, map[string]inference.CatalogMeta, error)
+	})
+	if !ok {
+		models, err := provider.ListModels(ctx)
+		return CatalogFetch{Models: models}, err
+	}
+	models, meta, err := lister.ListCatalog(ctx)
+	if err != nil {
+		return CatalogFetch{}, err
+	}
+	var out map[string]config.ModelMeta
+	if len(meta) > 0 {
+		out = make(map[string]config.ModelMeta, len(meta))
+		for id, m := range meta {
+			out[id] = m
+		}
+	}
+	return CatalogFetch{Models: models, Meta: out}, nil
 }
 
 // SetModelFetcher replaces how catalogs are fetched (tests, offline mode).
+// A fetcher that reports ids only keeps the metadata already stored.
 func (r *AgentRuntime) SetModelFetcher(f ModelFetcher) {
+	if f == nil {
+		r.SetCatalogFetcher(nil)
+		return
+	}
+	r.SetCatalogFetcher(func(ctx context.Context, p config.Provider, apiKey string) (CatalogFetch, error) {
+		models, err := f(ctx, p, apiKey)
+		return CatalogFetch{Models: models}, err
+	})
+}
+
+// SetCatalogFetcher replaces how catalogs and their metadata are fetched
+// (tests, offline mode).
+func (r *AgentRuntime) SetCatalogFetcher(f CatalogFetcher) {
 	if f == nil {
 		f = networkModelFetcher
 	}
@@ -54,7 +107,7 @@ func (r *AgentRuntime) SetModelFetcher(f ModelFetcher) {
 	r.fetchModels = f
 }
 
-func (r *AgentRuntime) fetcher() ModelFetcher {
+func (r *AgentRuntime) fetcher() CatalogFetcher {
 	r.fetchMu.RLock()
 	defer r.fetchMu.RUnlock()
 	return r.fetchModels
@@ -123,7 +176,7 @@ func (r *AgentRuntime) RefreshProvider(name string) (RefreshResult, error) {
 // refreshCatalogResults fetches the named providers (all when names is
 // empty) and saves every successful listing. Failures keep the old
 // catalog entry and are reported per provider.
-func refreshCatalogResults(store *config.Store, names []string, fetch ModelFetcher) ([]RefreshResult, error) {
+func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFetcher) ([]RefreshResult, error) {
 	file, err := store.LoadProviders()
 	if err != nil {
 		return nil, err
@@ -149,19 +202,23 @@ func refreshCatalogResults(store *config.Store, names []string, fetch ModelFetch
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
-		models, err := fetch(ctx, p, key)
+		fetched, err := fetch(ctx, p, key)
 		cancel()
 		if err != nil {
 			res.Error = err.Error()
 			results = append(results, res)
 			continue
 		}
+		models := fetched.Models
 		sort.Strings(models)
 		entry := catalog.Providers[p.Name]
 		entry.AllModels = models
 		if len(entry.EnabledModels) == 0 {
 			entry.EnabledModels = append([]string(nil), models...)
 		}
+		// A listing that carries no metadata says nothing about its
+		// models, so whatever was learned before still stands.
+		entry.Meta = mergeMeta(entry.Meta, fetched.Meta, models)
 		if catalog.Providers == nil {
 			catalog.Providers = map[string]config.ProviderModels{}
 		}
@@ -173,4 +230,28 @@ func refreshCatalogResults(store *config.Store, names []string, fetch ModelFetch
 		return results, err
 	}
 	return results, nil
+}
+
+// mergeMeta folds a fresh listing's metadata into the stored map: models
+// the listing described take its values, models it stayed silent about
+// keep theirs, and models it no longer serves are dropped so a stale
+// entry never outlives its model.
+func mergeMeta(stored, fresh map[string]config.ModelMeta, models []string) map[string]config.ModelMeta {
+	if len(stored) == 0 && len(fresh) == 0 {
+		return nil
+	}
+	out := make(map[string]config.ModelMeta, len(models))
+	for _, id := range models {
+		if m, ok := fresh[id]; ok && !m.Empty() {
+			out[id] = m
+			continue
+		}
+		if m, ok := stored[id]; ok && !m.Empty() {
+			out[id] = m
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

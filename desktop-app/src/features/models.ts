@@ -21,9 +21,19 @@ import {
   modelTreeEl,
   providerPickEl,
 } from "../core/dom";
-import { bare, escapeAttr, escapeHtml, fuzzyMatch, labKey, modelsInLab, modelsOf, splitModel } from "../core/format";
+import {
+  approxTokens,
+  bare,
+  escapeAttr,
+  escapeHtml,
+  fuzzyMatch,
+  labKey,
+  modelsInLab,
+  modelsOf,
+  splitModel,
+} from "../core/format";
 import { collapsedLabs, collapsedProviders, state } from "../core/state";
-import type { GroupedLab, GroupedProvider, ProviderInfo } from "../core/types";
+import type { GroupedLab, GroupedProvider, ModelMeta, ProviderInfo } from "../core/types";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
 import { claimPopover, registerPopover } from "../ui/popover";
 import { icon } from "../icons";
@@ -283,6 +293,7 @@ function detailHTML(): string {
   const info = state.providers.find((p) => p.name === state.selectedProvider);
   const lab = target ? bare(splitModel(target).lab) : bare(state.selectedLab);
   const apiType = info?.apiType ?? "";
+  const meta = target ? info?.meta?.[target] : undefined;
 
   if (!target) {
     return `<p class="font-mono text-[11px] text-slate-400">Pick a model from the tree.</p>`;
@@ -294,6 +305,11 @@ function detailHTML(): string {
       <div class="truncate font-mono text-[11px] text-slate-700 dark:text-slate-200" title="${escapeAttr(real ?? value)}">${escapeHtml(value)}</div>
     </div>`;
 
+  // Prices arrive in USD per million tokens; the row keeps them to the
+  // precision the catalog publishes so a $0.0028 cache read still reads.
+  const prices = priceLine(meta);
+  const thinking = thinkingLine(meta);
+
   return `
     <div class="flex items-center gap-1.5">
       <span class="flex-shrink-0 text-agent-rose">${icon("brain", "h-5 w-5")}</span>
@@ -302,7 +318,48 @@ function detailHTML(): string {
     ${row("Full id", target)}
     ${state.selectedProvider ? row("Provider", bare(state.selectedProvider), state.selectedProvider) : ""}
     ${lab ? row("Lab", lab) : ""}
-    ${apiType ? row("API", apiType) : ""}`;
+    ${apiType ? row("API", apiType) : ""}
+    ${meta?.contextWindow ? row("Context", contextLine(meta)) : ""}
+    ${thinking ? row("Thinking", thinking) : ""}
+    ${prices ? row("Price / 1M", prices) : ""}`;
+}
+
+// priceLine words a model's published prices, in USD per million tokens.
+// Levels the listing omitted stay out, so a model with no cache price
+// does not claim a free one. Precision is kept as published.
+function priceLine(meta: ModelMeta | undefined): string {
+  if (!meta) {
+    return "";
+  }
+  const price = (n: number): string =>
+    `$${String(n)
+      .replace(/(\.\d*?)0+$/, "$1")
+      .replace(/\.$/, "")}`;
+  return [
+    meta.priceInput !== undefined ? `in ${price(meta.priceInput)}` : "",
+    meta.priceOutput !== undefined ? `out ${price(meta.priceOutput)}` : "",
+    meta.priceCacheRead ? `cache ${price(meta.priceCacheRead)}` : "",
+    meta.priceCacheWrite ? `write ${price(meta.priceCacheWrite)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+// contextLine words the model's published limits: its context window and,
+// when the listing names one, its output ceiling.
+function contextLine(meta: ModelMeta): string {
+  const window = `${approxTokens(meta.contextWindow ?? 0)} tokens`;
+  return meta.maxOutput ? `${window} · ${approxTokens(meta.maxOutput)} out` : window;
+}
+
+// thinkingLine words the levels the model accepts. A listing that
+// described the model's reasoning and named none means "none"; one that
+// said nothing about it shows no line at all.
+function thinkingLine(meta: ModelMeta | undefined): string {
+  if (!meta?.thinkingKnown) {
+    return "";
+  }
+  return meta.thinkingLevels && meta.thinkingLevels.length > 0 ? meta.thinkingLevels.join(" · ") : "none";
 }
 
 function paintPick(): void {

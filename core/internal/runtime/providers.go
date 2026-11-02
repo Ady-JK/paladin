@@ -46,7 +46,8 @@ func (r *AgentRuntime) resolveProvider(nameOverride, modelOverride string) (conf
 		return entry, cached, nil
 	}
 	r.cacheMu.Unlock()
-	provider, err := inference.BuildProvider(entry.ApiType, entry.Name, entry.Model, entry.ApiURL, key)
+	meta := r.store.ModelMeta(entry.Name, entry.Model)
+	provider, err := inference.BuildProviderWithMeta(entry.ApiType, entry.Name, entry.Model, entry.ApiURL, key, meta)
 	if err != nil {
 		return config.Provider{}, nil, err
 	}

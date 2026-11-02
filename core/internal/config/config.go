@@ -97,6 +97,9 @@ type ProviderInfo struct {
 	Model   string   `json:"model"`
 	Models  []string `json:"models"`
 	Name    string   `json:"name"`
+	// Meta is the catalog metadata of the models listed in Models, by
+	// model id; models the listing said nothing about are absent.
+	Meta map[string]ModelMeta `json:"meta,omitempty"`
 }
 
 type ProviderInput struct {
@@ -115,6 +118,44 @@ type ProvidersFile struct {
 type ProviderModels struct {
 	AllModels     []string `json:"allModels"`
 	EnabledModels []string `json:"enabledModels"`
+	// Meta is each model's catalog metadata by model id, captured on the
+	// last successful refresh. Models the listing said nothing about are
+	// absent; readers fall back to the built-in tables then.
+	Meta map[string]ModelMeta `json:"meta,omitempty"`
+}
+
+// ModelMeta is what a provider's own model listing reports about one
+// model. Every field is optional: a zero value means "the listing did
+// not say", never "no". Prices are USD per million tokens.
+type ModelMeta struct {
+	// ContextWindow is the model's total context window in tokens.
+	ContextWindow int64 `json:"contextWindow,omitempty"`
+	// MaxOutput is the model's output token ceiling.
+	MaxOutput int64 `json:"maxOutput,omitempty"`
+	// Protocol is the wire dialect the gateway documents for the model,
+	// using the inference package's protocol names ("chat", "responses",
+	// "anthropic", "google"). Empty means the listing did not say.
+	Protocol string `json:"protocol,omitempty"`
+	// ThinkingLevels are the reasoning efforts the model accepts, weakest
+	// first. Only ThinkingKnown tells "no adjustable thinking" (an empty
+	// list) from "the listing said nothing" (nil).
+	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
+	// ThinkingKnown marks ThinkingLevels as authoritative: the listing
+	// described this model's thinking, so an empty list really means it
+	// has none to pick from.
+	ThinkingKnown bool `json:"thinkingKnown,omitempty"`
+	// Prices are USD per million tokens.
+	PriceInput      float64 `json:"priceInput,omitempty"`
+	PriceOutput     float64 `json:"priceOutput,omitempty"`
+	PriceCacheRead  float64 `json:"priceCacheRead,omitempty"`
+	PriceCacheWrite float64 `json:"priceCacheWrite,omitempty"`
+}
+
+// Empty reports whether the listing said nothing about the model.
+func (m ModelMeta) Empty() bool {
+	return m.ContextWindow == 0 && m.MaxOutput == 0 && m.Protocol == "" &&
+		len(m.ThinkingLevels) == 0 && !m.ThinkingKnown && m.PriceInput == 0 && m.PriceOutput == 0 &&
+		m.PriceCacheRead == 0 && m.PriceCacheWrite == 0
 }
 
 type ModelsFile struct {
@@ -377,6 +418,16 @@ func (s *Store) ModelsFor(name string) []string {
 	return nil
 }
 
+// ModelMeta returns the catalog metadata recorded for one provider's
+// model. A model with no recorded metadata reports the zero ModelMeta.
+func (s *Store) ModelMeta(provider, model string) ModelMeta {
+	file, err := s.LoadModels()
+	if err != nil {
+		return ModelMeta{}
+	}
+	return file.Providers[provider].Meta[model]
+}
+
 func (s *Store) ProviderInfos() []ProviderInfo {
 	file, err := s.LoadProviders()
 	if err != nil {
@@ -389,12 +440,14 @@ func (s *Store) ProviderInfos() []ProviderInfo {
 	var out []ProviderInfo
 	for _, p := range file.Providers {
 		var list []string
+		var meta map[string]ModelMeta
 		if entry, ok := models.Providers[p.Name]; ok {
 			if len(entry.EnabledModels) > 0 {
 				list = append([]string(nil), entry.EnabledModels...)
 			} else {
 				list = append([]string(nil), entry.AllModels...)
 			}
+			meta = listedMeta(entry.Meta, list)
 		}
 		if list == nil {
 			list = []string{}
@@ -406,12 +459,31 @@ func (s *Store) ProviderInfos() []ProviderInfo {
 			ApiURL:  p.ApiURL,
 			Model:   p.Model,
 			Models:  list,
+			Meta:    meta,
 			Default: p.Name == file.DefaultProvider,
 			HasKey:  !IsPlaceholderKey(key),
 		})
 	}
 	if out == nil {
 		out = []ProviderInfo{}
+	}
+	return out
+}
+
+// listedMeta narrows recorded metadata to the models actually listed, so
+// the wire never carries entries for models a provider no longer serves.
+func listedMeta(meta map[string]ModelMeta, models []string) map[string]ModelMeta {
+	if len(meta) == 0 || len(models) == 0 {
+		return nil
+	}
+	out := make(map[string]ModelMeta, len(models))
+	for _, m := range models {
+		if entry, ok := meta[m]; ok && !entry.Empty() {
+			out[m] = entry
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

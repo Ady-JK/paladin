@@ -600,6 +600,30 @@ async function __paladinBaseInvoke(cmd, args) {
         window.__e2eLists > 1
           ? ["anthropic/claude-fable-20990101", "anthropic/claude-3-opus", "openai/gpt-4o"]
           : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
+      // Catalog metadata as a provider listing publishes it: the picker's
+      // detail pane shows the limits, thinking levels and prices.
+      window.__e2eProviders[0].meta = {
+        "anthropic/claude-3-opus": {
+          contextWindow: 1000000,
+          maxOutput: 128000,
+          protocol: "anthropic",
+          thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+          thinkingKnown: true,
+          priceInput: 0.1,
+          priceOutput: 0.5,
+          priceCacheRead: 0.01,
+          priceCacheWrite: 0.125,
+        },
+        "openai/gpt-4o": {
+          contextWindow: 128000,
+          maxOutput: 16384,
+          protocol: "chat",
+          thinkingLevels: [],
+          thinkingKnown: true,
+          priceInput: 2.5,
+          priceOutput: 10,
+        },
+      };
       return window.__e2eProviders;
     case "refreshProviders":
       if (args && args.name) {

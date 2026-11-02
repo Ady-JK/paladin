@@ -39,7 +39,7 @@ func init() {
 	RegisterProviderTemplate(ProviderTemplate{
 		ApiType: config.ApiTypeOpenai,
 		New: func(spec ProviderSpec) (Provider, error) {
-			return NewOpenAIProvider(spec.Name, spec.Model, spec.BaseURL, spec.ApiKey), nil
+			return NewOpenAIProviderWithMeta(spec.Name, spec.Model, spec.BaseURL, spec.ApiKey, spec.Meta), nil
 		},
 	})
 }
@@ -51,15 +51,48 @@ type OpenAIProvider struct {
 	apiKey     string
 	isOpencode bool
 	protocol   string
-	client     *openai.Client
+	// meta is what the provider's model listing said about this model;
+	// the zero value means it said nothing.
+	meta   config.ModelMeta
+	client *openai.Client
 	// effort is the reasoning effort sent with every call; empty sends
 	// none and leaves the provider's default.
 	effort string
 	// effortDropped is set once the provider rejected effort.
 	effortDropped *atomic.Bool
+	// publicListing keeps the key off catalog reads: the listing is
+	// public, and a placeholder key sent as a credential is refused.
+	publicListing bool
+}
+
+// WithPublicListing marks p's catalog reads as unauthenticated. It is for
+// a provider resolved without a real key, whose listing endpoint is
+// public; a configured key is still sent, because it can unlock a
+// private or regional listing.
+//
+// The flag switches the read to plain HTTP: the SDK always attaches the
+// key it was built with (an empty key still sends "Bearer"), and its
+// client also picks up OPENAI_API_KEY from the environment, which must
+// never travel to a third-party gateway on a keyless read.
+func WithPublicListing(p Provider) Provider {
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		return p
+	}
+	cp := *op
+	cp.publicListing = true
+	return &cp
 }
 
 func NewOpenAIProvider(name, model, baseURL, apiKey string) *OpenAIProvider {
+	return NewOpenAIProviderWithMeta(name, model, baseURL, apiKey, config.ModelMeta{})
+}
+
+// NewOpenAIProviderWithMeta builds the provider knowing what the model
+// listing said about model. The metadata decides the wire dialect (a
+// gateway serving an OpenAI-named model over Responses, for instance)
+// and the thinking levels it offers.
+func NewOpenAIProviderWithMeta(name, model, baseURL, apiKey string, meta config.ModelMeta) *OpenAIProvider {
 	if strings.TrimSpace(model) == "" {
 		model = DefaultOpenAIModel
 	}
@@ -74,17 +107,14 @@ func NewOpenAIProvider(name, model, baseURL, apiKey string) *OpenAIProvider {
 		option.WithMaxRetries(2),
 	)
 	isOpencode := config.IsOpencodeEndpoint(baseURL)
-	protocol := protocolChat
-	if isOpencode {
-		protocol = opencodeProtocol(model)
-	}
 	return &OpenAIProvider{
 		name:       name,
 		model:      model,
 		baseURL:    baseURL,
 		apiKey:     apiKey,
 		isOpencode: isOpencode,
-		protocol:   protocol,
+		protocol:   ProtocolFor(baseURL, model, meta),
+		meta:       meta,
 		client:     &client,
 	}
 }
@@ -513,14 +543,25 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 }
 
 func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
+	ids, _, err := p.ListCatalog(ctx)
+	return ids, err
+}
+
+// ListCatalog lists the provider's models with whatever metadata its
+// listing carries. Plain OpenAI-compatible endpoints publish ids only,
+// so their metadata is nil and callers keep the built-in tables.
+func (p *OpenAIProvider) ListCatalog(ctx context.Context) ([]string, map[string]CatalogMeta, error) {
 	if p.isOpencode {
 		return p.listOpencodeCatalog(ctx)
+	}
+	if p.publicListing {
+		return p.listPublicCatalog(ctx)
 	}
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 	page, err := p.client.Models.List(ctx, p.headers("catalog")...)
 	if err != nil {
-		return nil, p.mapError("list models", err)
+		return nil, nil, p.mapError("list models", err)
 	}
 	var ids []string
 	for _, m := range page.Data {
@@ -528,50 +569,74 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]string, error) {
 			ids = append(ids, m.ID)
 		}
 	}
-	return ids, nil
+	return ids, nil, nil
 }
 
-func (p *OpenAIProvider) listOpencodeCatalog(ctx context.Context) ([]string, error) {
+// listPublicCatalog reads a keyless provider's listing over plain HTTP so
+// no credential travels: not the provider's own, and not one the
+// OpenAI SDK would pick up from the environment.
+func (p *OpenAIProvider) listPublicCatalog(ctx context.Context) ([]string, map[string]CatalogMeta, error) {
+	ctx, cancel := context.WithTimeout(ctx, listTimeout)
+	defer cancel()
+	url := strings.TrimRight(p.baseURL, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := providerHTTPClient.Do(req)
+	if err != nil {
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+	}
+	defer resp.Body.Close()
+	body, err := readBody(resp.Body, maxResponseBody)
+	if err != nil {
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, nil, p.requestError(resp.StatusCode, string(body))
+	}
+	ids, meta, err := ParseCatalog(body)
+	if err != nil {
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+	}
+	return ids, meta, nil
+}
+
+func (p *OpenAIProvider) listOpencodeCatalog(ctx context.Context) ([]string, map[string]CatalogMeta, error) {
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.catalogURL(), nil)
 	if err != nil {
-		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", config.OpencodeUserAgent)
 	req.Header.Set(config.OpencodeSessionHeader, "catalog")
 	// The catalog is public today, but sending the key when one is
 	// configured keeps private/regional listings working without a
-	// separate code path. A placeholder key must never be sent.
-	if key := strings.TrimSpace(p.apiKey); key != "" && !config.IsPlaceholderKey(key) {
+	// separate code path. A placeholder key must never be sent, and a
+	// provider resolved without a real key marks itself publicListing:
+	// the gateway refuses a bogus Bearer token where a header-less
+	// request succeeds.
+	if key := strings.TrimSpace(p.apiKey); key != "" && !config.IsPlaceholderKey(key) && !p.publicListing {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
-		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
 	defer resp.Body.Close()
 	body, err := readBody(resp.Body, maxResponseBody)
 	if err != nil {
-		return nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, p.requestError(resp.StatusCode, string(body))
+		return nil, nil, p.requestError(resp.StatusCode, string(body))
 	}
-	var wire struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	ids, meta, err := ParseCatalog(body)
+	if err != nil {
+		return nil, nil, RequestError(fmt.Sprintf("%s: list models: %v", p.name, err))
 	}
-	if err := json.Unmarshal(body, &wire); err != nil {
-		return nil, RequestError(fmt.Sprintf("%s: list models: decode: %v", p.name, err))
-	}
-	var ids []string
-	for _, m := range wire.Data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
-		}
-	}
-	return ids, nil
+	return ids, meta, nil
 }

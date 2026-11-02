@@ -114,6 +114,9 @@ func ValidEffort(levels []string, effort string) error {
 
 // EffortLevels is the provider's model's level list.
 func (p *OpenAIProvider) EffortLevels() []string {
+	if p.meta.ThinkingKnown {
+		return EffortLevelsFor(p.protocol, p.meta.ThinkingLevels)
+	}
 	return EffortLevels(p.protocol, p.model)
 }
 
@@ -222,14 +225,50 @@ func effortRejected(err error) bool {
 }
 
 // ModelEffortLevels is EffortLevels for a configured provider entry,
-// without building a client (no key needed).
-func ModelEffortLevels(apiType config.ApiType, baseURL, model string) []string {
+// without building a client (no key needed). meta is what the provider's
+// listing said about the model; its levels win over the name-based guess,
+// because the provider knows which efforts it forwards.
+func ModelEffortLevels(apiType config.ApiType, baseURL, model string, meta config.ModelMeta) []string {
 	if apiType != config.ApiTypeOpenai {
 		return nil
 	}
-	protocol := protocolChat
-	if config.IsOpencodeEndpoint(strings.TrimRight(strings.TrimSpace(baseURL), "/")) {
-		protocol = opencodeProtocol(model)
+	protocol := ProtocolFor(baseURL, model, meta)
+	if meta.ThinkingKnown {
+		// The listing is authoritative: these are exactly the levels the
+		// model takes, and an empty answer means it has none to pick.
+		return EffortLevelsFor(protocol, meta.ThinkingLevels)
 	}
 	return EffortLevels(protocol, model)
+}
+
+// EffortLevelsFor is EffortLevels when the levels are already known: it
+// only refuses them for a dialect that cannot carry an effort yet.
+func EffortLevelsFor(protocol string, levels []string) []string {
+	if len(levels) == 0 || (protocol != protocolChat && protocol != protocolResponses) {
+		return nil
+	}
+	return append([]string(nil), levels...)
+}
+
+// ProtocolFor is the wire dialect that serves model: the provider's own
+// documentation when its listing carried it, else the name-based mapping
+// OpenCode Go uses, else chat completions for every other provider.
+func ProtocolFor(baseURL, model string, meta config.ModelMeta) string {
+	if !config.IsOpencodeEndpoint(strings.TrimRight(strings.TrimSpace(baseURL), "/")) {
+		return protocolChat
+	}
+	if p := normalProtocol(meta.Protocol); p != "" {
+		return p
+	}
+	return opencodeProtocol(model)
+}
+
+// normalProtocol accepts only the protocol names the gateway documents.
+func normalProtocol(p string) string {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case protocolChat, protocolResponses, protocolAnthropic, protocolGoogle:
+		return strings.ToLower(strings.TrimSpace(p))
+	default:
+		return ""
+	}
 }

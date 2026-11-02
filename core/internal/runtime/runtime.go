@@ -111,7 +111,7 @@ type AgentRuntime struct {
 	refreshing    atomic.Bool
 	refreshWG     sync.WaitGroup
 	fetchMu       sync.RWMutex
-	fetchModels   ModelFetcher
+	fetchModels   CatalogFetcher
 	providerCache map[string]inference.Provider
 	// thinkingCache holds providers with a thinking level applied, so a
 	// level the provider rejected stays dropped across turns.
@@ -302,6 +302,10 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	req.FormatOnWrite = settings.formatOnWrite()
 	req.VerifyNudge = settings.verifyNudge()
 	req.Web = settings.Web.options()
+	// The window the provider's catalog published beats the built-in
+	// table; the agent's own resolution covers the rest. The model is the
+	// turn's choice, else the one the session is already on.
+	req.ContextWindow = r.catalogWindow(sess.Meta.Provider, firstModel(req.Model, sess.Meta.Model))
 	if settings.lspDiagnostics() {
 		req.Diagnose, req.Warm = r.lspHooks(ctx, req.Cwd, req.SessionID)
 	}

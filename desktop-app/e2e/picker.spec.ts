@@ -34,6 +34,42 @@ test("composer picker stays open while toggling and picking", async ({ page }) =
   await expect(menu).toBeHidden();
 });
 
+test("the detail pane shows the catalog's window, thinking and prices", async ({ page }) => {
+  const menu = page.locator("#modelMenu");
+  await page.click("#modelSelectBtn");
+  // Only Opencode Go's listing carries metadata in the stub, and it is
+  // also the pick the app starts on. The dropdown narrows the tree so a
+  // model another provider also serves (gpt-4o) resolves once.
+  await page.locator("#providerPick").selectOption("Opencode Go");
+  const pick = async (model: string): Promise<void> => {
+    await menu.locator("[data-mpick]").filter({ hasText: model }).first().click();
+  };
+  const detail = page.locator("#modelDetail");
+
+  await pick("claude-3-opus");
+  await expect(detail).toContainText("1M tokens");
+  await expect(detail).toContainText("128k out");
+  await expect(detail).toContainText("low · medium · high · xhigh · max");
+  await expect(detail).toContainText("in $0.1 · out $0.5 · cache $0.01 · write $0.125");
+
+  // A model the catalog says has no thinking levels says so, and a
+  // price the listing omits leaves no invented cache number behind.
+  await pick("gpt-4o");
+  await expect(detail).toContainText("in $2.5 · out $10");
+  await expect(detail).not.toContainText("cache $");
+});
+
+test("a model without catalog metadata shows no invented numbers", async ({ page }) => {
+  const menu = page.locator("#modelMenu");
+  await page.click("#modelSelectBtn");
+  await page.locator("#providerPick").selectOption("Opencode Go");
+  await menu.locator("[data-mpick]").filter({ hasText: "claude-fable" }).first().click();
+  const detail = page.locator("#modelDetail");
+  await expect(detail).toContainText("anthropic/claude-fable");
+  await expect(detail).not.toContainText("Price / 1M");
+  await expect(detail).not.toContainText("Context");
+});
+
 test("the picked model survives a reload", async ({ page }) => {
   await page.click("#modelSelectBtn");
   const menu = page.locator("#modelMenu");

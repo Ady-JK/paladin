@@ -353,6 +353,26 @@ export type ProviderInfo = {
   models: string[];
   default: boolean;
   hasKey?: boolean;
+  // meta is what the provider's own model listing published about each
+  // model id in models; models it said nothing about are absent.
+  meta?: Record<string, ModelMeta>;
+};
+
+// ModelMeta is a provider's published metadata for one model: the wire
+// dialect serving it, its limits, the thinking levels it accepts and its
+// prices in USD per million tokens.
+export type ModelMeta = {
+  contextWindow?: number;
+  maxOutput?: number;
+  /** "chat", "responses", "anthropic" or "google". */
+  protocol?: string;
+  /** Weakest first; empty with thinkingKnown means "none to pick". */
+  thinkingLevels?: string[];
+  thinkingKnown?: boolean;
+  priceInput?: number;
+  priceOutput?: number;
+  priceCacheRead?: number;
+  priceCacheWrite?: number;
 };
 
 type FsDirectory = {

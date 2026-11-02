@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -27,8 +28,59 @@ func (r *AgentRuntime) SessionUsage(sessionID, cwd string) (session.SessionUsage
 		return session.SessionUsage{}, err
 	}
 	totals, model := readUsage(sess)
-	window, known := inference.ContextWindow(model)
-	return totals.View(sess.Meta.SessionID, window, known, inference.ContextWindow), nil
+	window, known := r.windowOf(sess, model)
+	return totals.View(sess.Meta.SessionID, window, known, r.windowResolver(sess)), nil
+}
+
+// windowOf resolves a model's context window for a session: the window
+// the provider's catalog published for it, else the built-in table.
+func (r *AgentRuntime) windowOf(sess transcript.Session, model string) (int64, bool) {
+	provider := ""
+	if sess.Meta.Provider != nil {
+		provider = *sess.Meta.Provider
+	}
+	meta := config.ModelMeta{}
+	if provider != "" && model != "" {
+		meta = r.store.ModelMeta(provider, model)
+	}
+	return inference.WindowFor(meta, model)
+}
+
+// windowResolver is windowOf for the per-model breakdown, which only
+// knows model ids.
+func (r *AgentRuntime) windowResolver(sess transcript.Session) func(string) (int64, bool) {
+	return func(model string) (int64, bool) { return r.windowOf(sess, model) }
+}
+
+// catalogWindow is the context window the provider's catalog published
+// for model, or 0 when it published none (the agent then falls back to
+// the built-in table). The session's provider still names whose catalog
+// to read when the turn picks its own model.
+func (r *AgentRuntime) catalogWindow(provider *string, model *string) int64 {
+	name := ""
+	if provider != nil {
+		name = strings.TrimSpace(*provider)
+	}
+	if name == "" || model == nil {
+		return 0
+	}
+	id := strings.TrimSpace(*model)
+	if id == "" {
+		return 0
+	}
+	if meta := r.store.ModelMeta(name, id); meta.ContextWindow > 0 {
+		return meta.ContextWindow
+	}
+	return 0
+}
+
+// firstModel returns the first non-empty model id: the turn's own choice
+// wins over the one the session already carries.
+func firstModel(override, session *string) *string {
+	if override != nil && strings.TrimSpace(*override) != "" {
+		return override
+	}
+	return session
 }
 
 // readUsage loads a session's usage.json (zero totals when missing)

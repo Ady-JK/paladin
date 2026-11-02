@@ -34,7 +34,8 @@ func (r *AgentRuntime) ThinkingGet(provider, model string) (ThinkingView, error)
 		entry.Model = r.defaultModel(entry)
 	}
 	v := ThinkingView{Provider: entry.Name, Model: entry.Model, Levels: []string{}}
-	if levels := inference.ModelEffortLevels(entry.ApiType, entry.ApiURL, entry.Model); levels != nil {
+	meta := r.store.ModelMeta(entry.Name, entry.Model)
+	if levels := inference.ModelEffortLevels(entry.ApiType, entry.ApiURL, entry.Model, meta); levels != nil {
 		v.Levels = levels
 	}
 	v.Level = r.loadSettings().ThinkingLevels[entry.Name][entry.Model]

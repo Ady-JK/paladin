@@ -253,6 +253,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	return newAgent(runConfig{
 		session:     sess,
 		provider:    provider,
+		window:      req.ContextWindow,
 		tools:       registry,
 		shell:       shell,
 		toolDefs:    toolDefinitions(registry),

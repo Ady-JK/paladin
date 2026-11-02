@@ -88,6 +88,10 @@ type Request struct {
 	Warm     func(path string, trust func(string) bool)                 `json:"-"`
 	// Web is the user's web settings for web_fetch. Set by the runtime.
 	Web tools.WebOptions `json:"-"`
+	// ContextWindow, when positive, is the model's context window as the
+	// provider's catalog reported it, overriding the built-in table. Set
+	// by the runtime; never on the wire.
+	ContextWindow int64 `json:"-"`
 }
 
 // Notice is a reminder delivered into a running turn: recorded as a
@@ -218,6 +222,9 @@ type runConfig struct {
 	toolDefs    []inference.ToolDefinition
 	history     []transcript.Message
 	system      string
+	// window overrides the model's context window; 0 means "resolve it
+	// from the provider's catalog, else the built-in table".
+	window      int64
 	ctx         context.Context
 	cancel      context.CancelFunc
 	tx          chan<- ChatChunk
@@ -334,8 +341,8 @@ type Agent struct {
 }
 
 func newAgent(c runConfig) *Agent {
-	var window int64
-	if c.provider != nil {
+	window := c.window
+	if window <= 0 && c.provider != nil {
 		if w, known := inference.ContextWindow(c.provider.Model()); known {
 			window = w
 		}

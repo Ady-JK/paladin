@@ -85,6 +85,9 @@ type ProviderSpec struct {
 	Model   string
 	BaseURL string
 	ApiKey  string
+	// Meta is what the provider's model listing said about Model; the
+	// zero value means it said nothing.
+	Meta config.ModelMeta
 }
 
 // ProviderFactory builds a live provider from a resolved spec.
@@ -206,6 +209,13 @@ func IsRetryable(err error) bool {
 // Placeholder keys are rejected for every dialect; unknown dialects and
 // unimplemented ones keep their original error strings.
 func BuildProvider(apiType config.ApiType, name, model, baseURL, apiKey string) (Provider, error) {
+	return BuildProviderWithMeta(apiType, name, model, baseURL, apiKey, config.ModelMeta{})
+}
+
+// BuildProviderWithMeta is BuildProvider for a model whose catalog
+// metadata is known, so the provider routes the way its gateway
+// documents rather than by the model's name.
+func BuildProviderWithMeta(apiType config.ApiType, name, model, baseURL, apiKey string, meta config.ModelMeta) (Provider, error) {
 	if config.IsPlaceholderKey(apiKey) {
 		return nil, &ProviderError{Kind: "placeholder", Message: "provider " + quote(name) + ": api key is still the placeholder"}
 	}
@@ -213,7 +223,7 @@ func BuildProvider(apiType config.ApiType, name, model, baseURL, apiKey string) 
 	if !ok {
 		return nil, ConfigError("unknown api type " + string(apiType))
 	}
-	return tpl.New(ProviderSpec{Name: name, Model: model, BaseURL: baseURL, ApiKey: apiKey})
+	return tpl.New(ProviderSpec{Name: name, Model: model, BaseURL: baseURL, ApiKey: apiKey, Meta: meta})
 }
 
 func quote(s string) string {

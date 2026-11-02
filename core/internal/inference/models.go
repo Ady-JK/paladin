@@ -1,11 +1,19 @@
 // models.go is the static per-model context window
-// table. Values are exact ids from Models.dev (the same source OpenCode
+// table, the fallback for models whose provider publishes no metadata.
+// Values are exact ids from Models.dev (the same source OpenCode
 // itself uses: the `opencode` and `opencode-go` providers), verified
 // 2026-10-27. Only omen-alpha and qwen3.7-max have no entry anywhere and
 // resolve to DefaultContextWindow (known=false) until real values are
 // supplied.
+//
+// A provider that describes its own models wins: OpenCode Go's catalog
+// reports each model's window, and WindowFor prefers it. That is what
+// keeps a repriced or resized model correct without a code change, and
+// it already disagrees with this table for minimax-m3 and qwen3.8-max.
 
 package inference
+
+import "github.com/Ady-JK/paladin/core/internal/config"
 
 // DefaultContextWindow is the assumed window for models with no table
 // entry. It is deliberately marked unknown by ContextWindow so the UI
@@ -61,4 +69,15 @@ func ContextWindow(model string) (tokens int64, known bool) {
 		return w, true
 	}
 	return DefaultContextWindow, false
+}
+
+// WindowFor is ContextWindow preferring the window the provider's own
+// listing reported, which is fresher than the static table and covers
+// models the table has never heard of. Without a published window it
+// falls back to the table.
+func WindowFor(meta config.ModelMeta, model string) (tokens int64, known bool) {
+	if meta.ContextWindow > 0 {
+		return meta.ContextWindow, true
+	}
+	return ContextWindow(model)
 }
