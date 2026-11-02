@@ -43,7 +43,11 @@ func (g *doomGuard) check(name, args string) string {
 			continue
 		}
 		if period == 1 {
-			return fmt.Sprintf("refused: %s was called with identical arguments %d times in a row (repeated call); the result will not change. Use a different approach, different arguments, or report what is blocking you.", name, doomLimit)
+			msg := fmt.Sprintf("refused: %s was called with identical arguments %d times in a row (repeated call); the result will not change. Use a different approach, different arguments, or report what is blocking you.", name, doomLimit)
+			if readOnlyTools[name] {
+				msg += " You already have these results — the content has not changed, so use what you have instead of re-reading."
+			}
+			return msg
 		}
 		lap := g.recent[len(g.recent)-period:]
 		names := make([]string, len(lap))

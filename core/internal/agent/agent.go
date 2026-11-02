@@ -296,6 +296,13 @@ type Agent struct {
 	// warning threshold the result carries an escalation note instead
 	// of failing silently into another identical round.
 	editStreaks map[string]int
+	// deniedStreak counts consecutive denied tool results this turn;
+	// three in a row end the turn instead of pestering on.
+	deniedStreak int
+	// readOnlyRounds counts consecutive rounds whose calls are all
+	// search/read-only with nothing acted on in between; at the limit
+	// the round's calls are refused so exploration converges.
+	readOnlyRounds int
 	// noticed holds tool rows announced while the model was still
 	// streaming the call; any that never execute are settled as failed
 	// so the UI never keeps a spinner for a call that won't run.

@@ -232,7 +232,10 @@ flowchart TD
 | **Streaming watchdog** | If the model goes silent too long, hang up and retry instead of waiting forever. |
 | **Retry with backoff** | Wait a bit longer each time (2s, 4s, 8s…) with some randomness, so all sessions don't retry at the same moment. |
 | **Empty-reply rescue** | If the stream came back empty, ask once more without streaming. |
-| **Doom-loop guard** | If the model keeps asking for the exact same thing (or loops A, B, A, B… through the same 2–4 calls three times), say "that won't change, try something else." The turn keeps going; the model has to adapt. |
+| **Doom-loop guard** | If the model keeps asking for the exact same thing (or loops A, B, A, B… through the same 2–4 calls three times), say "that won't change, try something else." The turn keeps going; the model has to adapt. Re-reads get a sharper variant: the content has not changed, use what you have. |
+| **Denial breaker** | Three tool calls denied in a row (user declines, permission rule blocks) end the turn with a saved error instead of pestering forever. Any other result resets the count. |
+| **Search-only refusal** | Eight consecutive rounds that only search or read (no writes, commands, or questions) get the next such round refused with guidance to summarize and act. Any round that acts resets the count. |
+| **Output budgets** | Every search answer (grep, glob, list) is cut at 50 KiB with a pointer to narrow the query — the same role as read's 50 KiB pages and shell's 32 KiB spill. No single tool result can flood the context. |
 | **Edit-spiral note** | If the model edits the same file over and over without getting it clean (errors, or diagnostics that never clear), the result itself says so: batch all remaining fixes together, then run the build/tests and fix from their output instead of guessing. |
 | **Tool-call budget** | A turn may run at most 200 tool calls. Past that the turn ends with a saved, resumable error instead of looping forever. |
 | **Parallel batches** | Reading 5 files? Do it at once (up to 8). Writing or running shell? One at a time, in order. |

@@ -37,7 +37,12 @@ const (
 	searchMaxFiles     = 200_000
 	searchMaxFileBytes = 1 << 20
 	searchMaxLineRunes = 300
-	searchTimeout      = 30 * time.Second
+	// searchMaxOutputBytes caps one rendered answer the way read caps
+	// a page: past it the answer is cut at a line boundary and marked
+	// truncated, so the model narrows the query instead of drowning
+	// the context. Uniform with read's 50 KiB page.
+	searchMaxOutputBytes = 50 << 10
+	searchTimeout        = 30 * time.Second
 )
 
 // searchUseRipgrep switches ripgrep on when it is installed; tests
@@ -358,6 +363,20 @@ func clipLine(s string) string {
 	return s
 }
 
+// cutSearchOutput caps a rendered search answer at the output budget,
+// cutting at a line boundary so no row is torn. It reports whether it
+// cut, and names the way out: a narrower path, glob, or pattern.
+func cutSearchOutput(out string) (string, bool) {
+	if len(out) <= searchMaxOutputBytes {
+		return out, false
+	}
+	cut := strings.LastIndex(out[:searchMaxOutputBytes], "\n")
+	if cut <= 0 {
+		cut = searchMaxOutputBytes
+	}
+	return out[:cut] + "\n[truncated at 50 KiB: use a more specific path, glob, or narrower pattern]\n", true
+}
+
 // ---- grep ----
 
 type GrepTool struct{}
@@ -371,7 +390,8 @@ func (GrepTool) Definition() ToolDefinition {
 		Description: "Search file contents with a regular expression (RE2/ripgrep syntax) under a folder or in one file. " +
 			"Respects .gitignore and skips binary files, .git and node_modules. Returns matching lines grouped by " +
 			"absolute file path with line numbers (\"12: text\"; context lines use \"12- text\"). " +
-			"Use grep instead of running grep or rg through the shell.",
+			"Use grep instead of running grep or rg through the shell. Results are truncated past 50 KiB " +
+			"or the match limit: when truncated is true, narrow the pattern, path, or glob instead of paging.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -505,6 +525,9 @@ func (GrepTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	if args.Output != "files" {
 		resp.Matches = matches
 	}
+	if output, cut := cutSearchOutput(resp.Output); cut {
+		resp.Output, resp.Truncated = output, true
+	}
 	return searchJSON(resp)
 }
 
@@ -572,7 +595,8 @@ func (GlobTool) Definition() ToolDefinition {
 		Name: "glob",
 		Description: "Find files by name pattern under a folder, newest first. ** spans folders, * and ? stay within " +
 			"one, {a,b} picks alternatives; a pattern without / matches the file name at any depth. Respects " +
-			".gitignore and skips .git and node_modules. Returns one absolute path per line.",
+			".gitignore and skips .git and node_modules. Returns one absolute path per line. Results are " +
+			"truncated past 50 KiB or the path limit: when truncated is true, narrow the pattern or path.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -631,7 +655,8 @@ func (GlobTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	for _, f := range hits {
 		out.WriteString(f.path + "\n")
 	}
-	return searchJSON(SearchResponse{Path: root, Scope: scope, Engine: engine, Files: len(hits), Truncated: truncated, Output: out.String()})
+	output, cut := cutSearchOutput(out.String())
+	return searchJSON(SearchResponse{Path: root, Scope: scope, Engine: engine, Files: len(hits), Truncated: truncated || cut, Output: output})
 }
 
 // ---- list ----
@@ -646,7 +671,8 @@ func (ListTool) Definition() ToolDefinition {
 		Name: "list",
 		Description: "Show a folder as an indented tree, folders first with a trailing / and the number of files " +
 			"under them. Respects .gitignore and skips .git and node_modules; empty folders are not shown. " +
-			"Use it to get oriented before reading files.",
+			"Use it to get oriented before reading files. Entries are truncated past 50 KiB or the entry " +
+			"limit: when truncated is true, list a deeper path instead.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -750,5 +776,6 @@ func (ListTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	if !walk(top, 1) {
 		truncated = true
 	}
-	return searchJSON(SearchResponse{Path: root, Scope: scope, Engine: engine, Files: top.count, Truncated: truncated, Output: out.String()})
+	output, cut := cutSearchOutput(out.String())
+	return searchJSON(SearchResponse{Path: root, Scope: scope, Engine: engine, Files: top.count, Truncated: truncated || cut, Output: output})
 }

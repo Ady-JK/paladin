@@ -29,6 +29,21 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 		return turnFailed{msg: "tool call budget exhausted: over 200 tool calls in one turn without finishing — ending the turn so it can't loop forever. The transcript is saved; resume with a narrower task to continue."}
 	}
 	a.toolCalls += len(calls)
+	if a.noteReadOnlyRound(calls) {
+		// Refuse the whole round: many consecutive rounds only searched
+		// or read without acting. History still needs a result for every
+		// call, so refused rows go through the normal record+emit path
+		// and the turn continues — the model must act, ask, or answer.
+		for i := range calls {
+			result := tools.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, IsError: true,
+				Content: readOnlyRefusal(a.readOnlyRounds)}
+			a.appendToolResult(&calls[i], &result)
+			if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
+				return turnStop{}
+			}
+		}
+		return nil
+	}
 	a.settleNotices(calls)
 	for i, call := range calls {
 		if err := a.emit(ChatChunk{Tool: &ToolActivity{
@@ -56,6 +71,10 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
 				a.settleAborted(calls[k+1:])
 				return turnStop{}
+			}
+			if a.noteDenial(&result) {
+				a.settleAborted(calls[k+1:])
+				return turnFailed{msg: "stopped after 3 consecutive denied tool calls — the approach needs approval that is not coming; change approach or ask the user what they want instead"}
 			}
 		}
 		i = j
