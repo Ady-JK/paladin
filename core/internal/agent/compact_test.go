@@ -338,9 +338,8 @@ func TestReactiveCompactionWithLargeSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestCompactThresholdCapsLargeWindows(t *testing.T) {
-	// Small windows keep the classic 85% trigger; very large windows
-	// compact at the absolute cap instead of dragging ~1M tokens.
+func TestCompactThresholdIsPctOfWindow(t *testing.T) {
+	// Auto-compaction fires at 85% of the window, whatever its size.
 	a := &Agent{window: 200_000}
 	if !a.overThreshold(170_000) {
 		t.Fatal("85% of a 200k window should trip")
@@ -349,11 +348,12 @@ func TestCompactThresholdCapsLargeWindows(t *testing.T) {
 		t.Fatal("below 85% of a 200k window should not trip")
 	}
 	a.window = 1_048_576
-	if !a.overThreshold(maxProactiveContextTokens) {
-		t.Fatalf("a 1M window should trip at the %d cap", maxProactiveContextTokens)
+	// Integer division truncates, so probe just above the boundary.
+	if !a.overThreshold(1_048_576*85/100 + 1) {
+		t.Fatal("85% of a 1M window should trip")
 	}
-	if a.overThreshold(maxProactiveContextTokens - 1) {
-		t.Fatalf("a 1M window should not trip below the %d cap", maxProactiveContextTokens)
+	if a.overThreshold(1_048_576*85/100 - 1000) {
+		t.Fatal("below 85% of a 1M window should not trip")
 	}
 }
 
