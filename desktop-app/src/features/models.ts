@@ -505,6 +505,14 @@ function persistModel(): void {
   saveJson(MODEL_KEY, { provider: state.selectedProvider, lab: state.selectedLab, model: state.selectedModel });
 }
 
+// persistModelChoice records an out-of-picker model change (e.g. the
+// session bringing its own last-used model) so the global default and
+// a later provider refresh agree with the composer instead of
+// clobbering it back.
+export function persistModelChoice(): void {
+  persistModel();
+}
+
 // Listeners hear about every change to the picked provider or model.
 const modelListeners: Array<() => void> = [];
 let lastPicked = "";

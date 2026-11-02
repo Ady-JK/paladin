@@ -13,6 +13,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/permission"
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 // Turn states.
@@ -463,9 +464,9 @@ func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
 	t.info.Stopped = t.info.Stopped || out.Stopped
 	switch {
 	case err != nil:
-		t.info.Error = err.Error()
+		t.info.Error = redact.String(err.Error())
 	case t.errMsg != "":
-		t.info.Error = t.errMsg
+		t.info.Error = redact.String(t.errMsg)
 	}
 	t.log = nil
 	if h.active[t.info.SessionID] == t {

@@ -170,6 +170,8 @@ func TestIsContextOverflow(t *testing.T) {
 		&ProviderError{Kind: "request", Status: 413, Message: "request entity too large"},
 		errors.New("input exceeds the context window of this model"),
 		&ProviderError{Kind: "request", Status: 400, Message: "The input token count (1200000) exceeds the maximum number of tokens allowed"},
+		&ProviderError{Kind: "request", Status: 500, Message: "context length unknown: prompt too large for gateway buffer"},
+		&ProviderError{Kind: "request", Status: 529, Message: "prompt is too long: reduce the length and try again"},
 	}
 	for _, err := range yes {
 		if !IsContextOverflow(err) {
@@ -179,8 +181,8 @@ func TestIsContextOverflow(t *testing.T) {
 	no := []error{
 		nil,
 		&ProviderError{Kind: "request", Status: 429, Message: "rate limit: too many tokens per minute"},
+		&ProviderError{Kind: "request", Status: 500, Message: "tokens per minute quota exceeded, try again later"},
 		&ProviderError{Kind: "request", Status: 400, Message: "invalid tool schema"},
-		&ProviderError{Kind: "request", Status: 500, Message: "context length unknown"},
 		CancelledError(),
 	}
 	for _, err := range no {

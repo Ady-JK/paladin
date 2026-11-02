@@ -20,6 +20,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -333,7 +334,9 @@ func (a *Agent) compact(reason string, before int64) error {
 		err = errors.New("model returned an empty summary")
 	}
 	if err != nil {
-		_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "failed", Reason: reason, TokensBefore: before, Error: err.Error()}})
+		// The error reaches the UI verbatim in the compaction divider:
+		// mask secret-looking values a gateway may have echoed back.
+		_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "failed", Reason: reason, TokensBefore: before, Error: redact.String(err.Error())}})
 		return err
 	}
 	if a.hooks.Has(hooks.SessionStart) {

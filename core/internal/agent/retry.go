@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 // retryUnit is the backoff quantum; tests shrink it.
@@ -94,5 +95,7 @@ func retryReason(err error) string {
 	if len(r) > 200 {
 		r = append(r[:200], '…')
 	}
-	return string(r)
+	// Reasons ride the event stream to the UI: mask secret-looking
+	// values a gateway may have echoed into the error body.
+	return redact.String(string(r))
 }

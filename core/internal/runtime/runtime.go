@@ -345,6 +345,31 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	if err != nil {
 		return agent.ChatOutcome{}, err
 	}
+	// The session remembers the turn's explicit provider/model choice,
+	// so reopening it restores the last-used model instead of the
+	// creation-time default. The write-back goes through UpdateMeta's
+	// atomic read-modify-write: runTurn's sess copy predates the turn's
+	// own toolset seeding, and a blind SaveMeta would clobber it.
+	// Best-effort: a meta write never fails a turn that built fine.
+	_ = r.transcripts.UpdateMeta(req.Cwd, req.SessionID, func(m *transcript.Meta) error {
+		changed := false
+		if p := strings.TrimSpace(derefString(req.Provider)); p != "" {
+			if m.Provider == nil || *m.Provider != p {
+				m.Provider = &p
+				changed = true
+			}
+		}
+		if v := strings.TrimSpace(derefString(req.Model)); v != "" {
+			if m.Model == nil || *m.Model != v {
+				m.Model = &v
+				changed = true
+			}
+		}
+		if !changed {
+			return errMetaUnchanged
+		}
+		return nil
+	})
 	defer r.setLiveConversation(req.SessionID, nil)
 	outcome, err := built.Run()
 	if err != nil {

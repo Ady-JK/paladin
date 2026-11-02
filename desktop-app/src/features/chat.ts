@@ -234,8 +234,15 @@ async function send(): Promise<void> {
     if (skill && /not found: skill/i.test(String(error))) {
       refreshSkillsCache();
     }
-    addTurn("error", String(error));
-    setStatus(String(error), "error");
+    // A turn dropped before it started (user stopped a queued turn) is
+    // an intentional stop, not a failure: no red row, just a status.
+    // The draft stays restored above so the message can be resent.
+    if (/stopped before it started/i.test(String(error))) {
+      setStatus("stopped", "ok");
+    } else {
+      addTurn("error", String(error));
+      setStatus(String(error), "error");
+    }
     syncComposer();
   } finally {
     // An approval card that took focus mid-submit keeps it.

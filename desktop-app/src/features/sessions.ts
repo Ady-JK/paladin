@@ -31,7 +31,7 @@ import { createVisualCard } from "./visuals";
 import { ToolRun } from "./toolRun";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
-import { syncModelSelects } from "./models";
+import { persistModelChoice, syncModelSelects } from "./models";
 import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
 import { refreshExternalVisibility } from "./sites";
 import { forkSessionById, renameSessionById } from "./sessionActions";
@@ -477,6 +477,10 @@ export async function openSession(id: string): Promise<void> {
       state.selectedProvider = session.provider;
       state.selectedLab = session.model ? splitModel(session.model).lab : "";
       state.selectedModel = session.model;
+      // The session's last-used model becomes the global default too,
+      // so a later provider refresh (or an app restart) restores this
+      // instead of falling back to another provider's model.
+      persistModelChoice();
       syncModelSelects();
     } else {
       modelSelectLabelEl.textContent = session.model || "default";

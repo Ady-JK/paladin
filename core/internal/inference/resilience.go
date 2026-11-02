@@ -147,10 +147,29 @@ var overflowPhrases = []string{
 	"reduce the length",
 }
 
+// throttlePhrases mark an error as rate limiting rather than an
+// over-long prompt, even when the wording mentions tokens: a TPM
+// throttle ("too many tokens per minute") must back off and retry, not
+// compact. Mirrors opencode's exclusion of throttling codes.
+var throttlePhrases = []string{
+	"per minute",
+	"rate limit",
+	"ratelimit",
+	"too many requests",
+	"try again later",
+	"please wait",
+	"throttl",
+	"quota",
+	"billing",
+	"credit",
+	"insufficient",
+}
+
 // IsContextOverflow reports whether err is the provider rejecting the
 // request because the prompt doesn't fit the model's context window.
-// Only client errors (400/413/422) or untyped errors qualify: a rate
-// limit about tokens-per-minute is not an overflow.
+// Overflow wording wins on any status — some gateways surface it as
+// 500/529 — except throttling (429 or throttle wording), which must
+// back off and retry instead of compacting.
 func IsContextOverflow(err error) bool {
 	if err == nil || IsCancelled(err) {
 		return false
@@ -158,14 +177,18 @@ func IsContextOverflow(err error) bool {
 	var pe *ProviderError
 	if errors.As(err, &pe) {
 		switch pe.Status {
-		case 0, http.StatusBadRequest, http.StatusUnprocessableEntity:
 		case http.StatusRequestEntityTooLarge:
 			return true
-		default:
+		case http.StatusTooManyRequests:
 			return false
 		}
 	}
 	msg := strings.ToLower(err.Error())
+	for _, p := range throttlePhrases {
+		if strings.Contains(msg, p) {
+			return false
+		}
+	}
 	for _, p := range overflowPhrases {
 		if strings.Contains(msg, p) {
 			return true

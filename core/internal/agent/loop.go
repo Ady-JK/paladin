@@ -440,6 +440,11 @@ loop:
 			return turnStop{}
 		}
 	}
+	// A silent turn would fake READY with nothing said and no error row;
+	// fail loudly like the tool path's empty-round guard instead.
+	if a.reply.Len() == 0 {
+		return turnFailed{"model returned an empty response — try again"}
+	}
 	a.finish(phaseDone)
 	return nil
 }

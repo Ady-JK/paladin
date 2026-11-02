@@ -277,6 +277,11 @@ type Agent struct {
 	// nor tool calls; three in a row ends the turn (done with progress,
 	// failed without) instead of spinning on a dead gateway.
 	emptyRounds int
+	// toolCalls counts tool calls actually run this turn; past
+	// maxToolCallsPerTurn the turn fails instead of looping forever.
+	// A syntactic loop guard (doomGuard) cannot catch a spiral of
+	// ever-varying searches and reads, so this is the backstop.
+	toolCalls int
 	// retries counts retried rounds after retryable provider errors
 	// (rate limits, 5xx, transport blips); three per turn, then the
 	// turn fails. Any round progress resets it alongside emptyRounds.
@@ -420,7 +425,12 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	a.settleNotices(nil)
 	stopped := errors.As(err, new(turnStop))
 	if err != nil && !stopped {
-		_ = a.save()
+		// The transcript is the only record of a failed turn: if it
+		// cannot persist either, say so instead of silently dropping
+		// the whole turn while the UI shows only the first error.
+		if perr := a.save(); perr != nil {
+			return ChatOutcome{}, turnFailed{msg: err.Error() + " (and the failed turn could not be saved: " + perr.Error() + ")"}
+		}
 		return ChatOutcome{}, err
 	}
 	a.finalize(stopped)
