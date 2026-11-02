@@ -30,7 +30,7 @@ test("composer picker stays open while toggling and picking", async ({ page }) =
   await expect(menu).toBeVisible();
   await expect(page.locator("#modelSelectLabel")).toHaveText("local/llama3.2");
 
-  await page.getByRole("heading", { name: "Ready when you are." }).click();
+  await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
 });
 
