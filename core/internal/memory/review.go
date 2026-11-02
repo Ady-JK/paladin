@@ -89,6 +89,12 @@ func saveReviewState(sessionDir string, st ReviewState) error {
 	if strings.TrimSpace(sessionDir) == "" {
 		return nil
 	}
+	// A session deleted while its turn was finishing has nowhere to record
+	// this: writing would recreate the folder the delete just removed (and
+	// race the delete). The counter is recomputed from the next turn.
+	if !dirExists(sessionDir) {
+		return nil
+	}
 	data, err := json.Marshal(st)
 	if err != nil {
 		return err
@@ -210,3 +216,109 @@ func (b *Bank) ShouldForkReview(sessionDir string) bool {
 // ErrDisabled reports a store switched off in memory.json, so callers can
 // tell "you may not" from "that failed".
 var ErrDisabled = errors.New("memory target is switched off")
+
+// recallMinWords is how much overlap a message needs before an entry is
+// recalled. Below this the match is noise (one shared word), and a recall
+// that fires on everything is worse than none: it trains the model to
+// ignore the reminder.
+const recallMinWords = 2
+
+// Match finds the entry a user message is most clearly about, across the
+// enabled scopes, for recall injection into the prompt.
+//
+// The score is how many distinct words the message shares with an entry,
+// on the same folded form the tool uses for old_text, so "the build's
+// cache" matches an entry saying "build cache". An entry that shares
+// fewer than recallMinWords distinct words is not a match; ties go to the
+// project scope (the most specific), then to the longer overlap.
+func (b *Bank) Match(cwd, message string) (string, Target, bool) {
+	words := recallWords(message)
+	if len(words) < recallMinWords {
+		return "", "", false
+	}
+	type scored struct {
+		entry  string
+		target Target
+		score  int
+		order  int
+	}
+	var best scored
+	found := false
+	// Project first so it wins a tie against the broader scopes.
+	for order, t := range []Target{TargetProject, TargetGlobal, TargetUser} {
+		if t == TargetProject && strings.TrimSpace(cwd) == "" {
+			continue
+		}
+		if !b.cfg.TargetEnabled(t) {
+			continue
+		}
+		res, err := b.Read(t, cwd)
+		if err != nil {
+			continue
+		}
+		for _, entry := range res.Entries {
+			if Scan(entry) != "" {
+				continue
+			}
+			score := overlap(words, recallWords(entry))
+			if score < recallMinWords {
+				continue
+			}
+			// A longer shared overlap wins; on equal overlap the earlier
+			// scope (project) wins, then the earlier entry.
+			if found && (score < best.score || (score == best.score && order >= best.order)) {
+				continue
+			}
+			best, found = scored{entry: entry, target: t, score: score, order: order}, true
+		}
+	}
+	if !found {
+		return "", "", false
+	}
+	return best.entry, best.target, true
+}
+
+// recallWords is the folded word set of a text, lowercased, dropping the
+// words too common to mean anything on their own.
+func recallWords(text string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range wordRE.FindAllString(normalizeForMatch(strings.ToLower(text)), -1) {
+		if len(w) < 3 || recallStopWords[w] {
+			continue
+		}
+		out[w] = true
+	}
+	return out
+}
+
+// recallStopWords are words that appear in nearly every entry or request,
+// so matching on them says nothing about relevance.
+var recallStopWords = map[string]bool{
+	"the": true, "and": true, "that": true, "this": true, "with": true, "for": true,
+	"you": true, "your": true, "are": true, "was": true, "have": true, "has": true,
+	"can": true, "will": true, "would": true, "should": true, "does": true, "did": true,
+	"not": true, "but": true, "all": true, "any": true, "how": true, "what": true,
+	"when": true, "where": true, "which": true, "there": true, "their": true, "them": true,
+	"from": true, "into": true, "than": true, "then": true, "also": true, "use": true,
+	"used": true, "using": true, "make": true, "made": true, "run": true, "runs": true,
+	"please": true, "help": true, "need": true, "want": true, "like": true, "just": true,
+}
+
+// overlap counts the distinct shared words.
+func overlap(a, b map[string]bool) int {
+	n := 0
+	for w := range a {
+		if b[w] {
+			n++
+		}
+	}
+	return n
+}
+
+// dirExists reports whether path is still a directory. Used before writing
+// per-session state, so a deleted session is never recreated by a turn
+// that was finishing when the delete happened.
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}

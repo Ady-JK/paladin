@@ -597,8 +597,16 @@ flowchart TB
 
 - The model uses the **`memory` tool** to add, replace or remove notes. Each notebook has a size limit, so it stays short.
 - **Many sessions, same folder:** they share one folder notebook. Writes take a **file lock**, so two sessions can't scribble over each other.
-- **Frozen snapshot per session:** at the start of a session, memory is copied into its prompt and stays fixed. A note written by session 2 doesn't suddenly change session 1's prompt (that would break its cache). Session 1 sees it next time it refreshes.
+- **Frozen snapshot per session:** at the start of a session, memory is copied into its prompt and stays fixed. A note written by session 2 doesn't suddenly change session 1's prompt (that would break its cache). Session 1 sees it next time it refreshes. `memorySnapshotStatus` reports when the stores on disk moved past that snapshot, and the refresh RPC re-reads them.
+- **Tolerant addressing.** Models re-type text, so `old_text` matches byte-exact first and then after folding typography (curly quotes, em dashes, re-wrapped lines). A whole-entry match beats a substring; an ambiguous match lists the candidates instead of guessing.
+- **Writes are checked, not trusted.** No-op patches, missing `old_text`, oversized entries and the `§` delimiter are refused; a threat scan blocks prompt-injection and exfiltration patterns on the way in *and* again when the store is rendered (a hand-edited poisoned file shows `[BLOCKED]`, never the text); secret-shaped values are masked on write and the tool reports which entries were masked.
+- **`memory.json`** (`<data>/config/`) sets per-scope budgets, which scopes are off, the backend provider, the review nudge interval and `autoReview`. Absent means today's behaviour.
+- **Review loop:** after N turns without a memory write, one short nudge paragraph asks the model to save what it learned. With `autoReview` on, a finished turn forks a child session that may only write memory (never the workspace) and replays the conversation to decide what is worth keeping.
+- **Recall:** when your message clearly matches a stored entry (two or more content words, folded the same way), that one entry is repeated as a short reminder naming its scope — attention, not a second copy of the store.
+- **`session_search`** answers "like last time" from a SQLite FTS index over past transcripts.
 - You can view and edit everything in **Settings → Memory**, or with `/memories`.
+
+The backend is behind a small seam (`core/internal/memory/provider.go`): read entries, fingerprint them, and mutate under a lock. The write rules — guards, scan, masking, budget, matching — live once above it, so a second backend cannot drift from them. Only the file backend exists today, deliberately.
 
 ---
 
@@ -660,6 +668,7 @@ flowchart LR
 │   ├── commands/, skills/  ← your commands and skills (and edited built-ins)
 │   ├── lsp.json            ← language server overrides
 │   ├── mcp.json            ← global MCP servers
+│   ├── memory.json         ← memory budgets, disabled scopes, review, provider
 │   └── tools.json          ← global tool switches
 ├── permissions/
 │   ├── global.json         ← saved allow/deny rules (everywhere)

@@ -16,6 +16,8 @@ import (
 	"log"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -65,5 +67,55 @@ func (r *AgentRuntime) maybeForkReview(sess transcript.Session, info TurnInfo) {
 	}
 	if err := memory.MarkReviewed(sess.Dir, turn); err != nil {
 		log.Printf("memory: mark reviewed for %s: %v", sess.Meta.SessionID, err)
+	}
+}
+
+// memoryRecall is the point where a relevant stored entry surfaces in a
+// turn without the agent having to call the memory tool.
+//
+// The frozen snapshot already carries every entry, so recall is not about
+// adding text that is missing — it is about attention. Once a store grows
+// to dozens of entries the relevant line is easy to miss, so when the
+// incoming message clearly matches one entry, that entry is repeated as
+// one short reminder naming the store it came from.
+//
+// It is deliberately quiet: at most one entry per turn, only when the
+// message shares at least two content words with it, and only for a
+// message the user actually typed (a resume, a compaction, or a tool-only
+// continuation recalls nothing). That keeps the prompt byte-stable for the
+// common case and keeps the reminder meaningful when it does appear.
+func (r *AgentRuntime) memoryRecall(req agent.Request, cwd string) []agent.Notice {
+	if r.memory == nil || req.Resume || req.Compact || strings.TrimSpace(req.Message) == "" {
+		return nil
+	}
+	entry, target, ok := r.memory.Match(cwd, req.Message)
+	if !ok {
+		return nil
+	}
+	args, err := jsonx.Marshal(map[string]string{"action": "recall", "target": string(target)})
+	if err != nil {
+		return nil
+	}
+	return []agent.Notice{{
+		CallID:    "memory-recall-" + string(target),
+		Name:      "memory",
+		Arguments: string(args),
+		Content:   "Recalled from " + string(target) + " memory — this request looks related:\n" + entry,
+	}}
+}
+
+// withRecall chains the recall reminder in front of the subagent mailbox,
+// so one callable answers the agent's Notices hook. Recall fires exactly
+// once: the agent drains notices at the top of a round and again when a
+// text round finishes, and a reminder that came back both times would
+// keep the turn alive forever.
+func withRecall(recall []agent.Notice, next func() []agent.Notice) func() []agent.Notice {
+	return func() []agent.Notice {
+		out := recall
+		recall = nil
+		if next != nil {
+			out = append(out, next()...)
+		}
+		return out
 	}
 }

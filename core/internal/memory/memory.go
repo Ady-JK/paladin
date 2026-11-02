@@ -455,17 +455,19 @@ func (b *Bank) Store(target Target, cwd string) (*Store, error) {
 // Enabled reports whether a scope is switched on in memory.json.
 func (b *Bank) Enabled(target Target) bool { return b.cfg.TargetEnabled(target) }
 
-// Apply runs a batch on one scope. Project writes record the folder
-// path next to the store so the settings UI can label it.
+// Apply runs a batch on one scope through the configured backend, so the
+// write rules (guards, masking, scan, budget) are the same whichever
+// provider answers. Project writes record the folder path next to the
+// store so the settings UI can label it.
 func (b *Bank) Apply(target Target, cwd string, ops []Op) (Result, error) {
 	if !b.Enabled(target) {
 		return Result{}, fmt.Errorf("invalid: memory target %q is switched off in memory.json", target)
 	}
-	s, err := b.Store(target, cwd)
+	p, err := b.ProviderFor(target, cwd)
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := s.Apply(ops)
+	res, err := Apply(p, ops)
 	if err == nil && target == TargetProject {
 		b.noteFolder(cwd)
 	}
@@ -475,14 +477,14 @@ func (b *Bank) Apply(target Target, cwd string, ops []Op) (Result, error) {
 // ReplaceAll overwrites one scope (the settings editor). The editor may
 // still clear a switched-off store, so only additions are refused.
 func (b *Bank) ReplaceAll(target Target, cwd string, entries []string) (Result, error) {
-	s, err := b.Store(target, cwd)
+	p, err := b.ProviderFor(target, cwd)
 	if err != nil {
 		return Result{}, err
 	}
 	if !b.Enabled(target) && hasContent(entries) {
 		return Result{}, fmt.Errorf("invalid: memory target %q is switched off in memory.json", target)
 	}
-	res, err := s.ReplaceAll(entries)
+	res, err := ReplaceAll(p, entries)
 	if err == nil && target == TargetProject {
 		b.noteFolder(cwd)
 	}
@@ -498,13 +500,24 @@ func hasContent(entries []string) bool {
 	return false
 }
 
-// Read reports one scope.
+// Read reports one scope through the configured backend.
 func (b *Bank) Read(target Target, cwd string) (Result, error) {
-	s, err := b.Store(target, cwd)
+	p, err := b.ProviderFor(target, cwd)
 	if err != nil {
 		return Result{}, err
 	}
-	return s.Read()
+	bp, ok := p.(batchProvider)
+	if !ok {
+		return Result{}, fmt.Errorf("memory: provider %q cannot be read with a budget", p.Name())
+	}
+	entries, err := p.Entries()
+	if err != nil {
+		return Result{}, err
+	}
+	if entries == nil {
+		entries = []string{}
+	}
+	return Result{Entries: entries, Used: used(entries), Limit: bp.Limit()}, nil
 }
 
 func (b *Bank) noteFolder(cwd string) {

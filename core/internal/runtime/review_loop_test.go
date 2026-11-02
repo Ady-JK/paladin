@@ -178,3 +178,37 @@ func writeFileMkdir(path, text string) error {
 	}
 	return os.WriteFile(path, []byte(text), 0o600)
 }
+
+// TestRecallAddsOneReminderForAMatchingMessage pins the injection point:
+// a message that clearly matches a stored entry carries that entry as a
+// short reminder in the model request, and an unrelated message does not
+// grow the prompt at all.
+func TestRecallAddsOneReminderForAMatchingMessage(t *testing.T) {
+	var last []string // the newest user message of each model request
+	rt, ws, parentID, _ := agentRuntime(t, func(c modelCall) modelReply {
+		if !c.Child && len(c.Users) > 0 {
+			last = append(last, c.Users[len(c.Users)-1])
+		}
+		return modelReply{Text: "ok"}
+	})
+	res, err := rt.memory.Apply(memory.TargetProject, ws, []memory.Op{
+		{Action: "add", Content: "tests run with make test, which drives playwright on port 5173"},
+	})
+	if err != nil || len(res.Entries) != 1 {
+		t.Fatalf("seed memory: %+v %v", res, err)
+	}
+
+	runParent(t, rt, parentID, ws, "how do I run the playwright tests?")
+	rt.hub.SettleDone(5 * time.Second)
+	runParent(t, rt, parentID, ws, "unrelated question about the weather")
+
+	if len(last) < 2 {
+		t.Fatalf("model requests = %d", len(last))
+	}
+	if !strings.Contains(last[0], "Recalled from project memory") || !strings.Contains(last[0], "playwright") {
+		t.Fatalf("matching message got no reminder:\n%s", last[0])
+	}
+	if strings.Contains(last[1], "Recalled from") {
+		t.Fatalf("unrelated message was reminded:\n%s", last[1])
+	}
+}
