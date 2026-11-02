@@ -15,7 +15,8 @@
 // file from disk, applies the whole batch, checks the budget, and swaps
 // the file in atomically. A stale in-memory view can therefore never
 // clobber another session's additions. Sessions see a frozen snapshot
-// (see SessionSnapshot) so the prompt stays cache-friendly.
+// (see SessionSnapshot) so the prompt stays cache-friendly; SnapshotStatus
+// reports when the store on disk has moved past that snapshot.
 package memory
 
 import (
@@ -24,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -46,6 +46,7 @@ const (
 )
 
 // Character budgets per scope, counted over the serialized entries.
+// memory.json may override them per target.
 const (
 	LimitUser    = 1500
 	LimitGlobal  = 2500
@@ -79,6 +80,9 @@ type Result struct {
 	Entries []string `json:"entries"`
 	Used    int      `json:"used"`
 	Limit   int      `json:"limit"`
+	// Masked lists the entry indices whose secret-shaped values were
+	// replaced on the way in, so the tool can say so.
+	Masked []int `json:"masked,omitempty"`
 }
 
 // Store is one bounded memory file.
@@ -125,7 +129,28 @@ func (s *Store) Read() (Result, error) {
 }
 
 func (s *Store) result(entries []string) Result {
+	if entries == nil {
+		entries = []string{}
+	}
 	return Result{Entries: entries, Used: used(entries), Limit: s.limit}
+}
+
+// Hash fingerprints the store's current on-disk content. A session keeps
+// the fingerprint of the snapshot it rendered so a later read can tell
+// that another writer moved the file underneath it.
+func (s *Store) Hash() string { return hashOfFile(s.path) }
+
+func hashOfFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return hashOf(nil)
+	}
+	return hashOf(data)
+}
+
+func hashOf(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // Apply runs a batch all-or-nothing against the latest on-disk state.
@@ -133,38 +158,48 @@ func (s *Store) Apply(ops []Op) (Result, error) {
 	if len(ops) == 0 {
 		return Result{}, fmt.Errorf("no operations")
 	}
+	masked := map[int]bool{}
 	return s.mutate(func(entries []string) ([]string, error) {
 		for i, op := range ops {
-			next, err := applyOp(entries, op)
+			next, hit, err := applyOp(entries, op)
 			if err != nil {
 				return nil, fmt.Errorf("operation %d (%s): %w", i+1, op.Action, err)
 			}
 			entries = next
+			if hit >= 0 {
+				masked[hit] = true
+			}
 		}
 		return entries, nil
-	})
+	}, masked)
 }
 
 // ReplaceAll swaps the whole store for entries (the settings editor).
 // Blank entries are dropped.
 func (s *Store) ReplaceAll(entries []string) (Result, error) {
+	masked := map[int]bool{}
 	return s.mutate(func([]string) ([]string, error) {
 		out := []string{}
 		for _, e := range entries {
-			e = normalize(e)
-			if e == "" {
+			// Blank rows are dropped before validation so the editor can
+			// carry a trailing empty line without complaining.
+			if normalize(e) == "" {
 				continue
 			}
-			if reason := Scan(e); reason != "" {
-				return nil, fmt.Errorf("blocked: %s", reason)
+			clean, wasMasked, err := cleanEntry(e)
+			if err != nil {
+				return nil, err
 			}
-			out = append(out, e)
+			if wasMasked {
+				masked[len(out)] = true
+			}
+			out = append(out, clean)
 		}
 		return out, nil
-	})
+	}, masked)
 }
 
-func (s *Store) mutate(change func([]string) ([]string, error)) (Result, error) {
+func (s *Store) mutate(change func([]string) ([]string, error), masked map[int]bool) (Result, error) {
 	unlock := s.lockProc()
 	defer unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
@@ -192,51 +227,95 @@ func (s *Store) mutate(change func([]string) ([]string, error)) (Result, error) 
 	if err := atomicWrite(s.path, serialize(next)); err != nil {
 		return Result{}, err
 	}
-	return s.result(next), nil
+	res := s.result(next)
+	for i := range next {
+		if masked[i] {
+			res.Masked = append(res.Masked, i)
+		}
+	}
+	return res, nil
 }
 
-func applyOp(entries []string, op Op) ([]string, error) {
+// applyOp runs one operation and reports the entry whose content was
+// masked on the way in (-1 when nothing was masked).
+func applyOp(entries []string, op Op) ([]string, int, error) {
 	switch strings.ToLower(strings.TrimSpace(op.Action)) {
 	case "add":
-		content := normalize(op.Content)
-		if err := validEntry(content); err != nil {
-			return nil, err
-		}
-		return append(entries, content), nil
-	case "patch", "replace":
-		content := normalize(op.Content)
-		if err := validEntry(content); err != nil {
-			return nil, err
-		}
-		i, err := findOne(entries, op.OldText)
+		content, masked, err := cleanEntry(op.Content)
 		if err != nil {
-			return nil, err
+			return nil, -1, err
 		}
-		if strings.Count(entries[i], op.OldText) != 1 {
-			return nil, fmt.Errorf("old_text occurs more than once in the entry; include more context")
+		for _, e := range entries {
+			if e == content {
+				return nil, -1, fmt.Errorf("that entry is already stored verbatim — use patch to change it, or add a genuinely new fact")
+			}
 		}
-		patched := normalize(strings.Replace(entries[i], op.OldText, content, 1))
+		entries = append(entries, content)
+		if masked {
+			return entries, len(entries) - 1, nil
+		}
+		return entries, -1, nil
+	case "patch", "replace":
+		content, masked, err := cleanEntry(op.Content)
+		if err != nil {
+			return nil, -1, err
+		}
+		if strings.TrimSpace(op.OldText) == "" {
+			return nil, -1, fmt.Errorf("old_text is required for patch: copy the text of the entry to change")
+		}
+		i, err := findEntry(entries, op.OldText)
+		if err != nil {
+			return nil, -1, err
+		}
+		at, end, err := locateSpan(entries[i], op.OldText)
+		if err != nil {
+			return nil, -1, err
+		}
+		patched := normalize(entries[i][:at] + content + entries[i][end:])
+		if patched == entries[i] {
+			return nil, -1, fmt.Errorf("patch would leave the entry unchanged (%q) — content must differ from the text it replaces", clip(entries[i], 60))
+		}
 		if err := validEntry(patched); err != nil {
-			return nil, err
+			return nil, -1, err
 		}
 		entries[i] = patched
-		return entries, nil
-	case "remove", "delete":
-		i, err := findOne(entries, op.OldText)
-		if err != nil {
-			return nil, err
+		if masked {
+			return entries, i, nil
 		}
-		return append(entries[:i], entries[i+1:]...), nil
+		return entries, -1, nil
+	case "remove", "delete":
+		if strings.TrimSpace(op.OldText) == "" {
+			return nil, -1, fmt.Errorf("old_text is required for remove: copy the text of the entry to drop")
+		}
+		i, err := findEntry(entries, op.OldText)
+		if err != nil {
+			return nil, -1, err
+		}
+		return append(entries[:i], entries[i+1:]...), -1, nil
 	}
-	return nil, fmt.Errorf("unknown action %q (use add, patch or remove)", op.Action)
+	return nil, -1, fmt.Errorf("unknown action %q (use add, patch or remove)", op.Action)
+}
+
+// cleanEntry prepares one entry for storage: normalize, mask anything
+// secret-shaped, then enforce the size, delimiter and threat rules on the
+// result. Masking runs before the scan on purpose — a pasted credential
+// is neutralized rather than rejected, and the strict scan still applies
+// to everything else in the entry.
+func cleanEntry(content string) (text string, masked bool, err error) {
+	content = normalize(content)
+	content, masked = maskSecrets(content)
+	if err := validEntry(content); err != nil {
+		return "", false, err
+	}
+	return content, masked, nil
 }
 
 func validEntry(content string) error {
 	if content == "" {
 		return fmt.Errorf("content is required")
 	}
-	if utf8.RuneCountInString(content) > MaxEntry {
-		return fmt.Errorf("entry is %d chars, max %d — keep entries compact", utf8.RuneCountInString(content), MaxEntry)
+	if n := utf8.RuneCountInString(content); n > MaxEntry {
+		return fmt.Errorf("entry is %d chars, max %d — keep entries compact and split long notes", n, MaxEntry)
 	}
 	if strings.Contains(content, "\n§\n") || strings.TrimSpace(content) == "§" {
 		return fmt.Errorf("entries must not contain the § delimiter line")
@@ -247,32 +326,7 @@ func validEntry(content string) error {
 	return nil
 }
 
-// findOne locates the single entry containing needle: an exact entry
-// match wins, otherwise the substring must match exactly one entry.
-func findOne(entries []string, needle string) (int, error) {
-	needle = strings.TrimSpace(needle)
-	if needle == "" {
-		return -1, fmt.Errorf("old_text is required")
-	}
-	for i, e := range entries {
-		if e == needle {
-			return i, nil
-		}
-	}
-	hit := -1
-	for i, e := range entries {
-		if strings.Contains(e, needle) {
-			if hit >= 0 {
-				return -1, fmt.Errorf("old_text matches more than one entry; include more context")
-			}
-			hit = i
-		}
-	}
-	if hit < 0 {
-		return -1, fmt.Errorf("no entry contains old_text %q", clip(needle, 60))
-	}
-	return hit, nil
-}
+// findEntry, locateSpan and their helpers live in match.go.
 
 func normalize(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
@@ -324,38 +378,6 @@ func atomicWrite(path, content string) error {
 	return nil
 }
 
-// threatPatterns catch prompt-injection and exfiltration attempts:
-// memory is replayed into every future system prompt, so a poisoned
-// entry would be a persistent jailbreak.
-var threatPatterns = []struct {
-	re     *regexp.Regexp
-	reason string
-}{
-	{regexp.MustCompile(`(?i)\b(ignore|disregard|forget|override)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all|system)\b[^.\n]{0,20}\b(instructions?|prompts?|rules?|messages?)`), "instruction override"},
-	{regexp.MustCompile(`(?i)\byou are now\b|\bnew (system )?instructions?:`), "role hijack"},
-	{regexp.MustCompile(`(?i)\b(reveal|print|show|output|leak)\b[^.\n]{0,30}\bsystem prompt\b`), "system prompt extraction"},
-	{regexp.MustCompile(`(?i)\b(curl|wget)\b[^\n|]*\|\s*(ba|z)?sh\b`), "remote code execution"},
-	{regexp.MustCompile(`(?i)\b(send|post|upload|exfiltrate)\b[^.\n]{0,40}\b(secrets?|tokens?|api[ _-]?keys?|credentials?|passwords?)\b`), "exfiltration"},
-	{regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`), "private key"},
-	{regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b`), "secret token"},
-}
-
-// Scan reports why content must not enter memory, or "" when clean.
-func Scan(content string) string {
-	for _, r := range content {
-		switch {
-		case r >= 0x200B && r <= 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2060 && r <= 0x2064, r == 0xFEFF:
-			return "invisible or bidi control characters"
-		}
-	}
-	for _, p := range threatPatterns {
-		if p.re.MatchString(content) {
-			return p.reason
-		}
-	}
-	return ""
-}
-
 func clip(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -367,9 +389,24 @@ func clip(s string, n int) string {
 // Bank resolves the three scopes under one data dir.
 type Bank struct {
 	dataDir string
+	cfg     Config
 }
 
-func NewBank(dataDir string) *Bank { return &Bank{dataDir: dataDir} }
+func NewBank(dataDir string) *Bank {
+	return &Bank{dataDir: dataDir, cfg: defaultConfig()}
+}
+
+// NewBankWithConfig builds a bank from a validated memory.json.
+func NewBankWithConfig(dataDir string, cfg Config) *Bank {
+	return &Bank{dataDir: dataDir, cfg: cfg.normalized()}
+}
+
+// Config returns the bank's live settings (see config.go).
+func (b *Bank) Config() Config { return b.cfg }
+
+// SetConfig swaps the settings in place, for a settings-file edit that
+// must reach the running runtime without a restart.
+func (b *Bank) SetConfig(cfg Config) { b.cfg = cfg.normalized() }
 
 // Root is <data>/memory.
 func Root(dataDir string) string { return filepath.Join(dataDir, "memory") }
@@ -403,21 +440,27 @@ func ProjectDir(dataDir, cwd string) string {
 func (b *Bank) Store(target Target, cwd string) (*Store, error) {
 	switch target {
 	case TargetUser:
-		return NewStore(filepath.Join(Root(b.dataDir), "USER.md"), LimitUser), nil
+		return NewStore(filepath.Join(Root(b.dataDir), "USER.md"), b.cfg.LimitFor(TargetUser)), nil
 	case TargetGlobal:
-		return NewStore(filepath.Join(Root(b.dataDir), "MEMORY.md"), LimitGlobal), nil
+		return NewStore(filepath.Join(Root(b.dataDir), "MEMORY.md"), b.cfg.LimitFor(TargetGlobal)), nil
 	case TargetProject:
 		if strings.TrimSpace(cwd) == "" {
 			return nil, fmt.Errorf("project memory needs a workspace folder")
 		}
-		return NewStore(filepath.Join(ProjectDir(b.dataDir, cwd), "MEMORY.md"), LimitProject), nil
+		return NewStore(filepath.Join(ProjectDir(b.dataDir, cwd), "MEMORY.md"), b.cfg.LimitFor(TargetProject)), nil
 	}
 	return nil, fmt.Errorf("unknown memory target %q", target)
 }
 
+// Enabled reports whether a scope is switched on in memory.json.
+func (b *Bank) Enabled(target Target) bool { return b.cfg.TargetEnabled(target) }
+
 // Apply runs a batch on one scope. Project writes record the folder
 // path next to the store so the settings UI can label it.
 func (b *Bank) Apply(target Target, cwd string, ops []Op) (Result, error) {
+	if !b.Enabled(target) {
+		return Result{}, fmt.Errorf("invalid: memory target %q is switched off in memory.json", target)
+	}
 	s, err := b.Store(target, cwd)
 	if err != nil {
 		return Result{}, err
@@ -429,17 +472,30 @@ func (b *Bank) Apply(target Target, cwd string, ops []Op) (Result, error) {
 	return res, err
 }
 
-// ReplaceAll overwrites one scope (the settings editor).
+// ReplaceAll overwrites one scope (the settings editor). The editor may
+// still clear a switched-off store, so only additions are refused.
 func (b *Bank) ReplaceAll(target Target, cwd string, entries []string) (Result, error) {
 	s, err := b.Store(target, cwd)
 	if err != nil {
 		return Result{}, err
+	}
+	if !b.Enabled(target) && hasContent(entries) {
+		return Result{}, fmt.Errorf("invalid: memory target %q is switched off in memory.json", target)
 	}
 	res, err := s.ReplaceAll(entries)
 	if err == nil && target == TargetProject {
 		b.noteFolder(cwd)
 	}
 	return res, err
+}
+
+func hasContent(entries []string) bool {
+	for _, e := range entries {
+		if strings.TrimSpace(e) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Read reports one scope.
@@ -485,7 +541,7 @@ func (b *Bank) Projects() []Project {
 			continue
 		}
 		cwd := strings.TrimSpace(string(folder))
-		res, err := NewStore(filepath.Join(dir, it.Name(), "MEMORY.md"), LimitProject).Read()
+		res, err := NewStore(filepath.Join(dir, it.Name(), "MEMORY.md"), b.cfg.LimitFor(TargetProject)).Read()
 		if err != nil {
 			continue
 		}
@@ -497,12 +553,28 @@ func (b *Bank) Projects() []Project {
 
 const rule = "══════════════════════════════════════════════"
 
+// Section is one rendered scope, reported next to the block so the tool
+// and the UI can show where the budget went.
+type Section struct {
+	Target  Target `json:"target"`
+	Entries int    `json:"entries"`
+	Used    int    `json:"used"`
+	Limit   int    `json:"limit"`
+	// Blocked counts entries withheld by the threat re-scan.
+	Blocked int `json:"blocked"`
+}
+
 // Render builds the system-prompt memory block for a folder: user
-// profile, global notes, then the folder's notes. Entries that fail
-// the threat scan are shown as [BLOCKED] so a hand-edited poisoned
-// file never reaches the model. Empty scopes are omitted; all empty
-// renders "".
+// profile, global notes, then the folder's notes. Entries that fail the
+// threat scan are shown as [BLOCKED] so a hand-edited poisoned file never
+// reaches the model. Empty scopes are omitted; all empty renders "".
 func (b *Bank) Render(cwd string) string {
+	block, _ := b.RenderSections(cwd)
+	return block
+}
+
+// RenderSections is Render plus a per-scope summary.
+func (b *Bank) RenderSections(cwd string) (string, []Section) {
 	sections := []struct {
 		target Target
 		title  string
@@ -512,8 +584,12 @@ func (b *Bank) Render(cwd string) string {
 		{TargetProject, "FOLDER MEMORY (notes for " + cwd + ")"},
 	}
 	var out strings.Builder
+	summary := []Section{}
 	for _, sec := range sections {
 		if sec.target == TargetProject && strings.TrimSpace(cwd) == "" {
+			continue
+		}
+		if !b.cfg.TargetEnabled(sec.target) {
 			continue
 		}
 		res, err := b.Read(sec.target, cwd)
@@ -529,26 +605,45 @@ func (b *Bank) Render(cwd string) string {
 		}
 		fmt.Fprintf(&out, "%s\n%s [%d%% — %d/%d chars]\n%s\n", rule, sec.title, pct, res.Used, res.Limit, rule)
 		shown := make([]string, len(res.Entries))
+		blocked := 0
 		for i, e := range res.Entries {
 			if reason := Scan(e); reason != "" {
+				blocked++
 				shown[i] = "[BLOCKED: entry withheld (" + reason + "); ask the user to review memory]"
 			} else {
 				shown[i] = e
 			}
 		}
 		out.WriteString(strings.Join(shown, Delim))
+		summary = append(summary, Section{Target: sec.target, Entries: len(res.Entries), Used: res.Used, Limit: res.Limit, Blocked: blocked})
 	}
-	return out.String()
+	return out.String(), summary
 }
 
 // SnapshotFile is the frozen per-session copy of the memory block.
 const SnapshotFile = "memory_snapshot.md"
 
-// SessionSnapshot returns the session's frozen memory block, creating
-// it from the current stores on first use. Freezing keeps the system
-// prompt byte-stable across turns (prompt caching) — writes made during
-// the session land on disk at once and show up in the next session or
-// after ResetSessionSnapshot.
+// StateFile records the store fingerprints the snapshot was rendered from.
+const StateFile = "memory_snapshot.state"
+
+// SnapshotState compares a session's frozen memory block with the stores
+// on disk now, so the UI can say "memory changed since this session
+// started" and offer the existing refresh RPC.
+type SnapshotState struct {
+	// Frozen is true when the session has a snapshot file.
+	Frozen bool `json:"frozen"`
+	// Stale is true when an enabled store differs from the content the
+	// snapshot was rendered from.
+	Stale bool `json:"stale"`
+	// Changed lists the targets that moved, for an actionable message.
+	Changed []string `json:"changed"`
+}
+
+// SessionSnapshot returns the session's frozen memory block, creating it
+// from the current stores on first use. Freezing keeps the system prompt
+// byte-stable across turns (prompt caching) — writes made during the
+// session land on disk at once and show up in the next session or after
+// ResetSessionSnapshot.
 func (b *Bank) SessionSnapshot(sessionDir, cwd string) string {
 	if strings.TrimSpace(sessionDir) == "" {
 		return b.Render(cwd)
@@ -559,14 +654,81 @@ func (b *Bank) SessionSnapshot(sessionDir, cwd string) string {
 	}
 	snap := b.Render(cwd)
 	_ = atomicWrite(path, snap)
+	_ = atomicWrite(filepath.Join(sessionDir, StateFile), b.fingerprint(cwd))
 	return snap
+}
+
+// fingerprint lists target=hash pairs for the enabled scopes.
+func (b *Bank) fingerprint(cwd string) string {
+	parts := []string{}
+	for _, t := range []Target{TargetUser, TargetGlobal, TargetProject} {
+		if t == TargetProject && strings.TrimSpace(cwd) == "" {
+			continue
+		}
+		if !b.cfg.TargetEnabled(t) {
+			continue
+		}
+		s, err := b.Store(t, cwd)
+		if err != nil {
+			continue
+		}
+		parts = append(parts, string(t)+"="+s.Hash())
+	}
+	return strings.Join(parts, "\n")
+}
+
+// SnapshotStatus reports whether the stores moved past the session's
+// frozen snapshot. A session with no snapshot yet is not stale: its first
+// turn reads current memory.
+func (b *Bank) SnapshotStatus(sessionDir, cwd string) SnapshotState {
+	if strings.TrimSpace(sessionDir) == "" {
+		return SnapshotState{}
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, SnapshotFile)); err != nil {
+		return SnapshotState{}
+	}
+	st := SnapshotState{Frozen: true}
+	data, err := os.ReadFile(filepath.Join(sessionDir, StateFile))
+	if err != nil {
+		// Snapshot from before state tracking: compare what the prompt
+		// actually shows, which is still an honest staleness answer.
+		if snap, rerr := os.ReadFile(filepath.Join(sessionDir, SnapshotFile)); rerr == nil && string(snap) != b.Render(cwd) {
+			st.Stale = true
+			st.Changed = []string{string(TargetGlobal)}
+		}
+		return st
+	}
+	before := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			before[k] = v
+		}
+	}
+	for _, line := range strings.Split(b.fingerprint(cwd), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		if old, seen := before[k]; !seen || old != v {
+			st.Stale = true
+			st.Changed = append(st.Changed, k)
+		}
+		delete(before, k)
+	}
+	for k := range before {
+		st.Stale = true
+		st.Changed = append(st.Changed, k)
+	}
+	sort.Strings(st.Changed)
+	return st
 }
 
 // ResetSessionSnapshot drops the frozen copy so the next turn re-reads.
 func (b *Bank) ResetSessionSnapshot(sessionDir string) error {
-	err := os.Remove(filepath.Join(sessionDir, SnapshotFile))
-	if err != nil && !os.IsNotExist(err) {
-		return err
+	for _, name := range []string{SnapshotFile, StateFile} {
+		if err := os.Remove(filepath.Join(sessionDir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }

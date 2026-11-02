@@ -15,6 +15,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/commands"
 	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/lsp"
+	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/skills"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
@@ -43,6 +44,9 @@ func (r *AgentRuntime) registerCustomizable() {
 			Description: "Language servers: timeoutMs and per-server command, extensions, rootMarkers, env or disabled.",
 			File:        "lsp.json", Default: func() string { return "{\n  \"timeoutMs\": 1500,\n  \"servers\": {}\n}\n" },
 			Validate: lsp.ValidateConfig},
+		custom.Item{ID: "file.memory", Group: "Settings files", Title: "memory.json", Order: 2, Kind: custom.KindJSON,
+			Description: "Persistent memory: per-target char budgets, which scopes are switched on, the backend provider, and how many turns may pass without a write before a review is suggested. Reset deletes the file, so every setting returns to its default.",
+			File:        "memory.json", Default: memory.DefaultConfigText, Validate: memory.ValidateConfig},
 	)
 	for i, k := range subagentKinds {
 		role := k.Role

@@ -26,6 +26,9 @@ func (*Tool) Definition() tools.ToolDefinition {
 			"`project` — notes for the current workspace folder (build/test commands, conventions, architecture, gotchas), shared with every session in this folder. " +
 			"Batch every change in one call: operations run all-or-nothing against the latest saved state. " +
 			"Use `patch` to update an entry instead of adding near-duplicates, and `remove` stale ones; when a store is full, consolidate in the same batch. " +
+			"`old_text` is matched exactly first, then ignoring quote and dash style and line wrapping, so retyping stored text works; " +
+			"a whole-entry match wins over a substring, and an ambiguous match lists the candidates with their line numbers. " +
+			"Secret-shaped values are replaced with [REDACTED] on the way in, and injection patterns are refused with the rule that matched. " +
 			"Do NOT store task progress, temporary state, secrets, or raw data/logs. Omit operations to view a store's current entries (includes writes from other sessions). " +
 			"Writes are saved immediately; the memory shown in your system prompt is the snapshot taken when this session started.",
 		Parameters: map[string]any{
@@ -44,7 +47,7 @@ func (*Tool) Definition() tools.ToolDefinition {
 						"properties": map[string]any{
 							"action":   map[string]any{"type": "string", "enum": []string{"add", "patch", "remove"}},
 							"content":  map[string]any{"type": "string", "description": "New entry text (add) or replacement for old_text (patch)."},
-							"old_text": map[string]any{"type": "string", "description": "Unique text identifying the entry to patch or remove."},
+							"old_text": map[string]any{"type": "string", "description": "Text identifying the entry to patch or remove; matched exactly first, then ignoring quote/dash style and wrapping."},
 						},
 						"required": []string{"action"},
 					},
@@ -78,11 +81,11 @@ func (t *Tool) Call(raw json.RawMessage, ctx *tools.ToolCtx) (string, error) {
 	if len(args.Operations) == 0 {
 		res, err = t.bank.Read(target, cwd)
 	} else {
-		res, err = t.bank.Apply(target, cwd, args.Operations)
+		res, err = t.apply(target, cwd, args.Operations)
 	}
 	if err != nil {
 		msg := "memory: " + err.Error()
-		if strings.Contains(err.Error(), "limit exceeded") {
+		if strings.Contains(err.Error(), "limit exceeded") || strings.Contains(err.Error(), "matches more than one") || strings.Contains(err.Error(), "no entry contains") {
 			if cur, rerr := t.bank.Read(target, cwd); rerr == nil {
 				data, _ := jsonx.Marshal(map[string]any{"error": msg, "entries": cur.Entries, "used": cur.Used, "limit": cur.Limit})
 				return "", tools.WithContent(string(data), msg)
@@ -99,9 +102,39 @@ func (t *Tool) Call(raw json.RawMessage, ctx *tools.ToolCtx) (string, error) {
 	if len(args.Operations) > 0 {
 		out["saved"] = true
 	}
+	if len(res.Masked) > 0 {
+		out["masked"] = res.Masked
+		out["note"] = "secret-shaped values in the listed entries were replaced with " + Masked + " before saving; the entry still records the fact, never the credential"
+	}
 	data, err := jsonx.Marshal(out)
 	if err != nil {
 		return "", tools.ArgsError("memory: encode result: " + err.Error())
 	}
 	return string(data), nil
+}
+
+// apply runs a batch, turning a concurrent external edit into an
+// actionable message instead of a silent overwrite: the store re-reads
+// disk under the lock, so a patch whose old_text another writer already
+// changed fails with the current entries attached.
+func (t *Tool) apply(target Target, cwd string, ops []Op) (Result, error) {
+	res, err := t.bank.Apply(target, cwd, ops)
+	if err == nil {
+		return res, nil
+	}
+	if d := driftHint(err); d != "" {
+		return Result{}, fmt.Errorf("%w\n%s", err, d)
+	}
+	return Result{}, err
+}
+
+// driftHint explains what to do when old_text is gone, which is nearly
+// always because another session rewrote the entry since this one read
+// its snapshot.
+func driftHint(err error) string {
+	msg := err.Error()
+	if !strings.Contains(msg, "no entry contains") {
+		return ""
+	}
+	return "hint: another session may have rewritten this entry since your snapshot was taken; re-read the store (omit operations) and retry with the current text"
 }

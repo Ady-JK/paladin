@@ -38,7 +38,7 @@ var methodClass = map[string]runClass{
 	"fsHome": runInline, "resolveWorkspace": runInline,
 
 	"listProviders": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
-	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead,
+	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead, "memoryConfig": runRead,
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
 	"sessionHistoryPage": runRead, "sessionImages": runRead,
 	"sessionImage": runRead,
@@ -54,7 +54,8 @@ var methodClass = map[string]runClass{
 	"renameSession":  runSession, "forkSession": runSession, "deleteSession": runSession,
 	"revertSession": runSession, "unrevertSession": runSession, "worktreeMerge": runSession,
 	"budgetSet": runSession, "thinkingSet": runSession, "memoryRefreshSnapshot": runSession,
-	"deleteSideChat": runSession,
+	"memorySnapshotStatus": runSession,
+	"deleteSideChat":       runSession,
 
 	"setDefaultProvider": runGlobal, "addProvider": runGlobal, "updateProvider": runGlobal,
 	"setWorkspace": runGlobal, "setPrompt": runGlobal, "resetPrompt": runGlobal,

@@ -83,12 +83,17 @@ func TestAmbiguousPatchRejected(t *testing.T) {
 
 func TestDuplicatesDropped(t *testing.T) {
 	s := newStore(t, 500)
-	res, err := s.Apply([]Op{{Action: "add", Content: "same"}, {Action: "add", Content: "same"}})
-	if err != nil {
+	// A second identical add is a no-op, so it is refused outright; the
+	// store still ends up with one copy of the entry.
+	if _, err := s.Apply([]Op{{Action: "add", Content: "same"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Entries) != 1 {
-		t.Fatalf("dup kept: %q", res.Entries)
+	if _, err := s.Apply([]Op{{Action: "add", Content: "same"}}); err == nil || !strings.Contains(err.Error(), "already stored") {
+		t.Fatalf("want duplicate refused, got %v", err)
+	}
+	entries, _ := s.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("dup kept: %q", entries)
 	}
 }
 

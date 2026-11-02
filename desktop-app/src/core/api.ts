@@ -36,7 +36,9 @@ import type {
   PermissionRule,
   PermissionsView,
   CommandEntry,
+  MemoryConfigView,
   MemoryProject,
+  MemorySnapshotState,
   MemoryTarget,
   MemoryView,
   TurnEvent,
@@ -147,6 +149,17 @@ export function memoryProjects(): Promise<MemoryProject[]> {
 // next turn sees the current memory.
 export function memoryRefreshSnapshot(sessionId: string, cwd: string | null): Promise<boolean> {
   return invoke<boolean>("memoryRefreshSnapshot", { sessionId, cwd });
+}
+
+// memorySnapshotStatus says whether the session's frozen memory snapshot
+// is behind the stores on disk, so the pane can offer the refresh above.
+export function memorySnapshotStatus(sessionId: string, cwd: string | null): Promise<MemorySnapshotState> {
+  return invoke<MemorySnapshotState>("memorySnapshotStatus", { sessionId, cwd });
+}
+
+// memoryConfig reports the effective memory.json settings.
+export function memoryConfig(): Promise<MemoryConfigView> {
+  return invoke<MemoryConfigView>("memoryConfig");
 }
 
 // WorktreeOpts asks for a session in a new managed git worktree; name

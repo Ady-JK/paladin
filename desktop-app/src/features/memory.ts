@@ -9,7 +9,7 @@ import * as api from "../core/api";
 import { memoryBodyEl } from "../core/dom";
 import { escapeHtml, shortPath } from "../core/format";
 import { state } from "../core/state";
-import type { MemoryProject, MemoryTarget, MemoryView } from "../core/types";
+import type { MemoryConfigView, MemoryProject, MemorySnapshotState, MemoryTarget, MemoryView } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 
@@ -25,6 +25,8 @@ let sections: Section[] = [];
 let projects: MemoryProject[] = [];
 let projectCwd = "";
 let loading = 0;
+let snapshot: MemorySnapshotState = { frozen: false, stale: false, changed: [] };
+let config: MemoryConfigView | null = null;
 
 function keyOf(target: MemoryTarget, cwd: string): string {
   return target === "project" ? `project:${cwd}` : target;
@@ -42,13 +44,19 @@ export async function loadMemory(cwd?: string): Promise<void> {
       ["global", ""],
     ];
     if (projectCwd) targets.push(["project", projectCwd]);
-    const [views, list] = await Promise.all([
+    const [views, list, snap, cfg] = await Promise.all([
       Promise.all(targets.map(([t, c]) => api.memoryGet(t, c || null))),
       api.memoryProjects().catch(() => [] as MemoryProject[]),
+      state.sessionId
+        ? api.memorySnapshotStatus(state.sessionId, state.cwd || null).catch(() => null)
+        : Promise.resolve(null),
+      api.memoryConfig().catch(() => null),
     ]);
     if (mine !== loading) return;
     sections = views.map((view, i) => ({ view, key: keyOf(targets[i][0], targets[i][1]) }));
     projects = list;
+    snapshot = snap ?? { frozen: false, stale: false, changed: [] };
+    config = cfg;
     paint();
   } catch (error) {
     if (mine !== loading) return;
@@ -64,6 +72,14 @@ function usage(view: MemoryView): string {
     `<span class="mem-bar"><span style="width:${pct}%"></span></span>` +
     `<span>${view.used.toLocaleString()} / ${view.limit.toLocaleString()} chars</span></div>`
   );
+}
+
+// describeChanged names the stores that moved, for the staleness banner.
+function describeChanged(changed: string[]): string {
+  const names: Record<string, string> = { user: "About you", global: "Everywhere", project: "This folder" };
+  const known = changed.map((c) => names[c] ?? c).filter((n, i, all) => all.indexOf(n) === i);
+  const what = known.length ? known.join(", ") : "Memory";
+  return `${what} changed outside this session`;
 }
 
 function sectionHtml(s: Section, idx: number): string {
@@ -83,11 +99,15 @@ function sectionHtml(s: Section, idx: number): string {
         )
         .join("")
     : `<li class="mem-none">Nothing remembered yet.</li>`;
+  const off = v.enabled === false;
+  const addRow = off
+    ? `<div class="mem-off" data-mem-off>Switched off in memory.json — Paladin will not read or write this store.</div>`
+    : `<input type="text" class="mem-add" data-mem-add placeholder="Add a memory and press Enter…" spellcheck="false" />`;
   return (
-    `<section class="mem-section" data-mem-target="${v.target}" data-mem-idx="${idx}">` +
+    `<section class="mem-section${off ? " is-off" : ""}" data-mem-target="${v.target}" data-mem-idx="${idx}">` +
     `<header class="mem-head"><div><div class="mem-title">${title}${where}</div><div class="mem-blurb">${blurb}</div></div>${usage(v)}</header>` +
     `<ul class="mem-list">${rows}</ul>` +
-    `<input type="text" class="mem-add" data-mem-add placeholder="Add a memory and press Enter…" spellcheck="false" />` +
+    addRow +
     `</section>`
   );
 }
@@ -107,8 +127,19 @@ function paint(): void {
   const refresh = state.sessionId
     ? `<button type="button" class="mem-refresh" data-mem-refresh title="The open session keeps the memory it started with; refresh so its next turn sees edits">${icon("repeat", "h-3 w-3")}Refresh this session's snapshot</button>`
     : "";
+  const stale =
+    snapshot.stale && state.sessionId
+      ? `<div class="mem-stale" data-mem-stale>` +
+        `<span>${icon("repeat", "h-3 w-3")}${escapeHtml(describeChanged(snapshot.changed))} — the open session still sees the memory it started with.</span>` +
+        `<button type="button" class="mem-refresh" data-mem-refresh>Refresh snapshot</button></div>`
+      : "";
+  const provider =
+    config && config.provider !== "file"
+      ? ` <span class="mem-provider" title="Set in memory.json">provider: ${escapeHtml(config.provider)}</span>`
+      : "";
   memoryBodyEl.innerHTML =
-    `<div class="mem-intro"><p>Paladin saves durable facts here through its memory tool. Sessions read a snapshot when they start.</p>${refresh}</div>` +
+    `<div class="mem-intro"><p>Paladin saves durable facts here through its memory tool. Sessions read a snapshot when they start.${provider}</p>${refresh}</div>` +
+    stale +
     sections.map(sectionHtml).join("") +
     folderPick;
 }

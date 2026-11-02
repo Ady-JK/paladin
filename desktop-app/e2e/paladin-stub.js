@@ -89,6 +89,7 @@ async function __paladinBaseInvoke(cmd, args) {
         entries,
         used: entries.join("\n§\n").length,
         limit: limits[args.target] || 2500,
+        enabled: true,
       };
     }
     case "memorySet": {
@@ -196,6 +197,10 @@ async function __paladinBaseInvoke(cmd, args) {
     case "memoryRefreshSnapshot":
       window.__e2eSnapshotRefreshes = (window.__e2eSnapshotRefreshes || 0) + 1;
       return true;
+    case "memorySnapshotStatus":
+      return { frozen: true, stale: !!window.__e2eMemoryStale, changed: window.__e2eMemoryStale ? ["global"] : [] };
+    case "memoryConfig":
+      return { limits: { user: 1500, global: 2500, project: 4000 }, disabled: [], provider: "file", reviewTurns: 12 };
     case "gitInfo":
       return window.__e2eGit || { repo: false, hasCommits: false };
     case "revertPreview":

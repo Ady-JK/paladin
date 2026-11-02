@@ -130,6 +130,27 @@ test("/memories opens the memory pane and saves edits", async ({ page }) => {
     .toMatchObject({ target: "user", entries: [] });
 });
 
+test("the memory pane says when a store moved past the session's snapshot", async ({ page }) => {
+  // The banner belongs to an open session: it explains why that session
+  // still sees old memory.
+  await page.evaluate(() => {
+    (window as any).__e2eMemoryStale = true;
+  });
+  await page.fill("#promptInput", "hello");
+  await page.click("#sendBtn");
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eChats?.length || 0)).toBeGreaterThan(0);
+  await page.fill("#promptInput", "/memories");
+  await page.keyboard.press("Enter");
+  const pane = page.locator("#settingsPaneMemory");
+  await expect(pane).toBeVisible();
+  const stale = pane.locator("[data-mem-stale]");
+  await expect(stale).toBeVisible();
+  await expect(stale).toContainText("Everywhere");
+  await expect(stale).toContainText("still sees the memory it started with");
+  await stale.locator("[data-mem-refresh]").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eSnapshotRefreshes || 0)).toBe(1);
+});
+
 test("a running turn shows the working bar with elapsed time", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eChatEvents = [

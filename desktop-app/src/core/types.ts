@@ -25,6 +25,23 @@ export type MemoryView = {
   entries: string[];
   used: number;
   limit: number;
+  /** False when memory.json switches this scope off: shown, not writable. */
+  enabled: boolean;
+};
+
+/** Whether a session's frozen memory snapshot is behind the stores on disk. */
+export type MemorySnapshotState = {
+  frozen: boolean;
+  stale: boolean;
+  changed: string[];
+};
+
+/** Effective <data>/config/memory.json. */
+export type MemoryConfigView = {
+  limits: Record<MemoryTarget, number>;
+  disabled: string[];
+  provider: string;
+  reviewTurns: number;
 };
 
 export type MemoryProject = {

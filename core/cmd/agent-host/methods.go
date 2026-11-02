@@ -149,6 +149,12 @@ var methods = map[string]handler{
 	"memoryRefreshSnapshot": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return true, rt.RefreshMemorySnapshot(a.str("sessionId"), a.str("cwd"))
 	},
+	"memorySnapshotStatus": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MemorySnapshotStatus(a.str("sessionId"), a.str("cwd"))
+	},
+	"memoryConfig": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		return rt.MemoryConfig(), nil
+	},
 
 	// Sessions
 	"openSession": func(rt *runtime.AgentRuntime, a args) (any, error) {

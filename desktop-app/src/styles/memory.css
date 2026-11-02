@@ -219,3 +219,42 @@
   color: #fff;
   opacity: 1;
 }
+
+/* A store that changed outside this session: the open session keeps its
+   snapshot, so say so rather than letting the pane look quietly wrong. */
+.mem-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--color-amber-300);
+  background: var(--color-amber-50);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--color-amber-900);
+}
+.dark .mem-stale {
+  border-color: var(--color-amber-700);
+  background: rgb(120 53 15 / 0.28);
+  color: var(--color-amber-200);
+}
+.mem-stale > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mem-off {
+  color: var(--color-slate-500);
+  font-size: 12px;
+  font-style: italic;
+}
+.mem-section.is-off {
+  opacity: 0.75;
+}
+.mem-provider {
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-200);
+  padding: 1px 8px;
+  font-size: 11px;
+}

@@ -65,9 +65,11 @@ separate setup command, not a JSONL method.
 | `listSkills` | `{cwd?}` | `SkillEntry[]` (name, description, source, path; content only at turn time) |
 | `listCommands` | `{cwd?}` | `CommandEntry[]` (`name,description,argumentHint?,mode?,tools?,source` builtin/global/workspace, `path?`); `tools` are command-only tools such as `report_findings` |
 | `memoryGet` | `{target,cwd?}` | `MemoryView` (`target` user/global/project, `cwd?`, `path`, `entries[]`, `used`, `limit` chars); `project` requires `cwd` |
-| `memorySet` | `{target,cwd?,entries[]}` | `MemoryView`; replaces the store (dedupes, enforces the limit and the threat scan) |
+| `memorySet` | `{target,cwd?,entries[]}` | `MemoryView`; replaces the store (dedupes, masks secret-shaped values, enforces the limit and the threat scan) |
 | `memoryProjects` | `{}` | `Project[]` (`cwd,key,entries,used,limit`): folders that have memory |
 | `memoryRefreshSnapshot` | `{sessionId,cwd?}` | `bool`: the session's next turn re-reads memory instead of its frozen snapshot |
+| `memorySnapshotStatus` | `{sessionId,cwd?}` | `{frozen,stale,changed[]}`: whether the session's frozen memory snapshot is behind the stores on disk (`changed` names the targets) |
+| `memoryConfig` | `{}` | `{limits{user,global,project},disabled[],provider,reviewTurns}`: effective `<data>/config/memory.json` |
 | `forkSession` | `{sessionId,cwd?,worktree?,name?}` | `SessionInfo` of the copy (title `… (fork)`); `worktree:true` forks into a new worktree, a plain fork stays in the source's folder (and worktree) |
 | `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],conflicts[],snapshots}`: what reverting to the user message at transcript `index` would restore |
 | `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's saved file snapshots |

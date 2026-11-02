@@ -20,7 +20,7 @@ const skillCatalogMax = 40
 // registerKnowledgeTools adds the tools that need the data dir or the
 // transcript store to the shared registry.
 func (r *AgentRuntime) registerKnowledgeTools() {
-	r.memory = memory.NewBank(r.dataDir)
+	r.memory = memory.NewBankWithConfig(r.dataDir, memory.LoadConfigOr(r.dataDir))
 	r.tools.Register(memory.NewTool(r.memory))
 	r.tools.Register(tools.NewSkillTool(r.dataDir))
 	r.tools.Register(tools.NewSessionSearchTool(r.transcripts))
@@ -56,6 +56,9 @@ type MemoryView struct {
 	Entries []string `json:"entries"`
 	Used    int      `json:"used"`
 	Limit   int      `json:"limit"`
+	// Enabled is false when memory.json switches this scope off: the
+	// pane still shows the stored entries but refuses new ones.
+	Enabled bool `json:"enabled"`
 }
 
 func (r *AgentRuntime) memoryStore(target, cwd string) (memory.Target, string, error) {
@@ -108,7 +111,7 @@ func (r *AgentRuntime) memoryView(t memory.Target, cwd string, res memory.Result
 	if entries == nil {
 		entries = []string{}
 	}
-	v := MemoryView{Target: string(t), Path: st.Path(), Entries: entries, Used: res.Used, Limit: res.Limit}
+	v := MemoryView{Target: string(t), Path: st.Path(), Entries: entries, Used: res.Used, Limit: res.Limit, Enabled: r.memory.Enabled(t)}
 	if t == memory.TargetProject {
 		v.Cwd = cwd
 	}
@@ -122,6 +125,52 @@ func (r *AgentRuntime) MemoryProjects() []memory.Project {
 		list = []memory.Project{}
 	}
 	return list
+}
+
+// MemoryConfigView is memory.json as the RPC reports it, for the pane's
+// budget labels and the switch state.
+type MemoryConfigView struct {
+	Limits      map[string]int `json:"limits"`
+	Disabled    []string       `json:"disabled"`
+	Provider    string         `json:"provider"`
+	ReviewTurns int            `json:"reviewTurns"`
+}
+
+// MemoryConfig reports the effective memory settings.
+func (r *AgentRuntime) MemoryConfig() MemoryConfigView {
+	cfg := r.memory.Config()
+	return MemoryConfigView{
+		Limits: map[string]int{
+			string(memory.TargetUser):    cfg.LimitFor(memory.TargetUser),
+			string(memory.TargetGlobal):  cfg.LimitFor(memory.TargetGlobal),
+			string(memory.TargetProject): cfg.LimitFor(memory.TargetProject),
+		},
+		Disabled:    append([]string{}, cfg.Disabled...),
+		Provider:    cfg.Provider,
+		ReviewTurns: cfg.ReviewTurns,
+	}
+}
+
+// ReloadMemoryConfig re-reads memory.json after the settings editor saves
+// it, so a limit or enable change reaches the running runtime.
+func (r *AgentRuntime) ReloadMemoryConfig() error {
+	cfg, err := memory.LoadConfig(r.dataDir)
+	if err != nil {
+		return err
+	}
+	r.memory.SetConfig(cfg)
+	return nil
+}
+
+// MemorySnapshotStatus says whether the open session's frozen snapshot is
+// behind the stores on disk. The pane uses it to offer the refresh RPC
+// instead of leaving the user to guess.
+func (r *AgentRuntime) MemorySnapshotStatus(sessionId, cwd string) (memory.SnapshotState, error) {
+	sess, err := r.transcripts.Load(cwd, sessionId)
+	if err != nil {
+		return memory.SnapshotState{}, err
+	}
+	return r.memory.SnapshotStatus(sess.Dir, sess.Meta.ProjectCwd()), nil
 }
 
 // RefreshMemorySnapshot drops a session's frozen memory snapshot so its

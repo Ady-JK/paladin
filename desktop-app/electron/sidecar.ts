@@ -83,6 +83,7 @@ const READ_METHODS = new Set([
   "listSkills",
   "listCommands",
   "memoryGet",
+  "memoryConfig",
   "memoryProjects",
   "listSessions",
   "sessionHistory",
