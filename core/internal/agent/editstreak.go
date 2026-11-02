@@ -39,6 +39,9 @@ func (a *Agent) noteEditResult(call *inference.ToolCall, result *tools.ToolResul
 	if path == "" {
 		return
 	}
+	if !result.IsError {
+		a.changed++
+	}
 	if a.editStreaks == nil {
 		a.editStreaks = map[string]int{}
 	}

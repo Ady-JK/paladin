@@ -7,6 +7,7 @@ package inference
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -167,6 +168,11 @@ func IsRetryable(err error) bool {
 	if err == nil || IsCancelled(err) {
 		return false
 	}
+	// A stream that stopped mid-frame is a transport blip by definition;
+	// don't make the wording decide it.
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	var msg string
 	var pe *ProviderError
 	if errors.As(err, &pe) {
@@ -197,6 +203,11 @@ func IsRetryable(err error) bool {
 		"bad gateway", "gateway timeout", "temporarily",
 		"transient connection", "connection reset", "connection refused",
 		"broken pipe", "eof", "incomplete",
+		// The stream decoder's wording for a frame that stopped short or
+		// arrived empty: a dropped connection, not a bad request.
+		"unexpected end of json", "unexpected end of file",
+		"stream terminated", "stream closed", "connection closed",
+		"reset by peer", "protocol error",
 	} {
 		if strings.Contains(msg, yes) {
 			return true

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -105,6 +106,9 @@ func NewOpenAIProviderWithMeta(name, model, baseURL, apiKey string, meta config.
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(providerHTTPClient),
 		option.WithMaxRetries(2),
+		// Gateways emit keepalive frames with no data; the SDK's SSE
+		// decoder chokes on them and kills a healthy stream (sse.go).
+		option.WithMiddleware(skipEmptySSEFrames()),
 	)
 	isOpencode := config.IsOpencodeEndpoint(baseURL)
 	return &OpenAIProvider{
@@ -499,11 +503,22 @@ func isTransientTransport(err error) bool {
 	if err == nil {
 		return false
 	}
+	// A body that stops mid-frame is a dropped connection, whatever the
+	// decoder called it.
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	for _, want := range []string{
 		"eof", "connection reset", "connection refused", "broken pipe",
 		"unexpected eof", "status 502", "status 503", "status 504",
 		"bad gateway", "service unavailable", "gateway timeout",
+		// Truncated or malformed frames from a gateway that dropped the
+		// stream: the openai-go SSE decoder says "unexpected end of JSON
+		// input" when the event data stopped short or arrived empty.
+		"unexpected end of json", "unexpected end of file",
+		"stream terminated", "stream closed", "connection closed",
+		"reset by peer", "protocol error",
 	} {
 		if strings.Contains(msg, want) {
 			return true

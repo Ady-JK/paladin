@@ -41,8 +41,10 @@ func TestDenialBreakerResetsOnOtherResults(t *testing.T) {
 	if a.noteDenial(okResult()) {
 		t.Fatal("a success must reset the streak")
 	}
-	if a.noteDenial(deniedResult()) || a.noteDenial(deniedResult()) {
-		t.Fatal("streak restarted, must not trip yet")
+	for i := 0; i < 2; i++ {
+		if a.noteDenial(deniedResult()) {
+			t.Fatalf("streak restarted, must not trip at denial %d", i+1)
+		}
 	}
 	errResult := &tools.ToolResult{CallID: "e1", Name: "read", IsError: true, Content: `{"error":"read: no such file"}`}
 	if a.noteDenial(errResult) {

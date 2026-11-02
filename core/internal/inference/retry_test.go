@@ -2,6 +2,7 @@ package inference
 
 import (
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -13,6 +14,13 @@ func TestIsRetryable(t *testing.T) {
 		RequestError("opencode: responses: transient connection (EOF) — try again"),
 		RequestError("opencode: stream: Post https://x/v1/responses: EOF"),
 		errors.New("connection reset by peer"),
+		// The openai-go SSE decoder's wording for a stream that stopped
+		// mid-frame: a dropped connection, not a bad request.
+		RequestError("Opencode Go: stream: unexpected end of JSON input"),
+		RequestError("Opencode Go: chat completion: unexpected end of JSON input"),
+		errors.New("unexpected EOF"),
+		RequestError("gateway: stream terminated early"),
+		io.ErrUnexpectedEOF,
 	}
 	for _, err := range retry {
 		if !IsRetryable(err) {

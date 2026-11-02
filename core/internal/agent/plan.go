@@ -41,21 +41,7 @@ func (a *Agent) planNudge() bool {
 	if len(a.toolDefs) == 0 || a.planNudges >= maxPlanNudges || a.halt.tripped() {
 		return false
 	}
-	// No list, an empty list or an unreadable one means no plan to
-	// enforce: fail open, never fail (or loop) a turn over storage.
-	if strings.TrimSpace(a.session.Dir) == "" {
-		return false
-	}
-	data, err := os.ReadFile(filepath.Join(a.session.Dir, session.TodoFileName))
-	if err != nil {
-		return false
-	}
-	var open []string
-	for _, td := range session.TodosView(data) {
-		if planStepOpen(td.Status) {
-			open = append(open, strings.TrimSpace(td.Content)+" ("+strings.TrimSpace(td.Status)+")")
-		}
-	}
+	open := a.openPlanSteps()
 	if len(open) == 0 {
 		return false
 	}
@@ -72,6 +58,52 @@ func (a *Agent) planNudge() bool {
 	rec.Display = planDisplay
 	a.records = append(a.records, rec)
 	return true
+}
+
+// openPlanSteps names the steps still open in the session's activity
+// list. It fails open: no list, an empty list or an unreadable one
+// means nothing to enforce, never a failed (or looping) turn.
+func (a *Agent) openPlanSteps() []string {
+	if strings.TrimSpace(a.session.Dir) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(a.session.Dir, session.TodoFileName))
+	if err != nil {
+		return nil
+	}
+	var open []string
+	for _, td := range session.TodosView(data) {
+		if planStepOpen(td.Status) {
+			open = append(open, strings.TrimSpace(td.Content)+" ("+strings.TrimSpace(td.Status)+")")
+		}
+	}
+	return open
+}
+
+// planStalled is the turn error for a model that kept its plan open
+// through every reminder. Ending the turn as a normal completion there
+// fakes a finished job: the user sees a calm "next I will …" and a plan
+// nobody advanced. A resumable failure says what is actually true. It
+// needs the turn to have changed something — a stale list from an
+// earlier turn, or a turn that only answered a question, is not a
+// stalled plan.
+func (a *Agent) planStalled() string {
+	if len(a.toolDefs) == 0 || a.planNudges < maxPlanNudges || a.changed == 0 {
+		return ""
+	}
+	open := a.openPlanSteps()
+	if len(open) == 0 {
+		return ""
+	}
+	steps := open
+	more := ""
+	if len(steps) > planMaxSteps {
+		more = " and " + strconv.Itoa(len(steps)-planMaxSteps) + " more"
+		steps = steps[:planMaxSteps]
+	}
+	return "stopped with " + strconv.Itoa(len(open)) + " plan step(s) still open after " +
+		strconv.Itoa(maxPlanNudges) + " reminders: " + strings.Join(steps, "; ") + more +
+		". The transcript is saved — resume to continue, or say the rest can be dropped."
 }
 
 // planStepOpen reports whether a stored status still needs work. It

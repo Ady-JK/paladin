@@ -141,3 +141,96 @@ func TestPlanNudgeStaysQuietWithoutOpenSteps(t *testing.T) {
 		})
 	}
 }
+
+// TestPlanNudgeResetsAfterProgress pins the fix for a real stall: a
+// turn that does work between stalls must keep its reminders, instead
+// of dying after three of them halfway through a long plan.
+func TestPlanNudgeResetsAfterProgress(t *testing.T) {
+	prov := &mockProvider{}
+	a, sess := planAgent(t, prov)
+	writeTodos(t, sess.Dir, `[{"content":"Ship it","status":"in_progress"}]`)
+	stalls := maxPlanNudges + 1 // one past the cap: only a reset keeps going
+	var scripts []streamScript
+	for i := 0; i < stalls; i++ {
+		scripts = append(scripts, textRound("still working"))
+		if i < stalls-1 {
+			// Real work between stalls: the reminder budget restarts.
+			scripts = append(scripts, callRound("r", "read", `{"path":"/nonexistent"}`))
+		}
+	}
+	scripts = append(scripts,
+		callRound("done", "todo", todoArgs(`[{"content":"Ship it","status":"finished"}]`)),
+		textRound("done"),
+	)
+	prov.streams = scripts
+	out, err := a.Run()
+	if err != nil {
+		t.Fatalf("a turn making progress must not fail: %v", err)
+	}
+	if !strings.Contains(out.Reply, "done") {
+		t.Fatalf("reply %q", out.Reply)
+	}
+	if n, _ := countNudges(prov); n != stalls {
+		t.Fatalf("want %d nudges across the stalls, got %d", stalls, n)
+	}
+}
+
+// TestPlanStalledFailsLoudly pins the honest ending: a turn that
+// changed files, ignored every reminder and left steps open is a
+// failure the user can resume, not a calm completion.
+func TestPlanStalledFailsLoudly(t *testing.T) {
+	prov := &mockProvider{}
+	a, sess := planAgent(t, prov)
+	writeTodos(t, sess.Dir, `[{"content":"First step","status":"in_progress"},
+		{"content":"Second step","status":"not_started"}]`)
+	// The turn changed a file: it is executing a plan, not answering a
+	// question. (The write tool itself is not under test here.)
+	a.changed = 1
+	for i := 0; i < maxPlanNudges+1; i++ {
+		prov.streams = append(prov.streams, textRound("next I will write the code"))
+	}
+	_, err := a.Run()
+	if err == nil {
+		t.Fatal("a stalled plan must fail, not end as a normal completion")
+	}
+	msg := err.Error()
+	for _, want := range []string{"still open", "First step", "resume"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q lacks %q", msg, want)
+		}
+	}
+	// The streamed text is still in history: the user sees what it said.
+	h, _ := sess.History()
+	found := false
+	for _, m := range h {
+		if m.Role == transcript.RoleAssistant && strings.Contains(m.Content, "next I will write") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the stalled turn's text must be kept")
+	}
+}
+
+// TestPlanStaleListDoesNotFailTurn pins the guard against false
+// failures: a turn that changed nothing (a question, a review) is not a
+// stalled plan, even when an older turn left steps open — it ends
+// normally however often it is reminded.
+func TestPlanStaleListDoesNotFailTurn(t *testing.T) {
+	prov := &mockProvider{}
+	a, sess := planAgent(t, prov)
+	writeTodos(t, sess.Dir, `[{"content":"Old work","status":"in_progress"}]`)
+	prov.streams = []streamScript{
+		textRound("here is the answer"),
+		textRound("still the answer"),
+		textRound("still the answer"),
+		textRound("still the answer"),
+	}
+	out, err := a.Run()
+	if err != nil {
+		t.Fatalf("a stale list must not fail the turn: %v", err)
+	}
+	if !strings.Contains(out.Reply, "answer") {
+		t.Fatalf("reply %q", out.Reply)
+	}
+}

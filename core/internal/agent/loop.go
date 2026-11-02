@@ -53,6 +53,7 @@ func (a *Agent) runLoop() error {
 			if a.recoverRound(err, round.empty()) {
 				continue
 			}
+			a.keepPartial(round)
 			return roundFailure(err)
 		}
 		if round.clientGone {
@@ -62,6 +63,7 @@ func (a *Agent) runLoop() error {
 			if a.recoverRound(err, round.empty()) {
 				continue
 			}
+			a.keepPartial(round)
 			return roundFailure(err)
 		}
 		a.noteRoundSucceeded()
@@ -101,6 +103,10 @@ func (a *Agent) runLoop() error {
 		}
 		a.emptyRounds = 0
 		a.retries, a.timeoutRetries = 0, 0
+		// A round that ran tools made real progress: the plan reminders
+		// start over, so a long task only ends loudly after three
+		// consecutive stalls with nothing done between them.
+		a.planNudges = 0
 		a.appendAssistant(round.text, round.calls)
 		if err := a.runToolsStreaming(round.calls); err != nil {
 			return err
@@ -270,6 +276,9 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 	if a.planNudge() {
 		return true, nil
 	}
+	if msg := a.planStalled(); msg != "" {
+		return false, turnFailed{msg}
+	}
 	if a.stopHooks(text) {
 		return true, nil
 	}
@@ -285,6 +294,20 @@ func (a *Agent) stopWithPartial(roundText string) error {
 		})
 	}
 	return turnStop{}
+}
+
+// keepPartial records text a round streamed before the provider failed,
+// so a dropped connection does not throw away a half-written answer.
+// Turns with tools persist records (the reply builder is only saved when
+// tools are off), so exactly one copy is kept.
+func (a *Agent) keepPartial(round roundResult) {
+	if round.text == "" || len(round.calls) > 0 || len(a.toolDefs) == 0 {
+		return
+	}
+	a.records = append(a.records, transcript.Message{
+		Role: transcript.RoleAssistant, Content: round.text,
+		CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
+	})
 }
 
 // maxParallelTools caps one concurrent batch.

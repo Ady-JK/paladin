@@ -88,6 +88,53 @@ func TestRunRetryableErrorRetriesThenRecovers(t *testing.T) {
 	}
 }
 
+// TestRunRetriesTruncatedStream pins the deepseek/opencode failure: a
+// stream the SDK cut off mid-frame ("unexpected end of JSON input") is
+// a transport blip, so the round retries instead of ending the turn.
+func TestRunRetriesTruncatedStream(t *testing.T) {
+	old := retryUnit
+	retryUnit = time.Millisecond
+	defer func() { retryUnit = old }()
+	prov := &mockProvider{
+		streams: []streamScript{
+			{err: inference.RequestError("Opencode Go: stream: unexpected end of JSON input")},
+			{chunks: []inference.Chunk{inference.TextChunk("recovered")}},
+		},
+	}
+	a, _, _, done := testAgent(t, prov)
+	defer close(done)
+	outcome, err := a.Run()
+	if err != nil {
+		t.Fatalf("a truncated stream must retry: %v", err)
+	}
+	if outcome.Reply != "recovered" || prov.calls != 2 {
+		t.Fatalf("reply=%q calls=%d", outcome.Reply, prov.calls)
+	}
+}
+
+// TestRunKeepsPartialTextOnStreamFailure pins the other half: when the
+// round already streamed text and the failure is not recoverable, that
+// text stays in the transcript instead of vanishing with the error.
+func TestRunKeepsPartialTextOnStreamFailure(t *testing.T) {
+	prov := &mockProvider{streams: []streamScript{{
+		chunks: []inference.Chunk{inference.TextChunk("half an answer")},
+		err:    inference.RequestError("boom: stream: status 401 unauthorized"),
+	}}}
+	a, sess, _, done := testAgent(t, prov)
+	defer close(done)
+	_, err := a.Run()
+	if err == nil {
+		t.Fatal("want the turn to fail")
+	}
+	h, _ := sess.History()
+	for _, m := range h {
+		if m.Role == transcript.RoleAssistant && strings.Contains(m.Content, "half an answer") {
+			return
+		}
+	}
+	t.Fatalf("partial text was dropped: %+v", h)
+}
+
 func TestRunNonRetryableErrorFailsFast(t *testing.T) {
 	prov := &mockProvider{
 		streams: []streamScript{{err: inference.RequestError("boom: stream: status 401 unauthorized")}},
