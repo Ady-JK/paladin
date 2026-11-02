@@ -338,6 +338,9 @@ type Agent struct {
 	verifyNudged bool
 	unverified   []string
 	verifyFailed bool
+	// planNudges counts unfinished-plan reminders this turn (plan.go);
+	// capped so a model that will not settle its list still ends.
+	planNudges int
 }
 
 func newAgent(c runConfig) *Agent {

@@ -18,7 +18,7 @@ func TestCustomizeListsEveryKindOfBuiltin(t *testing.T) {
 	}
 	for _, id := range []string{"prompt.system", "prompt.tool-guidance", "prompt.shell-guidance", "prompt.examples",
 		"prompt.plan-mode", "tool.read.description", "tool.web_fetch.description", "tool.visual.description",
-		"tool.spawn_agent.description", "tool.report_findings.description", "reminder.verify", "reminder.budget",
+		"tool.spawn_agent.description", "tool.report_findings.description", "reminder.verify", "reminder.budget", "reminder.plan",
 		"note.nested-held", "subagent.preamble", "subagent.explore", "compact.system", "side.question",
 		"section.tools-off", "command.review", "command.init", "skill.debugging", "file.settings", "file.lsp"} {
 		if _, ok := ids[id]; !ok {
