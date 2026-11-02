@@ -31,27 +31,14 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#promptInput")).toBeVisible();
 });
 
-test("the thinking strip above the composer sets a level in one click", async ({ page }) => {
+test("the toggle above the composer shows the current level and opens the slider", async ({ page }) => {
   await pickModel(page, "claude-3-opus");
-  const strip = page.locator(".think-inline");
-  await expect(strip).toBeVisible();
-  // Every level the model takes is a click away, in order.
-  const pills = strip.locator(".think-pill");
-  await expect(pills).toHaveText(["Low", "Medium", "High", "Extra High", "Max"]);
-  // Nothing chosen yet, so no pill is on: the provider decides.
-  await expect(strip.locator(".think-pill.is-on")).toHaveCount(0);
+  const toggle = page.locator("#thinkingMore");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toContainText("Thinking: Default");
 
-  await strip.locator('.think-pill[data-level="medium"]').click();
-  await expect(strip.locator('.think-pill[data-level="medium"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(strip.locator(".think-pill.is-on")).toHaveCount(1);
-  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("medium");
-  expect((await sets(page)).at(-1).model).toBe("anthropic/claude-3-opus");
-});
-
-test("the More button opens the slider card for keyboard work", async ({ page }) => {
-  await pickModel(page, "claude-3-opus");
+  await toggle.click();
   const card = page.locator("#thinkingMenu");
-  await page.click("#thinkingMore");
   await expect(card).toBeVisible();
   await expect(card.locator(".think-level")).toHaveText("Default");
   await expect(card.locator(".think-model")).toContainText("claude-3-opus");
@@ -66,8 +53,8 @@ test("the More button opens the slider card for keyboard work", async ({ page })
   await page.keyboard.press("ArrowRight");
   await expect(card.locator(".think-level")).toHaveText("Medium");
   await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("medium");
-  // The strip mirrors the card's choice.
-  await expect(page.locator('.think-pill[data-level="medium"]')).toHaveAttribute("aria-pressed", "true");
+  // The toggle mirrors the card's choice.
+  await expect(toggle).toContainText("Thinking: Medium");
 
   await page.keyboard.press("End");
   await expect(card).toHaveAttribute("data-level", "max");
@@ -75,34 +62,40 @@ test("the More button opens the slider card for keyboard work", async ({ page })
 
   await card.locator(".think-reset").click();
   await expect(card.locator(".think-level")).toHaveText("Default");
-  await expect(page.locator(".think-inline .think-pill.is-on")).toHaveCount(0);
+  await expect(toggle).toContainText("Thinking: Default");
   await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("");
 
   await page.keyboard.press("Escape");
   await expect(card).toBeHidden();
 });
 
-test("the strip says so for a model with no adjustable thinking", async ({ page }) => {
+test("the toggle says n/a for a model with no adjustable thinking", async ({ page }) => {
   await pickModel(page, "gpt-4o");
-  const strip = page.locator(".think-inline");
-  // Visible and explicit rather than hidden: a hidden control reads as
-  // broken, and the model may still be reasoning without levels.
-  await expect(strip).toBeVisible();
-  await expect(strip.locator(".think-inline-none")).toContainText("gpt-4o has no thinking levels");
-  await expect(strip.locator(".think-pill")).toHaveCount(0);
-  await expect(page.locator("#thinkingMore")).toBeHidden();
+  const toggle = page.locator("#thinkingMore");
+  // Visible and disabled rather than hidden: a hidden control reads as
+  // broken, and the composer layout stays stable.
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toContainText("Thinking: n/a");
+  await toggle.click({ force: true });
+  await expect(page.locator("#thinkingMenu")).toBeHidden();
 });
 
 test("levels are remembered per model", async ({ page }) => {
   await pickModel(page, "claude-3-opus");
-  await page.locator('.think-pill[data-level="max"]').click();
-  await expect(page.locator('.think-pill[data-level="max"]')).toHaveAttribute("aria-pressed", "true");
+  await page.click("#thinkingMore");
+  const slider = page.locator('#thinkingMenu input[type="range"]');
+  await slider.focus();
+  await page.keyboard.press("End");
+  await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("max");
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: Max");
+  await page.keyboard.press("Escape");
 
   await pickModel(page, "gpt-4o");
-  await expect(page.locator(".think-inline .think-pill")).toHaveCount(0);
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: n/a");
 
   await pickModel(page, "claude-3-opus");
-  await expect(page.locator('.think-pill[data-level="max"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: Max");
 });
 
 test("the card's model name opens the model picker", async ({ page }) => {
@@ -118,8 +111,7 @@ test("thinking levels appear after a catalog refresh, without switching models",
   // pick. The second listing (a refresh) teaches the app three.
   await pickModel(page, "claude-fable");
   await expect(page.locator(".think-inline")).toBeVisible();
-  await expect(page.locator(".think-inline-none")).toBeVisible();
-  await expect(page.locator(".think-pill")).toHaveCount(0);
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: n/a");
 
   await page.click("#settingsBtn");
   await page.click("#settingsNavProviders");
@@ -127,8 +119,11 @@ test("thinking levels appear after a catalog refresh, without switching models",
   await page.click("#settingsCloseBtn");
   // Same model id, new metadata: the control must follow the catalog,
   // not wait for the user to switch models.
-  await expect(page.locator('.think-pill[data-level="high"]')).toBeVisible();
-  await expect(page.locator(".think-inline-none")).toBeHidden();
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: Default");
+  await expect(page.locator("#thinkingMore")).toBeEnabled();
+  await page.click("#thinkingMore");
+  await expect(page.locator("#thinkingMenu")).toBeVisible();
+  await page.keyboard.press("Escape");
 });
 
 test("/thinking opens the options and /thinking <level> sets one", async ({ page }) => {
@@ -140,9 +135,15 @@ test("/thinking opens the options and /thinking <level> sets one", async ({ page
   await page.keyboard.press("Escape");
   await expect(page.locator("#thinkingMenu")).toBeHidden();
 
+  // The toggle also opens the card for pointer users.
+  await page.click("#thinkingMore");
+  await expect(page.locator("#thinkingMenu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#thinkingMenu")).toBeHidden();
+
   await page.fill("#promptInput", "/thinking high");
   await page.press("#promptInput", "Enter");
-  await expect(page.locator('.think-pill[data-level="high"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: High");
   await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("high");
   // A local command never becomes a turn.
   const chats = await page.evaluate(() => ((window as any).__e2eChats || []).length);
@@ -152,12 +153,12 @@ test("/thinking opens the options and /thinking <level> sets one", async ({ page
   await page.fill("#promptInput", "/thinking minimal");
   await page.press("#promptInput", "Enter");
   await expect(page.locator("#toast")).toContainText("claude-3-opus: Low, Medium, High, Extra High, Max");
-  await expect(page.locator('.think-pill[data-level="high"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: High");
 
   // And `default` clears it back to the provider's own.
   await page.fill("#promptInput", "/thinking default");
   await page.press("#promptInput", "Enter");
-  await expect(page.locator(".think-inline .think-pill.is-on")).toHaveCount(0);
+  await expect(page.locator("#thinkingMore")).toContainText("Thinking: Default");
   await expect.poll(async () => (await sets(page)).at(-1)?.level).toBe("");
 });
 

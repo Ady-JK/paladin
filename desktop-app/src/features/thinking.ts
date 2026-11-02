@@ -1,17 +1,15 @@
-// thinking.ts owns how hard the picked model thinks. Two surfaces, one
-// stored choice:
-//
-//   - an inline strip above the composer text, showing the model and a
-//     pill per level it accepts, so the setting is visible where you
-//     type and one click away;
-//   - the card the old chip opened, kept for keyboard work: a slider
-//     over the same stops, the model picker and a reset.
+// thinking.ts owns how hard the picked model thinks. One compact toggle
+// above the composer text (a brain plus the current level) and the card
+// it opens: a slider over every stop the model takes, the model picker
+// and a reset. The toggle keeps the setting visible where you type;
+// changing it always goes through the card.
 //
 // The choice is stored app-wide per model (thinkingLevels in
 // settings.json) and applied from the next model call, so it can be
 // changed in the middle of a session. Stop 0 is the provider default
-// (nothing is sent). A model with no adjustable thinking still shows the
-// strip, saying so, instead of hiding the whole control.
+// (nothing is sent). A model with no adjustable thinking keeps a
+// disabled "Thinking: n/a" toggle, so the composer layout stays stable
+// instead of hiding the whole control.
 
 import * as api from "../core/api";
 import { modelSelectBtn } from "../core/dom";
@@ -33,8 +31,8 @@ const LABELS: Record<string, string> = {
   max: "Max",
 };
 
-// HINTS says what each level means for the next turn, so the pills read
-// as something more than jargon.
+// HINTS says what each level means for the next turn, so the toggle
+// and card read as something more than jargon.
 const HINTS: Record<string, string> = {
   "": "The provider's own default",
   none: "No thinking before the answer",
@@ -74,7 +72,7 @@ function setExpanded(on: boolean): void {
 
 function openCard(): void {
   ensureChrome();
-  if (!view) return;
+  if (!view || view.levels.length === 0) return;
   claimPopover("thinking");
   paintCard();
   card!.classList.remove("hidden");
@@ -87,8 +85,8 @@ function closeCard(): void {
   setExpanded(false);
 }
 
-// ensureChrome builds the strip above the composer and the card it sits
-// over. Both are created once and only repainted afterwards.
+// ensureChrome builds the compact toggle above the composer and the
+// card it opens. Both are created once and only repainted afterwards.
 function ensureChrome(): void {
   if (strip && chip && card) return;
 
@@ -96,12 +94,10 @@ function ensureChrome(): void {
   const wrap = document.createElement("div");
   wrap.className = "think-inline hidden";
   wrap.innerHTML =
-    `<div class="think-inline-bar">` +
-    `<span class="think-inline-icon" aria-hidden="true">${icon("zap-line", "h-3.5 w-3.5")}</span>` +
-    `<span class="think-inline-label">Thinking</span>` +
-    `<div id="thinkingLevels" class="think-inline-levels" role="group" aria-label="Thinking level"></div>` +
-    `<button type="button" id="thinkingMore" class="think-inline-more" title="Thinking options" aria-haspopup="dialog" aria-expanded="false">More${icon("chevron-down", "h-3 w-3")}</button>` +
-    `</div>` +
+    `<button type="button" id="thinkingMore" class="think-toggle" title="Thinking options" aria-haspopup="dialog" aria-expanded="false">` +
+    `<span class="think-toggle-icon" aria-hidden="true">${icon("brain", "h-3.5 w-3.5")}</span>` +
+    `<span class="think-toggle-level" aria-live="polite"></span>` +
+    `</button>` +
     `<div id="thinkingMenu" class="think-card hidden" role="dialog" aria-label="Thinking level"></div>`;
   (slot ?? modelSelectBtn.parentElement)?.appendChild(wrap);
 
@@ -114,12 +110,6 @@ function ensureChrome(): void {
     event.stopPropagation();
     if (card!.classList.contains("hidden")) openCard();
     else closeCard();
-  });
-  // A pill picks its level outright: the common case is one click.
-  strip.querySelector("#thinkingLevels")!.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const pill = (event.target as HTMLElement).closest<HTMLElement>("[data-level]");
-    if (pill?.dataset.level !== undefined) void save(pill.dataset.level);
   });
   card.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -160,8 +150,9 @@ function ensureChrome(): void {
   });
 }
 
-// paintStrip repaints the inline control: a pill per level, or a plain
-// explanation when the model has nothing to adjust.
+// paintStrip repaints the compact toggle: a brain plus the current
+// level, or a disabled "Thinking: n/a" for a model with nothing to
+// adjust. The toggle opens the card; it never picks a level itself.
 function paintStrip(): void {
   ensureChrome();
   if (!view) {
@@ -172,30 +163,20 @@ function paintStrip(): void {
   strip!.classList.remove("hidden");
   strip!.dataset.level = view.level || "default";
 
-  const label = strip!.querySelector<HTMLElement>(".think-inline-label")!;
-  label.textContent = "Thinking";
-  label.title = `${shortModel(view.model)}: ${thinkingLabel(view.level)} — ${HINTS[view.level] ?? ""}`;
-
-  const levels = strip!.querySelector<HTMLElement>("#thinkingLevels")!;
+  const toggle = strip!.querySelector<HTMLElement>(".think-toggle-level")!;
   if (view.levels.length === 0) {
-    // Not adjustable: say so rather than showing an empty row, which
-    // reads as broken.
-    levels.innerHTML = `<span class="think-inline-none">${escapeHtml(shortModel(view.model))} has no thinking levels</span>`;
-    chip!.classList.add("hidden");
+    // Not adjustable: a disabled stub, so the composer layout stays
+    // put instead of hiding the whole control.
+    toggle.textContent = "Thinking: n/a";
+    chip!.disabled = true;
     closeCard();
     return;
   }
-  chip!.classList.remove("hidden");
-  // Only the levels, not the provider default: the default is the
-  // absence of a choice, and the card's reset covers it.
-  levels.innerHTML = view.levels
-    .map(
-      (level) =>
-        `<button type="button" class="think-pill${level === view!.level ? " is-on" : ""}" data-level="${escapeHtml(level)}"` +
-        ` title="${escapeHtml(`${thinkingLabel(level)} — ${HINTS[level] ?? ""}`)}"` +
-        ` aria-pressed="${level === view!.level ? "true" : "false"}">${escapeHtml(thinkingLabel(level))}</button>`,
-    )
-    .join("");
+  chip!.disabled = false;
+  const label = thinkingLabel(view.level);
+  toggle.textContent = `Thinking: ${label}`;
+  chip!.title = `${shortModel(view.model)}: ${label} — ${HINTS[view.level] ?? ""}. Change the thinking level`;
+  chip!.setAttribute("aria-label", `Thinking: ${label}. Change the thinking level`);
 }
 
 // intensity is how far along the slider a level sits, 0..1; it drives
@@ -234,12 +215,16 @@ function paintCard(): void {
 }
 
 // showStop paints a level without rebuilding the card, so the slider
-// keeps focus while it is dragged or stepped. The card may never have
-// been painted (the inline pills are the common path, and the card is
-// built lazily), so a missing card is not an error.
+// keeps focus while it is dragged or stepped. The toggle mirrors the
+// level at the same time, so the setting is visible once the card
+// closes. The card may never have been painted (it is built lazily on
+// open), so a missing card is not an error.
 function showStop(level: string): void {
-  if (!card || !view) return;
+  if (!view) return;
   const label = thinkingLabel(level);
+  const toggle = strip?.querySelector<HTMLElement>(".think-toggle-level");
+  if (toggle && view.levels.length > 0) toggle.textContent = `Thinking: ${label}`;
+  if (!card) return;
   card.dataset.level = level || "default";
   card.style.setProperty("--think-i", intensity(view, level).toFixed(3));
   const title = card.querySelector(".think-level");

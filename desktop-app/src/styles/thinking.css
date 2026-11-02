@@ -1,122 +1,66 @@
-/* thinking.css: the composer's inline thinking strip, the card it opens
-   (a blue-to-purple flowing track whose motion grows with the level) and
-   the "Thinking" blocks in a turn. --think-i is 0..1 along the slider. */
+/* thinking.css: the compact thinking toggle above the composer, the
+   card it opens (a blue-to-purple flowing track whose motion grows
+   with the level) and the "Thinking" blocks in a turn.
+   --think-i is 0..1 along the slider. */
 
-/* The inline strip above the composer text: the setting is visible where
-   you type, and one click picks a level. */
+/* The compact toggle: a brain plus the current level. Changing the
+   setting always goes through the card it opens. */
 .think-inline {
+  position: relative;
   padding: 6px 12px 0;
 }
-.think-inline.hidden,
-.think-inline-bar.hidden {
+.think-inline.hidden {
   display: none;
 }
-.think-inline-bar {
-  display: flex;
+.think-toggle {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex-wrap: wrap;
-}
-.think-inline-icon {
-  display: grid;
-  place-items: center;
-  color: var(--color-slate-400);
-}
-.think-inline[data-level="default"] .think-inline-icon {
-  color: var(--color-slate-400);
-}
-.think-inline:not([data-level="default"]) .think-inline-icon {
-  color: #8b5cf6;
-}
-.think-inline-label {
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 2px 10px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-slate-400);
-}
-.think-inline-levels {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-/* One click per level: no slider needed for the common case. */
-.think-pill {
-  border-radius: 9999px;
-  border: 1px solid transparent;
-  padding: 2px 8px;
-  font-size: 11px;
-  line-height: 1.35;
-  color: var(--color-slate-500);
   transition:
     background-color 120ms ease,
     border-color 120ms ease,
     color 120ms ease;
 }
-.think-pill:hover {
+.think-toggle:hover,
+.think-toggle[aria-expanded="true"] {
   border-color: var(--color-slate-200);
   background: var(--color-slate-100);
   color: var(--color-slate-700);
 }
-.dark .think-pill {
-  color: var(--color-slate-400);
-}
-.dark .think-pill:hover {
+.dark .think-toggle:hover,
+.dark .think-toggle[aria-expanded="true"] {
   border-color: var(--color-slate-700);
-  background: var(--color-slate-800);
-  color: var(--color-slate-200);
-}
-.think-pill.is-on {
-  border-color: rgb(139 92 246 / 0.45);
-  background: rgb(139 92 246 / 0.12);
-  color: #6d28d9;
-  font-weight: 600;
-}
-.dark .think-pill.is-on {
-  border-color: rgb(167 139 250 / 0.5);
-  background: rgb(139 92 246 / 0.2);
-  color: #c4b5fd;
-}
-.think-inline-none {
-  font-size: 11px;
-  color: var(--color-slate-400);
-  font-style: italic;
-}
-.dark .think-inline-none {
-  color: var(--color-slate-500);
-}
-.think-inline-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  border-radius: 9999px;
-  padding: 2px 7px;
-  font-size: 11px;
-  color: var(--color-slate-400);
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-}
-.think-inline-more:hover,
-.think-inline-more[aria-expanded="true"] {
-  background: var(--color-slate-100);
-  color: var(--color-slate-700);
-}
-.dark .think-inline-more:hover,
-.dark .think-inline-more[aria-expanded="true"] {
   background: var(--color-slate-800);
   color: var(--color-slate-100);
 }
-.think-inline-more.hidden {
-  display: none;
+.think-toggle-icon {
+  display: grid;
+  place-items: center;
+  color: var(--color-slate-400);
 }
-/* The card hangs off the strip, which is wider than the old chip's spot. */
-.think-inline {
-  position: relative;
+.think-inline[data-level="default"] .think-toggle-icon {
+  color: var(--color-slate-400);
+}
+.think-inline:not([data-level="default"]) .think-toggle,
+.think-inline:not([data-level="default"]) .think-toggle-icon {
+  color: #8b5cf6;
+}
+.think-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.think-toggle:disabled:hover {
+  border-color: transparent;
+  background: none;
 }
 .think-inline .think-card {
   bottom: calc(100% + 6px);
@@ -242,12 +186,23 @@
   font-size: 20px;
   font-weight: 600;
   line-height: 1.3;
-  background: linear-gradient(90deg, #5b6cf0, #a46bff, #c08cff, #5b6cf0);
-  background-size: 300% 100%;
+  /* Seamless drift: first and last stops match and the loop shifts by
+     exactly one tile (100% of the element's own width), so the restart
+     lands on identical pixels instead of jumping. */
+  background: linear-gradient(90deg, #5b6cf0, #a46bff, #c08cff, #5b6cf0, #a46bff);
+  background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: think-flow calc(9s - 6s * var(--think-i)) linear infinite;
+  animation: think-flow-text calc(9s - 6s * var(--think-i)) linear infinite;
+}
+@keyframes think-flow-text {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: -200% 50%;
+  }
 }
 .think-card[data-level="default"] .think-level {
   background: none;
@@ -305,17 +260,11 @@
 .think-flow {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    100deg,
-    #3d4fd6 0%,
-    #6c5ce7 25%,
-    #b48cff 45%,
-    #d8b4fe 52%,
-    #8b5cf6 65%,
-    #4c3ab8 85%,
-    #3d4fd6 100%
-  );
-  background-size: 250% 100%;
+  /* Seamless drift, same trick as the level text: the gradient tiles
+     twice across its box and the loop shifts exactly one tile. A seam
+     would show as a visible jump each time the animation restarts. */
+  background: linear-gradient(100deg, #3d4fd6 0%, #6c5ce7 25%, #b48cff 45%, #8b5cf6 50%, #3d4fd6 100%);
+  background-size: 200% 100%;
   animation: think-flow calc(8s - 5.5s * var(--think-i)) linear infinite;
   filter: saturate(calc(0.75 + 0.5 * var(--think-i)));
 }
@@ -324,7 +273,7 @@
     background-position: 0% 50%;
   }
   to {
-    background-position: -250% 50%;
+    background-position: -200% 50%;
   }
 }
 .think-sparkles {
@@ -339,7 +288,7 @@
   box-shadow: 0 0 4px rgb(255 255 255 / 0.9);
   animation:
     think-twinkle 2.4s ease-in-out infinite,
-    think-drift calc(7s - 4s * var(--think-i)) linear infinite;
+    think-drift calc(7s - 4s * var(--think-i)) ease-in-out infinite;
 }
 @keyframes think-twinkle {
   0%,
@@ -350,11 +299,15 @@
     opacity: 1;
   }
 }
+/* Drift-and-return: each sparkle moves out and eases back to its own
+   start point, so the loop restarts exactly where it began instead of
+   snapping back from a displaced position. */
 @keyframes think-drift {
-  from {
+  0%,
+  100% {
     translate: 0 0;
   }
-  to {
+  50% {
     translate: 40px -3px;
   }
 }
@@ -463,8 +416,10 @@
   transform: rotate(90deg);
 }
 .think-block[data-state="streaming"] .think-title {
-  background: linear-gradient(90deg, #64748b 0%, #8b5cf6 40%, #c4b5fd 50%, #8b5cf6 60%, #64748b 100%);
-  background-size: 250% 100%;
+  /* Seamless drift, same trick as the card: the gradient's ends match
+     and the loop shifts one tile, so the restart is invisible. */
+  background: linear-gradient(90deg, #64748b 0%, #8b5cf6 33%, #c4b5fd 50%, #8b5cf6 67%, #64748b 100%);
+  background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
