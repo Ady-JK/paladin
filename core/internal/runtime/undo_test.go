@@ -91,67 +91,13 @@ func userRows(t *testing.T, rt *AgentRuntime, sid string) []session.HistoryMessa
 	return out
 }
 
-func TestStepsRecordedForFileChangingCalls(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, "echo one > a.txt", "")
-	turn(t, rt, sid, ws, "write a")
-	steps, err := rt.loadSteps(sid, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(steps) != 1 || strings.Join(steps[0].Files, ",") != "a.txt" || steps[0].Turn != 0 || steps[0].Before == steps[0].After {
-		t.Fatalf("steps %+v", steps)
-	}
-	if rows := userRows(t, rt, sid); len(rows) != 1 || rows[0].Index == nil || *rows[0].Index != 0 {
-		t.Fatalf("user rows %+v", rows)
-	}
-}
-
-func TestSessionChangesAndDiffUseRecordedSnapshots(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, "printf 'one\\n' > a.txt; printf 'new\\n' > b.txt", "", "printf 'two\\n' > a.txt", "")
-	turn(t, rt, sid, ws, "create two files")
-	turn(t, rt, sid, ws, "edit one file")
-	changes, err := rt.SessionChanges(sid, "")
-	if err != nil || !changes.Available || len(changes.Turns) != 2 || len(changes.Files) != 2 {
-		t.Fatalf("changes = %+v, %v", changes, err)
-	}
-	if changes.Turns[0].Turn != 0 || len(changes.Turns[0].Files) != 2 || changes.Turns[0].Files[0].Status != "created" {
-		t.Fatalf("first turn = %+v", changes.Turns[0])
-	}
-	if changes.Turns[1].Files[0].Status != "modified" || changes.Files[0].Status != "created" {
-		t.Fatalf("edit and session summary = %+v", changes)
-	}
-	first, err := rt.SessionDiff(sid, "", 0, "a.txt")
-	if err != nil || !strings.Contains(first.Patch, "+one") || !strings.Contains(first.Patch, "new file mode") {
-		t.Fatalf("created file diff = %+v, %v", first, err)
-	}
-	second, err := rt.SessionDiff(sid, "", changes.Turns[1].Turn, "a.txt")
-	if err != nil || !strings.Contains(second.Patch, "-one") || !strings.Contains(second.Patch, "+two") {
-		t.Fatalf("edited file diff = %+v, %v", second, err)
-	}
-	if _, err := rt.SessionDiff(sid, "", -1, "../outside"); err == nil {
-		t.Fatal("diff accepted path outside workspace")
-	}
-	if _, err := rt.SessionDiff(sid, "", -1, "not-changed.txt"); err == nil {
-		t.Fatal("diff accepted path not changed by this session")
-	}
-	if _, err := rt.RevertSession(sid, "", changes.Turns[1].Turn); err != nil {
-		t.Fatal(err)
-	}
-	hidden, err := rt.SessionChanges(sid, "")
-	if err != nil || len(hidden.Turns) != 1 {
-		t.Fatalf("reverted turn still visible: %+v, %v", hidden, err)
-	}
-	if _, err := rt.SessionDiff(sid, "", changes.Turns[1].Turn, "a.txt"); err == nil {
-		t.Fatal("reverted turn diff remained visible")
-	}
-}
-
-func TestRevertRedoAndCommitOnNextTurn(t *testing.T) {
+// One snapshot per user turn is the whole undo model: reverting puts the
+// folder back exactly as it was before the message, including deleting
+// files the turn created.
+func TestTurnSnapshotRestoresFolderExactly(t *testing.T) {
 	rt, ws, sid := undoRuntime(t,
 		"echo one > a.txt", "",
-		"echo two > a.txt; mkdir -p sub; echo new > sub/b.txt", "",
-		"echo three > c.txt", "")
-	os.WriteFile(filepath.Join(ws, "a.txt"), []byte("orig\n"), 0o644)
+		"echo two > a.txt; echo c > c.txt", "")
 	turn(t, rt, sid, ws, "first")
 	turn(t, rt, sid, ws, "second")
 	rows := userRows(t, rt, sid)
@@ -164,7 +110,7 @@ func TestRevertRedoAndCommitOnNextTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !pv.Snapshots || strings.Join(pv.Files, ",") != "a.txt,sub/b.txt" || len(pv.Conflicts) != 0 || pv.Turns != 1 {
+	if !pv.Snapshots || strings.Join(pv.Files, ",") != "a.txt" || strings.Join(pv.Deleted, ",") != "c.txt" || pv.Turns != 1 {
 		t.Fatalf("preview %+v", pv)
 	}
 
@@ -172,86 +118,44 @@ func TestRevertRedoAndCommitOnNextTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Message != "second" || strings.Join(res.Restored, ",") != "a.txt,sub/b.txt" {
+	if res.Message != "second" || strings.Join(res.Restored, ",") != "a.txt" || strings.Join(res.Deleted, ",") != "c.txt" {
 		t.Fatalf("revert %+v", res)
 	}
-	if readFile(t, filepath.Join(ws, "a.txt")) != "one" || readFile(t, filepath.Join(ws, "sub/b.txt")) != "<missing>" {
-		t.Fatal("files not restored")
-	}
-	if _, err := os.Stat(filepath.Join(ws, "sub")); !os.IsNotExist(err) {
-		t.Fatal("empty dir left behind")
+	if readFile(t, filepath.Join(ws, "a.txt")) != "one" || readFile(t, filepath.Join(ws, "c.txt")) != "<missing>" {
+		t.Fatal("folder not restored to the snapshot")
 	}
 	if rows := userRows(t, rt, sid); len(rows) != 1 {
 		t.Fatalf("reverted turn still visible: %+v", rows)
 	}
-	if info, _ := rt.OpenSession(sid, ""); info.Revert == nil || info.Revert.Index != second {
-		t.Fatalf("session info lacks revert: %+v", info.Revert)
-	}
-
-	if _, err := rt.UnrevertSession(sid, ""); err != nil {
-		t.Fatal(err)
-	}
-	if readFile(t, filepath.Join(ws, "a.txt")) != "two" || readFile(t, filepath.Join(ws, "sub/b.txt")) != "new" {
-		t.Fatal("redo did not bring files back")
-	}
-	if rows := userRows(t, rt, sid); len(rows) != 2 {
-		t.Fatalf("redo did not restore conversation: %+v", rows)
-	}
-
-	// Reverting the first turn while nothing is pending, then sending a
-	// new message, makes the revert permanent.
-	if _, err := rt.RevertSession(sid, "", *rows[0].Index); err != nil {
-		t.Fatal(err)
-	}
-	if readFile(t, filepath.Join(ws, "a.txt")) != "orig" {
-		t.Fatalf("a.txt = %q", readFile(t, filepath.Join(ws, "a.txt")))
-	}
-	turn(t, rt, sid, ws, "third")
-	rows = userRows(t, rt, sid)
-	if len(rows) != 1 || rows[0].Content != "third" || *rows[0].Index != 0 {
-		t.Fatalf("after commit %+v", rows)
-	}
-	if info, _ := rt.OpenSession(sid, ""); info.Revert != nil {
-		t.Fatal("revert still pending after a new turn")
-	}
-	steps, _ := rt.loadSteps(sid, "")
-	if len(steps) != 1 || steps[0].Files[0] != "c.txt" {
-		t.Fatalf("old steps survived the commit: %+v", steps)
-	}
-	if _, err := rt.UnrevertSession(sid, ""); err == nil {
-		t.Fatal("redo after commit should fail")
-	}
-}
-
-func TestRevertSkipsFilesChangedSince(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, "echo agent > a.txt; echo agent > b.txt", "")
-	turn(t, rt, sid, ws, "edit")
-	os.WriteFile(filepath.Join(ws, "a.txt"), []byte("user\n"), 0o644)
-	pv, err := rt.RevertPreview(sid, "", 0)
+	info, err := rt.OpenSession(sid, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(pv.Conflicts, ",") != "a.txt" {
-		t.Fatalf("preview %+v", pv)
+	if info.Revert != nil {
+		t.Fatal("a revert is final and leaves no pending undo")
+	}
+}
+
+// A revert ignores changes made after the turn, by the user or another
+// session: the snapshot wins.
+func TestRevertOverwritesLaterChanges(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt; echo agent > b.txt", "")
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("orig\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "edit")
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("user\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	res, err := rt.RevertSession(sid, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(res.Skipped, ",") != "a.txt" || strings.Join(res.Restored, ",") != "b.txt" {
+	if strings.Join(res.Restored, ",") != "a.txt" || strings.Join(res.Deleted, ",") != "b.txt" {
 		t.Fatalf("revert %+v", res)
 	}
-	if readFile(t, filepath.Join(ws, "a.txt")) != "user" || readFile(t, filepath.Join(ws, "b.txt")) != "<missing>" {
-		t.Fatal("wrong files touched")
-	}
-	// Redo leaves a file alone if it changed after the revert.
-	os.WriteFile(filepath.Join(ws, "b.txt"), []byte("mine\n"), 0o644)
-	res, err = rt.UnrevertSession(sid, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(res.Skipped, ",") != "b.txt" || readFile(t, filepath.Join(ws, "b.txt")) != "mine" {
-		t.Fatalf("redo %+v", res)
+	if readFile(t, filepath.Join(ws, "a.txt")) != "orig" || readFile(t, filepath.Join(ws, "b.txt")) != "<missing>" {
+		t.Fatal("the snapshot did not win over later changes")
 	}
 }
 
@@ -262,9 +166,6 @@ func TestRevertRejectsBadTargets(t *testing.T) {
 		if _, err := rt.RevertSession(sid, "", idx); err == nil {
 			t.Errorf("index %d accepted", idx)
 		}
-	}
-	if _, err := rt.UnrevertSession(sid, ""); err == nil {
-		t.Error("redo with nothing reverted accepted")
 	}
 }
 
@@ -304,30 +205,7 @@ func TestRevertConversationOnlyWithoutSnapshots(t *testing.T) {
 	}
 }
 
-func TestRevertSkipsFilesWhoseOriginalWasNeverCaptured(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, "echo small > big.txt", "")
-	big := strings.Repeat("x", 10<<20+1)
-	if err := os.WriteFile(filepath.Join(ws, "big.txt"), []byte(big), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	turn(t, rt, sid, ws, "shrink it")
-	pv, err := rt.RevertPreview(sid, "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(pv.Conflicts, ",") != "big.txt" || len(pv.Files) != 0 {
-		t.Fatalf("preview %+v", pv)
-	}
-	res, err := rt.RevertSession(sid, "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(res.Skipped, ",") != "big.txt" || readFile(t, filepath.Join(ws, "big.txt")) != "small" {
-		t.Fatalf("revert %+v", res)
-	}
-}
-
-func TestForkDuringAPendingRevertCopiesOnlyTheVisibleConversation(t *testing.T) {
+func TestForkAfterRevertCopiesTheRewoundConversation(t *testing.T) {
 	rt, ws, sid := undoRuntime(t, "", "")
 	turn(t, rt, sid, ws, "first")
 	turn(t, rt, sid, ws, "second")
@@ -345,12 +223,44 @@ func TestForkDuringAPendingRevertCopiesOnlyTheVisibleConversation(t *testing.T) 
 	}
 }
 
-func (r *AgentRuntime) loadSteps(sessionID, cwd string) ([]Step, error) {
-	sess, err := r.transcripts.Load(cwd, sessionID)
-	if err != nil {
-		return nil, err
+func TestSessionChangesAndDiffUseTurnSnapshots(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "printf 'one\\n' > a.txt; printf 'new\\n' > b.txt", "", "printf 'two\\n' > a.txt", "")
+	turn(t, rt, sid, ws, "create two files")
+	turn(t, rt, sid, ws, "edit one file")
+	changes, err := rt.SessionChanges(sid, "")
+	if err != nil || !changes.Available || len(changes.Turns) != 2 || len(changes.Files) != 2 {
+		t.Fatalf("changes = %+v, %v", changes, err)
 	}
-	return readSteps(sess.Dir)
+	if changes.Turns[0].Turn != 0 || len(changes.Turns[0].Files) != 2 || changes.Turns[0].Files[0].Status != "created" {
+		t.Fatalf("first turn = %+v", changes.Turns[0])
+	}
+	if changes.Turns[1].Files[0].Status != "modified" || changes.Files[0].Status != "created" {
+		t.Fatalf("edit and session summary = %+v", changes)
+	}
+	first, err := rt.SessionDiff(sid, "", 0, "a.txt")
+	if err != nil || !strings.Contains(first.Patch, "+one") || !strings.Contains(first.Patch, "new file mode") {
+		t.Fatalf("created file diff = %+v, %v", first, err)
+	}
+	second, err := rt.SessionDiff(sid, "", changes.Turns[1].Turn, "a.txt")
+	if err != nil || !strings.Contains(second.Patch, "-one") || !strings.Contains(second.Patch, "+two") {
+		t.Fatalf("edited file diff = %+v, %v", second, err)
+	}
+	if _, err := rt.SessionDiff(sid, "", -1, "../outside"); err == nil {
+		t.Fatal("diff accepted path outside workspace")
+	}
+	if _, err := rt.SessionDiff(sid, "", -1, "not-changed.txt"); err == nil {
+		t.Fatal("diff accepted path not changed by this session")
+	}
+	if _, err := rt.RevertSession(sid, "", changes.Turns[1].Turn); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := rt.SessionChanges(sid, "")
+	if err != nil || len(hidden.Turns) != 1 {
+		t.Fatalf("reverted turn still visible: %+v, %v", hidden, err)
+	}
+	if _, err := rt.SessionDiff(sid, "", changes.Turns[1].Turn, "a.txt"); err == nil {
+		t.Fatal("reverted turn diff remained visible")
+	}
 }
 
 func TestReviewSessionCarriesTheSessionsOwnDiff(t *testing.T) {

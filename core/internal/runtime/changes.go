@@ -56,9 +56,9 @@ func changeFiles(states map[string]fileState) []ChangedFile {
 	return files
 }
 
-// visibleChangeSteps uses the same step ledger and pending-revert cutoff
-// as undo. No project Git repository or current worktree state is needed.
-func (r *AgentRuntime) visibleChangeSteps(sessionID, cwd string) (*snapshot.Repo, []Step, error) {
+// visibleTurns loads the session's turn snapshots, hiding the turns a
+// legacy pending revert would remove.
+func (r *AgentRuntime) visibleTurns(sessionID, cwd string) (*snapshot.Repo, []TurnSnapshot, error) {
 	sess, err := r.transcripts.Load(cwd, sessionID)
 	if err != nil {
 		return nil, nil, err
@@ -67,75 +67,89 @@ func (r *AgentRuntime) visibleChangeSteps(sessionID, cwd string) (*snapshot.Repo
 	if repo == nil {
 		return nil, nil, nil
 	}
-	steps, err := readSteps(sess.Dir)
+	turns, err := readTurnSnapshots(sess.Dir)
 	if err != nil {
 		return nil, nil, err
 	}
 	if rv := sess.Meta.Revert; rv != nil {
-		kept := steps[:0]
-		for _, step := range steps {
-			if step.Turn < rv.Index {
-				kept = append(kept, step)
+		kept := turns[:0]
+		for _, t := range turns {
+			if t.Turn < rv.Index {
+				kept = append(kept, t)
 			}
 		}
-		steps = kept
+		turns = kept
 	}
-	return repo, steps, nil
+	return repo, turns, nil
 }
 
-// SessionChanges groups recorded file changes by user turn and across
-// the whole session. Status compares the first and last recorded entry.
+// turnStates compares two trees and returns each path's first and last
+// entry, so a created/deleted/modified status can be derived.
+func turnStates(ctx context.Context, repo *snapshot.Repo, from, to string) (map[string]fileState, error) {
+	changed, err := repo.Changed(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	before, err := repo.Entries(ctx, from, changed)
+	if err != nil {
+		return nil, err
+	}
+	after, err := repo.Entries(ctx, to, changed)
+	if err != nil {
+		return nil, err
+	}
+	states := make(map[string]fileState, len(changed))
+	for _, p := range changed {
+		states[p] = fileState{first: before[p], last: after[p]}
+	}
+	return states, nil
+}
+
+// SessionChanges groups files by the user turn that changed them. A
+// turn is compared with the next turn's snapshot, and the last turn
+// with the folder now, so no separate "after" snapshot is needed.
 func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView, error) {
 	view := SessionChangesView{Turns: []ChangeTurn{}, Files: []ChangedFile{}}
-	repo, steps, err := r.visibleChangeSteps(sessionID, cwd)
+	repo, turns, err := r.visibleTurns(sessionID, cwd)
 	if err != nil || repo == nil {
 		return view, err
 	}
 	view.Available = true
+	if len(turns) == 0 {
+		return view, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	byTurn := map[int]map[string]fileState{}
-	callIDs := map[int][]string{}
-	all := map[string]fileState{}
-	for _, step := range steps {
-		before, err := repo.Entries(ctx, step.Before, step.Files)
+	current, err := repo.Snapshot(ctx)
+	if err != nil {
+		return view, err
+	}
+	for i, ts := range turns {
+		to := current
+		if i+1 < len(turns) {
+			to = turns[i+1].Tree
+		}
+		states, err := turnStates(ctx, repo, ts.Tree, to)
 		if err != nil {
 			return view, err
 		}
-		after, err := repo.Entries(ctx, step.After, step.Files)
-		if err != nil {
-			return view, err
-		}
-		if byTurn[step.Turn] == nil {
-			byTurn[step.Turn] = map[string]fileState{}
-		}
-		callIDs[step.Turn] = append(callIDs[step.Turn], step.CallID)
-		for _, path := range step.Files {
-			for _, target := range []map[string]fileState{byTurn[step.Turn], all} {
-				st, seen := target[path]
-				if !seen {
-					st.first = before[path]
-				}
-				st.last = after[path]
-				target[path] = st
-			}
+		if len(states) > 0 {
+			view.Turns = append(view.Turns, ChangeTurn{Turn: ts.Turn, Files: changeFiles(states)})
 		}
 	}
-	turns := make([]int, 0, len(byTurn))
-	for turn := range byTurn {
-		turns = append(turns, turn)
-	}
-	sort.Ints(turns)
-	for _, turn := range turns {
-		view.Turns = append(view.Turns, ChangeTurn{Turn: turn, Files: changeFiles(byTurn[turn]), CallIDs: callIDs[turn]})
+	all, err := turnStates(ctx, repo, turns[0].Tree, current)
+	if err != nil {
+		return view, err
 	}
 	view.Files = changeFiles(all)
 	return view, nil
 }
 
-// SessionDiff shows only snapshots belonging to this session and scope.
-// Repeating a file across steps preserves attribution instead of mixing
-// in intervening edits from another session to the same path.
+// SessionDiff shows the patch for one file in one turn, or across the
+// whole session when turn is negative.
 func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string) (SessionDiffView, error) {
 	if err := snapshot.CheckPath(path); err != nil {
 		return SessionDiffView{}, err
@@ -143,46 +157,61 @@ func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string)
 	if turn < -1 {
 		return SessionDiffView{}, fmt.Errorf("invalid turn %d", turn)
 	}
-	repo, steps, err := r.visibleChangeSteps(sessionID, cwd)
+	repo, turns, err := r.visibleTurns(sessionID, cwd)
 	if err != nil {
 		return SessionDiffView{}, err
 	}
-	if repo == nil {
+	if repo == nil || len(turns) == 0 {
 		return SessionDiffView{}, fmt.Errorf("snapshots are unavailable for this session")
 	}
-	view := SessionDiffView{Path: path}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	var patch strings.Builder
-	found := false
-	for _, step := range steps {
-		if turn >= 0 && step.Turn != turn {
-			continue
-		}
-		for _, changed := range step.Files {
-			if changed != path {
+	current, err := repo.Snapshot(ctx)
+	if err != nil {
+		return SessionDiffView{}, err
+	}
+	from := turns[0].Tree
+	to := current
+	if turn >= 0 {
+		found := false
+		for i, ts := range turns {
+			if ts.Turn != turn {
 				continue
 			}
-			found = true
-			part, err := repo.DiffFile(ctx, step.Before, step.After, path)
-			if err != nil {
-				return SessionDiffView{}, err
+			from, found = ts.Tree, true
+			to = current
+			if i+1 < len(turns) {
+				to = turns[i+1].Tree
 			}
-			if patch.Len()+len(part) > maxSessionDiff {
-				patch.WriteString(part[:max(0, maxSessionDiff-patch.Len())])
-				view.Truncated = true
-				break
-			}
-			patch.WriteString(part)
 			break
 		}
-		if view.Truncated {
+		if !found {
+			return SessionDiffView{}, fmt.Errorf("file was not changed by this session in the selected scope")
+		}
+	}
+	changed, err := repo.Changed(ctx, from, to)
+	if err != nil {
+		return SessionDiffView{}, err
+	}
+	found := false
+	for _, p := range changed {
+		if p == path {
+			found = true
 			break
 		}
 	}
 	if !found {
 		return SessionDiffView{}, fmt.Errorf("file was not changed by this session in the selected scope")
 	}
-	view.Patch = patch.String()
+	view := SessionDiffView{Path: path}
+	patch, err := repo.DiffFile(ctx, from, to, path)
+	if err != nil {
+		return SessionDiffView{}, err
+	}
+	if len(patch) > maxSessionDiff {
+		view.Truncated = true
+		patch = patch[:maxSessionDiff]
+	}
+	view.Patch = strings.TrimRight(patch, "\n")
 	return view, nil
 }

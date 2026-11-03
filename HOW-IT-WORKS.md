@@ -518,19 +518,18 @@ flowchart LR
 
 ### Undo with snapshots
 
-Before a turn changes files, Paladin takes a **photo** of the folder.
+Before a user turn starts, Paladin takes a **photo** of the folder. That is the only photo: nothing is captured per tool call, and commands never hold a folder lock.
 It uses a hidden git repo under `<data>/snapshots/`, so your own `.git` is never touched.
 
 ```mermaid
 flowchart LR
     T1["Turn 1<br/>📸 photo A"] --> T2["Turn 2<br/>📸 photo B"] --> T3["Turn 3<br/>📸 photo C"]
-    T3 -. "/undo or 'Revert to here'" .-> Back["Files go back to photo B,<br/>messages after turn 2 hidden"]
-    Back -. "Unrevert" .-> T3
+    T3 -. "/undo or 'Revert to here'" .-> Back["Files go back to photo C,<br/>messages from that point dropped"]
 ```
 
-- **Revert preview** shows which files would change, and warns about **conflicts** (files you edited by hand since).
-- **Unrevert** brings it all back, as long as you haven't sent a new message yet.
-- **Cheap photos:** a foreground command the plan-mode read-only allowlist accepts is not photographed at all, and `write`/`edit` photograph only the file they touch. Only a shell command that may write does a whole-folder scan.
+- **Exact restore:** files changed since the photo go back to their old content, and files created since are deleted. The revert is final — there is no redo.
+- **Revert preview** lists what will be restored and what will be deleted, and says plainly that it cannot be undone.
+- **One scan per turn:** a cold photo can take a moment on a huge folder; warm photos are a few milliseconds. The scan happens before the first model call, not around each command.
 
 ### Worktrees
 

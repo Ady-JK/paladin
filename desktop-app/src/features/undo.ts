@@ -1,85 +1,21 @@
 // undo.ts is "Revert to here": a user message's undo button previews
-// the rewind (turns, files restored, files changed since), reverts
-// files plus conversation, and leaves a banner with Redo until the next
-// message makes it final. /undo reverts the last message.
+// the rewind, then restores the folder to the snapshot taken before that
+// message and drops the message and everything after it. The restore is
+// final — there is no redo. /undo reverts the last message.
 
 import * as api from "../core/api";
-import { inputEl, messagesEl, sendBtn } from "../core/dom";
+import { inputEl, messagesEl } from "../core/dom";
 import { escapeHtml } from "../core/format";
 import { state } from "../core/state";
-import type { RevertInfo, RevertPreview } from "../core/types";
+import type { RevertPreview } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { clearLanded, isBusy } from "./live";
 import { loadHistory, refreshSessions } from "./sessions";
 
-// pending is each session's revert awaiting the next message or Redo.
-const pending = new Map<string, RevertInfo>();
-// prefill is the composer text a revert put back, cleared on Redo.
-let prefill = "";
 let pop: HTMLElement | null = null;
-let banner: HTMLElement | null = null;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-function bannerEl(): HTMLElement {
-  if (banner) return banner;
-  const el = document.createElement("div");
-  el.id = "revertBanner";
-  el.className = "revert-banner hidden";
-  el.setAttribute("role", "status");
-  const footer = sendBtn.closest("footer");
-  (footer?.firstElementChild ?? footer)?.prepend(el);
-  el.addEventListener("click", (event) => {
-    if ((event.target as HTMLElement).closest("#redoBtn")) void redo();
-  });
-  banner = el;
-  return el;
-}
-
-// paintRevert shows the visible session's pending revert, if any.
-export function paintRevert(): void {
-  const el = bannerEl();
-  const info = state.sessionId ? pending.get(state.sessionId) : undefined;
-  if (!info) {
-    el.classList.add("hidden");
-    el.innerHTML = "";
-    return;
-  }
-  const parts: string[] = [];
-  if (!info.snapshots) {
-    parts.push("files here are not tracked");
-  } else if (info.restored.length === 0 && info.skipped.length === 0) {
-    parts.push("no file changes to undo");
-  } else {
-    parts.push(`${plural(info.restored.length, "file")} restored`);
-  }
-  if (info.skipped.length) {
-    parts.push(
-      `<span class="revert-skipped" title="Changed since or could not be restored; left as is:\n${escapeHtml(info.skipped.join("\n"))}">${info.skipped.length} skipped</span>`,
-    );
-  }
-  el.innerHTML =
-    `<span class="revert-ico">${icon("tl-undo", "h-3.5 w-3.5")}</span>` +
-    `<span class="revert-title">Conversation rewound</span>` +
-    `<span class="revert-detail">${parts.join(" · ")}</span>` +
-    `<span class="revert-hint">Sending a message makes it final</span>` +
-    `<button type="button" id="redoBtn" class="revert-redo">Redo</button>`;
-  el.classList.remove("hidden");
-}
-
-// setRevert records a session's pending revert (from openSession).
-export function setRevert(sessionId: string, info: RevertInfo | null | undefined): void {
-  if (info) pending.set(sessionId, info);
-  else pending.delete(sessionId);
-  if (sessionId === state.sessionId) paintRevert();
-}
-
-// noteSent drops the banner: the core commits the revert on the turn.
-export function noteSent(sessionId: string): void {
-  prefill = "";
-  setRevert(sessionId, null);
-}
 
 function closePop(): void {
   pop?.remove();
@@ -121,16 +57,25 @@ function previewHtml(pv: RevertPreview): string {
   let body = `<p class="revert-sub">Rewinds ${plural(pv.turns || 1, "turn")}: this message and everything after it.</p>`;
   if (!pv.snapshots) {
     body += `<p class="revert-note">Files in this folder are not tracked, so only the conversation is rewound.</p>`;
-  } else if (pv.files.length === 0 && pv.conflicts.length === 0) {
+  } else if (pv.files.length === 0 && pv.deleted.length === 0 && pv.skipped.length === 0) {
     body += `<p class="revert-note">No file changes to undo.</p>`;
   }
   if (pv.files.length) {
     body +=
       `<div class="revert-label">Restores ${plural(pv.files.length, "file")}</div>` + list("revert-files", pv.files);
   }
-  if (pv.conflicts.length) {
+  if (pv.deleted.length) {
     body +=
-      `<div class="revert-label is-warn">Changed since — left as is</div>` + list("revert-conflicts", pv.conflicts);
+      `<div class="revert-label is-warn">Deletes ${plural(pv.deleted.length, "file")} created since</div>` +
+      list("revert-conflicts", pv.deleted);
+  }
+  if (pv.skipped.length) {
+    body +=
+      `<div class="revert-label is-warn">Leaves ${plural(pv.skipped.length, "file")} alone (too large or binary)</div>` +
+      list("revert-conflicts", pv.skipped);
+  }
+  if (pv.snapshots) {
+    body += `<p class="revert-note is-warn">The folder is put back exactly as it was before this message. This cannot be undone.</p>`;
   }
   return (
     `<div class="revert-head">${icon("tl-undo", "h-3.5 w-3.5")}<span>Revert to here?</span></div>` +
@@ -185,47 +130,26 @@ async function revert(sessionId: string, index: number): Promise<void> {
   if (!guard(sessionId)) return;
   try {
     const res = await api.revertSession(sessionId, null, index);
-    pending.set(sessionId, {
-      index: res.index,
-      restored: res.restored,
-      skipped: res.skipped,
-      snapshots: res.snapshots,
-    });
     await reload(sessionId);
     if (state.sessionId === sessionId) {
-      prefill = res.message || "";
+      const prefill = res.message || "";
       if (prefill && !inputEl.value.trim()) {
         inputEl.value = prefill;
         inputEl.dispatchEvent(new Event("input"));
       }
       inputEl.focus();
     }
-    paintRevert();
+    const parts: string[] = [];
+    if (res.restored.length) parts.push(`${plural(res.restored.length, "file")} restored`);
+    if (res.deleted.length) parts.push(`${plural(res.deleted.length, "file")} deleted`);
+    if (res.skipped.length) parts.push(`${plural(res.skipped.length, "file")} left as is`);
+    toast(parts.length ? `Rewound: ${parts.join(", ")}.` : "Conversation rewound.");
   } catch (error) {
     toast(`Revert failed: ${String(error)}`, "error");
   }
 }
 
-async function redo(): Promise<void> {
-  const sessionId = state.sessionId;
-  if (!guard(sessionId)) return;
-  try {
-    await api.unrevertSession(sessionId, null);
-    pending.delete(sessionId);
-    if (prefill && inputEl.value === prefill) {
-      inputEl.value = "";
-      inputEl.dispatchEvent(new Event("input"));
-    }
-    prefill = "";
-    paintRevert();
-    await reload(sessionId);
-  } catch (error) {
-    toast(`Redo failed: ${String(error)}`, "error");
-  }
-}
-
-// undoLast is /undo: revert the last user message without a preview
-// (the banner's Redo is the safety net).
+// undoLast is /undo: revert the last user message without a preview.
 export async function undoLast(): Promise<void> {
   const sessionId = state.sessionId;
   if (!sessionId) {

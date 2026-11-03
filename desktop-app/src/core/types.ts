@@ -60,7 +60,6 @@ export type SessionInfo = {
   model: string;
   messageCount: number;
   title: string;
-  revert?: RevertInfo;
   worktree?: WorktreeInfo;
   // subagent is set on a subagent's child session.
   subagent?: SubagentLink;
@@ -103,15 +102,6 @@ export type AgentInfo = {
   updatedAt: number;
 };
 
-// RevertInfo is a session's pending undo: the transcript is hidden from
-// index on and files were rewound until the next message (or Redo).
-export type RevertInfo = {
-  index: number;
-  restored: string[];
-  skipped: string[];
-  snapshots: boolean;
-};
-
 // WorktreeInfo links a session to its managed git worktree. origin is
 // the project folder it branched from.
 export type WorktreeInfo = {
@@ -126,7 +116,8 @@ export type RevertPreview = {
   index: number;
   turns: number;
   files: string[];
-  conflicts: string[];
+  deleted: string[];
+  skipped: string[];
   snapshots: boolean;
 };
 
@@ -142,7 +133,9 @@ export type RevertResult = {
   index: number;
   message: string;
   restored: string[];
+  deleted: string[];
   skipped: string[];
+  failed?: string[];
   snapshots: boolean;
 };
 
@@ -177,7 +170,6 @@ export type OpenedSession = {
   cwd: string;
   provider: string;
   model: string;
-  revert?: RevertInfo;
   worktree?: WorktreeInfo;
   subagent?: SubagentLink;
 };

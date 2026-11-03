@@ -36,7 +36,6 @@ import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queue
 import { refreshExternalVisibility } from "./sites";
 import { forkSessionById, renameSessionById } from "./sessionActions";
 import { resetDraft, syncPermChip } from "./permissions";
-import { paintRevert, setRevert } from "./undo";
 import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
 import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
@@ -464,7 +463,6 @@ export async function openSession(id: string): Promise<void> {
 
     sessionLabelEl.textContent = state.sessionId.slice(0, 8);
     paintResources();
-    setRevert(session.sessionId, session.revert);
     setWorktree(session.worktree);
     syncWorktreeChip();
 
@@ -748,7 +746,6 @@ export function newSession(): void {
   clearTodos();
   paintResources();
   sessionLabelEl.textContent = "—";
-  paintRevert();
   setWorktree(null);
   syncWorktreeChip();
   syncTools();

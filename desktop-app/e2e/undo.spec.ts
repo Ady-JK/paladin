@@ -1,5 +1,5 @@
 // undo.spec.ts covers undo and worktrees: "Revert to here" on a user
-// message (preview, banner, redo, /undo), the new-session worktree
+// message (preview, exact restore, /undo), the new-session worktree
 // toggle, fork into a worktree, the branch badge, merge back, and the
 // discard confirm when deleting a dirty worktree session.
 import { showSidebar } from "./drawer";
@@ -36,10 +36,10 @@ async function boot(page: Page, values: Record<string, unknown> = {}) {
   await expect(page.locator("#promptInput")).toBeVisible();
 }
 
-test("Revert to here previews, reverts files and conversation, then redoes", async ({ page }) => {
+test("Revert to here previews, restores files and the conversation", async ({ page }) => {
   await boot(page, {
-    __e2ePreview: { turns: 2, files: ["src/a.ts", "src/b.ts"], conflicts: ["README.md"] },
-    __e2eRevertResult: { restored: ["src/a.ts", "src/b.ts"], skipped: ["README.md"] },
+    __e2ePreview: { turns: 2, files: ["src/a.ts", "src/b.ts"], deleted: ["old.ts"] },
+    __e2eRevertResult: { restored: ["src/a.ts", "src/b.ts"], deleted: ["old.ts"], skipped: [] },
   });
   await openDemo(page);
   const row = page.locator("#messages .turn-row:has(.bubble-user)").first();
@@ -50,24 +50,17 @@ test("Revert to here previews, reverts files and conversation, then redoes", asy
   await expect(pop).toBeVisible();
   await expect(pop).toContainText("2 turns");
   await expect(pop.locator(".revert-files li")).toHaveText(["src/a.ts", "src/b.ts"]);
-  await expect(pop.locator(".revert-conflicts li")).toHaveText(["README.md"]);
+  await expect(pop.locator(".revert-conflicts li")).toHaveText(["old.ts"]);
+  await expect(pop).toContainText("cannot be undone");
   expect((await get(page, "__e2ePreviews"))[0]).toMatchObject({ sessionId: "sess-notify-1", index: 0 });
 
   await pop.locator("#revertConfirmBtn").click();
   await expect(pop).toBeHidden();
   expect((await get(page, "__e2eReverts"))[0]).toMatchObject({ sessionId: "sess-notify-1", index: 0 });
-  const banner = page.locator("#revertBanner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText("2 files restored");
-  await expect(banner).toContainText("1 skipped");
+  await expect(page.locator("#toastText")).toContainText("2 files restored");
+  await expect(page.locator("#toastText")).toContainText("1 file deleted");
   await expect(page.locator("#promptInput")).toHaveValue("run the slow job");
   await expect(page.locator("#messages .bubble-user")).toHaveCount(0);
-
-  await banner.locator("#redoBtn").click();
-  await expect(banner).toBeHidden();
-  expect(await get(page, "__e2eUnreverts")).toBe(1);
-  await expect(page.locator("#messages .bubble-user")).toHaveCount(1);
-  await expect(page.locator("#promptInput")).toHaveValue("");
 });
 
 test("Cancel leaves everything alone; untracked folders note conversation-only", async ({ page }) => {
@@ -84,28 +77,14 @@ test("Cancel leaves everything alone; untracked folders note conversation-only",
   expect(await get(page, "__e2eReverts")).toBeUndefined();
 });
 
-test("/undo reverts the last message and the next send clears the banner", async ({ page }) => {
+test("/undo reverts the last message", async ({ page }) => {
   await boot(page);
   await openDemo(page);
   await page.fill("#promptInput", "/undo");
   await page.keyboard.press("Enter");
   await expect.poll(() => get(page, "__e2eReverts")).toHaveLength(1);
   expect((await get(page, "__e2eReverts"))[0].index).toBe(0);
-  const banner = page.locator("#revertBanner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toContainText(/conversation/i);
-  await page.click("#sendBtn");
-  await expect(banner).toBeHidden();
-});
-
-test("opening a session with a pending revert restores the banner", async ({ page }) => {
-  await boot(page, {
-    __e2eOpenExtra: { "sess-notify-1": { revert: { index: 0, restored: ["x.go"], skipped: [], snapshots: true } } },
-    __e2eRevertedAt: 0,
-  });
-  await showSidebar(page);
-  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
-  await expect(page.locator("#revertBanner")).toContainText("1 file restored");
+  await expect(page.locator("#toastText")).toContainText(/rewound/i);
 });
 
 test("the worktree toggle starts a new session in its own worktree", async ({ page }) => {

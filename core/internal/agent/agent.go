@@ -167,13 +167,6 @@ type ProjectTrust interface {
 	TrustProject(ctx context.Context, callID, tool string, notify func(permission.Approval)) bool
 }
 
-// StepRecorder brackets each run of a file-changing tool, e.g. with
-// workspace snapshots for undo. It must call run exactly once and return
-// its result; recording is best-effort and must never fail the call.
-type StepRecorder interface {
-	Track(ctx context.Context, callID, name string, paths []string, run func() tools.ToolResult) tools.ToolResult
-}
-
 // ChatOutcome is the summary returned when a turn finishes.
 type ChatOutcome struct {
 	SessionID string `json:"sessionId"`
@@ -205,7 +198,6 @@ func (e turnFailed) Error() string { return e.msg }
 type runConfig struct {
 	persistGate func(persist func() error)
 	gate        ToolGate
-	steps       StepRecorder
 	steer       func() []SteerMessage
 	budget      func() float64
 	notices     func() []Notice
@@ -255,7 +247,6 @@ type Agent struct {
 	ctx      context.Context
 	toolCtx  *tools.ToolCtx
 	gate     ToolGate
-	steps    StepRecorder
 	// steer, when set, hands over messages the user sent mid-turn.
 	steer  func() []SteerMessage
 	budget func() float64
@@ -410,7 +401,6 @@ func newAgent(c runConfig) *Agent {
 		verify:      c.verify,
 		persistGate: c.persistGate,
 		gate:        c.gate,
-		steps:       c.steps,
 		steer:       c.steer,
 		budget:      c.budget,
 		notices:     c.notices,

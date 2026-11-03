@@ -25,7 +25,6 @@ import { currentPreset, initPermissions, keepDraftFor } from "./permissions";
 import { dropFinishedPanel } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
 import { isBusy, noteSubmitted, syncComposer } from "./live";
-import { noteSent } from "./undo";
 import { setWorktree, takeWorktreeRequest } from "./worktrees";
 import { shortPath } from "../core/format";
 import { syncMcp } from "./mcp";
@@ -141,7 +140,6 @@ async function runBang(line: string): Promise<void> {
       permissions,
     });
     noteSubmitted(info);
-    noteSent(sessionId);
   } catch (error) {
     if (!inputEl.value && state.sessionId === targetSession) inputEl.value = line;
     addTurn("error", String(error));
@@ -225,7 +223,6 @@ async function send(): Promise<void> {
     });
     attachmentBatch.consume();
     noteSubmitted(info);
-    noteSent(sessionId);
   } catch (error) {
     if (!inputEl.value && !route?.compact) {
       inputEl.value = message;

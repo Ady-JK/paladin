@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestStdioRevertAndRedo(t *testing.T) {
+func TestStdioRevertIsFinal(t *testing.T) {
 	var mu sync.Mutex
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +42,8 @@ func TestStdioRevertAndRedo(t *testing.T) {
 		t.Fatalf("user row %v", first)
 	}
 	pv := h.call("revertPreview", map[string]any{"sessionId": sid, "index": 0})["result"].(map[string]any)
-	if files := pv["files"].([]any); len(files) != 1 || files[0] != "a.txt" || pv["snapshots"] != true {
+	deleted := pv["deleted"].([]any)
+	if len(deleted) != 1 || deleted[0] != "a.txt" || pv["snapshots"] != true {
 		t.Fatalf("preview %v", pv)
 	}
 	changes := h.call("sessionChanges", map[string]any{"sessionId": sid})["result"].(map[string]any)
@@ -64,12 +65,8 @@ func TestStdioRevertAndRedo(t *testing.T) {
 		t.Fatalf("history after revert %v", hist)
 	}
 	sess := h.call("openSession", map[string]any{"sessionId": sid})["result"].(map[string]any)
-	if rv, _ := sess["revert"].(map[string]any); rv == nil || rv["index"] != float64(0) {
-		t.Fatalf("openSession revert %v", sess)
-	}
-	h.call("unrevertSession", map[string]any{"sessionId": sid})
-	if b, _ := os.ReadFile(filepath.Join(cwd, "a.txt")); string(b) != "agent\n" {
-		t.Fatalf("redo a.txt = %q", b)
+	if rv, _ := sess["revert"].(map[string]any); rv != nil {
+		t.Fatalf("a final revert left a pending redo: %v", sess)
 	}
 	id := h.send("revertSession", map[string]any{"sessionId": sid})
 	if bad := h.waitLine("revert without index", func(m map[string]any) bool { return m["id"] == id }); bad["ok"] == true {

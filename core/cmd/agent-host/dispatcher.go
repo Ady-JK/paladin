@@ -52,7 +52,7 @@ var methodClass = map[string]runClass{
 	"saveAttachment": runSession,
 	"terminalStart":  runSession,
 	"renameSession":  runSession, "forkSession": runSession, "deleteSession": runSession,
-	"revertSession": runSession, "unrevertSession": runSession, "worktreeMerge": runSession,
+	"revertSession": runSession, "worktreeMerge": runSession,
 	"budgetSet": runSession, "thinkingSet": runSession, "memoryRefreshSnapshot": runSession,
 	"memorySnapshotStatus": runSession,
 	"deleteSideChat":       runSession,

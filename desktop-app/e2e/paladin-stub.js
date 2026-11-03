@@ -205,7 +205,15 @@ async function __paladinBaseInvoke(cmd, args) {
       return window.__e2eGit || { repo: false, hasCommits: false };
     case "revertPreview":
       window.__e2ePreviews = (window.__e2ePreviews || []).concat([args]);
-      return { index: args.index, turns: 1, files: [], conflicts: [], snapshots: true, ...(window.__e2ePreview || {}) };
+      return {
+        index: args.index,
+        turns: 1,
+        files: [],
+        deleted: [],
+        skipped: [],
+        snapshots: true,
+        ...(window.__e2ePreview || {}),
+      };
     case "sessionChanges":
       return window.__e2eChanges || { available: true, turns: [], files: [] };
     case "fileExcerpt": {
@@ -225,15 +233,12 @@ async function __paladinBaseInvoke(cmd, args) {
         index: args.index,
         message: "run the slow job",
         restored: [],
+        deleted: [],
         skipped: [],
         snapshots: true,
         ...(window.__e2eRevertResult || {}),
       };
     }
-    case "unrevertSession":
-      window.__e2eUnreverts = (window.__e2eUnreverts || 0) + 1;
-      window.__e2eRevertedAt = undefined;
-      return true;
     case "worktreeStatus":
       return (
         window.__e2eWorktreeStatus || {

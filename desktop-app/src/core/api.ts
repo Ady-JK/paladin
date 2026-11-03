@@ -190,14 +190,10 @@ export function sessionDiff(
   return invoke<SessionDiff>("sessionDiff", { sessionId, cwd, turn: turn ?? -1, path });
 }
 
-// revertSession rewinds files and hides the conversation from index on,
-// until the next message makes it final or unrevertSession redoes it.
+// revertSession restores the folder to the snapshot taken before the
+// message at index and drops that message and everything after it.
 export function revertSession(sessionId: string, cwd: string | null, index: number): Promise<RevertResult> {
   return invoke<RevertResult>("revertSession", { sessionId, cwd, index });
-}
-
-export function unrevertSession(sessionId: string, cwd: string | null): Promise<unknown> {
-  return invoke("unrevertSession", { sessionId, cwd });
 }
 
 export function gitInfo(cwd: string): Promise<GitInfo> {

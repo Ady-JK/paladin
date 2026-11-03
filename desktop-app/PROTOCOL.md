@@ -71,12 +71,11 @@ separate setup command, not a JSONL method.
 | `memorySnapshotStatus` | `{sessionId,cwd?}` | `{frozen,stale,changed[]}`: whether the session's frozen memory snapshot is behind the stores on disk (`changed` names the targets) |
 | `memoryConfig` | `{}` | `{limits{user,global,project},disabled[],provider,reviewTurns}`: effective `<data>/config/memory.json` |
 | `forkSession` | `{sessionId,cwd?,worktree?,name?}` | `SessionInfo` of the copy (title `… (fork)`); `worktree:true` forks into a new worktree, a plain fork stays in the source's folder (and worktree) |
-| `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],conflicts[],snapshots}`: what reverting to the user message at transcript `index` would restore |
+| `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],deleted[],skipped[],snapshots}`: what reverting to the user message at transcript `index` would restore, delete, or leave alone |
 | `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's saved file snapshots |
 | `sessionDiff` | `{sessionId,cwd?,turn?,path}` | `{path,patch,truncated}`: unified diff for one changed file; `turn` is a transcript index or omitted for the session |
 | `fileExcerpt` | `{sessionId,cwd?,path,start,end}` | `{path,rel,startLine,lines,truncated}`: lines `start`..`end` plus 3 of context (at most 60) of a text file inside the session workspace; used by review findings |
-| `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],skipped[],failed?[],snapshots}`: undo from that user message on (files + conversation); `message` is its text for the composer. `failed` lists files whose restore errored (also in `skipped`; the others were still restored). Fails while a turn runs |
-| `unrevertSession` | `{sessionId,cwd?}` | same shape: redo the pending revert |
+| `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],deleted[],skipped[],failed?[],snapshots}`: restores the folder to the snapshot taken before that user message and drops the message and everything after it. This is final and cannot be undone. `message` is its text for the composer. `deleted` lists files created since the snapshot; `failed` lists files whose restore errored (also in `skipped`). Fails while a turn runs |
 | `gitInfo` | `{cwd}` | `{repo,root?,branch?,hasCommits}` |
 | `worktreeStatus` | `{sessionId,cwd?}` | `{exists,changed,ahead,branch,baseBranch?,into,path,repoRoot}`: `changed` files in the worktree, commits `ahead` of the repo's checkout (`into`) |
 | `worktreeMerge` | `{sessionId,cwd?,message?}` | `{merged,nothingToMerge,commit?,conflicts[],into?}`: commits the worktree's changes (message defaults to the session title) and merges its branch into the repo's current checkout with `--no-ff`; conflicts abort the merge and are listed. Fails if the checkout has uncommitted tracked changes |
@@ -601,14 +600,13 @@ just the image rows, which is what a finished turn needs to mount a
 screenshot without downloading the transcript.
 
 `sessionHistory` user rows carry `index`, their transcript position.
-`revertSession` restores each file the session changed from that
-message on to its state before the first change, but only if it still
-holds what the session last wrote: files changed since (by the user or
-another session in the same folder) are `skipped`. The reverted
-messages disappear from `sessionHistory`, and `openSession` /
-`listSessions` report `revert`. `unrevertSession` puts the files back
-(again skipping any changed since). The next message commits the
-revert: the hidden messages and their steps are dropped.
+`revertSession` restores the folder to the snapshot taken before that
+user message, exactly: files changed since go back to their old content,
+and files created since are deleted. It then drops that message and
+everything after it from the transcript. The revert is final — there is
+no redo — and `openSession` / `listSessions` stop reporting a pending
+`revert`. Changes made by the user or another session after the turn are
+overwritten too.
 
 Shell commands belong to the session that started them: `status`/`cancel`
 with another session's `job_id` (including a subagent's) fails as an unknown
@@ -619,36 +617,20 @@ timeout (`timeout_ms` is gone). An auto-backgrounded job reports its running
 time through the session's notice stream every five minutes until it ends,
 and its completion notice wakes an idle session. Explicit `background: true`
 jobs send no running reminders; add `notify: true` for a completion report.
-They are tracked separately: the
-sidecar snapshots the folder when a background job starts (for an auto job,
-when it moves to the background), keeps a record in
-`<sessionDir>/jobs/<jobId>.json` (`status` running/done/failed/
-cancelled, `startedAt`, `endedAt`, `exitCode`, `files`,
-`uncertain`, `finalized`) and, exactly once when the job exits or is
-cancelled, snapshots again and records the changed files
-as a step of the turn that started it. `revertSession` and
-`unrevertSession` fail while one of the session's jobs is still
-running. Files that another call (any session) also changed while the
-job ran are `uncertain`: they are not in the step and a revert reports
-them as `skipped` instead of restoring them. If two jobs overlap in one
-folder, all their files are uncertain. Each record keeps the job's
-process-group `pid`. A record left `running` by an earlier sidecar
-process is checked on revert and redo: while that process group is
-still alive both fail with an error naming the job and pid; once it is
-gone, the revert marks the record `interrupted` (finalized, with a
-`note`), and every file changed since the job started is `uncertain`
-and reported as `skipped`, never restored. A recycled pid can cause a
-false refusal; where process groups cannot be probed (Windows) the job
-is treated as ended. `job_id`, polling, cancel and completion notices are
-unchanged.
+They are tracked separately: the sidecar keeps a record in
+`<sessionDir>/jobs/<jobId>.json` (`status` running/done/failed/cancelled,
+`startedAt`, `endedAt`, `exitCode`, `command`, `finalized`) so the app can
+list and stop them. A finished or cancelled job is finalized exactly once.
+`revertSession` fails while one of the session's jobs is still running, or
+while a job left by an earlier sidecar process is still alive. A recycled
+pid can cause a false refusal; where process groups cannot be probed
+(Windows) the job is treated as ended. Undo takes its snapshot at the start
+of a turn, so a job's files belong to that turn.
 
-File-changing calls (write, edit, foreground shell) and reverts in one
-folder run one at a time across all sessions of this sidecar, so each
-step's before/after snapshots hold only that call's changes. That is
-in-process only: an editor, a background job or another program writing
-during a call is attributed to the call, and a long foreground shell
-command makes other sessions' writes in that folder wait. Sessions that
-need real isolation should use a worktree.
+Commands and tools run at the same priority as the user's terminal. They do
+not hold a folder-wide lock while they run; only a revert briefly serializes
+the folder with other reverts. Sessions that need real isolation should use a
+worktree.
 
 `write` with `overwrite` on an existing file needs this session to have
 read the whole current version (line 1 to EOF, in one read or

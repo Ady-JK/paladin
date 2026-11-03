@@ -113,8 +113,6 @@ type Deps struct {
 	PersistGate func(persist func() error)
 	// Gate, when set, authorizes and sandboxes each tool call.
 	Gate ToolGate
-	// Steps, when set, records each file-changing tool run for undo.
-	Steps StepRecorder
 	// Hooks runs the user's hook scripts; nil runs none. SessionStart is
 	// "startup" or "resume" when this turn opens the session.
 	Hooks        *hooks.Engine
@@ -265,7 +263,6 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		done:        d.Done,
 		persistGate: d.PersistGate,
 		gate:        gate,
-		steps:       d.Steps,
 		steer:       req.Steer,
 		budget:      req.Budget,
 		notices:     req.Notices,

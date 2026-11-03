@@ -4,7 +4,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/hooks"
@@ -195,35 +194,9 @@ func (a *Agent) authorizedCall(call *tools.ToolCall, verdict hooks.Decision) too
 	return result
 }
 
-// callTool runs the tool itself, bracketed by the step recorder when it
-// may change files. Approval waits stay outside the bracket.
+// callTool runs the tool itself. Approval waits stay outside it.
 func (a *Agent) callTool(call *tools.ToolCall, ctx *tools.ToolCtx) tools.ToolResult {
-	if a.steps == nil || !a.tools.Mutates(call.Name) {
-		return a.tools.Call(call, ctx)
-	}
-	// A read-only command cannot change files, so bracketing it with
-	// two snapshots only burns git scans.
-	if call.Name == "shell" && tools.ShellReadOnly(call.Arguments) {
-		return a.tools.Call(call, ctx)
-	}
-	return a.steps.Track(a.ctx, call.ID, call.Name, mutatingPaths(call), func() tools.ToolResult {
-		return a.tools.Call(call, ctx)
-	})
-}
-
-// mutatingPaths names the file a tool is about to change, so the step
-// recorder can snapshot just that path instead of the whole folder.
-func mutatingPaths(call *tools.ToolCall) []string {
-	switch call.Name {
-	case "write", "edit":
-		var args struct {
-			Path string `json:"path"`
-		}
-		if json.Unmarshal([]byte(call.Arguments), &args) == nil && args.Path != "" {
-			return []string{args.Path}
-		}
-	}
-	return nil
+	return a.tools.Call(call, ctx)
 }
 
 // settleAborted answers calls that will never run so the transcript

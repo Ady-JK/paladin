@@ -234,9 +234,6 @@ var methods = map[string]handler{
 	"revertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RevertSession(a.str("sessionId"), a.str("cwd"), a.num("index", -1))
 	},
-	"unrevertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.UnrevertSession(a.str("sessionId"), a.str("cwd"))
-	},
 	"worktreeStatus": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.WorktreeStatus(a.str("sessionId"), a.str("cwd"))
 	},

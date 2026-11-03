@@ -246,7 +246,6 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	// the new work. Best-effort — a stale file never fails a turn.
 	workspace := resolveCwd(r, req.Cwd)
 	project := workspace
-	var steps agent.StepRecorder
 	var extraWritable []string
 	var sessionStart string
 	var hookEngine *hooks.Engine
@@ -272,8 +271,8 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		if !req.Resume && !req.Compact {
 			sessionStart = r.sessionStartSource(hookEngine, sess)
 		}
-		if rec := r.stepRecorderFor(sess, workspace); rec != nil {
-			steps = rec
+		if !req.Resume && !req.Compact && sess.Meta.Subagent == nil {
+			r.recordTurnSnapshot(sess, workspace)
 		}
 		if sa := sess.Meta.Subagent; sa != nil {
 			kind, ok := findSubagentKind(sa.Type)
@@ -335,7 +334,6 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		Done:      done,
 
 		PersistGate:  gate,
-		Steps:        steps,
 		Hooks:        hookEngine,
 		SessionStart: sessionStart,
 		Live:         func(m []inference.LlmMessage) { r.setLiveConversation(req.SessionID, m) },
