@@ -63,23 +63,6 @@ func killProcessGroup(pid int) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 }
 
-// shellNiceLevel is the scheduling priority model commands inherit.
-// Agent builds and test suites want all available cores and would
-// otherwise make the desktop (and the UI painting the results) stutter;
-// nice lets the foreground app win the next timeslice.
-const shellNiceLevel = "10"
-
-// niceArgv prepends a best-effort `nice` so the whole command tree runs
-// below the user's interactive work. Without a nice binary the command
-// runs unchanged.
-func niceArgv(argv []string) []string {
-	nice, err := lookPath("nice")
-	if err != nil || nice == "" {
-		return argv
-	}
-	return append([]string{nice, "-n", shellNiceLevel}, argv...)
-}
-
 func exitCode(err error) (*int, bool) {
 	if err == nil {
 		z := 0

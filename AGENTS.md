@@ -142,12 +142,12 @@ serial. Playwright specs drive the real renderer with the fake bridge from
   snapshots are a hidden git repo under the data dir, never `.git` in your workspace.
 - **`PALADIN_E2E_BROWSER`** picks the Playwright browser; fallback order is that var, then
   `/usr/bin/brave-browser`, then Playwright's Chromium, then any cached headless shell.
-- **Agent shell commands are polite and short-lived.** They run under `nice -n 10` (unix), the
-  whole process group is killed when a foreground call or background job returns, and on Linux
-  every child carries `Pdeathsig=SIGKILL` (hooks, MCP and LSP servers too). Starting a server
-  with `&` no longer survives the call — use `background: true`. Resource figures come from
-  `/proc` on Linux and `ps` elsewhere, and CPU is a rate between samples, not `ps`'s lifetime
-  average.
+- **Agent shell commands are short-lived.** The whole process group is killed when a foreground
+  call or background job returns, and on Linux every child carries `Pdeathsig=SIGKILL` (hooks,
+  MCP and LSP servers too). Starting a server with `&` no longer survives the call — use
+  `background: true`. Commands run at the same CPU priority as the user's terminal. Resource
+  figures come from `/proc` on Linux and `ps` elsewhere, and CPU is a rate between samples, not
+  `ps`'s lifetime average.
 - **Port 5173 is fixed** (`strictPort` in `vite.config.ts` and the Playwright `webServer`).
   Vite fails rather than picking another port.
 - **Only the OpenAI-compatible dialect is implemented.** `ApiTypeAnthropic` and
