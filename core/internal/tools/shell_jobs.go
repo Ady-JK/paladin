@@ -350,6 +350,7 @@ type JobInfo struct {
 	Command   string    `json:"command"`
 	StartedAt time.Time `json:"startedAt"`
 	ElapsedMs int64     `json:"elapsedMs"`
+	Status    string    `json:"status"`
 	Auto      bool      `json:"auto,omitempty"`
 }
 
@@ -375,7 +376,7 @@ func infoOf(j *job, now time.Time) JobInfo {
 		elapsed = 0
 	}
 	return JobInfo{ID: j.id, SessionID: j.owner, Workspace: j.workspace, Command: j.command,
-		StartedAt: j.startedAt, ElapsedMs: elapsed.Milliseconds(), Auto: j.auto}
+		StartedAt: j.startedAt, ElapsedMs: elapsed.Milliseconds(), Status: j.status, Auto: j.auto}
 }
 
 // KillJob stops any running command on the user's behalf and makes sure

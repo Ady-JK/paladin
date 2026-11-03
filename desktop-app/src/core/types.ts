@@ -682,6 +682,7 @@ export type RunningJob = {
   command: string;
   startedAt: string;
   elapsedMs: number;
+  status: string;
   auto?: boolean;
 };
 
