@@ -12,12 +12,13 @@ import { bridge, hasBridge } from "../core/bridge";
 import { escapeAttr, escapeHtml, renderMarkdown } from "../core/format";
 import { state } from "../core/state";
 import { loadText, saveText } from "../core/storage";
-import type { ChangedFile, SessionChanges, SideChatMessage } from "../core/types";
+import type { ChangedFile, RunningJob, SessionChanges, SideChatMessage } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { registerChangesLink } from "./findings";
 import { abortAttach, beginAttach, finishAttach, liveBadge, liveRoot, onResync, repaintLive } from "./live";
 import { agentStatus, agentStatusHtml, buildHistory, openSession, refreshSessions } from "./sessions";
+import { formatElapsed } from "./workingBar";
 
 type ChatTab = {
   kind: "chat";
@@ -81,7 +82,15 @@ type ChangesTab = {
   mark: { path: string; start: number; end: number } | null;
 };
 
-type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | TerminalTab;
+type JobsTab = {
+  kind: "jobs";
+  key: string;
+  sessionId: string;
+  title: string;
+  body: HTMLElement;
+};
+
+type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | JobsTab | TerminalTab;
 type TabSet = { tabs: Tab[]; active: string };
 
 const tabsEl = $("#paneTabs");
@@ -92,6 +101,8 @@ const menuEl = $("#paneHistoryMenu");
 const menuItemsEl = $("#paneHistoryItems");
 const layoutBtn = $<HTMLButtonElement>("#paneLayoutBtn");
 const changesBtn = $<HTMLButtonElement>("#sessionChangesBtn");
+const runningJobsBtn = $<HTMLButtonElement>("#runningJobsBtn");
+const runningJobsCount = $("#runningJobsCount");
 const titleBar = $("#titleBar");
 const agentView = $("#agentView");
 const layoutKey = "paladin.paneLayout";
@@ -714,6 +725,92 @@ function openChangesTab(turn: number | null): void {
   void refreshChanges(sessionId);
 }
 
+// ---- running commands ----
+
+let runningJobs: RunningJob[] = [];
+
+function jobsTab(sessionId: string): JobsTab | undefined {
+  return sets.get(sessionId)?.tabs.find((t): t is JobsTab => t.kind === "jobs");
+}
+
+function newJobsTab(sessionId: string): JobsTab {
+  const body = document.createElement("div");
+  body.className = "pane-jobs";
+  body.innerHTML =
+    `<div class="jobs-head"><span>Running commands</span><button type="button" class="jobs-refresh" title="Refresh">${icon("rl-pulse", "h-3.5 w-3.5")}</button></div>` +
+    `<div class="jobs-list"></div>` +
+    `<p class="jobs-note">Stop anything the agent left running. The agent is told which command you stopped.</p>`;
+  const tab: JobsTab = { kind: "jobs", key: `t${++nextKey}`, sessionId, title: "Running", body };
+  body.querySelector<HTMLButtonElement>(".jobs-refresh")!.addEventListener("click", () => void refreshRunningJobs());
+  body.addEventListener("click", (event) => {
+    const id = (event.target as HTMLElement).closest<HTMLElement>("[data-kill]")?.dataset.kill;
+    if (id) void killRunningJob(id);
+  });
+  return tab;
+}
+
+function paintJobsTab(tab: JobsTab): void {
+  const list = tab.body.querySelector<HTMLElement>(".jobs-list")!;
+  const mine = runningJobs.filter((job) => job.sessionId === tab.sessionId);
+  if (!mine.length) {
+    list.innerHTML = `<p class="jobs-empty">Nothing is running.</p>`;
+    return;
+  }
+  list.innerHTML = mine
+    .map(
+      (job) =>
+        `<div class="job-row">` +
+        `<div class="job-main"><code class="job-cmd" title="${escapeAttr(job.command)}">${escapeHtml(job.command)}</code>` +
+        `<span class="job-meta">${escapeHtml(formatElapsed(job.elapsedMs))}${job.auto ? " · auto" : ""}</span></div>` +
+        `<button type="button" class="job-kill" data-kill="${escapeAttr(job.id)}" title="Stop this command">${icon("pause", "h-3 w-3")}<span>Stop</span></button>` +
+        `</div>`,
+    )
+    .join("");
+}
+
+async function refreshRunningJobs(): Promise<void> {
+  try {
+    runningJobs = (await api.runningJobs()) ?? [];
+  } catch {
+    return;
+  }
+  const mine = runningJobs.filter((job) => job.sessionId === state.sessionId);
+  runningJobsCount.textContent = mine.length ? String(mine.length) : "";
+  runningJobsBtn.classList.toggle("hidden", mine.length === 0);
+  runningJobsBtn.title = mine.length
+    ? `${mine.length} command${mine.length === 1 ? "" : "s"} running`
+    : "Running commands";
+  const tab = state.sessionId ? jobsTab(state.sessionId) : undefined;
+  if (tab) paintJobsTab(tab);
+}
+
+async function killRunningJob(id: string): Promise<void> {
+  try {
+    await api.killJob(id);
+  } catch (error) {
+    toast(`Could not stop the command: ${errorText(error)}`, "error");
+    return;
+  }
+  toast("Stopped the command; the agent will be told.");
+  void refreshRunningJobs();
+}
+
+function openJobsTab(): void {
+  const sessionId = state.sessionId;
+  if (!sessionId) return;
+  const set = currentSet();
+  if (!set) return;
+  let tab = jobsTab(sessionId);
+  if (!tab) {
+    tab = newJobsTab(sessionId);
+    set.tabs.push(tab);
+  }
+  set.active = tab.key;
+  showPane();
+  paintJobsTab(tab);
+  void refreshRunningJobs();
+}
+
 function syncNativeBrowser(): void {
   if (!hasBridge() || !bridge().browser) return;
   const set = state.sessionId ? sets.get(state.sessionId) : undefined;
@@ -1015,9 +1112,11 @@ function tabHtml(tab: Tab, active: boolean): string {
         ? icon("globe", "h-3 w-3")
         : tab.kind === "terminal"
           ? icon("terminal", "h-3 w-3")
-          : tab.kind === "changes"
-            ? icon("tl-file", "h-3 w-3")
-            : icon("comments", "h-3 w-3");
+          : tab.kind === "jobs"
+            ? icon("terminal", "h-3 w-3")
+            : tab.kind === "changes"
+              ? icon("tl-file", "h-3 w-3")
+              : icon("comments", "h-3 w-3");
   const data =
     tab.kind === "agent"
       ? ` data-agent="${escapeAttr(tab.agentId)}"`
@@ -1097,6 +1196,7 @@ function render(): void {
     paintHead(tab);
     void loadAgent(tab);
   }
+  if (tab?.kind === "jobs") paintJobsTab(tab);
   syncNativeBrowser();
 }
 
@@ -1196,6 +1296,7 @@ export function syncSidePane(): void {
   closeMenu();
   paintChangesHeader(changesCache.get(state.sessionId));
   render();
+  void refreshRunningJobs();
 }
 
 // ---- saved side chats ----
@@ -1316,6 +1417,11 @@ export function initSidePane(): void {
     }
   }).observe(document.body, { childList: true });
   changesBtn.addEventListener("click", () => openChangesTab(null));
+  runningJobsBtn.addEventListener("click", openJobsTab);
+  void refreshRunningJobs();
+  window.setInterval(() => {
+    if (!document.hidden) void refreshRunningJobs();
+  }, 4000);
   // Clicking the card expands or collapses the file list in place;
   // "View changes" still opens the diff tab. Undo keeps its own
   // button and never expands.

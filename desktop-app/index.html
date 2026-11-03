@@ -60,7 +60,7 @@
             >
               paladin
               <span id="brandVersion" class="font-mono text-[10px] font-normal text-slate-400 dark:text-slate-500"
-                >v0.8.23</span
+                >v0.8.24</span
               >
             </h1>
             <div
@@ -209,6 +209,15 @@
               aria-label="View files changed in this session"
             >
               <span data-icon="tl-file"></span><span id="sessionChangesCount"></span>
+            </button>
+            <button
+              id="runningJobsBtn"
+              class="session-changes-btn hidden"
+              type="button"
+              title="Running commands"
+              aria-label="Running commands"
+            >
+              <span data-icon="terminal"></span><span id="runningJobsCount"></span>
             </button>
             <button
               id="themeToggleBtn"

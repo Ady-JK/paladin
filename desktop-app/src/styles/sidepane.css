@@ -972,3 +972,98 @@
   background: var(--color-slate-900);
   color: var(--color-slate-200);
 }
+
+/* ---- running commands ---- */
+.pane-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 14px;
+  overflow: auto;
+}
+.jobs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+.jobs-refresh {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--color-slate-500);
+}
+.jobs-refresh:hover {
+  background: var(--color-slate-100);
+  color: var(--color-slate-800);
+}
+.dark .jobs-refresh:hover {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.jobs-empty,
+.jobs-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-slate-500);
+}
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 8px;
+  background: var(--color-slate-50);
+}
+.dark .job-row {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800/50);
+}
+.job-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+.job-cmd {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-800);
+}
+.dark .job-cmd {
+  color: var(--color-slate-100);
+}
+.job-meta {
+  font-size: 10px;
+  color: var(--color-slate-500);
+}
+.job-kill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--color-agent-rose);
+  border: 1px solid color-mix(in srgb, var(--color-agent-rose) 35%, transparent);
+}
+.job-kill:hover {
+  background: color-mix(in srgb, var(--color-agent-rose) 10%, transparent);
+}

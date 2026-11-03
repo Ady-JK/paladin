@@ -275,7 +275,7 @@ func (b *jobBook) JobFinished(e tools.JobEvent) {
 	}
 	rec.Status, rec.ExitCode, rec.EndedAt = e.Status, e.ExitCode, e.EndedAt
 	rec.KilledByUser = e.KilledByUser
-	wake := rec.Auto || rec.Notify
+	wake := rec.Auto || rec.Notify || e.KilledByUser
 	sessionID, workspace := rec.SessionID, rec.Workspace
 	if rec.repo != nil && rec.Before != "" && rec.Turn >= 0 {
 		b.attribute(rec)
@@ -363,6 +363,14 @@ func (b *jobBook) withNotices(sessionID string, next func() []agent.Notice) func
 		return out
 	}
 }
+
+// RunningJobs lists every shell command still running, for the app's
+// running-jobs panel.
+func (r *AgentRuntime) RunningJobs() []tools.JobInfo { return r.shell.RunningJobs() }
+
+// KillJob stops a running command on the user's behalf. The completion
+// notice tells the agent who stopped it.
+func (r *AgentRuntime) KillJob(id string) (tools.JobInfo, error) { return r.shell.KillJob(id) }
 
 // wakeSession starts a resume turn so an idle session can see a job
 // notice. A busy session takes it at its next round instead.

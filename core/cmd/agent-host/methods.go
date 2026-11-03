@@ -272,6 +272,12 @@ var methods = map[string]handler{
 		// CPU/RSS of the core plus each session's shell process trees.
 		return procstat.Default.Snapshot(), nil
 	},
+	"runningJobs": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		return rt.RunningJobs(), nil
+	},
+	"killJob": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.KillJob(a.str("id"))
+	},
 
 	// Blocking tools: ask and approvals
 	"answerAsk": func(rt *runtime.AgentRuntime, a args) (any, error) {

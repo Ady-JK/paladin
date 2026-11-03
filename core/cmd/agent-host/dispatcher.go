@@ -34,7 +34,7 @@ var methodClass = map[string]runClass{
 	"terminalWrite": runInline, "terminalResize": runInline, "terminalClose": runInline,
 	"browserReply":   runInline,
 	"answerApproval": runInline, "answerAsk": runInline, "cancelAsk": runInline,
-	"turns": runInline, "resources": runInline, "getWorkspace": runInline,
+	"turns": runInline, "resources": runInline, "runningJobs": runInline, "killJob": runInline, "getWorkspace": runInline,
 	"fsHome": runInline, "resolveWorkspace": runInline,
 
 	"listProviders": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,

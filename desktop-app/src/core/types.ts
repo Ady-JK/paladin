@@ -682,6 +682,17 @@ export type ResourceSnapshot = {
   sessions: Record<string, ResourceUsage>;
 };
 
+// RunningJob is one shell command the agent still has running.
+export type RunningJob = {
+  id: string;
+  sessionId: string;
+  workspace?: string;
+  command: string;
+  startedAt: string;
+  elapsedMs: number;
+  auto?: boolean;
+};
+
 // MCP servers, as mcpList and mcp/status report them.
 export type MCPScope = "global" | "folder";
 export type MCPState = "disabled" | "untrusted" | "stopped" | "starting" | "ready" | "failed" | "removed";

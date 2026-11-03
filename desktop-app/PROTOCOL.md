@@ -117,6 +117,8 @@ separate setup command, not a JSONL method.
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
 | `resources` | `{}` | `{at, supported, self:{cpu,rss,procs}, sessions:{[id]:{cpu,rss,procs}}}`: the core process plus each session's running shell process trees (one `ps` sample, cached 1.5s; `cpu` is % of one core, `rss` bytes). `supported:false` off unix |
+| `runningJobs` | `{}` | `JobInfo[]`: every shell command still running (id, sessionId, workspace, command, startedAt, elapsedMs, auto), oldest first |
+| `killJob` | `{id}` | `JobInfo`; stops a running command from the app and makes sure the next turn sees that the user stopped it |
 | `attach` | `{sessionId,cwd?,limit?}` | `{history: HistoryPage, turn: TurnInfo\|null, events: Event[], queued: TurnInfo[], seq}`; `history` is the newest page (`sessionHistoryPage`), `limit` defaults to 120; older rows load with `sessionHistoryPage` |
 | `cancelTurn` | `{turnId}` | `bool`: drops a queued turn (or stops it if already running) |
 

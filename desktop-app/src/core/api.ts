@@ -49,6 +49,7 @@ import type {
   OverallUsage,
   ProviderInfo,
   ResourceSnapshot,
+  RunningJob,
   RefreshResult,
   SessionInfo,
   SessionUsage,
@@ -672,6 +673,14 @@ function partitionFor(id: string): string {
 // resources samples per-session process usage (cached ~1.5s in the core).
 export function resources(): Promise<ResourceSnapshot> {
   return invoke<ResourceSnapshot>("resources");
+}
+
+export function runningJobs(): Promise<RunningJob[]> {
+  return invoke<RunningJob[]>("runningJobs");
+}
+
+export function killJob(id: string): Promise<RunningJob> {
+  return invoke<RunningJob>("killJob", { id });
 }
 
 // ---- hooks ----

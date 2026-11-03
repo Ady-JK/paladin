@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -339,6 +340,66 @@ type NotifyResult struct {
 	Truncated    bool
 	IsError      bool
 	KilledByUser bool
+}
+
+// JobInfo is one running command, as the app's running-jobs panel sees it.
+type JobInfo struct {
+	ID        string    `json:"id"`
+	SessionID string    `json:"sessionId"`
+	Workspace string    `json:"workspace,omitempty"`
+	Command   string    `json:"command"`
+	StartedAt time.Time `json:"startedAt"`
+	ElapsedMs int64     `json:"elapsedMs"`
+	Auto      bool      `json:"auto,omitempty"`
+}
+
+// RunningJobs lists every command still running, oldest first.
+func (s *ShellTool) RunningJobs() []JobInfo {
+	now := time.Now()
+	s.inner.mu.Lock()
+	out := make([]JobInfo, 0, len(s.inner.byID))
+	for _, j := range s.inner.byID {
+		if j.finished {
+			continue
+		}
+		out = append(out, infoOf(j, now))
+	}
+	s.inner.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
+	return out
+}
+
+func infoOf(j *job, now time.Time) JobInfo {
+	elapsed := now.Sub(j.startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return JobInfo{ID: j.id, SessionID: j.owner, Workspace: j.workspace, Command: j.command,
+		StartedAt: j.startedAt, ElapsedMs: elapsed.Milliseconds(), Auto: j.auto}
+}
+
+// KillJob stops any running command on the user's behalf and makes sure
+// its completion is reported, so a later turn knows the user stopped it.
+func (s *ShellTool) KillJob(id string) (JobInfo, error) {
+	s.inner.mu.Lock()
+	j, ok := s.inner.byID[strings.TrimSpace(id)]
+	if !ok || j.finished {
+		s.inner.mu.Unlock()
+		return JobInfo{}, ArgsError(fmt.Sprintf("shell: unknown job %q", id))
+	}
+	j.finished = true
+	j.status = JobCancelled
+	j.killedByUser = true
+	j.notify = true
+	pid := j.childPID
+	info := infoOf(j, time.Now())
+	j.closeLocked()
+	s.inner.mu.Unlock()
+	if pid != 0 {
+		killProcessGroup(pid)
+	}
+	s.inner.changed.notify()
+	return info, nil
 }
 
 func (s *ShellTool) PollNotify(owner string) []NotifyResult {
