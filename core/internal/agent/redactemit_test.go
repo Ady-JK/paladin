@@ -1,7 +1,7 @@
-// redactemit_test.go pins secret masking at the user-visible error
-// emission points: the turn's error row, the retry notice, and the
-// failed-compaction divider. Gateways may echo request metadata into
-// error bodies; none of it may reach the event stream verbatim.
+// redactemit_test.go pins masking of the user's stored keys at the
+// user-visible error emission points: the turn's error row, the retry
+// notice, and the failed-compaction divider. Pattern-shaped secrets are
+// the agent's responsibility now, but a stored key must never come back.
 
 package agent
 
@@ -10,12 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 const emitSecret = "sk-test-Key-1234567890abcdef"
 
 func TestRetryReasonMasksSecrets(t *testing.T) {
+	redact.Register(emitSecret)
+	defer redact.Reset()
 	got := retryReason(errors.New("status 500: upstream leaked " + emitSecret + " in body"))
 	if strings.Contains(got, emitSecret) {
 		t.Fatalf("secret leaked: %q", got)
@@ -26,6 +29,8 @@ func TestRetryReasonMasksSecrets(t *testing.T) {
 }
 
 func TestFailedCompactionMasksSecrets(t *testing.T) {
+	redact.Register(emitSecret)
+	defer redact.Reset()
 	provider := &mockProvider{completeErr: errors.New("summarizer 400: key " + emitSecret + " rejected")}
 	sess := testSession(t, "00000000-0000-4000-8000-000000000036")
 	for i := 0; i < 6; i++ {

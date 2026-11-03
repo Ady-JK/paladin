@@ -442,6 +442,9 @@ const toolGuidanceCommon = `
 Tools:
 - You act on this machine through your tools: run commands with the shell
   tool instead of telling the user to type them themselves.
+- Never print, echo or copy a secret: no API keys, tokens, passwords or
+  private keys in commands, files, logs or chat. Refer to the environment
+  variable by name instead, and mask any value you must show.
 - Use the read tool to inspect files instead of guessing what they hold.
 - User attachments are copied into this session. A message can include
   [Attached file: name at absolute-path] references: read non-image files

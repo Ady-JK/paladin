@@ -11,11 +11,14 @@ import (
 	"testing"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 func TestHubMasksSecretsInTurnError(t *testing.T) {
 	h, runs, _ := newTestHub(t, 4)
 	secret := "sk-test-Key-1234567890abcdef"
+	redact.Register(secret)
+	defer redact.Reset()
 	runs.behavior["bad"] = func(context.Context, func(func() error), chan<- agent.ChatChunk) (agent.ChatOutcome, error) {
 		return agent.ChatOutcome{}, errors.New("provider exploded: " + secret)
 	}

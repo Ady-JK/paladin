@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 type recordingObserver struct {
@@ -127,13 +129,18 @@ func TestJobObserverFinalizesOnce(t *testing.T) {
 	}
 }
 
-func TestShellOutputIsRedacted(t *testing.T) {
+func TestShellOutputMasksStoredKeys(t *testing.T) {
+	redact.Register("sk-stored-provider-key-0123456789")
+	defer redact.Reset()
 	sh := NewShellTool()
-	out, err := sh.Call([]byte(`{"cmd":"echo OPENAI_API_KEY=abcdef1234567890xyz; echo ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"}`), &ToolCtx{Workspace: t.TempDir(), SessionDir: t.TempDir(), Cancel: context.Background()})
+	out, err := sh.Call([]byte(`{"cmd":"echo sk-stored-provider-key-0123456789; echo ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"}`), &ToolCtx{Workspace: t.TempDir(), SessionDir: t.TempDir(), Cancel: context.Background()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "abcdef1234567890xyz") || strings.Contains(out, "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123") || !strings.Contains(out, "OPENAI_API_KEY=") {
-		t.Fatalf("output %s", out)
+	if strings.Contains(out, "sk-stored-provider-key-0123456789") || !strings.Contains(out, "[redacted]") {
+		t.Fatalf("stored key not masked: %s", out)
+	}
+	if !strings.Contains(out, "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123") {
+		t.Fatalf("pattern-shaped text should be left to the agent: %s", out)
 	}
 }

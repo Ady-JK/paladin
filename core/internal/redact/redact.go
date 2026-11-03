@@ -1,14 +1,11 @@
-// Package redact masks secrets in text that leaves a tool or the
-// sidecar: shell output, error messages and logs. It is a best-effort
-// pattern match (ported from Hermes' redact.py): known key prefixes,
-// bearer tokens, URL credentials, secret-named KEY=value assignments,
-// PEM private keys and registered values such as stored provider keys.
-// File contents returned by `read` get only the registered values masked
-// (Registered), so edits still match everything else.
+// Package redact masks the exact secret values the app knows about: the
+// provider keys the user stored. Everything else is the agent's job — the
+// prompt tells it never to print secrets — so no pattern scan runs over
+// tool output, logs or errors.
+
 package redact
 
 import (
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -17,42 +14,19 @@ import (
 const minRegistered = 8
 
 var (
-	prefixRE = regexp.MustCompile(`(^|[^A-Za-z0-9_])(` + strings.Join([]string{
-		`sk-[A-Za-z0-9_-](?:\.?[A-Za-z0-9_-]){9,}`,
-		`gh[pousr]_[A-Za-z0-9]{10,}`,
-		`github_pat_[A-Za-z0-9_]{10,}`,
-		`xox[baprs]-[A-Za-z0-9-]{10,}`,
-		`AIza[A-Za-z0-9_-]{30,}`,
-		`AKIA[A-Z0-9]{16}`,
-		`[sr]k_(?:live|test)_[A-Za-z0-9]{10,}`,
-		`SG\.[A-Za-z0-9_-]{10,}`,
-		`hf_[A-Za-z0-9]{10,}`,
-		`npm_[A-Za-z0-9]{10,}`,
-		`pypi-[A-Za-z0-9_-]{10,}`,
-		`glpat-[A-Za-z0-9_-]{10,}`,
-		`gsk_[A-Za-z0-9]{10,}`,
-		`xai-[A-Za-z0-9]{30,}`,
-	}, "|") + `)`)
-	bearerRE  = regexp.MustCompile(`(?i)(\bbearer\s+)([A-Za-z0-9._~+/=-]{8,})`)
-	urlCredRE = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+:)([^\s/@]+)@`)
-	envRE     = regexp.MustCompile(`(^|[^A-Za-z0-9_])([A-Z0-9_]*(?:API_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?|PRIVATE_KEY|ACCESS_KEY|AUTH)[A-Z0-9_]*=)(['"]?)([^\s'"]{8,})`)
-	pemRE     = regexp.MustCompile(`(?s)-----BEGIN ([A-Z ]*)PRIVATE KEY-----.*?-----END ([A-Z ]*)PRIVATE KEY-----`)
-
 	mu         sync.RWMutex
 	registered = map[string]bool{}
 	ordered    []string
 )
 
-// mask keeps a recognisable head and tail of long values.
-func mask(v string) string {
-	if len(v) < 16 {
-		return "[redacted]"
-	}
-	return v[:6] + "…" + v[len(v)-4:]
-}
+// String masks the exact registered values in s. It is the same cheap
+// lookup as Registered; there is no pattern scanning.
+func String(s string) string { return Registered(s) }
 
-// String masks every secret it recognises in s.
-func String(s string) string {
+// Registered masks only the exact registered values (the user's stored
+// keys). Every tool result goes through it: those values must never
+// reach the model, whichever tool would carry them.
+func Registered(s string) string {
 	if s == "" {
 		return s
 	}
@@ -64,48 +38,7 @@ func String(s string) string {
 			s = strings.ReplaceAll(s, v, "[redacted]")
 		}
 	}
-	s = pemRE.ReplaceAllString(s, "-----BEGIN ${1}PRIVATE KEY----- [redacted] -----END ${2}PRIVATE KEY-----")
-	s = replaceGroup(prefixRE, s, 2)
-	s = replaceGroup(bearerRE, s, 2)
-	s = replaceGroup(urlCredRE, s, 2)
-	s = replaceGroup(envRE, s, 4)
 	return s
-}
-
-// Registered masks only the exact registered values (the user's stored
-// keys). Every tool result goes through it: those values must never
-// reach the model, whichever tool would carry them.
-func Registered(s string) string {
-	mu.RLock()
-	vals := ordered
-	mu.RUnlock()
-	for _, v := range vals {
-		if strings.Contains(s, v) {
-			s = strings.ReplaceAll(s, v, "[redacted]")
-		}
-	}
-	return s
-}
-
-// replaceGroup masks submatch g of every match, keeping the rest.
-func replaceGroup(re *regexp.Regexp, s string, g int) string {
-	idx := re.FindAllStringSubmatchIndex(s, -1)
-	if idx == nil {
-		return s
-	}
-	var b strings.Builder
-	last := 0
-	for _, m := range idx {
-		start, end := m[2*g], m[2*g+1]
-		if start < 0 || strings.HasPrefix(s[start:end], "$") {
-			continue
-		}
-		b.WriteString(s[last:start])
-		b.WriteString(mask(s[start:end]))
-		last = end
-	}
-	b.WriteString(s[last:])
-	return b.String()
 }
 
 // Register adds an exact value to mask (e.g. a stored API key). Values
@@ -140,8 +73,8 @@ func Reset() {
 	ordered = nil
 }
 
-// rebuild orders values longest first so a value containing another
-// is masked whole.
+// rebuild orders values longest first so a value containing another is
+// masked whole.
 func rebuild() {
 	out := make([]string, 0, len(registered))
 	for v := range registered {

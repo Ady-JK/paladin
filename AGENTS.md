@@ -15,7 +15,7 @@ worth reading before large changes); `desktop-app/PROTOCOL.md` is the wire spec.
 | `core/internal/runtime/` | Turn hub (scheduling), sessions, subagents, MCP wiring, undo, worktrees |
 | `core/internal/tools/` | Built-in tools (`read/write/edit/shell/grep/glob/list/ask/browser/web_fetch/visual/todo`) |
 | `core/internal/inference/` | Model providers and streaming |
-| `core/internal/permission/`, `sandbox/`, `redact/` | Approval gate, OS sandbox, secret redaction |
+| `core/internal/permission/`, `sandbox/`, `redact/` | Approval gate, OS sandbox, stored-key masking |
 | `core/internal/transcript/`, `session/`, `memory/`, `atomicfile/` | Persistence |
 | `core/internal/{hooks,lsp,mcp,skills,extension,commands,prompt}/` | Plug-in surfaces |
 | `desktop-app/electron/` | Electron main + preload: spawns the sidecar, IPC bridge, `WebContentsView`s |
