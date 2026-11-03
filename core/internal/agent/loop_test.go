@@ -8,7 +8,6 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
-	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -350,6 +349,13 @@ func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "shell", Arguments: callArgs}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("after")}},
 	}}
+	// The completion notice is delivered at the end of the round after
+	// the job finishes; give the short echo command time to exit.
+	prov.afterChunks = func(idx int) {
+		if idx == 1 {
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
 	a, tx, done := newAgentForTest(t, prov, sess, "run bg", false, true)
 	defer close(done)
 	outcome, err := a.Run()
@@ -387,28 +393,5 @@ func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
 	}
 	if notifyEvents != 1 {
 		t.Fatalf("want 1 notify tool event, got %d", notifyEvents)
-	}
-}
-
-func TestArmNotifyOnlyForBackgroundNotifyJobs(t *testing.T) {
-	a, _, _, done := testAgent(t, &mockProvider{})
-	defer close(done)
-	cases := []struct {
-		name string
-		args string
-	}{
-		{"foreground", `{"cmd":"true"}`},
-		{"no notify", `{"cmd":"true","background":true}`},
-		{"not run", `{"action":"status","background":true,"notify":true}`},
-		{"bad json", `{`},
-		{"empty receipt", `{}`},
-	}
-	for _, tc := range cases {
-		call := &inference.ToolCall{ID: "c1", Name: "shell", Arguments: tc.args}
-		result := tools.ToolResult{Content: `{"job_id":"job-1","status":"running"}`}
-		a.armNotify(call, &result)
-		if got := a.shell.PollNotify(a.session.Meta.SessionID); len(got) != 0 {
-			t.Fatalf("%s armed unexpectedly: %+v", tc.name, got)
-		}
 	}
 }

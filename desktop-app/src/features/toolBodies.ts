@@ -123,12 +123,12 @@ function shellHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | nul
   if (str(res.output_file)) {
     meta.push(`<span><b>full output</b> <code>${escapeHtml(str(res.output_file))}</code></span>`);
   }
-  if (num(args.timeout_ms)) {
-    meta.push(`<span><b>timeout</b> ${Math.round((num(args.timeout_ms) as number) / 1000)}s</span>`);
-  }
   if (res.truncated === true) {
     const kept = str(res.output_file) ? "the full output is saved in the session" : "the middle was dropped";
     html += `<div class="term-note">Output truncated: showing the start and end; ${kept}.</div>`;
+  }
+  if (str(res.note)) {
+    html += `<div class="term-note">${escapeHtml(str(res.note))}</div>`;
   }
   if (meta.length) {
     html += `<div class="term-meta">${meta.join("")}</div>`;

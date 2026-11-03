@@ -252,11 +252,6 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 			CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
 		})
 	}
-	sid := a.session.Meta.SessionID
-	// The wait only fails when the turn is stopped; text is already recorded.
-	if a.shell != nil && a.shell.PendingNotify(sid) && !a.shell.WaitPendingNotify(sid, a.ctx) {
-		return false, turnStop{}
-	}
 	drained := len(a.records)
 	if err := a.drainNotifications(); err != nil {
 		return false, err

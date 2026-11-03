@@ -155,6 +155,10 @@ func notifyContent(notice *tools.NotifyResult) string {
 		"output":    notice.Output,
 		"truncated": notice.Truncated,
 	}
+	if notice.KilledByUser {
+		out["notice"] = "the user stopped this background job"
+		out["killed_by_user"] = true
+	}
 	data, err := json.Marshal(out)
 	if err != nil {
 		return "{}"

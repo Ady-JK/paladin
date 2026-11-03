@@ -304,7 +304,8 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			extra = append(extra, extensionTools...)
 		}
 		registry = r.turnTools(req.Cwd, req.SessionID, r.tools.With(extra...))
-		req.Notices = withRecall(r.memoryRecall(req, req.Cwd), r.subagents.notices(req.SessionID, req.Cwd))
+		req.Notices = withRecall(r.memoryRecall(req, req.Cwd),
+			r.jobs.withNotices(req.SessionID, r.subagents.notices(req.SessionID, req.Cwd)))
 	}
 	req.Budget = r.turnBudget(req.Cwd, req.SessionID)
 	settings := r.loadSettings()

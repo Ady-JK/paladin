@@ -235,7 +235,7 @@ flowchart TD
 | **Doom-loop guard** | If the model keeps asking for the exact same thing (or loops A, B, A, B… through the same 2–4 calls three times), say "that won't change, try something else." The turn keeps going; the model has to adapt. Re-reads get a sharper variant: the content has not changed, use what you have. |
 | **Denial breaker** | Three tool calls denied in a row (user declines, permission rule blocks) end the turn with a saved error instead of pestering forever. Any other result resets the count. |
 | **Search-only refusal** | Eight consecutive rounds that only search or read (no writes, commands, or questions) get the next such round refused with guidance to summarize and act. Any round that acts resets the count. |
-| **Output budgets** | Every search answer (grep, glob, list) is cut at 50 KiB with a pointer to narrow the query — the same role as read's 50 KiB pages and shell's 32 KiB spill. No single tool result can flood the context. |
+| **Output budgets** | Every search answer (grep, glob, list) is cut at 50 KiB with a pointer to narrow the query — the same role as read's 50 KiB pages and shell's 32 KiB inline cap (its whole output stays in the job log). No single tool result can flood the context. |
 | **Plan reminder** | A turn that is about to end with steps still open gets reminded to finish or settle them. A round that runs tools restarts the count, so a long task that keeps working is never cut short; three stalls in a row with files changed and the plan still open end the turn as a resumable failure instead of a calm "next I will…". |
 | **Stream keepalives** | Gateways send SSE frames with no data as pings. The SDK's decoder would choke on one and kill a healthy reply, so empty frames are dropped before it sees them, and a stream that still stops mid-frame is retried as a transport blip. Text already streamed is kept in the transcript. |
 | **Edit-spiral note** | If the model edits the same file over and over without getting it clean (errors, or diagnostics that never clear), the result itself says so: batch all remaining fixes together, then run the build/tests and fix from their output instead of guessing. |
@@ -372,11 +372,12 @@ session (remembered in `nested-instructions.json` next to the transcript), withi
 
 ### Long output is kept, not lost
 
-A shell command or MCP tool that prints more than fits (32 KB for shell, 40 000 characters for MCP) still shows the model
-its **start and end**, but the whole output is saved to `<session>/tool-output/<call id>.txt` (blurred for secrets, up to 8 MB).
-The result names that file (`output_file`), so the model can `read` or `grep` the missing middle instead of running the
-command again. A session may always read its own folder (these files, background job logs, screenshots) without an
-approval card; a deny rule still wins. The files go away with the session.
+A shell command writes its whole output to its job log under `<session>/tmp/`; the model gets at most 32 KB of it
+(the start and end around a truncation marker). A truncated result names the log (`output_file`), and the job's own
+answer names it as `log`, so the model can `read` or `grep` the missing middle instead of running the command again.
+MCP results over 40 000 characters are saved to `<session>/tool-output/<call id>.txt`. A session may always read its
+own folder (these files, background job logs, screenshots) without an approval card; a deny rule still wins. The
+files go away with the session.
 
 ### Tool switches (on/off)
 

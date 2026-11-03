@@ -21,10 +21,6 @@ func sleepMs(ms int) {
 	}
 }
 
-func afterMs(ms int) <-chan time.Time {
-	return time.After(time.Duration(ms) * time.Millisecond)
-}
-
 func TestStripANSIAndToLF(t *testing.T) {
 	if got := StripANSI("\x1b[31mred\x1b[0m plain"); got != "red plain" {
 		t.Fatalf("got %q", got)
@@ -216,7 +212,6 @@ func TestShellValidation(t *testing.T) {
 		`{"action":"run"}`,
 		`{"action":"run","cmd":""}`,
 		`{"action":"run","command":""}`,
-		`{"action":"run","cmd":"echo hi","timeout_ms":-1}`,
 		`{"action":"status"}`,
 		`{"action":"cancel"}`,
 		`{"action":"bogus"}`,
@@ -263,7 +258,7 @@ func TestShellSyncOutput(t *testing.T) {
 		t.Fatalf("got %+v", resp)
 	}
 	// Huge output is capped.
-	out, err = tool.Call(json.RawMessage(`{"cmd":"python3 -c \"print('y'*100000)\"","timeout_ms":15000}`), ctx)
+	out, err = tool.Call(json.RawMessage(`{"cmd":"python3 -c \"print('y'*100000)\""}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,17 +268,37 @@ func TestShellSyncOutput(t *testing.T) {
 	if resp.Truncated == nil || !*resp.Truncated || len(*resp.Output) > MaxShellOutput+100 {
 		t.Fatalf("not capped: %d", len(*resp.Output))
 	}
-	// Timeout surfaces as an error mentioning the limit.
-	_, err = tool.Call(json.RawMessage(`{"cmd":"sleep 5","timeout_ms":200}`), ctx)
-	if err == nil || !strings.Contains(err.Error(), "timeout") {
-		t.Fatalf("got %v", err)
-	}
 	// Cancelled context interrupts.
 	cctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = tool.Call(json.RawMessage(`{"cmd":"sleep 5"}`), &ToolCtx{Workspace: ctx.Workspace, SessionDir: ctx.SessionDir, Cancel: cctx})
 	if err == nil || !strings.Contains(err.Error(), "interrupted") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestShellLongCommandMovesToBackground(t *testing.T) {
+	ctx, _ := testCtx(t)
+	old := DefaultShellYieldMs
+	DefaultShellYieldMs = 100
+	defer func() { DefaultShellYieldMs = old }()
+	tool := NewShellTool()
+	out, err := tool.Call(json.RawMessage(`{"cmd":"sleep 5"}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp ShellResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != JobRunning || resp.JobID == nil || resp.Log == nil || resp.Note == nil {
+		t.Fatalf("got %+v", resp)
+	}
+	if !strings.Contains(*resp.Note, "background") {
+		t.Fatalf("note: %q", *resp.Note)
+	}
+	if _, err := tool.Call(json.RawMessage(`{"action":"cancel","job_id":"`+*resp.JobID+`"}`), ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -333,7 +348,8 @@ func TestShellBackgroundLifecycle(t *testing.T) {
 	if !strings.Contains(string(data), "hello-bg") {
 		t.Fatalf("log: %q", data)
 	}
-	// Notify arming + poll round-trip.
+	// Notify round-trip: the job reports itself once when it finishes.
+	ctx.CallID = "call-2"
 	out2, err := tool.Call(json.RawMessage(`{"cmd":"echo notify-me","background":true,"notify":true}`), ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -342,28 +358,18 @@ func TestShellBackgroundLifecycle(t *testing.T) {
 	if err := json.Unmarshal([]byte(out2), &started2); err != nil {
 		t.Fatal(err)
 	}
-	tool.ArmNotify("owner-1", "call-1", *started2.JobID)
-	if !tool.PendingNotify("owner-1") {
-		t.Fatal("pending notify missed")
-	}
-	waitDone := make(chan bool, 1)
-	go func() { waitDone <- tool.WaitPendingNotify("owner-1", context.Background()) }()
-	select {
-	case v := <-waitDone:
-		if !v {
-			t.Fatal("wait returned false")
+	var notices []NotifyResult
+	for i := 0; i < 200; i++ {
+		notices = tool.PollNotify("")
+		if len(notices) > 0 {
+			break
 		}
-	case <-afterMs(10000):
-		t.Fatal("wait hung")
+		sleepMs(50)
 	}
-	notices := tool.PollNotify("owner-1")
-	if len(notices) != 1 || notices[0].CallID != "call-1" || notices[0].Status != JobDone {
+	if len(notices) != 1 || notices[0].JobID != *started2.JobID || notices[0].Status != JobDone || notices[0].CallID != "call-2" {
 		t.Fatalf("got %+v", notices)
 	}
-	if tool.PendingNotify("owner-1") {
-		t.Fatal("reported job still pending")
-	}
-	if got := tool.PollNotify("owner-1"); len(got) != 0 {
+	if got := tool.PollNotify(""); len(got) != 0 {
 		t.Fatalf("double report: %+v", got)
 	}
 	// Cancel a live job.
@@ -412,7 +418,7 @@ func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
 	ctx, _ := testCtx(t)
 	tool := NewShellTool()
 	cmd := `python3 -c "import sys; sys.stdout.write('head-'); sys.stdout.flush(); sys.stderr.write('e'*100000); sys.stdout.write(('x'*100000)+'-tail-marker')"`
-	out, err := tool.Call(json.RawMessage(`{"cmd":`+jsonQuote(cmd)+`,"timeout_ms":3000}`), ctx)
+	out, err := tool.Call(json.RawMessage(`{"cmd":`+jsonQuote(cmd)+`}`), ctx)
 	if err != nil {
 		t.Fatalf("command deadlocked or failed: %v", err)
 	}
@@ -426,14 +432,24 @@ func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
 	if len(*resp.Output) > MaxShellOutput+len(shellTruncatedMarker)+8 {
 		t.Fatalf("output exceeded cap: %d bytes", len(*resp.Output))
 	}
-	capture := newShellOutputCapture(MaxShellOutput)
-	_, _ = capture.Write([]byte("head-" + strings.Repeat("界", MaxShellOutput) + "-tail-marker"))
-	bytes, wasTruncated := capture.result()
+	path := filepath.Join(t.TempDir(), "log.txt")
+	text := "head-" + strings.Repeat("界", MaxShellOutput) + "-tail-marker"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bytes, wasTruncated, err := readJobOutput(path, MaxShellOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes = []byte(strings.ToValidUTF8(string(bytes), "�"))
 	if !utf8.Valid(bytes) {
 		t.Fatal("captured output split a UTF-8 character")
 	}
+	if !wasTruncated {
+		t.Fatal("oversized output was not truncated")
+	}
 	code := 0
-	encoded, failure := finishSync(bytes, wasTruncated, "", waitResult{code: &code}, false)
+	encoded, failure := finishSync(bytes, wasTruncated, path, waitResult{code: &code}, false)
 	if failure != nil {
 		t.Fatal(failure)
 	}
@@ -442,24 +458,6 @@ func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
 	}
 	if resp.Output == nil || !strings.HasPrefix(*resp.Output, "head-") || !strings.Contains(*resp.Output, "-tail-marker") {
 		t.Fatalf("truncated output must preserve head and tail: %q", *resp.Output)
-	}
-}
-
-func TestShellDefaultTimeouts(t *testing.T) {
-	if d, _ := shellTimeoutMs(0, false); d != 10*time.Second {
-		t.Fatalf("foreground default %v", d)
-	}
-	if d, _ := shellTimeoutMs(0, true); d != 300*time.Second {
-		t.Fatalf("background default %v", d)
-	}
-	if d, _ := shellTimeoutMs(2000, true); d != 2*time.Second {
-		t.Fatalf("explicit timeout ignored: %v", d)
-	}
-}
-
-func TestShellTimeoutOverflowRejected(t *testing.T) {
-	if _, err := shellTimeoutMs(int64(^uint64(0)>>1), false); err == nil {
-		t.Fatal("overflowing timeout accepted")
 	}
 }
 

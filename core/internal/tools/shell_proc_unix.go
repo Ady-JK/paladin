@@ -3,27 +3,12 @@
 package tools
 
 import (
-	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"syscall"
 
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
-
-func spawnPiped(cmdStr, dir string, sb *sandbox.Policy) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
-	cmd := spawnShellCmd(cmdStr, dir, "TERM=dumb", "NO_COLOR=1", "CLICOLOR=0")
-	if err := confine(cmd, sb); err != nil {
-		return nil, nil, nil, err
-	}
-	cmd.SysProcAttr = shellSysProcAttr()
-	outR, errR, err := startPiped(cmd)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return cmd, outR, errR, nil
-}
 
 func spawnToLog(cmdStr, dir string, log *os.File, sb *sandbox.Policy) (*exec.Cmd, error) {
 	dup, err := duplicateFile(log)
@@ -61,19 +46,4 @@ func killProcessGroup(pid int) {
 	// its child's death could fork the next command past the SIGKILL.
 	_ = syscall.Kill(-pid, syscall.SIGSTOP)
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
-}
-
-func exitCode(err error) (*int, bool) {
-	if err == nil {
-		z := 0
-		return &z, false
-	}
-	if ee := (*exec.ExitError)(nil); errors.As(err, &ee) {
-		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			return nil, true
-		}
-		c := ee.ExitCode()
-		return &c, false
-	}
-	return nil, true
 }

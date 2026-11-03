@@ -86,11 +86,22 @@ func TestCancelledJobIsFinalizedOnce(t *testing.T) {
 	}
 }
 
-func TestTimedOutJobKeepsItsEarlyWritesUndoable(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, `{"cmd":"sleep 0.2; echo early > t.txt; sleep 30","background":true,"timeout_ms":800}`, "")
+func TestCancelledJobKeepsItsEarlyWritesUndoable(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, `{"cmd":"sleep 0.2; echo early > t.txt; sleep 30","background":true}`, "")
 	turn(t, rt, sid, ws, "start job")
-	rec := waitJob(t, rt, sid)
-	if rec.Status != tools.JobTimeout || strings.Join(rec.Files, ",") != "t.txt" {
+	rec := runningJob(t, rt, sid)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(ws, "t.txt")); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := rt.shell.Call([]byte(`{"action":"cancel","job_id":"`+rec.ID+`"}`), &tools.ToolCtx{SessionID: sid}); err != nil {
+		t.Fatal(err)
+	}
+	rec = waitJob(t, rt, sid)
+	if rec.Status != tools.JobCancelled || strings.Join(rec.Files, ",") != "t.txt" {
 		t.Fatalf("finalized %+v", rec)
 	}
 	res, err := rt.RevertSession(sid, "", 0)

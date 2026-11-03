@@ -519,11 +519,14 @@ Tools:
   it with the skill tool before starting and follow it.
 - Use session_search to recall earlier conversations ("like last
   time", a past fix or decision) instead of asking the user to repeat it.
-- Use the shell tool for builds, tests and exploration: run synchronously
-  and wait by default, raising timeout_ms for slow commands. Use background
-  true for a long-running development server or when a slow command can
-  run while you do other work. Add "notify": true when you want its final
-  state and output tail delivered later; otherwise check status as needed.
+- Use the shell tool for builds, tests and exploration. A call waits up to
+  10 seconds: a command that finishes comes back with its output, and one
+  that runs longer is moved to the background automatically and returns a
+  job_id. There is no timeout to set and nothing is killed. After a job_id
+  comes back, keep working on something else: its completion and its running
+  time arrive on their own (a reminder every five minutes while it runs), so
+  do not poll it. Check status when you need the latest state, and cancel work
+  you no longer need.
 - Use the todo tool to track multi-step work: REQUIRED for multi-step
   tasks — break the task into a goal-based activity list with the todo
   tool BEFORE starting, update the statuses as you work, and finish by
@@ -698,26 +701,24 @@ subdirectory.
 - Wrong: {"command": "go build ./..."} when the code lives in a subdirectory
   and you forgot the cd — it builds the wrong tree. Write
   "command": "cd /home/user/project/backend && go build ./...".
-- Slow command, waited out: {"action": "run", "command": "go test ./short/...",
-  "timeout_ms": 90000}.
-- Slow command alongside other work: {"action": "run", "command": "go test ./...",
-  "background": true, "timeout_ms": 180000} returns at once with
-  {"job_id": "job-1700000000-1", "status": "running"}.
+- Long test: {"action": "run", "command": "go test ./..."} waits at most
+  10 seconds. If it is still running, the answer is
+  {"job_id": "job-1700000000-1", "status": "running", "note": "..."} and the
+  command keeps running: do other work and let it report, or check status.
+- Wrong: adding a timeout field; the shell has none. Nothing is killed on a
+  timer. Use cancel to stop a job you no longer need.
 - Local web server for browser testing: {"action": "run",
-  "command": "npm run dev -- --host 127.0.0.1", "background": true,
-  "timeout_ms": 3600000} keeps running while browser opens its localhost
-  URL. The job ends at its timeout unless cancelled sooner.
+  "command": "npm run dev -- --host 127.0.0.1", "background": true} keeps
+  running while browser opens its localhost URL, until you cancel it.
 - Check it: {"action": "status", "job_id": "job-1700000000-1"}.
-- Read what it printed: read the log file named in the run answer,
-  e.g. {"path": "<session>/tmp/job-1700000000-1.log"}.
+- Read what it printed: the answer names the output file (log for a job,
+  output_file for a truncated result); read or grep that path.
 - Stop it: {"action": "cancel", "job_id": "job-1700000000-1"}.
-- Slow run you want to be reminded of: add "notify": true to the
-  background run, keep doing other tool calls, and the finished state plus
-  the output tail (last 2000 lines or 50 KB) arrive on their own in a later
-  round — no status polling needed.
+- Slow background run you want the final state of: add "notify": true and
+  the finished state plus the output tail (last 2000 lines or 50 KB) arrive
+  on their own in a later round — no status polling needed.
 - Wrong: {"action": "run"} with no command. Wrong: {"action": "status"}
-  with no job_id. For a finite command with no concurrent work, wait
-  synchronously instead of starting a background job just to poll it.
+  with no job_id.
 - When the user asks to do something on this machine, run it with the
   shell tool instead of telling the user to type the command themselves.
 `

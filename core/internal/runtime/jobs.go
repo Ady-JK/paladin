@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
@@ -44,6 +45,19 @@ type JobRecord struct {
 	EndedAt   time.Time `json:"endedAt,omitempty"`
 	Status    string    `json:"status"`
 	ExitCode  *int      `json:"exitCode,omitempty"`
+	// Command is the shell command line, shown in the running-jobs panel.
+	Command string `json:"command,omitempty"`
+	// Auto marks a foreground command that outlived its 10s wait and was
+	// moved to the background automatically; only those report every 5m.
+	Auto bool `json:"auto,omitempty"`
+	// Candidate marks a foreground command that may still become an auto
+	// job. It is not a tracked job until it backgrounds.
+	Candidate bool `json:"-"`
+	// KilledByUser marks a job the user stopped from the panel.
+	KilledByUser bool `json:"killedByUser,omitempty"`
+	// Notify asks for a completion report and a wake when the session
+	// is idle.
+	Notify bool `json:"notify,omitempty"`
 	// PID is the job's process group, used to tell whether a job left
 	// running by an earlier sidecar process is still alive.
 	PID    int    `json:"pid,omitempty"`
@@ -76,15 +90,24 @@ type activity struct {
 type jobBook struct {
 	rt *AgentRuntime
 
-	mu       sync.Mutex
-	live     map[string]*JobRecord
-	turns    map[string]int
-	seq      uint64
-	activity map[*snapshot.Repo][]activity
+	mu   sync.Mutex
+	live map[string]*JobRecord
+	// candidates are foreground commands that may still outlive their
+	// wait. They hold a snapshot but are not jobs until they background.
+	candidates map[string]*JobRecord
+	turns      map[string]int
+	seq        uint64
+	activity   map[*snapshot.Repo][]activity
+	// notices are running-job reminders waiting for the session's next
+	// round, or for the wake turn that delivers them.
+	notices map[string][]agent.Notice
+	// stops ends each live job's five-minute notice loop.
+	stops map[string]chan struct{}
 }
 
 func newJobBook(rt *AgentRuntime) *jobBook {
-	return &jobBook{rt: rt, live: map[string]*JobRecord{}, turns: map[string]int{}, activity: map[*snapshot.Repo][]activity{}}
+	return &jobBook{rt: rt, live: map[string]*JobRecord{}, candidates: map[string]*JobRecord{}, turns: map[string]int{},
+		activity: map[*snapshot.Repo][]activity{}, notices: map[string][]agent.Notice{}, stops: map[string]chan struct{}{}}
 }
 
 // setTurn records the transcript index of a session's running turn.
@@ -131,8 +154,21 @@ func (b *jobBook) running(sessionID string) []string {
 
 func (b *jobBook) JobStarted(e tools.JobEvent) {
 	rec := &JobRecord{ID: e.ID, SessionID: e.SessionID, Workspace: e.Workspace, CallID: e.CallID,
-		StartedAt: e.StartedAt, Status: tools.JobRunning, dir: e.SessionDir, Turn: -1}
+		Command: e.Command, StartedAt: e.StartedAt, Status: tools.JobRunning, dir: e.SessionDir, Turn: -1,
+		Candidate: e.Candidate, Notify: e.Notify}
 	rec.repo = b.rt.snapRepo(e.Workspace)
+	if e.Candidate {
+		// A foreground command may finish long before it matters. Keep
+		// it out of the job book (and skip its snapshot) until it
+		// actually outlives the wait.
+		b.mu.Lock()
+		if t, ok := b.turns[e.SessionID]; ok {
+			rec.Turn = t
+		}
+		b.candidates[e.ID] = rec
+		b.mu.Unlock()
+		return
+	}
 	if rec.repo != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
 		before, err := rec.repo.Snapshot(ctx)
@@ -162,25 +198,85 @@ func (b *jobBook) JobStarted(e tools.JobEvent) {
 func (b *jobBook) JobSpawned(e tools.JobEvent) {
 	b.mu.Lock()
 	rec := b.live[e.ID]
+	if rec == nil {
+		rec = b.candidates[e.ID]
+	}
 	if rec != nil {
 		rec.PID = e.PID
 	}
 	b.mu.Unlock()
-	if rec != nil {
+	if rec != nil && !rec.Candidate {
 		if err := writeJobRecord(rec); err != nil {
 			log.Printf("undo: record job %s pid: %v", e.ID, err)
 		}
 	}
 }
 
+// JobBackgrounded marks a foreground command that outlived its wait.
+// Only these jobs report their running time every five minutes.
+func (b *jobBook) JobBackgrounded(e tools.JobEvent) {
+	b.mu.Lock()
+	rec := b.candidates[e.ID]
+	delete(b.candidates, e.ID)
+	if rec == nil {
+		rec = b.live[e.ID]
+	}
+	if rec == nil {
+		b.mu.Unlock()
+		return
+	}
+	rec.Candidate = false
+	rec.Auto = true
+	rec.PID = e.PID
+	if rec.repo != nil && rec.Before == "" {
+		// The turn snapshot covers earlier work; this one starts the
+		// job's own attribution from the moment it became a job.
+		ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
+		before, err := rec.repo.Snapshot(ctx)
+		cancel()
+		if err != nil {
+			rec.Note = "no snapshot when the job moved to the background; its changes are not undoable"
+		}
+		rec.Before = before
+	}
+	for _, other := range b.live {
+		if rec.repo != nil && other.repo == rec.repo {
+			other.overlap, rec.overlap = true, true
+		}
+	}
+	rec.startSeq = b.seq
+	b.live[e.ID] = rec
+	started := rec.StartedAt
+	sessionID, workspace, command := rec.SessionID, rec.Workspace, rec.Command
+	b.mu.Unlock()
+	if err := writeJobRecord(rec); err != nil {
+		log.Printf("undo: record job %s background: %v", e.ID, err)
+	}
+	b.startNoticeLoop(e.ID, sessionID, workspace, command, started)
+}
+
 func (b *jobBook) JobFinished(e tools.JobEvent) {
 	b.mu.Lock()
 	rec := b.live[e.ID]
+	if rec == nil {
+		// A foreground command that finished inside its wait: it never
+		// was a job, so it leaves no record behind.
+		delete(b.candidates, e.ID)
+		b.mu.Unlock()
+		return
+	}
+	if stop := b.stops[e.ID]; stop != nil {
+		close(stop)
+		delete(b.stops, e.ID)
+	}
 	b.mu.Unlock()
-	if rec == nil || rec.Finalized {
+	if rec.Finalized {
 		return
 	}
 	rec.Status, rec.ExitCode, rec.EndedAt = e.Status, e.ExitCode, e.EndedAt
+	rec.KilledByUser = e.KilledByUser
+	wake := rec.Auto || rec.Notify
+	sessionID, workspace := rec.SessionID, rec.Workspace
 	if rec.repo != nil && rec.Before != "" && rec.Turn >= 0 {
 		b.attribute(rec)
 	}
@@ -191,6 +287,98 @@ func (b *jobBook) JobFinished(e tools.JobEvent) {
 	b.mu.Unlock()
 	if err := writeJobRecord(rec); err != nil {
 		log.Printf("undo: finalize job %s: %v", e.ID, err)
+	}
+	// A finished auto job's completion notice still has to reach an idle
+	// session. Waking here runs one turn that drains it.
+	if wake {
+		b.rt.wakeSession(sessionID, workspace)
+	}
+}
+
+// jobNoticeEvery is how often an auto-backgrounded command reports that
+// it is still running. A variable so tests can shorten it.
+var jobNoticeEvery = 5 * time.Minute
+
+func (b *jobBook) startNoticeLoop(id, sessionID, workspace, command string, started time.Time) {
+	stop := make(chan struct{})
+	b.mu.Lock()
+	b.stops[id] = stop
+	b.mu.Unlock()
+	go func() {
+		ticker := time.NewTicker(jobNoticeEvery)
+		defer ticker.Stop()
+		n := 0
+		for {
+			select {
+			case <-ticker.C:
+				b.mu.Lock()
+				_, live := b.live[id]
+				b.mu.Unlock()
+				if !live {
+					return
+				}
+				n++
+				b.runningNotice(id, sessionID, workspace, command, time.Since(started), n)
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+func (b *jobBook) runningNotice(id, sessionID, workspace, command string, elapsed time.Duration, n int) {
+	body := map[string]any{
+		"event": "job_running", "job_id": id, "command": command,
+		"running_for": elapsed.Round(time.Second).String(),
+		"note": "Still running in the background. Check it with the shell tool status action, " +
+			"cancel it if it is no longer needed, or keep working on something that does not depend on it.",
+	}
+	data, err := jsonx.Marshal(body)
+	if err != nil {
+		return
+	}
+	args, _ := jsonx.Marshal(map[string]string{"action": "notify", "job_id": id})
+	b.mu.Lock()
+	b.notices[sessionID] = append(b.notices[sessionID], agent.Notice{
+		CallID:    fmt.Sprintf("%s#running-%d", id, n),
+		Name:      "shell",
+		Arguments: string(args),
+		Content:   string(data),
+	})
+	b.mu.Unlock()
+	b.rt.wakeSession(sessionID, workspace)
+}
+
+// withNotices chains running-job notices in front of next, so one
+// callable answers the agent's Notices hook.
+func (b *jobBook) withNotices(sessionID string, next func() []agent.Notice) func() []agent.Notice {
+	return func() []agent.Notice {
+		b.mu.Lock()
+		out := b.notices[sessionID]
+		delete(b.notices, sessionID)
+		b.mu.Unlock()
+		if next != nil {
+			out = append(out, next()...)
+		}
+		return out
+	}
+}
+
+// wakeSession starts a resume turn so an idle session can see a job
+// notice. A busy session takes it at its next round instead.
+func (r *AgentRuntime) wakeSession(sessionID, cwd string) {
+	if sessionID == "" || r.hub.Busy(sessionID) {
+		return
+	}
+	s := r.subagents.settingsFor(sessionID, cwd)
+	if s.Cwd == "" {
+		s.Cwd = cwd
+	}
+	if _, _, err := r.hub.Submit(agent.Request{
+		SessionID: sessionID, Cwd: s.Cwd, Resume: true,
+		Permissions: s.Permissions, Provider: s.Provider, Model: s.Model,
+	}, SubmitOpts{}); err != nil && !strings.Contains(err.Error(), "shutting down") {
+		log.Printf("jobs: wake %s: %v", sessionID, err)
 	}
 }
 

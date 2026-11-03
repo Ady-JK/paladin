@@ -1,12 +1,12 @@
-// shell_jobs.go tracks background shell jobs: start, timeout, status,
-// cancel and completion notices.
+// shell_jobs.go tracks shell commands: start, status, cancel and the
+// notices a running command sends.
 
 package tools
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,23 +15,30 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
 type job struct {
 	id           string
+	command      string
 	log          string
+	workspace    string
+	sessionDir   string
 	status       string
 	exitCode     *int
 	finished     bool
 	notify       bool
+	auto         bool
+	killedByUser bool
 	notifyCallID string
 	owner        string
 	reported     bool
 	childPID     int
 	logDone      bool
+	startedAt    time.Time
+	done         chan struct{}
+	closed       bool
 }
 
 // broadcaster wakes all waiters; each notify swaps the channel.
@@ -51,12 +58,6 @@ func (b *broadcaster) notify() {
 	b.ch = make(chan struct{})
 }
 
-func (b *broadcaster) waitChan() <-chan struct{} {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.ch
-}
-
 type shellJobs struct {
 	mu      sync.Mutex
 	byID    map[string]*job
@@ -64,13 +65,14 @@ type shellJobs struct {
 	changed *broadcaster
 }
 
-// JobEvent describes a background job for undo bookkeeping.
+// JobEvent describes a shell command for undo and lifecycle bookkeeping.
 type JobEvent struct {
 	ID         string
 	SessionID  string
 	SessionDir string
 	Workspace  string
 	CallID     string
+	Command    string
 	StartedAt  time.Time
 	EndedAt    time.Time
 	Status     string
@@ -78,38 +80,54 @@ type JobEvent struct {
 	// PID is the job's process (and process group) id; set from
 	// JobSpawned on.
 	PID int
+	// Auto marks a command that outlived its foreground wait and was
+	// moved to the background automatically.
+	Auto bool
+	// Candidate marks a foreground command that may still become an auto
+	// job.
+	Candidate bool
+	// Notify asks for a completion report when the job ends.
+	Notify bool
+	// KilledByUser marks a job the user stopped from the app.
+	KilledByUser bool
 }
 
-// JobObserver hears about background jobs. JobStarted runs inside the
+// JobObserver hears about shell commands. JobStarted runs inside the
 // starting call, just before the process spawns; JobSpawned right after
-// it spawned, with its PID; JobFinished runs once
-// per job after the process has exited (whether it finished, failed,
-// was cancelled or timed out), or right away when it never started.
+// it spawned, with its PID; JobBackgrounded when a foreground command
+// outlives its wait and becomes an auto job; JobFinished runs once per
+// job after the process has exited (whether it finished, failed or was
+// cancelled), or right away when it never started.
 type JobObserver interface {
 	JobStarted(JobEvent)
 	JobSpawned(JobEvent)
+	JobBackgrounded(JobEvent)
 	JobFinished(JobEvent)
 }
 
 // Observe sets the job observer; call it before any job starts.
 func (s *ShellTool) Observe(o JobObserver) { s.observer = o }
 
-func (s *ShellTool) runBackground(cmd, dir, owner, callID string, limit time.Duration, notify bool, sessionDir string, sb *sandbox.Policy) (string, error) {
+// startJob spawns one command with its output streamed to a log file
+// and registers it. It never kills the command on a timer.
+func (s *ShellTool) startJob(cmd, dir, owner, callID string, notify, candidate bool, sessionDir string, sb *sandbox.Policy) (*job, error) {
 	if sessionDir == "" {
-		return "", ArgsError("shell: no session to keep the background job in")
+		return nil, ArgsError("shell: no session to keep the background job in")
 	}
 	now := time.Now().Unix()
 	id := fmt.Sprintf("job-%d-%d", now, s.inner.counter.Add(1))
 	tmp := filepath.Join(sessionDir, "tmp")
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		return "", ArgsError(fmt.Sprintf("shell: cannot keep the job log: %s", syserr.Str(err)))
+		return nil, ArgsError(fmt.Sprintf("shell: cannot keep the job log: %s", syserr.Str(err)))
 	}
 	logPath := filepath.Join(tmp, id+".log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
-		return "", ArgsError(fmt.Sprintf("shell: cannot write the job log: %s", syserr.Str(err)))
+		return nil, ArgsError(fmt.Sprintf("shell: cannot write the job log: %s", syserr.Str(err)))
 	}
-	event := JobEvent{ID: id, SessionID: owner, SessionDir: sessionDir, Workspace: dir, CallID: callID, StartedAt: time.Now().UTC()}
+	started := time.Now().UTC()
+	event := JobEvent{ID: id, SessionID: owner, SessionDir: sessionDir, Workspace: dir,
+		CallID: callID, Command: cmd, StartedAt: started, Candidate: candidate, Notify: notify}
 	if s.observer != nil {
 		s.observer.JobStarted(event)
 	}
@@ -121,7 +139,7 @@ func (s *ShellTool) runBackground(cmd, dir, owner, callID string, limit time.Dur
 			event.EndedAt, event.Status, event.ExitCode = time.Now().UTC(), JobFailed, &one
 			s.observer.JobFinished(event)
 		}
-		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
+		return nil, ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
 	}
 	childPID := 0
 	if child.Process != nil {
@@ -132,51 +150,70 @@ func (s *ShellTool) runBackground(cmd, dir, owner, callID string, limit time.Dur
 		s.observer.JobSpawned(event)
 	}
 	untrack := procTracker.Track(owner, childPID)
-	s.inner.mu.Lock()
-	s.inner.byID[id] = &job{
-		id: id, log: logPath, status: JobRunning,
-		notify: notify, childPID: childPID, owner: owner,
+	j := &job{
+		id: id, command: cmd, log: logPath, workspace: dir, sessionDir: sessionDir,
+		status: JobRunning, notify: notify, notifyCallID: callID, owner: owner,
+		childPID: childPID, startedAt: started, done: make(chan struct{}),
 	}
+	s.inner.mu.Lock()
+	s.inner.byID[id] = j
 	s.inner.mu.Unlock()
-	timeout := time.AfterFunc(limit, func() { s.timeOutJob(id) })
 	go func() {
 		err := child.Wait()
-		timeout.Stop()
 		// The job's shell is done; kill anything it left running in its
 		// process group so no untracked daemon survives the job.
 		killProcessGroup(childPID)
 		untrack()
 		s.finishJob(id, event, exitCodeOf(err))
 	}()
-	out := ShellResponse{JobID: &id, Status: JobRunning, Log: &logPath}
-	data, merr := jsonx.Marshal(out)
-	if merr != nil {
-		return "", ArgsError(fmt.Sprintf("shell: encode the result: %v", merr))
-	}
-	return string(data), nil
+	return j, nil
 }
 
-// timeOutJob kills a background job that ran past its limit. The
-// waiter in runBackground still reports the exit.
-func (s *ShellTool) timeOutJob(id string) {
+// runBackground starts a job and returns its id at once.
+func (s *ShellTool) runBackground(cmd, dir, owner, callID string, notify bool, sessionDir string, sb *sandbox.Policy) (string, error) {
+	j, err := s.startJob(cmd, dir, owner, callID, notify, false, sessionDir, sb)
+	if err != nil {
+		return "", err
+	}
+	return shellResponseJSON(j.id, JobRunning, nil, nil, nil, j.log, "", "")
+}
+
+// armAuto marks a still-running foreground command as an auto job: it
+// now reports its completion and its running time. It returns false when
+// the command finished in the meantime.
+func (s *ShellTool) armAuto(id string) bool {
 	s.inner.mu.Lock()
 	j, ok := s.inner.byID[id]
 	if !ok || j.finished {
 		s.inner.mu.Unlock()
-		return
+		return false
 	}
-	j.finished = true
-	j.status = JobTimeout
-	pid := j.childPID
+	j.notify = true
+	j.auto = true
+	if j.notifyCallID == "" {
+		j.notifyCallID = j.id
+	}
+	event := JobEvent{ID: j.id, SessionID: j.owner, SessionDir: j.sessionDir, Workspace: j.workspace,
+		CallID: j.notifyCallID, Command: j.command, StartedAt: j.startedAt, PID: j.childPID, Auto: true}
 	s.inner.mu.Unlock()
-	if pid != 0 {
-		killProcessGroup(pid)
+	if s.observer != nil {
+		s.observer.JobBackgrounded(event)
 	}
-	s.inner.changed.notify()
+	return true
 }
 
-// finishJob records a background job's exit (unless it already ended,
-// e.g. by timeout or cancel) and tells the observer and waiters.
+// markReported consumes a finished command's completion notice when its
+// result already went back through the foreground call.
+func (s *ShellTool) markReported(id string) {
+	s.inner.mu.Lock()
+	if j, ok := s.inner.byID[id]; ok {
+		j.reported = true
+	}
+	s.inner.mu.Unlock()
+}
+
+// finishJob records a job's exit (unless it already ended, e.g. by
+// cancel) and tells the observer and waiters.
 func (s *ShellTool) finishJob(id string, event JobEvent, code *int) {
 	s.inner.mu.Lock()
 	final := event
@@ -195,6 +232,8 @@ func (s *ShellTool) finishJob(id string, event JobEvent, code *int) {
 		}
 		j.logDone = true
 		final.Status, final.ExitCode = j.status, j.exitCode
+		final.KilledByUser = j.killedByUser
+		j.closeLocked()
 	}
 	s.inner.mu.Unlock()
 	// The process has exited, so the bookkeeping sees all its writes.
@@ -203,6 +242,13 @@ func (s *ShellTool) finishJob(id string, event JobEvent, code *int) {
 		s.observer.JobFinished(final)
 	}
 	s.inner.changed.notify()
+}
+
+func (j *job) closeLocked() {
+	if !j.closed {
+		close(j.done)
+		j.closed = true
+	}
 }
 
 // exitCodeOf maps a Wait error to an exit code; nil means the process
@@ -244,76 +290,55 @@ func (s *ShellTool) status(jobID, caller string) (string, error) {
 	if !ok {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
 	}
-	text, err := shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "")
+	text, err := shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "", "")
 	if err != nil {
 		return "", err
 	}
-	if snap.finished && (snap.status == JobFailed || snap.status == JobTimeout) {
+	if snap.finished && snap.status == JobFailed {
 		return "", WithContent(text, fmt.Sprintf("shell: job %s %s", snap.id, snap.status))
 	}
 	return text, nil
 }
 
 func (s *ShellTool) cancel(jobID, caller string) (string, error) {
-	var childPID int
+	return s.killJob(jobID, func(j *job) bool { return j.owner == caller }, false)
+}
+
+// killJob stops a job. match selects the jobs the caller may stop;
+// byUser records that the user did it from the app.
+func (s *ShellTool) killJob(jobID string, match func(*job) bool, byUser bool) (string, error) {
 	s.inner.mu.Lock()
-	j, ok := s.ownedJobLocked(jobID, caller)
-	if !ok {
+	j, ok := s.inner.byID[strings.TrimSpace(jobID)]
+	if !ok || !match(j) {
 		s.inner.mu.Unlock()
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
 	}
+	pid := 0
 	if !j.finished {
 		j.finished = true
 		j.status = JobCancelled
-		childPID = j.childPID
+		j.killedByUser = byUser
+		pid = j.childPID
+		j.closeLocked()
 	}
+	snap := *j
 	s.inner.mu.Unlock()
-	if childPID != 0 {
-		killProcessGroup(childPID)
+	if pid != 0 {
+		killProcessGroup(pid)
 	}
 	s.inner.changed.notify()
-	s.inner.mu.Lock()
-	jj, ok := s.inner.byID[strings.TrimSpace(jobID)]
-	var snap job
-	if ok {
-		snap = *jj
-	}
-	s.inner.mu.Unlock()
-	if !ok {
-		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
-	}
-	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "")
-}
-
-func (s *ShellTool) ArmNotify(owner, callID, jobID string) {
-	s.inner.mu.Lock()
-	defer s.inner.mu.Unlock()
-	if j, ok := s.inner.byID[strings.TrimSpace(jobID)]; ok {
-		j.notify = true
-		j.notifyCallID = callID
-		j.owner = owner
-	}
-}
-
-func (s *ShellTool) PendingNotify(owner string) bool {
-	s.inner.mu.Lock()
-	defer s.inner.mu.Unlock()
-	for _, j := range s.inner.byID {
-		if j.notify && j.owner == owner && !j.finished && !j.reported {
-			return true
-		}
-	}
-	return false
+	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "", "")
 }
 
 type NotifyResult struct {
-	CallID    string
-	JobID     string
-	Status    string
-	ExitCode  *int
-	Output    string
-	Truncated bool
-	IsError   bool
+	CallID       string
+	JobID        string
+	Status       string
+	ExitCode     *int
+	Output       string
+	Truncated    bool
+	IsError      bool
+	KilledByUser bool
 }
 
 func (s *ShellTool) PollNotify(owner string) []NotifyResult {
@@ -338,49 +363,43 @@ func (s *ShellTool) PollNotify(owner string) []NotifyResult {
 		}
 		entry.reported = true
 		status, exitCode, callID, jobID, log := entry.status, entry.exitCode, entry.notifyCallID, entry.id, entry.log
+		killedByUser := entry.killedByUser
 		s.inner.mu.Unlock()
 		tail, truncated := tailFile(log)
 		out = append(out, NotifyResult{
 			CallID: callID, JobID: jobID, Status: status, ExitCode: exitCode,
 			Output: tail, Truncated: truncated,
-			IsError: status == JobFailed || status == JobTimeout,
+			IsError: status == JobFailed, KilledByUser: killedByUser,
 		})
 	}
 	return out
 }
 
-func (s *ShellTool) WaitPendingNotify(owner string, cancel context.Context) bool {
-	for {
-		s.inner.mu.Lock()
-		pending := false
-		for _, j := range s.inner.byID {
-			if j.notify && j.owner == owner && !j.finished && !j.reported {
-				pending = true
-				break
-			}
-		}
-		s.inner.mu.Unlock()
-		if !pending {
-			return true
-		}
-		select {
-		case <-s.inner.changed.waitChan():
-		case <-cancel.Done():
-			return false
-		}
-	}
-}
-
+// tailFile returns the last bytes of a log file without reading the
+// whole thing.
 func tailFile(path string) (string, bool) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", false
 	}
-	truncated := false
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return "", false
+	}
+	size := st.Size()
+	truncated := size > MaxNotifyOutput
+	if truncated {
+		if _, err := f.Seek(size-MaxNotifyOutput, io.SeekStart); err != nil {
+			return "", false
+		}
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", false
+	}
 	slice := data
-	if len(slice) > MaxNotifyOutput {
-		slice = slice[len(slice)-MaxNotifyOutput:]
-		truncated = true
+	if truncated {
 		if i := indexByte(slice, '\n'); i >= 0 {
 			slice = slice[i+1:]
 		} else {

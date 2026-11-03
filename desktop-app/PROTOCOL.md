@@ -608,16 +608,22 @@ messages disappear from `sessionHistory`, and `openSession` /
 (again skipping any changed since). The next message commits the
 revert: the hidden messages and their steps are dropped.
 
-Background shell jobs (`background: true`) belong to the session that
-started them: `status`/`cancel` with another session's `job_id`
-(including a subagent's) fails as an unknown job. They time out after 300 s unless
-`timeout_ms` says otherwise (foreground commands default to 10 s). They
-are tracked separately: the
-sidecar snapshots the folder when the job starts, keeps a record in
+Shell commands belong to the session that started them: `status`/`cancel`
+with another session's `job_id` (including a subagent's) fails as an unknown
+job. A foreground call waits up to 10 s; a command still running after that
+is moved to the background automatically and returns its `job_id`, and the
+process keeps running until it exits or is cancelled. No shell command has a
+timeout (`timeout_ms` is gone). An auto-backgrounded job reports its running
+time through the session's notice stream every five minutes until it ends,
+and its completion notice wakes an idle session. Explicit `background: true`
+jobs send no running reminders; add `notify: true` for a completion report.
+They are tracked separately: the
+sidecar snapshots the folder when a background job starts (for an auto job,
+when it moves to the background), keeps a record in
 `<sessionDir>/jobs/<jobId>.json` (`status` running/done/failed/
-cancelled/timeout, `startedAt`, `endedAt`, `exitCode`, `files`,
-`uncertain`, `finalized`) and, exactly once when the job exits, is
-cancelled or times out, snapshots again and records the changed files
+cancelled, `startedAt`, `endedAt`, `exitCode`, `files`,
+`uncertain`, `finalized`) and, exactly once when the job exits or is
+cancelled, snapshots again and records the changed files
 as a step of the turn that started it. `revertSession` and
 `unrevertSession` fail while one of the session's jobs is still
 running. Files that another call (any session) also changed while the

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -22,11 +21,15 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
+var (
+	// DefaultShellYieldMs is how long a synchronous call waits before it
+	// hands the still-running command to the background and returns a
+	// job id. Nothing is killed: the command keeps running either way.
+	// A variable so tests can shorten the wait.
+	DefaultShellYieldMs = 10_000
+)
+
 const (
-	DefaultShellTimeoutMs = 10_000
-	// DefaultJobTimeoutMs is the default for background runs, which
-	// are meant for long work.
-	DefaultJobTimeoutMs  = 300_000
 	MaxShellOutput       = 32 * 1024
 	shellTruncatedMarker = "\n… [truncated]"
 
@@ -54,7 +57,6 @@ type ShellArgs struct {
 	Cmd        string `json:"cmd"`
 	Background bool   `json:"background"`
 	Notify     bool   `json:"notify"`
-	TimeoutMs  int64  `json:"timeout_ms"`
 }
 
 // CommandLine returns the command to run, preferring command over the
@@ -75,6 +77,9 @@ type ShellResponse struct {
 	// OutputFile holds the whole output when it outgrew the inline cap.
 	OutputFile *string `json:"output_file,omitempty"`
 	Log        *string `json:"log,omitempty"`
+	// Note explains what happened when the answer is not the command's
+	// own result (for example, that it was moved to the background).
+	Note *string `json:"note,omitempty"`
 }
 
 // procTracker attributes shell children to their session for the
@@ -90,45 +95,149 @@ func NewShellTool() *ShellTool {
 	return &ShellTool{inner: &shellJobs{byID: map[string]*job{}, changed: newBroadcaster()}}
 }
 
-const maxShellTimeoutMs = int64(^uint64(0)>>1) / int64(time.Millisecond)
-
-func shellTimeoutMs(ms int64, background bool) (time.Duration, error) {
-	if ms == 0 && background {
-		return DefaultJobTimeoutMs * time.Millisecond, nil
+// runSync starts the command as a job and waits up to
+// DefaultShellYieldMs for it. A command that outlives the wait keeps
+// running: it is armed for a completion notice, gets a five-minute
+// running notice until it ends, and the call returns its job id.
+func (s *ShellTool) runSync(cmd, dir, owner, callID string, cancel context.Context, sessionDir string, sb *sandbox.Policy) (string, error) {
+	cleanup := ""
+	if sessionDir == "" {
+		// No session (an eval, a plan check): keep the log in a temp
+		// folder and take it away with the call.
+		tmp, err := os.MkdirTemp("", "paladin-shell-")
+		if err != nil {
+			return "", ArgsError(fmt.Sprintf("shell: cannot keep the command output: %s", syserr.Str(err)))
+		}
+		sessionDir, cleanup = tmp, tmp
 	}
-	if ms == 0 {
-		return DefaultShellTimeoutMs * time.Millisecond, nil
+	if cleanup != "" {
+		defer os.RemoveAll(cleanup)
 	}
-	if ms < 0 {
-		return 0, fmt.Errorf("shell: timeout_ms cannot be negative")
+	started, err := s.startJob(cmd, dir, owner, callID, false, true, sessionDir, sb)
+	if err != nil {
+		return "", err
 	}
-	if ms > maxShellTimeoutMs {
-		return 0, fmt.Errorf("shell: timeout_ms exceeds the maximum supported value of %d", maxShellTimeoutMs)
+	select {
+	case <-started.done:
+		s.markReported(started.id)
+		return s.completed(started.id, sb != nil)
+	case <-time.After(time.Duration(DefaultShellYieldMs) * time.Millisecond):
+		if s.armAuto(started.id) {
+			return s.runningResult(started.id,
+				fmt.Sprintf("still running after %dms; moved to the background. Its completion and its running time are reported to you automatically.", DefaultShellYieldMs))
+		}
+		s.markReported(started.id)
+		return s.completed(started.id, sb != nil)
+	case <-cancel.Done():
+		_, _ = s.cancel(started.id, owner)
+		select {
+		case <-started.done:
+		case <-time.After(2 * time.Second):
+		}
+		return "", ArgsError("shell: the command was interrupted")
 	}
-	return time.Duration(ms) * time.Millisecond, nil
 }
 
-func (s *ShellTool) runSync(cmd, dir, owner, spillPath string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, error) {
-	out, terr := runSyncInner(cmd, dir, owner, spillPath, limit, cancel, sb)
+// completed builds the answer for a command that has finished.
+func (s *ShellTool) completed(id string, sandboxed bool) (string, error) {
+	out, terr := s.completedResult(id, sandboxed)
 	if terr != nil {
 		return "", terr
 	}
 	return out, nil
 }
 
-func shellResponseJSON(id, status string, exitCode *int, output *string, truncated *bool, log, outputFile string) (string, error) {
-	var logPtr, filePtr *string
+func (s *ShellTool) completedResult(id string, sandboxed bool) (string, *ToolError) {
+	s.inner.mu.Lock()
+	j, ok := s.inner.byID[id]
+	var snap job
+	if ok {
+		snap = *j
+	}
+	s.inner.mu.Unlock()
+	if !ok {
+		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", id))
+	}
+	if snap.status == JobCancelled {
+		return "", ArgsError("shell: the command was cancelled")
+	}
+	raw, truncated, err := readJobOutput(snap.log, MaxShellOutput)
+	if err != nil {
+		return "", ArgsError(fmt.Sprintf("shell: cannot read the command output: %s", syserr.Str(err)))
+	}
+	outputFile := ""
+	if truncated {
+		outputFile = snap.log
+	}
+	raw = []byte(strings.ToValidUTF8(string(raw), "�"))
+	return finishSync(raw, truncated, outputFile, waitResult{code: snap.exitCode, signaled: snap.exitCode == nil}, sandboxed)
+}
+
+func (s *ShellTool) runningResult(id, note string) (string, error) {
+	s.inner.mu.Lock()
+	j, ok := s.inner.byID[id]
+	var snap job
+	if ok {
+		snap = *j
+	}
+	s.inner.mu.Unlock()
+	if !ok {
+		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", id))
+	}
+	return shellResponseJSON(snap.id, JobRunning, nil, nil, nil, snap.log, "", note)
+}
+
+// readJobOutput reads at most max bytes of a command log: the whole
+// file when it fits, otherwise its start and end around the truncation
+// marker. The log itself keeps every byte.
+func readJobOutput(path string, max int) ([]byte, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	if st.Size() <= int64(max) {
+		data, err := io.ReadAll(f)
+		return data, false, err
+	}
+	half := max / 2
+	head := make([]byte, half)
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+	if _, err := f.Seek(st.Size()-int64(half), io.SeekStart); err != nil {
+		return nil, false, err
+	}
+	tail := make([]byte, half)
+	n, _ = io.ReadFull(f, tail)
+	tail = tail[:n]
+	out := make([]byte, 0, len(head)+len(shellTruncatedMarker)+len(tail))
+	out = append(out, head...)
+	out = append(out, shellTruncatedMarker...)
+	out = append(out, tail...)
+	return out, true, nil
+}
+
+func shellResponseJSON(id, status string, exitCode *int, output *string, truncated *bool, log, outputFile, note string) (string, error) {
+	var logPtr, filePtr, notePtr *string
 	if log != "" {
 		logPtr = &log
 	}
 	if outputFile != "" {
 		filePtr = &outputFile
 	}
+	if note != "" {
+		notePtr = &note
+	}
 	if output != nil {
 		masked := redact.String(*output)
 		output = &masked
 	}
-	out := ShellResponse{Status: status, ExitCode: exitCode, Output: output, Truncated: truncated, OutputFile: filePtr, Log: logPtr}
+	out := ShellResponse{Status: status, ExitCode: exitCode, Output: output, Truncated: truncated,
+		OutputFile: filePtr, Log: logPtr, Note: notePtr}
 	if id != "" {
 		out.JobID = &id
 	}
@@ -139,138 +248,9 @@ func shellResponseJSON(id, status string, exitCode *int, output *string, truncat
 	return string(data), nil
 }
 
-func runSyncInner(cmdStr, dir, owner, spillPath string, limit time.Duration, cancel context.Context, sb *sandbox.Policy) (string, *ToolError) {
-	child, outR, errR, err := spawnPiped(cmdStr, dir, sb)
-	if err != nil {
-		return "", ArgsError(fmt.Sprintf("shell: cannot start the command: %s", syserr.Str(err)))
-	}
-	pid := 0
-	if child.Process != nil {
-		pid = child.Process.Pid
-	}
-	defer procTracker.Track(owner, pid)()
-	capture := newShellOutputCapture(MaxShellOutput)
-	if spillPath != "" {
-		capture.spillTo(spillPath)
-	}
-	defer capture.finishSpill()
-	var readers sync.WaitGroup
-	readers.Add(2)
-	go func() { defer readers.Done(); _, _ = io.Copy(capture, outR) }()
-	go func() { defer readers.Done(); _, _ = io.Copy(capture, errR) }()
-	ioDone := make(chan struct{})
-	go func() { readers.Wait(); close(ioDone) }()
-	// Closing our read ends ends the copies; a background grandchild that
-	// still holds the pipes cannot keep the call waiting past this.
-	defer func() { _ = outR.Close(); _ = errR.Close() }()
-	waitDone := make(chan waitResult, 1)
-	go func() {
-		werr := child.Wait()
-		code, signaled := exitCode(werr)
-		waitDone <- waitResult{code: code, signaled: signaled}
-	}()
-	start := time.Now()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-cancel.Done():
-			killProcessGroup(pid)
-			<-waitDone
-			<-ioDone
-			return "", ArgsError("shell: the command was interrupted")
-		case <-ticker.C:
-			if time.Since(start) >= limit {
-				killProcessGroup(pid)
-				<-waitDone
-				<-ioDone
-				return "", ArgsError(fmt.Sprintf("shell: the command ran past its timeout of %dms", limit.Milliseconds()))
-			}
-		case w := <-waitDone:
-			// The command itself is gone, so anything alive in its
-			// process group was left behind (a daemon, watcher or
-			// detached child). Kill it before reaping the output: an
-			// untracked leftover would keep burning CPU invisibly.
-			killProcessGroup(pid)
-			select {
-			case <-ioDone:
-			case <-time.After(10 * time.Second):
-			}
-			output, truncated := capture.result()
-			return finishSync(output, truncated, capture.finishSpill(), w, sb != nil)
-		}
-	}
-}
-
 type waitResult struct {
 	code     *int
 	signaled bool
-}
-
-type shellOutputCapture struct {
-	mu       sync.Mutex
-	maxBytes int
-	head     []byte
-	tail     []byte
-	total    int64
-	// The spill keeps every byte once output outgrows maxBytes (spill.go).
-	spillPath   string
-	spill       *os.File
-	spilled     int64
-	spillFailed bool
-}
-
-func newShellOutputCapture(maxBytes int) *shellOutputCapture {
-	half := maxBytes / 2
-	return &shellOutputCapture{maxBytes: maxBytes, head: make([]byte, 0, half), tail: make([]byte, 0, maxBytes-half)}
-}
-
-func (c *shellOutputCapture) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	n := len(p)
-	c.spillLocked(p)
-	c.total += int64(n)
-	headCap := c.maxBytes / 2
-	if len(c.head) < headCap {
-		add := headCap - len(c.head)
-		if add > len(p) {
-			add = len(p)
-		}
-		c.head = append(c.head, p[:add]...)
-		p = p[add:]
-	}
-	if len(p) > 0 {
-		tailCap := c.maxBytes - headCap
-		if len(p) >= tailCap {
-			c.tail = append(c.tail[:0], p[len(p)-tailCap:]...)
-		} else {
-			over := len(c.tail) + len(p) - tailCap
-			if over > 0 {
-				copy(c.tail, c.tail[over:])
-				c.tail = c.tail[:len(c.tail)-over]
-			}
-			c.tail = append(c.tail, p...)
-		}
-	}
-	return n, nil
-}
-
-func (c *shellOutputCapture) result() ([]byte, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	truncated := c.total > int64(c.maxBytes)
-	if truncated {
-		// Each half is cleaned on its own so a rune split at either cut
-		// never corrupts the text; the marker sits at the seam.
-		head := strings.ToValidUTF8(string(c.head), "�")
-		tail := strings.ToValidUTF8(string(c.tail), "�")
-		return []byte(head + shellTruncatedMarker + tail), true
-	}
-	out := make([]byte, 0, len(c.head)+len(c.tail))
-	out = append(out, c.head...)
-	out = append(out, c.tail...)
-	return []byte(strings.ToValidUTF8(string(out), "�")), false
 }
 
 func finishSync(output []byte, truncated bool, outputFile string, w waitResult, sandboxed bool) (string, *ToolError) {
@@ -289,13 +269,13 @@ func finishSync(output []byte, truncated bool, outputFile string, w waitResult, 
 	outText := text
 	codePtr := code
 	if code == 0 {
-		text2, err := shellResponseJSON("", JobDone, &codePtr, &outText, truncPtr, "", outputFile)
+		text2, err := shellResponseJSON("", JobDone, &codePtr, &outText, truncPtr, "", outputFile, "")
 		if err != nil {
 			return "", mustToolError(err)
 		}
 		return text2, nil
 	}
-	content, err := shellResponseJSON("", JobFailed, &codePtr, &outText, truncPtr, "", outputFile)
+	content, err := shellResponseJSON("", JobFailed, &codePtr, &outText, truncPtr, "", outputFile, "")
 	if err != nil {
 		return "", mustToolError(err)
 	}
@@ -381,14 +361,15 @@ func (ShellTool) Definition() ToolDefinition {
 			"Pass the shell command in the command field. " +
 			"There is no workdir: every run starts in the workspace root, " +
 			"so cd inside the command when you need a subdirectory. " +
-			"With background false (the default) the call waits for the command and " +
-			"returns its output; with background true it returns at once with a " +
-			"job_id in running state and writes everything to a log file. " +
-			"Status checks a background job, cancel stops one. Prefer " +
-			"synchronous runs for finite commands, raising timeout_ms for slow ones. " +
-			"Use background for a long-running development server or work that " +
-			"can proceed while other calls run. Check status and read the log as " +
-			"needed, or set notify true to receive the final state later. " +
+			"A normal call waits up to 10 seconds: a command that finishes sooner " +
+			"returns its output, and one that runs longer is moved to the background " +
+			"automatically and returns a job_id in running state. Nothing is killed. " +
+			"Use background true to return at once for a long-running development server " +
+			"or work that can proceed while other calls run. " +
+			"Status checks a job, cancel stops one. " +
+			"A job reports when it finishes and every five minutes while it runs; " +
+			"keep working and do not poll it. Every command writes its whole output " +
+			"to the log file named in the answer. " +
 			"When a command exits, any processes it left behind are terminated; " +
 			"start servers with background true rather than '&'.",
 		Parameters: map[string]any{
@@ -398,8 +379,7 @@ func (ShellTool) Definition() ToolDefinition {
 				"job_id":     map[string]any{"type": "string", "description": "The job to check or stop. Empty or missing for a new run."},
 				"command":    map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
-				"notify":     map[string]any{"type": "boolean", "description": "With background true, remind the agent when the job finishes: its final state and output tail arrive on their own in a later round. Defaults to false; ignored without background."},
-				"timeout_ms": map[string]any{"type": "integer", "description": "How long a command may run, in milliseconds. Defaults to 10000, or 300000 with background.", "minimum": 1, "maximum": maxShellTimeoutMs},
+				"notify":     map[string]any{"type": "boolean", "description": "With background true, report the job's final state and output tail when it finishes. Defaults to false; ignored without background."},
 			},
 		},
 	}
@@ -422,10 +402,6 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		if strings.TrimSpace(cmd) == "" {
 			return "", ArgsError("shell: command is required")
 		}
-		limit, err := shellTimeoutMs(args.TimeoutMs, args.Background)
-		if err != nil {
-			return "", ArgsError(err.Error())
-		}
 		dir := strings.TrimSpace(ctx.Workspace)
 		if dir == "" {
 			return "", ArgsError("shell: no workspace to run in")
@@ -442,9 +418,9 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, limit, args.Notify, ctx.SessionDir, ctx.Sandbox)
+			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, args.Notify, ctx.SessionDir, ctx.Sandbox)
 		}
-		return s.runSync(cmd, dir, ctx.SessionID, SpillPath(ctx), limit, ctx.Cancel, ctx.Sandbox)
+		return s.runSync(cmd, dir, ctx.SessionID, ctx.CallID, ctx.Cancel, ctx.SessionDir, ctx.Sandbox)
 	case ShellStatus:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")

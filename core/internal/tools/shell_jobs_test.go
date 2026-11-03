@@ -12,9 +12,10 @@ import (
 )
 
 type recordingObserver struct {
-	mu       sync.Mutex
-	started  []JobEvent
-	finished []JobEvent
+	mu           sync.Mutex
+	started      []JobEvent
+	backgrounded []JobEvent
+	finished     []JobEvent
 }
 
 func (o *recordingObserver) JobStarted(e JobEvent) {
@@ -24,6 +25,12 @@ func (o *recordingObserver) JobStarted(e JobEvent) {
 }
 
 func (o *recordingObserver) JobSpawned(JobEvent) {}
+
+func (o *recordingObserver) JobBackgrounded(e JobEvent) {
+	o.mu.Lock()
+	o.backgrounded = append(o.backgrounded, e)
+	o.mu.Unlock()
+}
 
 func (o *recordingObserver) JobFinished(e JobEvent) {
 	o.mu.Lock()
@@ -102,15 +109,10 @@ func TestJobObserverFinalizesOnce(t *testing.T) {
 	// A second cancel does not finalize again.
 	tool.Call(json.RawMessage(`{"action":"cancel","job_id":"`+cancelled+`"}`), ctx)
 
-	timedOut := startJob(t, tool, ctx, `{"cmd":"sleep 30","background":true,"timeout_ms":200}`)
-	if e := waitFinished(t, obs, timedOut); e.Status != JobTimeout {
-		t.Fatalf("timed-out job: %+v", e)
-	}
-
 	obs.mu.Lock()
 	started := append([]JobEvent(nil), obs.started...)
 	obs.mu.Unlock()
-	if len(started) != 3 {
+	if len(started) != 2 {
 		t.Fatalf("started %d", len(started))
 	}
 	for _, e := range started {
@@ -118,7 +120,7 @@ func TestJobObserverFinalizesOnce(t *testing.T) {
 			t.Fatalf("start event %+v", e)
 		}
 	}
-	for _, id := range []string{done, cancelled, timedOut} {
+	for _, id := range []string{done, cancelled} {
 		if len(obs.finishedFor(id)) != 1 {
 			t.Fatalf("job %s finalized %d times", id, len(obs.finishedFor(id)))
 		}
@@ -127,7 +129,7 @@ func TestJobObserverFinalizesOnce(t *testing.T) {
 
 func TestShellOutputIsRedacted(t *testing.T) {
 	sh := NewShellTool()
-	out, err := sh.Call([]byte(`{"cmd":"echo OPENAI_API_KEY=abcdef1234567890xyz; echo ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"}`), &ToolCtx{Workspace: t.TempDir(), Cancel: context.Background()})
+	out, err := sh.Call([]byte(`{"cmd":"echo OPENAI_API_KEY=abcdef1234567890xyz; echo ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"}`), &ToolCtx{Workspace: t.TempDir(), SessionDir: t.TempDir(), Cancel: context.Background()})
 	if err != nil {
 		t.Fatal(err)
 	}

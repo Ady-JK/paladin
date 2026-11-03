@@ -68,7 +68,6 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			if result.IsError {
 				a.logErrorf("tool:"+result.Name, "%s %s\n%s", call.ID, call.Arguments, result.Content)
 			}
-			a.armNotify(&call, &result)
 			a.noteVerify(&call, &result)
 			a.appendToolResult(&call, &result)
 			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
@@ -284,32 +283,4 @@ func toolActivity(call *inference.ToolCall, result *tools.ToolResult) *ToolActiv
 		ID: call.ID, Name: call.Name, Arguments: call.Arguments,
 		Result: result.Content, Status: status,
 	}
-}
-
-func (a *Agent) armNotify(call *inference.ToolCall, result *tools.ToolResult) {
-	if a.shell == nil || result.Name != "shell" || result.IsError {
-		return
-	}
-	var args struct {
-		Action     string `json:"action"`
-		Background bool   `json:"background"`
-		Notify     bool   `json:"notify"`
-	}
-	if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
-		return
-	}
-	if (args.Action != "" && args.Action != "run") || !args.Background || !args.Notify {
-		return
-	}
-	var receipt struct {
-		JobID  string `json:"job_id"`
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(result.Content), &receipt); err != nil {
-		return
-	}
-	if receipt.JobID == "" || receipt.Status != tools.JobRunning {
-		return
-	}
-	a.shell.ArmNotify(a.session.Meta.SessionID, call.ID, receipt.JobID)
 }
