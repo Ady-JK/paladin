@@ -751,6 +751,54 @@
 .dark .pane-agent-foot {
   border-top-color: var(--color-slate-800);
 }
+.pane-agent-ask {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0 12px 10px;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 16px;
+  padding: 8px 8px 8px 12px;
+}
+.pane-agent-ask:focus-within {
+  border-color: var(--color-accent-400);
+}
+.pane-agent-ask[hidden] {
+  display: none;
+}
+.dark .pane-agent-ask {
+  border-color: var(--color-slate-700);
+}
+.pane-agent-input {
+  min-height: 24px;
+  max-height: 140px;
+  flex: 1;
+  resize: none;
+  background: transparent;
+  font-size: 0.8125rem;
+  line-height: 1.5rem;
+  outline: none;
+  field-sizing: content;
+}
+.pane-agent-send {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--color-slate-900);
+  color: #fff;
+}
+.dark .pane-agent-send {
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+}
+.pane-agent-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* ---- agent status ---- */
 .agent-status {

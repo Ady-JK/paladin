@@ -46,11 +46,10 @@ func (r *AgentRuntime) SubmitTurn(req agent.Request, opts SubmitOpts) (TurnInfo,
 }
 
 // SteerTurn sends a message into the session's running turn (see
-// Hub.Steer).
+// Hub.Steer). A subagent's window accepts a steer like any other running
+// turn — the user is watching it work and may guide it — but it still
+// cannot be started by the user: SubmitTurn keeps refusing a child.
 func (r *AgentRuntime) SteerTurn(sessionID, message, display string) (TurnInfo, error) {
-	if err := r.subagents.refuseUserTurn(sessionID, ""); err != nil {
-		return TurnInfo{}, err
-	}
 	return r.hub.Steer(sessionID, message, display)
 }
 

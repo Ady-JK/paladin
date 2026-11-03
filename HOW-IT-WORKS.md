@@ -568,8 +568,10 @@ The main cook controls helpers with six tools: `spawn_agent` (hire one with a ta
 
 **In the app:**
 - Helpers sit **under their parent** in the sidebar ("2 subagents", fold/unfold), each with a coloured status dot (queued, running, done, failed, stopped).
-- Clicking one opens its full conversation in the main view, with a **"← parent"** bar at the top to go back. The composer is locked: only the parent gives a helper work.
-- A `spawn_agent` row in the chat has an **Open** button that shows the helper **live in the right-hand pane**, next to the parent, with a Stop button. You can switch sessions and come back; both keep running.
+- Clicking one opens its **own window in the right-hand pane**, beside the parent, so the parent's chat stays on screen. A helper that is working gets its window on its own as soon as it starts, without stealing focus; closing that tab keeps it closed.
+- The window shows the helper's conversation exactly as the main chat does — its text, tool rows, thinking and steers — live while it works and complete once it finishes.
+- While a helper runs, the window has a **composer**: a message there steers its running turn (the same path as the parent's `send_message`), and it appears in the helper's conversation. Once the helper finishes the window is read-only.
+- A `spawn_agent` row in the chat also has an **Open** button for the same window, with a Stop button. **Open** inside the window moves the helper into the main view, with a **"← parent"** bar to go back; the composer there is locked, because only the parent gives a helper work.
 - Helpers don't pop up "finished" notifications; their parent does.
 
 ---

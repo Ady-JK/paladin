@@ -138,16 +138,27 @@ func TestSessionMutationsKeepTheirOrder(t *testing.T) {
 	var (
 		mu      sync.Mutex
 		applied = map[string][]string{}
-		running atomic.Int32
-		overlap atomic.Bool
+		// inFlight counts the calls running per session: another
+		// session's call must not look like a second mutation of this
+		// one.
+		inFlight = map[string]int{}
+		overlap  atomic.Bool
 	)
 	release := make(chan struct{})
 	testMethod(t, "testMutate", runSession, func(_ *runtime.AgentRuntime, a args) (any, error) {
-		if running.Add(1) > 1 && a.str("sessionId") == "sess-a" {
+		session := a.str("sessionId")
+		mu.Lock()
+		inFlight[session]++
+		if inFlight[session] > 1 {
 			overlap.Store(true)
 		}
-		defer running.Add(-1)
-		if a.str("step") == "0" && a.str("sessionId") == "sess-a" {
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			inFlight[session]--
+			mu.Unlock()
+		}()
+		if a.str("step") == "0" && session == "sess-a" {
 			<-release
 		}
 		mu.Lock()

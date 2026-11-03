@@ -136,25 +136,107 @@ test("children nest under their parent, not as sessions of their own", async ({ 
   await expect(kids).toBeVisible();
 });
 
-test("a child opens in the main view with a way back to its parent", async ({ page }) => {
+test("a child opens in its own pane window, with a way into the main view", async ({ page }) => {
   await showSidebar(page);
   await page.locator('[data-child="sess-child-1"]').click();
-  await expect(page.locator("#messages")).toContainText("Child found login.go.");
-  const bar = page.locator("#parentBar");
-  await expect(bar).toBeVisible();
-  await expect(bar).toContainText("parent work");
-  await expect(bar).toContainText("explore-1");
-  await expect(bar.locator(".agent-status")).toHaveAttribute("data-status", "running");
-  // Only its parent gives a subagent work.
-  await expect(page.locator("#promptInput")).toBeDisabled();
-  await expect(page.locator('[data-child="sess-child-1"]')).toHaveClass(/is-active/);
 
+  const pane = page.locator("#sidePane");
+  await expect(pane).toBeVisible();
+  await expect(pane.locator(".pane-tab.is-active")).toContainText("explore-1");
+  const agent = pane.locator('.pane-agent[data-agent="sess-child-1"]');
+  await expect(agent).toContainText("Child found login.go.");
+  await expect(agent.locator(".pane-agent-head .agent-status")).toHaveAttribute("data-status", "running");
+  // The child never replaces the main view; its parent does.
+  expect(await opens(page)).not.toContain("sess-child-1");
+  // The parent stays on screen, so its composer is still the main one.
+  await expect(page.locator("#promptInput")).toBeEnabled();
+  await expect(page.locator("#parentBar")).toBeHidden();
+  // A running child takes guidance...
+  await expect(agent.locator(".pane-agent-ask")).toBeVisible();
+
+  // ...and Open moves it into the full view, where only its parent
+  // gives it work.
+  await agent.locator(".pane-agent-open").click();
+  await expect(page.locator("#parentBar")).toBeVisible();
+  await expect(page.locator("#parentBar")).toContainText("parent work");
+  await expect(page.locator("#parentBar")).toContainText("explore-1");
+  await expect(page.locator("#parentBar .agent-status")).toHaveAttribute("data-status", "running");
+  await expect(page.locator("#promptInput")).toBeDisabled();
+  await expect(pane).toBeHidden();
   await expect(page.locator("#messages .revert-btn")).toHaveCount(0);
+
   await page.locator("#parentBackBtn").click();
   await expect(page.locator("#messages")).toContainText("Parent is waiting on explore-1.");
-  await expect(bar).toBeHidden();
+  await expect(page.locator("#parentBar")).toBeHidden();
   await expect(page.locator("#promptInput")).toBeEnabled();
-  expect((await opens(page)).slice(-2)).toEqual(["sess-child-1", "sess-parent"]);
+});
+
+test("every working child gets a pane window without a click", async ({ page }) => {
+  await showSidebar(page);
+  await page.locator('[data-session="sess-parent"]').click();
+  await expect(page.locator("#sidePane")).toBeHidden();
+
+  // Opening the pane any way at all shows the child's tab already there.
+  await page.locator("#paneNewChatBtn").click();
+  await expect(page.locator("#sidePane")).toBeVisible();
+  const tabs = page.locator("#paneTabs");
+  await expect(tabs.locator('[data-agent="sess-child-1"]')).toHaveCount(1);
+  // The new side chat stays the active tab: auto-open never steals focus.
+  await expect(tabs.locator(".pane-tab.is-active")).toContainText("Side chat");
+
+  // Closing the tab does not bring it back on the next status change.
+  await tabs.locator('[data-agent="sess-child-1"] .pane-tab-close').click();
+  await expect(tabs.locator('[data-agent="sess-child-1"]')).toHaveCount(0);
+  await emit(page, {
+    event: "agents/changed",
+    parentSessionId: "sess-parent",
+    agent: {
+      agentId: "sess-child-1",
+      parentSessionId: "sess-parent",
+      name: "explore-1",
+      type: "explore",
+      status: "running",
+      updatedAt: now,
+    },
+  });
+  await expect(tabs.locator('[data-agent="sess-child-1"]')).toHaveCount(0);
+});
+
+test("a message typed into a running child steers its turn", async ({ page }) => {
+  await showSidebar(page);
+  await page.locator('[data-child="sess-child-1"]').click();
+  // A real running turn, as the sidecar would have started. The runner
+  // never resolves, so the child stays busy while the user types.
+  await page.evaluate(() => {
+    (window as any).__e2eRunTurn = () => new Promise(() => undefined);
+    (window as any).__e2eHub.submit({ sessionId: "sess-child-1", message: "work" });
+  });
+
+  const agent = page.locator('.pane-agent[data-agent="sess-child-1"]');
+  const ask = agent.locator(".pane-agent-ask");
+  await expect(ask).toBeVisible();
+  await ask.locator(".pane-agent-input").fill("focus on the handler tests");
+  await ask.locator(".pane-agent-input").press("Enter");
+
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e2eSteers || []))
+    .toEqual([
+      { sessionId: "sess-child-1", message: "focus on the handler tests", display: "focus on the handler tests" },
+    ]);
+  await expect(agent.locator(".pane-agent-input")).toHaveValue("");
+  // The steer joins the child's own transcript, not the parent's.
+  await expect(agent).toContainText("focus on the handler tests");
+  await expect(page.locator("#messages")).not.toContainText("focus on the handler tests");
+});
+
+test("a finished child is read-only in its window", async ({ page }) => {
+  await showSidebar(page);
+  await page.locator('[data-child="sess-child-2"]').click();
+  const agent = page.locator('.pane-agent[data-agent="sess-child-2"]');
+  await expect(agent).toContainText("Reviewer done.");
+  await expect(agent.locator(".pane-agent-head .agent-status")).toHaveAttribute("data-status", "completed");
+  await expect(agent.locator(".pane-agent-ask")).toBeHidden();
+  await expect(agent.locator(".pane-agent-foot")).toContainText("Finished · read-only");
 });
 
 test("agents/changed repaints a child's status and finds new children", async ({ page }) => {
@@ -246,12 +328,15 @@ test("a spawn_agent row opens the child live in the side pane", async ({ page })
     },
   });
 
-  // Full view and back: the parent's pane tab still streams.
+  // Full view and back: Open closes the pane, and the child's window
+  // reopens from the sidebar with its live rows intact.
   await agent.locator(".pane-agent-open").click();
   await expect(page.locator("#parentBar")).toBeVisible();
   await expect(page.locator("#messages")).toContainText("scanning handlers");
   await page.locator("#parentBackBtn").click();
   await expect(page.locator("#parentBar")).toBeHidden();
+  await showSidebar(page);
+  await page.locator('[data-child="sess-child-1"]').click();
   await expect(pane.locator(".pane-tab.is-active")).toContainText("explore-1");
   await childEmit(page, { event: "chat/delta", delta: " and routes" });
   await expect(pane.locator('.pane-agent[data-agent="sess-child-1"]')).toContainText("and routes");
@@ -281,10 +366,11 @@ test("deleting a parent drops its and its children's views, even with a child op
   await page.locator('[data-session="sess-parent"]').click();
   await page.locator('.tool-row[data-tool="spawn_agent"] [data-open-agent]').click();
   await expect(page.locator('.pane-agent[data-agent="sess-child-1"]')).toContainText("Child found login.go.");
-  // Open the child in the main view, its own pane open too.
+  await expect(page.locator('#paneTabs [data-agent="sess-child-1"]')).toHaveCount(1);
+  // Open the child in the main view: the pane gives way to it.
   await page.locator('.pane-agent[data-agent="sess-child-1"] .pane-agent-open').click();
   await expect(page.locator("#parentBar")).toBeVisible();
-  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+  await expect(page.locator("#sidePane")).toBeHidden();
 
   await showSidebar(page);
   const row = page.locator('#sessionList .session-row:has([data-session="sess-parent"])');

@@ -41,7 +41,14 @@ import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
 import { loadJson, saveJson } from "../core/storage";
-import { disposeSidePanes, paintAgentTabs, refreshChanges, syncSidePane } from "./sidePane";
+import {
+  autoOpenChildTabs,
+  disposeSidePanes,
+  openAgentTab,
+  paintAgentTabs,
+  refreshChanges,
+  syncSidePane,
+} from "./sidePane";
 import { mountImage, registerImage } from "./mediaGallery";
 
 export async function refreshSessions(): Promise<void> {
@@ -56,6 +63,8 @@ export async function refreshSessions(): Promise<void> {
   }
 
   renderSessions();
+  // A child that is already working gets its window without a click.
+  autoOpenChildTabs();
 }
 
 // scheduleRefreshSessions coalesces the list reloads that follow one
@@ -543,6 +552,7 @@ export function onAgentsChanged(agent: AgentInfo): void {
     state.subagent = child.subagent;
   }
   renderSessions();
+  autoOpenChildTabs();
 }
 
 // HISTORY_PAGE is how many transcript rows are painted at once. Long
@@ -811,7 +821,10 @@ export function initSessions(): void {
     }
     const child = target.closest<HTMLElement>("[data-child]");
     if (child?.dataset.child) {
-      void openSession(child.dataset.child);
+      // A child works beside its parent: open its window in the pane so
+      // the parent's chat stays on screen. "Open" in that window moves
+      // it into the main view when that is what you want.
+      void openAgentTab(child.dataset.child);
       return;
     }
     const fold = target.closest<HTMLElement>("[data-fold]");

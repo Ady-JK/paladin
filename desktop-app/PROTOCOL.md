@@ -565,9 +565,13 @@ parent's hub slot, so a child runs even with `maxConcurrentTurns: 1`.
 After a restart, a child whose turn was cut off reads `interrupted` and
 unreported results are delivered on the parent's next turn.
 
-`submitChat` and `steerChat` into a subagent session fail: only its
-parent gives it work. Stopping its turn (`stopChat`/`interruptAgent`)
-works, and the parent is told. Deleting a parent deletes its children.
+`submitChat` into a subagent session fails: only its parent starts new
+work. `steerChat` is different — the user may watch a child's live
+window and guide it while it runs, so a steer joins that turn exactly as
+it does for a normal session. With nothing running it still fails, so a
+finished child stays read-only. Stopping its turn
+(`stopChat`/`interruptAgent`) works, and the parent is told. Deleting a
+parent deletes its children.
 
 Status changes stream as
 

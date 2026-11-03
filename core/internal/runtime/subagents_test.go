@@ -567,6 +567,35 @@ func TestInterruptRunningChildIsQuietAndFollowupResumes(t *testing.T) {
 	}
 }
 
+// The user watching a child's window can guide it the same way the
+// parent can: the steer joins the running turn.
+func TestUserSteerReachesARunningChild(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	var steered atomic.Bool
+	rt, ws, parentID, _ := agentRuntime(t, func(c modelCall) modelReply {
+		if c.Child && strings.Contains(strings.Join(c.Users, "|"), "from the user") {
+			steered.Store(true)
+			return modelReply{Text: "steered"}
+		}
+		return blockingChild(release, started)(c)
+	})
+	runParent(t, rt, parentID, ws, "hi")
+	info, err := rt.subagents.spawn(parentID, spawnArgs{Kind: subagentKinds[0], Task: "look around", ForkTurns: ForkNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if _, err := rt.SteerTurn(info.ID, "from the user", "from the user"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	rt.hub.WaitIdle(info.ID, 10*time.Second)
+	if !steered.Load() {
+		t.Fatal("the child never saw the user's steer")
+	}
+}
+
 func TestMessageSteersARunningChild(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
@@ -821,8 +850,10 @@ func TestUserTurnsIntoAChildAreRefused(t *testing.T) {
 		!strings.Contains(err.Error(), "subagent") {
 		t.Fatalf("user turn into child: %v", err)
 	}
-	if _, err := rt.SteerTurn(info.ID, "hijack", "hijack"); err == nil {
-		t.Fatal("user steered a child")
+	// Steering is not starting work: with nothing running it still fails.
+	if _, err := rt.SteerTurn(info.ID, "hijack", "hijack"); err == nil ||
+		!strings.Contains(err.Error(), "no turn is running") {
+		t.Fatalf("steer into an idle child: %v", err)
 	}
 	list, err := rt.ListAgents(parentID)
 	if err != nil || len(list) != 1 || list[0].ID != info.ID {

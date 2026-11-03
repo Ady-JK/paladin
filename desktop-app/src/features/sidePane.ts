@@ -1013,6 +1013,10 @@ function newAgentTab(agentId: string): AgentTab {
   body.innerHTML =
     `<div class="pane-agent-head"></div>` +
     `<div class="pane-agent-body"><div class="pane-agent-history"></div></div>` +
+    `<form class="pane-agent-ask" hidden>` +
+    `<textarea class="pane-agent-input" rows="1" aria-label="Message this subagent" placeholder="Message this subagent while it runs…"></textarea>` +
+    `<button type="submit" class="pane-agent-send" title="Send into the running turn" aria-label="Send into the running turn">${icon("arrow-up", "h-3.5 w-3.5")}</button>` +
+    `</form>` +
     `<div class="pane-agent-foot">Driven by its parent agent · shares the parent's workspace</div>`;
   const tab: AgentTab = {
     kind: "agent",
@@ -1023,10 +1027,13 @@ function newAgentTab(agentId: string): AgentTab {
     loading: null,
     head: "",
   };
-  const parentId = state.sessionId;
+  const parentId = child?.subagent?.parentId || state.sessionId;
   body.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target.closest(".pane-agent-open")) {
+      // Full view and back: the pane would otherwise reopen a blank
+      // side chat for the child's own session.
+      closePane();
       void openSession(agentId);
     } else if (target.closest(".pane-agent-stop")) {
       api
@@ -1034,7 +1041,39 @@ function newAgentTab(agentId: string): AgentTab {
         .catch((error: unknown) => toast(`Could not stop: ${errorText(error)}`, "error"));
     }
   });
+  const ask = body.querySelector<HTMLFormElement>(".pane-agent-ask")!;
+  const input = body.querySelector<HTMLTextAreaElement>(".pane-agent-input")!;
+  ask.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void sendAgentMessage(agentId, input, ask);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      ask.requestSubmit();
+    }
+  });
   return tab;
+}
+
+// sendAgentMessage steers the child's running turn, the same path the
+// parent's send_message takes. It is only offered while the child runs:
+// a finished child is read-only from here.
+async function sendAgentMessage(agentId: string, input: HTMLTextAreaElement, form: HTMLFormElement): Promise<void> {
+  const text = input.value.trim();
+  if (!text) return;
+  const send = form.querySelector<HTMLButtonElement>(".pane-agent-send")!;
+  send.disabled = true;
+  try {
+    await api.steerChat(agentId, text, text);
+    input.value = "";
+    input.focus();
+  } catch (error) {
+    toast(`Could not reach the subagent: ${errorText(error)}`, "error");
+    void refreshSessions();
+  } finally {
+    send.disabled = false;
+  }
 }
 
 // loadAgent shows the child's history and then its live rows, which
@@ -1056,6 +1095,7 @@ function loadAgent(tab: AgentTab): Promise<void> {
       if (state.sessionId !== tab.agentId) view.append(root);
       view.scrollTop = view.scrollHeight;
       repaintLive(tab.agentId);
+      paintHead(tab);
     } catch (error) {
       abortAttach(tab.agentId);
       view.querySelector(".pane-agent-history")!.innerHTML =
@@ -1067,13 +1107,21 @@ function loadAgent(tab: AgentTab): Promise<void> {
   return tab.loading;
 }
 
-// openAgentTab shows a subagent of the open session in the pane.
-async function openAgentTab(agentId: string): Promise<void> {
-  const set = currentSet();
-  if (!set || agentId === state.sessionId) return;
+// openAgentTab shows a subagent in the pane beside its parent. With no
+// session open yet, the parent opens first so the child has somewhere to
+// belong.
+export async function openAgentTab(agentId: string): Promise<void> {
   if (!state.sessions.some((s) => s.sessionId === agentId)) {
     await refreshSessions();
   }
+  if (agentId === state.sessionId) return;
+  const parentId = state.sessions.find((s) => s.sessionId === agentId)?.subagent?.parentId;
+  if (parentId && state.sessionId !== parentId) {
+    await openSession(parentId);
+  }
+  const set = currentSet();
+  if (!set) return;
+  dismissedAgents.delete(agentId);
   let tab = set.tabs.find((t) => t.kind === "agent" && t.agentId === agentId);
   if (!tab) {
     tab = newAgentTab(agentId);
@@ -1081,6 +1129,29 @@ async function openAgentTab(agentId: string): Promise<void> {
   }
   set.active = tab.key;
   showPane();
+}
+
+// dismissedAgents remembers agent tabs the user closed, so auto-open
+// never brings the same child back on its next status change.
+const dismissedAgents = new Set<string>();
+
+// autoOpenChildTabs gives every working child its own window, without
+// stealing focus from the parent's chat: the tab is simply there when
+// the user opens the pane.
+export function autoOpenChildTabs(): void {
+  const set = currentSet();
+  const parentId = state.sessionId;
+  if (!set || !parentId) return;
+  let added = false;
+  for (const kid of state.sessions) {
+    if (kid.subagent?.parentId !== parentId || dismissedAgents.has(kid.sessionId)) continue;
+    const status = agentStatus(kid);
+    if (status !== "running" && status !== "queued") continue;
+    if (set.tabs.some((t) => t.kind === "agent" && t.agentId === kid.sessionId)) continue;
+    set.tabs.push(newAgentTab(kid.sessionId));
+    added = true;
+  }
+  if (added) render();
 }
 
 // paintAgentTabs refreshes the heads of the agent tabs on screen.
@@ -1096,10 +1167,28 @@ export function paintAgentTabs(): void {
 // paintHead repaints only on change: live events repaint often, and a
 // replaced button would swallow a click in progress.
 function paintHead(tab: AgentTab): void {
+  const child = state.sessions.find((s) => s.sessionId === tab.agentId);
+  const status =
+    child && child.subagent ? agentStatus(child) : liveBadge(tab.agentId) === "running" ? "running" : "completed";
   const html = agentHead(tab);
-  if (html === tab.head) return;
-  tab.head = html;
-  tab.body.querySelector(".pane-agent-head")!.innerHTML = html;
+  if (html !== tab.head) {
+    tab.head = html;
+    tab.body.querySelector(".pane-agent-head")!.innerHTML = html;
+  }
+  // The composer is the user's line into the running turn, so it exists
+  // only while the child runs; a finished child reads as history.
+  const ask = tab.body.querySelector<HTMLFormElement>(".pane-agent-ask");
+  if (!ask) return;
+  const running = status === "running";
+  ask.hidden = !running;
+  const input = ask.querySelector<HTMLTextAreaElement>(".pane-agent-input")!;
+  input.disabled = !running;
+  const foot = tab.body.querySelector<HTMLElement>(".pane-agent-foot");
+  if (foot) {
+    foot.textContent = running
+      ? "You can guide this subagent while it runs · shares the parent's workspace"
+      : "Finished · read-only · shares the parent's workspace";
+  }
 }
 
 // ---- the pane ----
@@ -1235,6 +1324,11 @@ function closeTab(key: string, dropBrowser = true): void {
   if (at < 0) return;
   const [removed] = set.tabs.splice(at, 1);
   if (removed.kind === "browser") stopBrowserPick(removed);
+  if (removed.kind === "agent") {
+    if (removed.loading) abortAttach(removed.agentId);
+    liveRoot(removed.agentId).remove();
+    dismissedAgents.add(removed.agentId);
+  }
   if (removed.kind === "browser" && dropBrowser && hasBridge()) void bridge().browser?.drop(removed.sessionId);
   if (removed.kind === "terminal") {
     removed.closed = true;
@@ -1296,6 +1390,7 @@ export function syncSidePane(): void {
   closeMenu();
   paintChangesHeader(changesCache.get(state.sessionId));
   render();
+  autoOpenChildTabs();
   void refreshRunningJobs();
 }
 
