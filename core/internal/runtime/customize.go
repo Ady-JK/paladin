@@ -31,6 +31,9 @@ func (r *AgentRuntime) registerCustomizable() {
 		custom.Item{ID: "subagent.preamble", Group: "Subagents", Title: "Every subagent", Order: 0,
 			Description: "Starts every subagent's role: how a child agent works and reports back.",
 			Default:     func() string { return subagentPreamble }},
+		custom.Item{ID: "subagent.shell", Group: "Subagents", Title: "Subagent shell rules", Order: 1,
+			Description: "Added for subagents that have the shell tool: the commands their read-only shell runs, and the ones it refuses.",
+			Default:     func() string { return strings.TrimSpace(subagentShellGuide) }},
 		custom.Item{ID: "section.tools-off", Group: "Reminders", Title: "Tools switched off", Order: 20,
 			Description: "Added to the system prompt when you switch tools off, so the agent ignores their guidance.",
 			Vars:        []string{"tools"}, Default: func() string { return toolsOffDefault }},
@@ -50,7 +53,7 @@ func (r *AgentRuntime) registerCustomizable() {
 	)
 	for i, k := range subagentKinds {
 		role := k.Role
-		custom.Register(custom.Item{ID: "subagent." + k.Name, Group: "Subagents", Title: k.Name + " role", Order: 1 + i,
+		custom.Register(custom.Item{ID: "subagent." + k.Name, Group: "Subagents", Title: k.Name + " role", Order: 2 + i,
 			Description: k.Description, Default: func() string { return role }})
 	}
 	for i, name := range commands.BuiltinNames() {

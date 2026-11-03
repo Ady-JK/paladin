@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -34,6 +35,17 @@ var readOnlyGit = map[string]bool{
 }
 
 var readOnlyGo = map[string]bool{"list": true, "version": true, "doc": true, "vet": true}
+
+// ReadOnlyProgramList lists the program names plan mode allows, sorted.
+// The subagent prompt names the same set, and a test keeps them equal.
+func ReadOnlyProgramList() []string {
+	out := make([]string, 0, len(readOnlyPrograms))
+	for name := range readOnlyPrograms {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // ShellReadOnly reports whether a shell call cannot change the
 // workspace: a foreground run the plan-mode allowlist accepts, or a
