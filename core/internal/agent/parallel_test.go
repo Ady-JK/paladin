@@ -107,12 +107,14 @@ func TestParallelSafeCallsRunConcurrentlyInOrder(t *testing.T) {
 	}
 }
 
-func TestReadIsParallelSafe(t *testing.T) {
+func TestParallelSafeTools(t *testing.T) {
 	reg := tools.BuiltinRegistry()
-	if !reg.ParallelSafe("read") {
-		t.Fatal("read should be parallel-safe")
+	for _, n := range []string{"read", "write", "edit", "shell", "grep", "glob", "list"} {
+		if !reg.ParallelSafe(n) {
+			t.Fatalf("%s should be parallel-safe", n)
+		}
 	}
-	for _, n := range []string{"write", "edit", "shell", "ask", "todo", "nope"} {
+	for _, n := range []string{"ask", "browser", "todo", "visual", "web_fetch", "nope"} {
 		if reg.ParallelSafe(n) {
 			t.Fatalf("%s must be exclusive", n)
 		}

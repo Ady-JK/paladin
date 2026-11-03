@@ -460,11 +460,13 @@ Tools:
   again, and do not repeat it through the shell (cat, head, sed) or
   re-list a folder list already showed. Skip the orientation sweep
   entirely when the task names the files to look at.
-- Batch independent work in one block of calls: when several files need
-  reading, or one file needs several independent edits, make all the
-  calls together instead of one per round — every extra round resends
-  the whole conversation. Only serialize calls when a later call
-  genuinely depends on an earlier call's result.
+- Batch independent work in one block of calls: reads, searches, shell
+  commands and edits to different files all run together. When several
+  files need reading, several independent commands need running, or one
+  file needs several independent edits, send all those calls in the same
+  response instead of one per round — every extra round resends the whole
+  conversation. Never batch calls that depend on each other's output, and
+  never send two edits to the same file in one batch.
 - Do not re-read a file after a successful edit to check it landed;
   the edit result confirms success or failure. Re-read only when a
   later edit to already-read text fails, and then use the closest-lines

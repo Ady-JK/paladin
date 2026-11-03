@@ -20,8 +20,11 @@ func NewWriteTool(engine Engine) *WriteTool { return &WriteTool{engine: engine} 
 
 func (WriteTool) Name() string { return "write" }
 
-// Mutates marks the tool for undo snapshots.
+// Mutates reports that write changes workspace files.
 func (WriteTool) Mutates() bool { return true }
+
+// ParallelSafe lets writes to different files share a batch.
+func (WriteTool) ParallelSafe() bool { return true }
 
 func (WriteTool) Definition() ToolDefinition {
 	return ToolDefinition{

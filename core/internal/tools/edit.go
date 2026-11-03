@@ -20,8 +20,11 @@ func NewEditTool(engine Engine) *EditTool { return &EditTool{engine: engine} }
 
 func (EditTool) Name() string { return "edit" }
 
-// Mutates marks the tool for undo snapshots.
+// Mutates reports that edit changes workspace files.
 func (EditTool) Mutates() bool { return true }
+
+// ParallelSafe lets edits to different files share a batch.
+func (EditTool) ParallelSafe() bool { return true }
 
 func (EditTool) Definition() ToolDefinition {
 	return ToolDefinition{

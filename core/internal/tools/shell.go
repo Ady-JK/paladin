@@ -351,8 +351,11 @@ func indexByte(b []byte, c byte) int {
 
 func (ShellTool) Name() string { return "shell" }
 
-// Mutates marks the tool for undo snapshots.
+// Mutates reports that the shell may change workspace files.
 func (ShellTool) Mutates() bool { return true }
+
+// ParallelSafe lets independent shell calls share a batch.
+func (ShellTool) ParallelSafe() bool { return true }
 
 func (ShellTool) Definition() ToolDefinition {
 	return ToolDefinition{
