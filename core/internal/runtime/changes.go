@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 const maxSessionDiff = 256 * 1024
@@ -57,20 +58,26 @@ func changeFiles(states map[string]fileState) []ChangedFile {
 }
 
 // visibleTurns loads the session's turn snapshots, hiding the turns a
-// legacy pending revert would remove.
-func (r *AgentRuntime) visibleTurns(sessionID, cwd string) (*snapshot.Repo, []TurnSnapshot, error) {
+// legacy pending revert would remove, plus the messages those turns
+// cover (needed to map tool calls to their turn).
+func (r *AgentRuntime) visibleTurns(sessionID, cwd string) (*snapshot.Repo, []TurnSnapshot, []transcript.Message, error) {
 	sess, err := r.transcripts.Load(cwd, sessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	repo := r.snapRepo(sess.Meta.Cwd)
 	if repo == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	turns, err := readTurnSnapshots(sess.Dir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	msgs, err := sess.History()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	msgs = visibleMessages(sess.Meta, msgs)
 	if rv := sess.Meta.Revert; rv != nil {
 		kept := turns[:0]
 		for _, t := range turns {
@@ -80,7 +87,32 @@ func (r *AgentRuntime) visibleTurns(sessionID, cwd string) (*snapshot.Repo, []Tu
 		}
 		turns = kept
 	}
-	return repo, turns, nil
+	return repo, turns, msgs, nil
+}
+
+// turnCallIDs groups every tool call under the turn whose user row
+// starts before it, keyed by that turn's message index. The renderer
+// matches a just-settled call to its turn while the turn is running.
+func turnCallIDs(msgs []transcript.Message, turns []TurnSnapshot) map[int][]string {
+	out := make(map[int][]string, len(turns))
+	if len(turns) == 0 {
+		return out
+	}
+	ti := -1
+	for i, m := range msgs {
+		for ti+1 < len(turns) && turns[ti+1].Turn <= i {
+			ti++
+		}
+		if ti < 0 || m.Role != transcript.RoleAssistant || m.ToolCalls == nil {
+			continue
+		}
+		for _, call := range *m.ToolCalls {
+			if call.ID != "" {
+				out[turns[ti].Turn] = append(out[turns[ti].Turn], call.ID)
+			}
+		}
+	}
+	return out
 }
 
 // turnStates compares two trees and returns each path's first and last
@@ -113,7 +145,7 @@ func turnStates(ctx context.Context, repo *snapshot.Repo, from, to string) (map[
 // with the folder now, so no separate "after" snapshot is needed.
 func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView, error) {
 	view := SessionChangesView{Turns: []ChangeTurn{}, Files: []ChangedFile{}}
-	repo, turns, err := r.visibleTurns(sessionID, cwd)
+	repo, turns, msgs, err := r.visibleTurns(sessionID, cwd)
 	if err != nil || repo == nil {
 		return view, err
 	}
@@ -121,6 +153,7 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 	if len(turns) == 0 {
 		return view, nil
 	}
+	callIDs := turnCallIDs(msgs, turns)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	current, err := repo.Snapshot(ctx)
@@ -137,7 +170,7 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 			return view, err
 		}
 		if len(states) > 0 {
-			view.Turns = append(view.Turns, ChangeTurn{Turn: ts.Turn, Files: changeFiles(states)})
+			view.Turns = append(view.Turns, ChangeTurn{Turn: ts.Turn, Files: changeFiles(states), CallIDs: callIDs[ts.Turn]})
 		}
 	}
 	all, err := turnStates(ctx, repo, turns[0].Tree, current)
@@ -157,7 +190,7 @@ func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string)
 	if turn < -1 {
 		return SessionDiffView{}, fmt.Errorf("invalid turn %d", turn)
 	}
-	repo, turns, err := r.visibleTurns(sessionID, cwd)
+	repo, turns, _, err := r.visibleTurns(sessionID, cwd)
 	if err != nil {
 		return SessionDiffView{}, err
 	}

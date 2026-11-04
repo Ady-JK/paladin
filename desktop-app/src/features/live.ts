@@ -527,6 +527,9 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
   if (turn.stats) {
     e.root.insertBefore(createTurnStats(turn.stats), firstQueued(e));
   }
+  // A live row learns its transcript position only when the turn is
+  // persisted; that is what lets the changes card attach to it.
+  if (turn.index !== undefined && userRow) userRow.dataset.turnIndex = String(turn.index);
   const quiet = turn.cancelled || turn.stopped;
   if (shown) {
     void refreshChanges(e.sessionId);

@@ -519,6 +519,9 @@ export type TurnInfo = {
   endedAt?: string;
   // stats is the turn's cost, for the summary line under it.
   stats?: TurnStats;
+  // index is the transcript position of the turn's user row, so the
+  // change card can be placed once the turn ends.
+  index?: number;
 };
 
 // TurnEvent is any chat/* or turn/* line, for any session.

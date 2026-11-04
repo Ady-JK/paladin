@@ -61,6 +61,9 @@ type TurnInfo struct {
 	// Stats is the turn's wall time and generated tokens, as persisted
 	// on its transcript line.
 	Stats *transcript.TurnStats `json:"stats,omitempty"`
+	// Index is the transcript position of the turn's user row, so the
+	// renderer can place the turn's change card. Absent on a resume turn.
+	Index *int `json:"index,omitempty"`
 }
 
 // TurnEvent is one hub broadcast: a streamed chat/* chunk or a
@@ -467,6 +470,7 @@ func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
 	t.info.State = TurnDone
 	t.info.EndedAt = time.Now().UnixMilli()
 	t.info.Stats = out.Stats
+	t.info.Index = out.Index
 	t.info.Reply = out.Reply
 	if t.info.Reply == "" {
 		t.info.Reply = t.reply.String()

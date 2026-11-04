@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -236,6 +237,14 @@ func TestSessionChangesAndDiffUseTurnSnapshots(t *testing.T) {
 	}
 	if changes.Turns[1].Files[0].Status != "modified" || changes.Files[0].Status != "created" {
 		t.Fatalf("edit and session summary = %+v", changes)
+	}
+	// Each turn names the tool calls it made, so the renderer can attach
+	// a just-settled call to the running turn.
+	if len(changes.Turns[0].CallIDs) == 0 || len(changes.Turns[1].CallIDs) == 0 {
+		t.Fatalf("turn call ids = %+v", changes.Turns)
+	}
+	if slices.Contains(changes.Turns[0].CallIDs, changes.Turns[1].CallIDs[0]) {
+		t.Fatalf("call id shared between turns: %+v", changes.Turns)
 	}
 	first, err := rt.SessionDiff(sid, "", 0, "a.txt")
 	if err != nil || !strings.Contains(first.Patch, "+one") || !strings.Contains(first.Patch, "new file mode") {

@@ -88,3 +88,43 @@ test("a finished write shows its file indicator while the turn is still running"
   await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toContainText("1 file");
   await expect(page.locator("#sessionChangesBtn")).toContainText("1");
 });
+
+test("a finished turn shows its file changes even with no live call id", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "modified" }] }],
+      files: [{ path: "index.html", status: "modified" }],
+    };
+    w.__e2ePatch = "diff --git a/index.html b/index.html\n@@ -1 +1 @@\n-old\n+new\n";
+    // The turn persists at index 0, which is what lets the card attach
+    // to the live row once the turn ends.
+    w.__e2eRunTurn = async () => ({
+      reply: "Done.",
+      index: 0,
+      stats: { durationMs: 65_000, tokens: 1_000 },
+    });
+  });
+  await page.goto("/");
+  await page.fill("#promptInput", "edit the page");
+  await page.click("#sendBtn");
+
+  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
+  await expect(card).toContainText("1 file");
+  await expect(card).toContainText("+1");
+  await expect(card).toContainText("-1");
+  await expect(card).toHaveAttribute("aria-expanded", "false");
+  // The summary and the card both close the turn, the card last.
+  const stats = page.locator("#messages .turn-stats");
+  await expect(stats).toHaveText("1m 5s · 15.4 tok/s");
+  const order = await page.evaluate(() => {
+    const nodes = Array.from(document.querySelectorAll("#messages > .live-root > *, #messages > *"));
+    const s = nodes.findIndex((n) => n.classList.contains("turn-stats"));
+    const c = nodes.findIndex((n) => n.classList.contains("turn-changes"));
+    return { s, c };
+  });
+  expect(order.s).toBeGreaterThanOrEqual(0);
+  expect(order.c).toBeGreaterThan(order.s);
+});

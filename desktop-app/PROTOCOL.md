@@ -185,7 +185,9 @@ it, then exits.
 `TurnInfo` is `{turnId, sessionId, cwd, message, display?, skill?,
 resume?, permissions?, parentSessionId?, state: queued|running|done,
 persisted?, reply?, stopped?, cancelled?, awaitingApproval?, error?,
-queuedAt, startedAt?, endedAt?, stats?}`. `stats` is the turn's cost,
+queuedAt, startedAt?, endedAt?, stats?, index?}`. `index` is the
+transcript position of the turn's user row (absent on a resume turn), so
+the renderer can attach the turn's change card once it ends. `stats` is the turn's cost,
 `{durationMs, tokens}`, where `tokens` counts generated (completion)
 tokens and therefore includes reasoning; it is written on the turn's
 transcript line and repeated on `turn/done` so the renderer can draw the

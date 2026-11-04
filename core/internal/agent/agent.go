@@ -181,6 +181,9 @@ type ChatOutcome struct {
 	Usage inference.Usage `json:"-"`
 	// Stats is what the turn cost, as persisted on its transcript line.
 	Stats *transcript.TurnStats `json:"-"`
+	// Index is the transcript position of the turn's user row; nil for
+	// a resume turn.
+	Index *int `json:"-"`
 }
 
 type phase int
@@ -324,6 +327,9 @@ type Agent struct {
 	// outcome reports the same numbers the transcript holds.
 	startedAt  time.Time
 	savedStats *transcript.TurnStats
+	// savedIndex is the transcript position of the turn's user row, so
+	// the client can place the turn's change card.
+	savedIndex *int
 	tx         chan<- ChatChunk
 	done       <-chan struct{}
 
@@ -454,7 +460,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		if perr := a.save(); perr != nil {
 			return ChatOutcome{}, turnFailed{msg: err.Error() + " (and the failed turn could not be saved: " + perr.Error() + ")"}
 		}
-		return ChatOutcome{SessionID: sessionID, Usage: a.turnUsage, Stats: a.savedStats}, err
+		return ChatOutcome{SessionID: sessionID, Usage: a.turnUsage, Stats: a.savedStats, Index: a.savedIndex}, err
 	}
 	a.finalize(stopped)
 	if perr := a.save(); perr != nil {
@@ -466,6 +472,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		Stopped:   stopped,
 		Usage:     a.turnUsage,
 		Stats:     a.savedStats,
+		Index:     a.savedIndex,
 	}, nil
 }
 
@@ -546,6 +553,12 @@ func (a *Agent) persist(message string, resume bool) error {
 		return turnFailed{"persist turn: " + err.Error()}
 	}
 	a.savedStats = stats
+	if !resume {
+		// The user row is the first new message, so the pre-turn length
+		// is its transcript position.
+		index := len(a.history)
+		a.savedIndex = &index
+	}
 	return nil
 }
 

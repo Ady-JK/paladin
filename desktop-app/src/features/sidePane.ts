@@ -500,12 +500,15 @@ function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[], t
   if (!button) {
     button = document.createElement("div");
     button.className = "turn-changes turn-change-card turn-change-collapsed";
-    let anchor = row;
-    while (anchor.nextElementSibling && !anchor.nextElementSibling.hasAttribute("data-turn-index")) {
-      anchor = anchor.nextElementSibling as HTMLElement;
-    }
-    anchor.after(button);
   }
+  // Keep the card at the end of its turn. Rows arrive after an earlier
+  // paint, and a live turn's first card lands while the turn is still
+  // growing, so a create-once insertion would leave it mid-turn.
+  let anchor = row;
+  while (anchor.nextElementSibling && !anchor.nextElementSibling.hasAttribute("data-turn-index")) {
+    anchor = anchor.nextElementSibling as HTMLElement;
+  }
+  if (anchor !== button && anchor.nextElementSibling !== button) anchor.after(button);
   button.dataset.changeTurn = String(turn);
   button.setAttribute("role", "button");
   button.tabIndex = 0;
