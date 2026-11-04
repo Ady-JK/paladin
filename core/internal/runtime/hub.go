@@ -14,6 +14,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/redact"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 // Turn states.
@@ -57,6 +58,9 @@ type TurnInfo struct {
 	QueuedAt         int64  `json:"queuedAt"`
 	StartedAt        int64  `json:"startedAt,omitempty"`
 	EndedAt          int64  `json:"endedAt,omitempty"`
+	// Stats is the turn's wall time and generated tokens, as persisted
+	// on its transcript line.
+	Stats *transcript.TurnStats `json:"stats,omitempty"`
 }
 
 // TurnEvent is one hub broadcast: a streamed chat/* chunk or a
@@ -462,6 +466,7 @@ func (h *Hub) finish(t *hubTurn, out agent.ChatOutcome, err error) {
 	defer h.mu.Unlock()
 	t.info.State = TurnDone
 	t.info.EndedAt = time.Now().UnixMilli()
+	t.info.Stats = out.Stats
 	t.info.Reply = out.Reply
 	if t.info.Reply == "" {
 		t.info.Reply = t.reply.String()

@@ -243,6 +243,21 @@ func (s *Session) AppendMessage(msg Message) error {
 	return s.appendMessages([]Message{msg})
 }
 
+// TurnStats is what a turn cost: its wall-clock duration and the
+// generated tokens it billed. It rides on the turn line so a reopened
+// session can show the same summary the live turn did.
+type TurnStats struct {
+	DurationMs int64 `json:"durationMs"`
+	Tokens     int64 `json:"tokens"`
+}
+
+// Turn is one transcript line: its messages and, for lines written by
+// a version that records them, what the turn cost.
+type Turn struct {
+	Messages []Message
+	Stats    *TurnStats
+}
+
 // turnLine is how a whole turn is stored: one JSONL line, so a crash or
 // a failed write leaves all of the turn or none of it. Older
 // transcripts hold one message per line; readers accept both.
@@ -251,11 +266,17 @@ type turnLine struct {
 }
 
 type turnBody struct {
-	Messages []Message `json:"messages"`
+	Messages []Message  `json:"messages"`
+	Stats    *TurnStats `json:"stats,omitempty"`
 }
 
 // AppendTurn appends a turn's messages as one line.
 func (s *Session) AppendTurn(msgs []Message) error {
+	return s.AppendTurnWithStats(msgs, nil)
+}
+
+// AppendTurnWithStats appends a turn and its cost as one line.
+func (s *Session) AppendTurnWithStats(msgs []Message, stats *TurnStats) error {
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -263,7 +284,7 @@ func (s *Session) AppendTurn(msgs []Message) error {
 	for i, m := range msgs {
 		stamped[i] = stampTime(m)
 	}
-	line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: stamped}})
+	line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: stamped, Stats: stats}})
 	if err != nil {
 		return fmt.Errorf("io: encode turn: %s", syserr.Str(err))
 	}
@@ -362,6 +383,12 @@ func (s *Session) Truncate(n int) error {
 
 func (s *Session) History() ([]Message, error) {
 	return LoadTranscript(s.Dir)
+}
+
+// HistoryTurns is History with each stored turn's stats kept alongside
+// its messages.
+func (s *Session) HistoryTurns() ([]Turn, error) {
+	return LoadTurns(s.Dir)
 }
 
 // UsagePath is the per-session token/spend ledger. It lives next to

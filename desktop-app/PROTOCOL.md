@@ -185,8 +185,12 @@ it, then exits.
 `TurnInfo` is `{turnId, sessionId, cwd, message, display?, skill?,
 resume?, permissions?, parentSessionId?, state: queued|running|done,
 persisted?, reply?, stopped?, cancelled?, awaitingApproval?, error?,
-queuedAt, startedAt?, endedAt?}`. `awaitingApproval` is true while a
-tool call waits on an approval card. `parentSessionId` marks a
+queuedAt, startedAt?, endedAt?, stats?}`. `stats` is the turn's cost,
+`{durationMs, tokens}`, where `tokens` counts generated (completion)
+tokens and therefore includes reasoning; it is written on the turn's
+transcript line and repeated on `turn/done` so the renderer can draw the
+summary under the turn without a second read. `awaitingApproval` is true
+while a tool call waits on an approval card. `parentSessionId` marks a
 subagent's turn (the session that gave it the work); the desktop does
 not notify or toast for those.
 
@@ -610,7 +614,10 @@ with the previous `start` loads older rows. `sessionImages` returns
 just the image rows, which is what a finished turn needs to mount a
 screenshot without downloading the transcript.
 
-`sessionHistory` user rows carry `index`, their transcript position.
+`sessionHistory` user rows carry `index`, their transcript position, and
+`stats` (`{durationMs, tokens}`, optional) for the turn that row starts,
+so a reopened session shows the same end-of-turn summary the live turn
+did.
 `revertSession` restores the folder to the snapshot taken before that
 user message, exactly: files changed since go back to their old content,
 and files created since are deleted. It then drops that message and

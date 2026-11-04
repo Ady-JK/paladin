@@ -1059,7 +1059,7 @@ const __e2eHub = (() => {
     };
     Promise.resolve()
       .then(() => window.__e2eRunTurn({ ...turn.params }, handlers))
-      .then((res) => finish(turn, { reply: res?.reply || "", stopped: !!res?.stopped }))
+      .then((res) => finish(turn, { reply: res?.reply || "", stopped: !!res?.stopped, stats: res?.stats }))
       .catch((err) => finish(turn, { error: String((err && err.message) || err) }));
   };
   const pump = () => {

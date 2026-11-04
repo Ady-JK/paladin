@@ -149,3 +149,40 @@ func TestCorruptTurnLineFails(t *testing.T) {
 		t.Fatal("a corrupt turn must not be skipped")
 	}
 }
+
+// A turn's stats ride on its line and come back with the turn, while an
+// older line without them still reads cleanly.
+func TestTurnStatsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := &Session{Dir: dir}
+	stats := &TurnStats{DurationMs: 65_000, Tokens: 12_345}
+	if err := s.AppendTurnWithStats([]Message{UserMessage("ask"), AssistantMessage("answer")}, stats); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendTurn([]Message{UserMessage("plain")}); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := s.HistoryTurns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns = %d", len(turns))
+	}
+	if turns[0].Stats == nil || turns[0].Stats.DurationMs != 65_000 || turns[0].Stats.Tokens != 12_345 {
+		t.Fatalf("stats = %+v", turns[0].Stats)
+	}
+	if turns[1].Stats != nil {
+		t.Fatalf("unexpected stats: %+v", turns[1].Stats)
+	}
+	msgs, statsAt := Flatten(turns)
+	if len(msgs) != 3 || contents(msgs) != "ask,answer,plain" {
+		t.Fatalf("messages = %s", contents(msgs))
+	}
+	if statsAt[0] == nil || statsAt[0].Tokens != 12_345 {
+		t.Fatalf("statsAt = %+v", statsAt)
+	}
+	if _, ok := statsAt[2]; ok {
+		t.Fatalf("a turn without stats should not map: %+v", statsAt)
+	}
+}

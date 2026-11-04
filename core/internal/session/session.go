@@ -169,9 +169,20 @@ type HistoryMessage struct {
 	Role       string  `json:"role"`
 	Status     *string `json:"status,omitempty"`
 	ToolCallID *string `json:"toolCallId,omitempty"`
+	// Stats is a user row's turn cost, so a reopened session can show
+	// the same summary the live turn did.
+	Stats *transcript.TurnStats `json:"stats,omitempty"`
 }
 
+// HistoryView renders messages as history rows.
 func HistoryView(msgs []transcript.Message) []HistoryMessage {
+	return HistoryViewStats(msgs, nil)
+}
+
+// HistoryViewStats is HistoryView with per-turn costs: statsAt maps a
+// turn's first message index to its cost, and the user row that starts
+// that turn carries it.
+func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.TurnStats) []HistoryMessage {
 	calls := map[string]transcript.ToolCall{}
 	for _, msg := range msgs {
 		if msg.Role != transcript.RoleAssistant {
@@ -266,6 +277,7 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 		if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
 			idx := i
 			row.Index = &idx
+			row.Stats = statsAt[i]
 		}
 		out = append(out, row)
 	}

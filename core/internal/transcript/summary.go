@@ -46,13 +46,15 @@ func sessionSummary(dir string) (summary, error) {
 		base = cached
 	}
 	next := base
-	end, err := scanTranscriptFrom(dir, base.Scanned, false, func(m Message) {
-		if !m.Visible() {
-			return
-		}
-		next.Count++
-		if next.Title == "" {
-			next.Title = TitleFor([]Message{m})
+	end, err := scanTranscriptFrom(dir, base.Scanned, false, func(msgs []Message, _ *TurnStats) {
+		for _, m := range msgs {
+			if !m.Visible() {
+				continue
+			}
+			next.Count++
+			if next.Title == "" {
+				next.Title = TitleFor([]Message{m})
+			}
 		}
 	})
 	if err != nil {
@@ -114,7 +116,7 @@ func lineStartsAt(dir string, offset int64) bool {
 // line is skipped when it does not decode (a torn append: the process
 // died mid-write); one that does is passed to fn only with withTail,
 // since the next append cuts it off.
-func scanTranscriptFrom(dir string, offset int64, withTail bool, fn func(Message)) (int64, error) {
+func scanTranscriptFrom(dir string, offset int64, withTail bool, fn func([]Message, *TurnStats)) (int64, error) {
 	if onScan != nil {
 		onScan(dir, offset)
 	}
@@ -138,22 +140,18 @@ func scanTranscriptFrom(dir string, offset int64, withTail bool, fn func(Message
 		}
 		if rerr == io.EOF {
 			if trimmed := bytes.TrimSpace(line); withTail && len(trimmed) > 0 {
-				if msgs, err := decodeLine(trimmed); err == nil {
-					for _, msg := range msgs {
-						fn(msg)
-					}
+				if msgs, stats, err := decodeLine(trimmed); err == nil {
+					fn(msgs, stats)
 				}
 			}
 			return end, nil
 		}
 		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
-			msgs, err := decodeLine(trimmed)
+			msgs, stats, err := decodeLine(trimmed)
 			if err != nil {
 				return 0, err
 			}
-			for _, msg := range msgs {
-				fn(msg)
-			}
+			fn(msgs, stats)
 		}
 		end += int64(len(line))
 	}

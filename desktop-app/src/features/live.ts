@@ -23,6 +23,7 @@ import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget } from "./budget";
 import { noteToolChange, refreshChanges } from "./sidePane";
+import { createTurnStats } from "./turnStats";
 import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
 
 export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "approval";
@@ -521,6 +522,10 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     if (turn.skill && /not found: skill/i.test(failure)) {
       refreshSkillsCache();
     }
+  }
+  // The turn's cost closes its rows; queued turns stay below it.
+  if (turn.stats) {
+    e.root.insertBefore(createTurnStats(turn.stats), firstQueued(e));
   }
   const quiet = turn.cancelled || turn.stopped;
   if (shown) {

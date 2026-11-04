@@ -179,6 +179,8 @@ type ChatOutcome struct {
 	// Usage is the turn's billed footprint: every LLM call's tokens
 	// and gateway-reported spend folded together.
 	Usage inference.Usage `json:"-"`
+	// Stats is what the turn cost, as persisted on its transcript line.
+	Stats *transcript.TurnStats `json:"-"`
 }
 
 type phase int
@@ -317,8 +319,13 @@ type Agent struct {
 	// turnUsage accumulates every LLM call's Usage for the turn, across
 	// all rounds and both streaming and fallback paths.
 	turnUsage inference.Usage
-	tx        chan<- ChatChunk
-	done      <-chan struct{}
+	// startedAt is when this turn began running, for the duration in
+	// its persisted stats; savedStats is what persist wrote, so the
+	// outcome reports the same numbers the transcript holds.
+	startedAt  time.Time
+	savedStats *transcript.TurnStats
+	tx         chan<- ChatChunk
+	done       <-chan struct{}
 
 	// currentMessage and currentResume are the turn input, held so Run
 	// can persist exactly what was asked.
@@ -422,6 +429,7 @@ func newAgent(c runConfig) *Agent {
 // Run executes the built agent's turn.
 func (a *Agent) Run() (ChatOutcome, error) {
 	sessionID := a.session.Meta.SessionID
+	a.startedAt = time.Now()
 	a.phase = phaseRunning
 	a.emptyRounds = 0
 	a.retries, a.timeoutRetries = 0, 0
@@ -446,7 +454,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		if perr := a.save(); perr != nil {
 			return ChatOutcome{}, turnFailed{msg: err.Error() + " (and the failed turn could not be saved: " + perr.Error() + ")"}
 		}
-		return ChatOutcome{}, err
+		return ChatOutcome{SessionID: sessionID, Usage: a.turnUsage, Stats: a.savedStats}, err
 	}
 	a.finalize(stopped)
 	if perr := a.save(); perr != nil {
@@ -457,6 +465,7 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		Reply:     a.reply.String(),
 		Stopped:   stopped,
 		Usage:     a.turnUsage,
+		Stats:     a.savedStats,
 	}, nil
 }
 
@@ -530,10 +539,31 @@ func (a *Agent) persist(message string, resume bool) error {
 	if len(a.toolDefs) == 0 && !a.compactOnly && (a.reply.Len() > 0 || resume) {
 		turn = append(turn, transcript.Message{Role: transcript.RoleAssistant, Content: a.reply.String()})
 	}
-	if err := a.session.AppendTurn(turn); err != nil {
+	// A resume turn has no user row to hang a summary on, and a failed
+	// write leaves nothing to describe.
+	stats := a.turnStats(resume)
+	if err := a.session.AppendTurnWithStats(turn, stats); err != nil {
 		return turnFailed{"persist turn: " + err.Error()}
 	}
+	a.savedStats = stats
 	return nil
+}
+
+// turnStats is what the transcript records for this turn: its wall
+// time and the tokens the model generated (completion already counts
+// reasoning). Nil for a resume turn.
+func (a *Agent) turnStats(resume bool) *transcript.TurnStats {
+	if resume || a.startedAt.IsZero() {
+		return nil
+	}
+	stats := &transcript.TurnStats{
+		DurationMs: time.Since(a.startedAt).Milliseconds(),
+		Tokens:     a.turnUsage.CompletionTokens,
+	}
+	if stats.DurationMs <= 0 && stats.Tokens <= 0 {
+		return nil
+	}
+	return stats
 }
 
 // noteCallUsage folds one LLM call's usage into the turn totals and

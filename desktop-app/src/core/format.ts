@@ -1,7 +1,24 @@
 // format.ts holds pure string, date, and JSON helpers.
 // It has no DOM or backend dependencies so any module can use it.
 
-import type { ProviderInfo } from "./types";
+import type { ProviderInfo, TurnStats } from "./types";
+
+// formatTurnStats renders a finished turn's cost: "10m 9s · 103.9
+// tok/s". The rate uses generated (completion) tokens over the turn's
+// wall time, which is the order of magnitude a provider reports.
+export function formatTurnStats(stats: TurnStats): string {
+  const seconds = Math.max(0, stats.durationMs) / 1000;
+  const rate = seconds > 0 ? stats.tokens / seconds : 0;
+  return `${formatTurnDuration(stats.durationMs)} · ${rate.toFixed(1)} tok/s`;
+}
+
+function formatTurnDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
 
 // escapeHtml makes text safe in element content and in quoted
 // attributes: a quote left as is would close the attribute and let the

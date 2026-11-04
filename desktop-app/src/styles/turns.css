@@ -325,3 +325,17 @@ body.guest-visible .tool-spin {
     animation: none;
   }
 }
+
+/* ============ Turn summary ============
+   The one-line cost under a finished turn: "10m 9s · 103.9 tok/s". It
+   sits in the same reading column as the rows, muted and right-aligned,
+   so it closes the turn without competing with it. */
+.turn-stats {
+  width: min(100%, 48rem);
+  margin: 6px auto 2px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-slate-400);
+  user-select: none;
+}

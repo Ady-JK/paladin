@@ -25,6 +25,7 @@ import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
 import { createCompactionDivider, createTurn, mountLinkCards, renderGreeting, scrollToBottom } from "./chatView";
+import { createTurnStats } from "./turnStats";
 import { createThinkingBlock } from "./turnView";
 import { createFindingsCard } from "./findings";
 import { createVisualCard } from "./visuals";
@@ -651,6 +652,9 @@ export function buildHistory(
   let agentBody: HTMLElement | null = null;
   // run is the open group of consecutive calls; any text closes it.
   let run: ToolRun | null = null;
+  // pendingStats closes the previous user turn: its summary row goes
+  // just before the next user row (or at the end of the last turn).
+  let pendingStats: HTMLElement | null = null;
 
   const openAgent = (text: string): void => {
     const { wrapper, textEl } = createTurn("agent", text);
@@ -700,6 +704,10 @@ export function buildHistory(
     if (message.role === "user") {
       agentBody = null;
       run = null;
+      if (pendingStats) {
+        container.append(pendingStats);
+        pendingStats = null;
+      }
       const turn = createTurn("user", message.content, {
         index: message.index,
         revertable: revertable && message.index !== undefined,
@@ -715,6 +723,7 @@ export function buildHistory(
         }
       }
       container.append(turn.wrapper);
+      if (message.stats) pendingStats = createTurnStats(message.stats);
     } else if (message.role === "assistant" && message.kind === "thinking") {
       if (!agentBody) {
         openAgent("");
@@ -743,6 +752,7 @@ export function buildHistory(
       if (message.image && agentBody) mountImage(agentBody, sessionId, message.image.path, "Browser screenshot");
     }
   }
+  if (pendingStats) container.append(pendingStats);
 }
 
 export function newSession(): void {

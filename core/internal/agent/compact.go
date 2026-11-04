@@ -387,5 +387,5 @@ func (a *Agent) runCompact() (ChatOutcome, error) {
 	if err := a.save(); err != nil {
 		return ChatOutcome{}, err
 	}
-	return ChatOutcome{SessionID: a.session.Meta.SessionID, Usage: a.turnUsage}, nil
+	return ChatOutcome{SessionID: a.session.Meta.SessionID, Usage: a.turnUsage, Stats: a.savedStats}, nil
 }

@@ -127,3 +127,37 @@ func TestSessionImagesReportsOnlyImageRows(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A turn's persisted stats reach the history row the renderer anchors
+// the summary on.
+func TestSessionHistoryCarriesTurnStats(t *testing.T) {
+	rt, dir := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.OpenSession("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := rt.transcripts.Load(dir, sess.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats := &transcript.TurnStats{DurationMs: 65_000, Tokens: 1_234}
+	if err := stored.AppendTurnWithStats([]transcript.Message{
+		{Role: transcript.RoleUser, Content: "q"},
+		{Role: transcript.RoleAssistant, Content: "a"},
+	}, stats); err != nil {
+		t.Fatal(err)
+	}
+	history, err := rt.SessionHistory(sess.SessionID, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("rows = %d", len(history))
+	}
+	if history[0].Stats == nil || history[0].Stats.DurationMs != 65_000 || history[0].Stats.Tokens != 1_234 {
+		t.Fatalf("stats = %+v", history[0].Stats)
+	}
+}

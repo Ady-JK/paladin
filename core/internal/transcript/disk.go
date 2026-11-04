@@ -93,33 +93,57 @@ func ValidID(id string) bool {
 }
 
 func LoadTranscript(dir string) ([]Message, error) {
-	var out []Message
-	err := scanTranscript(dir, func(m Message) { out = append(out, m) })
+	turns, err := LoadTurns(dir)
+	if err != nil {
+		return nil, err
+	}
+	msgs, _ := Flatten(turns)
+	return msgs, nil
+}
+
+// LoadTurns reads the transcript grouped into its stored turns.
+func LoadTurns(dir string) ([]Turn, error) {
+	var out []Turn
+	_, err := scanTranscriptFrom(dir, 0, true, func(msgs []Message, stats *TurnStats) {
+		out = append(out, Turn{Messages: msgs, Stats: stats})
+	})
 	return out, err
 }
 
-func scanTranscript(dir string, fn func(Message)) error {
-	_, err := scanTranscriptFrom(dir, 0, true, fn)
-	return err
+// Flatten expands turns into messages and maps each turn's stats to the
+// index of its first message, so a history view can attach them.
+func Flatten(turns []Turn) ([]Message, map[int]*TurnStats) {
+	var msgs []Message
+	var stats map[int]*TurnStats
+	for _, t := range turns {
+		if t.Stats != nil {
+			if stats == nil {
+				stats = map[int]*TurnStats{}
+			}
+			stats[len(msgs)] = t.Stats
+		}
+		msgs = append(msgs, t.Messages...)
+	}
+	return msgs, stats
 }
 
 var turnPrefix = []byte(`{"turn":`)
 
 // decodeLine reads one transcript line: a whole turn (see AppendTurn)
 // or, in older transcripts and forks, a single message.
-func decodeLine(line []byte) ([]Message, error) {
+func decodeLine(line []byte) ([]Message, *TurnStats, error) {
 	if bytes.HasPrefix(line, turnPrefix) {
 		var turn turnLine
 		if err := json.Unmarshal(line, &turn); err != nil {
-			return nil, fmt.Errorf("io: decode turn: %s", syserr.Str(err))
+			return nil, nil, fmt.Errorf("io: decode turn: %s", syserr.Str(err))
 		}
-		return turn.Turn.Messages, nil
+		return turn.Turn.Messages, turn.Turn.Stats, nil
 	}
 	var msg Message
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, fmt.Errorf("io: decode message: %s", syserr.Str(err))
+		return nil, nil, fmt.Errorf("io: decode message: %s", syserr.Str(err))
 	}
-	return []Message{msg}, nil
+	return []Message{msg}, nil, nil
 }
 
 // dropTornTail truncates f after its last newline so an append never

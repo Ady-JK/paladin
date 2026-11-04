@@ -12,6 +12,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 // fakeRuns scripts the hub's run function per message: each run blocks
@@ -167,6 +168,23 @@ func submit(t *testing.T, h *Hub, sessionID, message string) (TurnInfo, <-chan T
 		t.Fatal(err)
 	}
 	return info, done
+}
+
+// A finished turn carries the cost its transcript line recorded, so the
+// renderer can draw the end-of-turn summary without a second read.
+func TestHubCarriesTurnStats(t *testing.T) {
+	stats := &transcript.TurnStats{DurationMs: 65_000, Tokens: 1_234}
+	run := func(_ context.Context, req agent.Request, gate func(func() error), _ chan<- agent.ChatChunk, _ <-chan struct{}) (agent.ChatOutcome, error) {
+		gate(func() error { return nil })
+		return agent.ChatOutcome{SessionID: req.SessionID, Reply: "ok", Stats: stats}, nil
+	}
+	h := NewHub(run, func() int { return 1 })
+	t.Cleanup(func() { h.Shutdown(2 * time.Second) })
+	_, done := submit(t, h, "A", "hi")
+	info := <-done
+	if info.Stats == nil || info.Stats.DurationMs != 65_000 || info.Stats.Tokens != 1_234 {
+		t.Fatalf("stats: %+v", info.Stats)
+	}
 }
 
 func TestHubRunsDifferentSessionsConcurrently(t *testing.T) {

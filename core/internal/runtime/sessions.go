@@ -110,11 +110,12 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	if err != nil {
 		return nil, err
 	}
-	msgs, err := sess.History()
+	turns, err := sess.HistoryTurns()
 	if err != nil {
 		return nil, err
 	}
-	return session.HistoryView(visibleMessages(sess.Meta, msgs)), nil
+	msgs, statsAt := transcript.Flatten(turns)
+	return session.HistoryViewStats(visibleMessages(sess.Meta, msgs), statsAt), nil
 }
 
 // SessionHistoryPage is SessionHistory limited to one window of rows:

@@ -337,6 +337,9 @@ export type MessageInfo = {
     mimeType: string;
     image?: { path: string; mimeType: string; size: number; sha256: string };
   }[];
+  // stats is a user row's turn cost, so a reopened session shows the
+  // same summary the live turn did.
+  stats?: TurnStats;
 };
 
 // RetryInfo is a chat/retry event: a failed round runs again after
@@ -486,6 +489,9 @@ export type ChatEntry = {
 // TurnState is where a turn sits in the sidecar's turn hub.
 type TurnState = "queued" | "running" | "done";
 
+// TurnStats is what a turn cost: wall time and generated tokens.
+export type TurnStats = { durationMs: number; tokens: number };
+
 // TurnInfo describes one submitted message (see PROTOCOL.md).
 export type TurnInfo = {
   turnId: string;
@@ -511,6 +517,8 @@ export type TurnInfo = {
   queuedAt?: string;
   startedAt?: string;
   endedAt?: string;
+  // stats is the turn's cost, for the summary line under it.
+  stats?: TurnStats;
 };
 
 // TurnEvent is any chat/* or turn/* line, for any session.
