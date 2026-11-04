@@ -107,6 +107,7 @@ func (a *Agent) runLoop() error {
 		// start over, so a long task only ends loudly after three
 		// consecutive stalls with nothing done between them.
 		a.planNudges = 0
+		canonicalizeCalls(a.tools, round.calls)
 		a.appendAssistant(round.text, round.calls)
 		if err := a.runToolsStreaming(round.calls); err != nil {
 			return err

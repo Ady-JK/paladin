@@ -22,6 +22,21 @@ import (
 // patience runs out.
 const maxToolCallsPerTurn = 200
 
+// canonicalizeCalls rewrites each call's name to the tool that will
+// really run, so a model asking for "bash" is recorded, announced,
+// judged by hooks and the gate, and replayed to the model as "shell".
+//
+// It runs once per round, before appendAssistant, because that
+// assistant message and the execution below share the same call
+// slice: renaming in place fixes the stored conversation (and so every
+// later round's replay) as well as this round's events in one place.
+// The call id is untouched — it is what pairs a call with its result.
+func canonicalizeCalls(reg *tools.Registry, calls []inference.ToolCall) {
+	for i := range calls {
+		calls[i].Name = reg.CanonicalName(calls[i].Name)
+	}
+}
+
 func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 	if a.toolCalls+len(calls) > maxToolCallsPerTurn {
 		a.settleAborted(calls)
