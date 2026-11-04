@@ -261,8 +261,9 @@ Events are written to stdout in `seq` order by one writer that never
 holds up the agent. If the client stops reading, the writer buffers up
 to about 20,000 events or 8 MB; past that it drops streaming chunks
 (`chat/delta`, `chat/reasoning`, `chat/retry`, `chat/compact`,
-`chat/hook`) but never `turn/*`, `chat/tool`, `chat/approval`,
-`chat/steer`, `chat/budget` or `chat/thinkingDropped`. Once it catches
+`chat/hook`, `chat/usage`) but never `turn/*`, `chat/tool`,
+`chat/approval`, `chat/steer`, `chat/budget` or `chat/thinkingDropped`.
+Once it catches
 up it sends
 
 ```json
@@ -315,6 +316,12 @@ More streaming events:
   provider is reconfigured.
 - `chat/hook`: `{"hook": {"event", "command", "outcome", "message?"}}` — a hook ran and did something worth showing:
   `outcome` is `blocked`, `context`, `error`, `stopped` or `message`.
+- `chat/usage`: `{}` — one LLM call's tokens and cost were written to
+  the session's usage ledger. The client refetches `sessionUsage` (which
+  knows the model's context window and running totals) so the spend and
+  context-fill pill move after **every** call, not only at `turn/done`.
+  The event is a signal with no payload and is droppable: a later call
+  or `turn/done` refreshes the same reading.
 - Tool calls cut short by stop or a crash settle as `failed` `chat/tool`
   events with an `aborted` result, so no row is left spinning.
 

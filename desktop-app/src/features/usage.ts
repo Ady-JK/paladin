@@ -142,20 +142,45 @@ function knownFillAtLeast(usage: SessionUsage, pct: number): boolean {
   return usage.contextKnown && usage.fillPercent !== undefined && usage.fillPercent >= pct;
 }
 
+// usageSeq guards against a slow fetch painting over a newer reading:
+// a per-call refresh and the turn-end refresh can overlap, and a
+// session switch can land mid-flight.
+let usageSeq = 0;
+let usageTimer = 0;
+
+// scheduleUsageRefresh coalesces the chat/usage signals from a burst of
+// tool rounds into one fetch. Every LLM call emits one, so the pill
+// follows the ledger without an RPC per event.
+export function scheduleUsageRefresh(): void {
+  if (usageTimer) return;
+  usageTimer = window.setTimeout(() => {
+    usageTimer = 0;
+    void refreshUsage();
+  }, 100);
+}
+
 // refreshUsage fetches the active session's usage and repaints. Failures
 // keep the last reading (a transient sidecar hiccup must not blink the
 // pill away mid-session).
 export async function refreshUsage(): Promise<void> {
-  if (!state.sessionId) {
+  const sessionId = state.sessionId;
+  if (!sessionId) {
     clearUsage();
     return;
   }
+  const seq = ++usageSeq;
+  let usage: SessionUsage;
   try {
-    state.usage = await api.sessionUsage(state.sessionId, null);
+    usage = await api.sessionUsage(sessionId, null);
   } catch (error) {
     console.warn(`refreshUsage failed: ${String(error)}`);
     return;
   }
+  // A newer fetch, or a session switch, owns the pill now.
+  if (seq !== usageSeq || state.sessionId !== sessionId) {
+    return;
+  }
+  state.usage = usage;
   renderUsage();
   if (isModalOpen(usageModalEl)) {
     renderDashboard();
@@ -164,6 +189,7 @@ export async function refreshUsage(): Promise<void> {
 
 // clearUsage drops the reading and hides the pill, e.g. on new session.
 export function clearUsage(): void {
+  usageSeq++;
   state.usage = null;
   renderUsage();
   if (isModalOpen(usageModalEl)) {

@@ -121,7 +121,7 @@ func (w *eventWriter) flush(timeout time.Duration) bool {
 // from an attach snapshot.
 func droppable(event string) bool {
 	switch event {
-	case "chat/delta", "chat/reasoning", "chat/retry", "chat/compact", "chat/hook":
+	case "chat/delta", "chat/reasoning", "chat/retry", "chat/compact", "chat/hook", "chat/usage":
 		return true
 	}
 	return false

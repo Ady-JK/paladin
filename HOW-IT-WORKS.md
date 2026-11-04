@@ -105,6 +105,8 @@ sequenceDiagram
         Agent-->>UI: chat/delta (words), chat/tool (tool rows)
         Agent->>Agent: run tools (permission check → sandbox → tool)
         Agent-->>UI: chat/tool (result)
+        Agent->>Disk: usage.json (after every call)
+        Agent-->>UI: chat/usage (pill refreshes)
     end
     Agent->>Disk: save messages.jsonl, usage.json
     Hub-->>UI: turn/done
@@ -651,7 +653,7 @@ flowchart LR
 
 - Providers live in `<data>/config/providers.json`. Keys are kept in the OS keychain, not in plain text.
 - **OpenRouter and OpenCode are never pinged automatically.** Their model lists only refresh when you press refresh.
-- Each session tracks **tokens, cost and context size**. That's the `12.5% · $0.0042` pill at the top.
+- Each session tracks **tokens, cost and context size**. That's the `12.5% · $0.0042` pill at the top. The pill follows **every model call**, not just the end of a turn: the core writes the ledger and emits `chat/usage` after each one, and the UI refetches the session's usage view.
 - **Thinking level (how hard the cook thinks 🧠):** a strip above the composer text shows the picked model and one clickable pill per level it accepts (Off, Minimal, Low, Medium, High, Extra High, Max). Picking one applies from the next message, so it can be changed mid-session. **More** next to the pills opens a slider over the same stops plus *Default* (the provider decides, nothing is sent), and `/thinking` opens that slider while `/thinking <level>` (or `/thinking default`) sets one from the keyboard. The choice is saved **per model for the whole app** in `settings.json` and is sent as `reasoning_effort`. The levels come from the provider's own model catalog when it publishes them (OpenCode Go does), else Paladin guesses from the model's name; a model with none says so in the strip instead of hiding the control. If a provider rejects the level, Paladin retries once without it and shows a notice. While the model thinks, a **Thinking** block streams in the chat and folds into **Thought** when the answer starts. The thinking is saved in history but never sent back to the model.
 
 ---

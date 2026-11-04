@@ -25,6 +25,57 @@ test("the usage pill shows fill and spend after a turn", async ({ page }) => {
   expect(title).toContain("3 calls");
 });
 
+// Every LLM call bills, so the pill must move during the turn, not only
+// when it ends. This runs a turn that never finishes and emits the
+// chat/usage signal twice with a different reading each time.
+test("the usage pill follows every LLM call inside a turn", async ({ page }) => {
+  await page.evaluate(() => {
+    // Keep the turn running: no turn/done can refresh the pill, so any
+    // change below comes from the per-call signal alone.
+    (window as any).__e2eRunTurn = () => new Promise(() => undefined);
+  });
+
+  const reading = (calls: number, total: number, fill: number, cost: number) => ({
+    sessionId: "sess-notify-1",
+    model: "beam-free",
+    contextWindow: 200000,
+    contextKnown: true,
+    calls,
+    promptTokens: total - 500,
+    completionTokens: 500,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: total,
+    lastInputTokens: total - 500,
+    cost,
+    listCost: cost * 2,
+    hasCost: true,
+    fillPercent: fill,
+    models: [],
+  });
+  const emitUsage = (u: unknown) =>
+    page.evaluate((usage) => {
+      (window as any).__e2eUsage = usage;
+      const turn = (window as any).__e2eHub.list()[0];
+      (window as any).__e2eHub.emit({ event: "chat/usage", sessionId: turn.sessionId, turnId: turn.turnId });
+    }, u);
+
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+
+  // First call of the turn.
+  await emitUsage(reading(1, 40000, 20, 0.01));
+  await expect(page.locator("#usageLabel")).toHaveText("20% · $0.01");
+
+  // Second call, same running turn: the pill must follow the ledger again.
+  await emitUsage(reading(2, 90000, 45, 0.03));
+  await expect(page.locator("#usageLabel")).toHaveText("45% · $0.03");
+
+  // The turn is still running; no turn/done has repainted anything.
+  expect(await page.evaluate(() => (window as any).__e2eHub.list()[0].state)).toBe("running");
+});
+
 test("the usage pill falls back to tokens when the window is unknown", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eUsage = {

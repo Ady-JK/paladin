@@ -416,6 +416,11 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	if chunk.ThinkingDropped != "" {
 		h.publishLocked(t, TurnEvent{Event: "chat/thinkingDropped", ThinkingDropped: chunk.ThinkingDropped})
 	}
+	if chunk.UsageChanged {
+		// A signal, not a payload: the client refetches the session's
+		// usage view, which already knows the model window and totals.
+		h.publishLocked(t, TurnEvent{Event: "chat/usage"})
+	}
 	if chunk.Reasoning != "" {
 		h.publishLocked(t, TurnEvent{Event: "chat/reasoning", Reasoning: chunk.Reasoning})
 	}

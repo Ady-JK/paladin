@@ -152,6 +152,10 @@ type ChatChunk struct {
 	// ThinkingDropped names a thinking level the provider rejected; the
 	// call went on without it.
 	ThinkingDropped string `json:"thinkingDropped,omitempty"`
+	// UsageChanged says one LLM call's usage was just written to the
+	// session ledger, so the client can refresh spend and context fill
+	// without waiting for the turn to end.
+	UsageChanged bool `json:"usageChanged,omitempty"`
 }
 
 // ToolGate decides whether a tool call may run, and under which
@@ -546,6 +550,11 @@ func (a *Agent) noteCallUsage(u inference.Usage) {
 		a.promptTokens, a.promptLen = n, a.sentLen
 	}
 	session.RecordCall(a.session.UsagePath(), a.session.Meta.SessionID, a.provider.Model(), UsageCounters(u))
+	// Tell the client the ledger moved. The header's spend and context
+	// fill then update after every call, not only when the turn ends.
+	// A stop or a full channel is fine: the next call or turn/done
+	// refreshes again.
+	_ = a.emit(ChatChunk{UsageChanged: true})
 }
 
 // UsageCounters is one LLM call's usage in ledger form.

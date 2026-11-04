@@ -17,7 +17,7 @@ import { mountImage, registerImage } from "./mediaGallery";
 import { TurnView } from "./turnView";
 import { handleAskToolEvent } from "./ask";
 import { handleTodoToolEvent, refreshTodos } from "./todos";
-import { refreshUsage } from "./usage";
+import { refreshUsage, scheduleUsageRefresh } from "./usage";
 import { onAgentsChanged, renderSessions, scheduleRefreshSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
@@ -389,6 +389,11 @@ function track(e: Entry, ev: TurnEvent): boolean {
       return true;
     case "chat/budget":
       if (visible(e.sessionId)) void syncBudget();
+      return false;
+    case "chat/usage":
+      // One LLM call just billed: move the pill's spend and context fill
+      // now, not when the turn ends.
+      if (visible(e.sessionId)) scheduleUsageRefresh();
       return false;
   }
   return false;
