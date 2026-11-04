@@ -208,3 +208,39 @@ func TestCanonicalizeCallsLeavesOtherNames(t *testing.T) {
 		}
 	}
 }
+
+// TestBashAliasInPlanModeStaysReadOnly: renaming a call to "shell" must
+// hand it to whatever shell this registry holds — in plan mode that is
+// the read-only wrapper, not the real tool. An alias must never become
+// a way around the plan-mode fence.
+func TestBashAliasInPlanModeStaysReadOnly(t *testing.T) {
+	base := tools.BuiltinRegistry()
+	realShell := tools.NewShellTool()
+	base.Register(realShell)
+	plan := tools.NewRegistry()
+	for _, name := range base.Names() {
+		if name == "write" || name == "edit" {
+			continue
+		}
+		tool, _ := base.Get(name)
+		if name == "shell" {
+			plan.Register(tools.NewPlanShell(realShell))
+			continue
+		}
+		plan.Register(tool)
+	}
+
+	calls := []inference.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"command":"rm -rf build"}`}}
+	canonicalizeCalls(plan, calls)
+	if calls[0].Name != "shell" {
+		t.Fatalf("name = %q, want shell", calls[0].Name)
+	}
+	res := plan.Call(&tools.ToolCall{ID: calls[0].ID, Name: calls[0].Name, Arguments: calls[0].Arguments},
+		&tools.ToolCtx{Workspace: t.TempDir()})
+	if !res.IsError {
+		t.Fatalf("plan mode ran a destructive bash command: %+v", res)
+	}
+	if !strings.Contains(res.Content, "plan mode") {
+		t.Fatalf("refusal did not come from plan mode: %s", res.Content)
+	}
+}
