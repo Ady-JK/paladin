@@ -619,15 +619,19 @@ no redo — and `openSession` / `listSessions` stop reporting a pending
 `revert`. Changes made by the user or another session after the turn are
 overwritten too.
 
-Shell commands belong to the session that started them: `status`/`cancel`
-with another session's `job_id` (including a subagent's) fails as an unknown
-job. A foreground call waits up to 10 s; a command still running after that
-is moved to the background automatically and returns its `job_id`, and the
-process keeps running until it exits or is cancelled. No shell command has a
-timeout (`timeout_ms` is gone). An auto-backgrounded job reports its running
+Shell commands belong to the session that started them: `status`, `wait` and
+`cancel` with another session's `job_id` (including a subagent's) fails as an
+unknown job. A foreground call waits up to 60 s; a command still running after
+that is moved to the background automatically and returns its `job_id`, and
+the process keeps running until it exits or is cancelled. No shell command has
+a timeout (`timeout_ms` is gone). An auto-backgrounded job reports its running
 time through the session's notice stream every five minutes until it ends,
 and its completion notice wakes an idle session. Explicit `background: true`
-jobs send no running reminders; add `notify: true` for a completion report.
+jobs send no running reminders and report their completion by default; pass
+`notify: false` to opt out. `wait` takes a `job_id` and `seconds` (default 60,
+capped at 300), blocks until the job ends or the time is up, returns its
+output, and consumes the completion notice it saw, so no second notification
+follows.
 They are tracked separately: the sidecar keeps a record in
 `<sessionDir>/jobs/<jobId>.json` (`status` running/done/failed/cancelled,
 `startedAt`, `endedAt`, `exitCode`, `command`, `finalized`) so the app can

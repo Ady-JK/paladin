@@ -26,7 +26,7 @@ var (
 	// hands the still-running command to the background and returns a
 	// job id. Nothing is killed: the command keeps running either way.
 	// A variable so tests can shorten the wait.
-	DefaultShellYieldMs = 10_000
+	DefaultShellYieldMs = 60_000
 )
 
 const (
@@ -35,7 +35,14 @@ const (
 
 	ShellRun    = "run"
 	ShellStatus = "status"
+	ShellWait   = "wait"
 	ShellCancel = "cancel"
+
+	// DefaultShellWaitSeconds and MaxShellWaitSeconds bound the wait
+	// action: it blocks until the job ends or the time is up, and never
+	// longer than the cap, so one call cannot stall a turn indefinitely.
+	DefaultShellWaitSeconds = 60
+	MaxShellWaitSeconds     = 300
 
 	JobRunning   = "running"
 	JobDone      = "done"
@@ -56,7 +63,17 @@ type ShellArgs struct {
 	Command    string `json:"command"`
 	Cmd        string `json:"cmd"`
 	Background bool   `json:"background"`
-	Notify     bool   `json:"notify"`
+	// Notify defaults to true: a background job reports its completion
+	// unless the caller opts out. A pointer distinguishes "absent" from
+	// an explicit false.
+	Notify *bool `json:"notify"`
+	// Seconds bounds the wait action. Zero means the default.
+	Seconds int `json:"seconds"`
+}
+
+// notifyWanted reports whether a background job should report its completion.
+func (a ShellArgs) notifyWanted() bool {
+	return a.Notify == nil || *a.Notify
 }
 
 // CommandLine returns the command to run, preferring command over the
@@ -124,7 +141,7 @@ func (s *ShellTool) runSync(cmd, dir, owner, callID string, cancel context.Conte
 	case <-time.After(time.Duration(DefaultShellYieldMs) * time.Millisecond):
 		if s.armAuto(started.id) {
 			return s.runningResult(started.id,
-				fmt.Sprintf("still running after %dms; moved to the background. Its completion and its running time are reported to you automatically.", DefaultShellYieldMs))
+				fmt.Sprintf("still running after %s; moved to the background. Its completion and its running time are reported to you automatically; call wait with this job_id when you need the result before continuing.", yieldLabel()))
 		}
 		s.markReported(started.id)
 		return s.completed(started.id, sb != nil)
@@ -185,6 +202,23 @@ func (s *ShellTool) runningResult(id, note string) (string, error) {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", id))
 	}
 	return shellResponseJSON(snap.id, JobRunning, nil, nil, nil, snap.log, "", note)
+}
+
+// yieldLabel renders the foreground wait for model-facing notes.
+func yieldLabel() string {
+	d := time.Duration(DefaultShellYieldMs) * time.Millisecond
+	switch {
+	case d >= time.Minute && d%time.Minute == 0:
+		n := int(d / time.Minute)
+		if n == 1 {
+			return "a minute"
+		}
+		return fmt.Sprintf("%d minutes", n)
+	case d >= time.Second:
+		return fmt.Sprintf("%d seconds", int(d/time.Second))
+	default:
+		return d.String()
+	}
 }
 
 // readJobOutput reads at most max bytes of a command log: the whole
@@ -364,25 +398,27 @@ func (ShellTool) Definition() ToolDefinition {
 			"Pass the shell command in the command field. " +
 			"There is no workdir: every run starts in the workspace root, " +
 			"so cd inside the command when you need a subdirectory. " +
-			"A normal call waits up to 10 seconds: a command that finishes sooner " +
+			"A normal call waits up to a minute: a command that finishes sooner " +
 			"returns its output, and one that runs longer is moved to the background " +
 			"automatically and returns a job_id in running state. Nothing is killed. " +
-			"Use background true to return at once for a long-running development server " +
-			"or work that can proceed while other calls run. " +
-			"Status checks a job, cancel stops one. " +
+			"Start work you expect to be slow (a full test suite, a build, an install) " +
+			"with background true in the same call: it returns a job_id at once and " +
+			"reports when it finishes, so you never spend the wait. " +
+			"Status checks a job, wait blocks on one until it ends, cancel stops one. " +
 			"A job reports when it finishes and every five minutes while it runs; " +
-			"keep working and do not poll it. Every command writes its whole output " +
+			"keep working and do not poll it with a sleep command. Every command writes its whole output " +
 			"to the log file named in the answer. " +
 			"When a command exits, any processes it left behind are terminated; " +
 			"start servers with background true rather than '&'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "cancel"}, "description": "What to do: run a command, check a job, or stop a job. Defaults to run."},
-				"job_id":     map[string]any{"type": "string", "description": "The job to check or stop. Empty or missing for a new run."},
+				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "wait", "cancel"}, "description": "What to do: run a command, check a job, block until a job ends, or stop a job. Defaults to run."},
+				"job_id":     map[string]any{"type": "string", "description": "The job to check, wait for, or stop. Empty or missing for a new run."},
 				"command":    map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
-				"notify":     map[string]any{"type": "boolean", "description": "With background true, report the job's final state and output tail when it finishes. Defaults to false; ignored without background."},
+				"notify":     map[string]any{"type": "boolean", "description": "With background true, report the job's final state and output tail when it finishes. Defaults to true; pass false to start a job you do not want to hear about. Ignored without background."},
+				"seconds":    map[string]any{"type": "integer", "description": "With action wait, how long to block before answering, in seconds. Defaults to 60, maximum 300."},
 			},
 		},
 	}
@@ -421,7 +457,7 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, args.Notify, ctx.SessionDir, ctx.Sandbox)
+			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, args.notifyWanted(), ctx.SessionDir, ctx.Sandbox)
 		}
 		return s.runSync(cmd, dir, ctx.SessionID, ctx.CallID, ctx.Cancel, ctx.SessionDir, ctx.Sandbox)
 	case ShellStatus:
@@ -429,13 +465,15 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 			return "", ArgsError("shell: job_id is required for this action")
 		}
 		return s.status(args.JobID, ctx.SessionID)
+	case ShellWait:
+		return s.wait(args.JobID, args.Seconds, ctx.SessionID, ctx.Cancel)
 	case ShellCancel:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
 		}
 		return s.cancel(args.JobID, ctx.SessionID)
 	default:
-		return "", ArgsError(fmt.Sprintf("shell: action must be one of run, status or cancel, got %q", args.Action))
+		return "", ArgsError(fmt.Sprintf("shell: action must be one of run, status, wait or cancel, got %q", args.Action))
 	}
 }
 

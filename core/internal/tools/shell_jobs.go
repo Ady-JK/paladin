@@ -4,6 +4,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -299,6 +300,50 @@ func (s *ShellTool) status(jobID, caller string) (string, error) {
 		return "", WithContent(text, fmt.Sprintf("shell: job %s %s", snap.id, snap.status))
 	}
 	return text, nil
+}
+
+// waitSeconds clamps the wait action's block time: the default when the
+// caller gave none, and the cap so one call cannot stall a turn for longer.
+func waitSeconds(n int) int {
+	if n <= 0 {
+		return DefaultShellWaitSeconds
+	}
+	return min(n, MaxShellWaitSeconds)
+}
+
+// wait blocks until the job ends or the caller's deadline passes, so the
+// model can take a finished result without polling with a sleep. A job
+// this call saw finish is reported here, not again through the notice
+// stream.
+func (s *ShellTool) wait(jobID string, seconds int, caller string, cancel context.Context) (string, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return "", ArgsError("shell: job_id is required for this action")
+	}
+	seconds = waitSeconds(seconds)
+	s.inner.mu.Lock()
+	j, ok := s.ownedJobLocked(jobID, caller)
+	if !ok {
+		s.inner.mu.Unlock()
+		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
+	}
+	done := j.done
+	s.inner.mu.Unlock()
+	if cancel == nil {
+		cancel = context.Background()
+	}
+	timer := time.NewTimer(time.Duration(seconds) * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		return s.runningResult(jobID, fmt.Sprintf(
+			"still running after %ds; call wait again if you need the result now, or keep working and let its completion notice arrive.", seconds))
+	case <-cancel.Done():
+		return "", ArgsError("shell: the wait was interrupted")
+	}
+	// The result this call returns is the completion report, so consume it.
+	s.markReported(jobID)
+	return s.completed(jobID, false)
 }
 
 func (s *ShellTool) cancel(jobID, caller string) (string, error) {

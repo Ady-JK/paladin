@@ -314,7 +314,8 @@ func TestShellBackgroundLifecycle(t *testing.T) {
 	}
 	ctx := &ToolCtx{Workspace: ws, SessionDir: sess, Cancel: context.Background()}
 	tool := NewShellTool()
-	out, err := tool.Call(json.RawMessage(`{"cmd":"echo hello-bg","background":true}`), ctx)
+	// notify is off here so the notify round-trip below sees only its own job.
+	out, err := tool.Call(json.RawMessage(`{"cmd":"echo hello-bg","background":true,"notify":false}`), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

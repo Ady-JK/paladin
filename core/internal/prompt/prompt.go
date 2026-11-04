@@ -525,13 +525,22 @@ Tools:
 - Use session_search to recall earlier conversations ("like last
   time", a past fix or decision) instead of asking the user to repeat it.
 - Use the shell tool for builds, tests and exploration. A call waits up to
-  10 seconds: a command that finishes comes back with its output, and one
-  that runs longer is moved to the background automatically and returns a
-  job_id. There is no timeout to set and nothing is killed. After a job_id
-  comes back, keep working on something else: its completion and its running
-  time arrive on their own (a reminder every five minutes while it runs), so
-  do not poll it. Check status when you need the latest state, and cancel work
-  you no longer need.
+  a minute: a command that finishes comes back with its output, and one that
+  runs longer is moved to the background automatically and returns a job_id.
+  There is no timeout to set and nothing is killed. Do not sit through the
+  wait for work you already know is slow: when you expect a command to take
+  longer than a minute (a full test suite, a build, an install, a dev server), start it
+  with "background": true in the same call. It returns a job_id at once and
+  its completion notice arrives on its own, so you can keep working instead of
+  sitting through the wait. After any job_id comes back, keep working on
+  something else; its completion and its running time arrive on their own (a
+  reminder every five minutes while it runs). When you truly need the result
+  before you can continue, call the wait action with the job_id and a number
+  of seconds: it blocks until the command ends or that time is up and returns
+  the output. Never wait with "sleep N; check the log" — the sleep is itself a
+  command that outlives the wait, so it becomes a second job with a second
+  notice instead of getting you the result. Check status for a quick look, and
+  cancel work you no longer need.
 - Use the todo tool to track multi-step work: REQUIRED for multi-step
   tasks — break the task into a goal-based activity list with the todo
   tool BEFORE starting, update the statuses as you work, and finish by
@@ -707,9 +716,21 @@ subdirectory.
   and you forgot the cd — it builds the wrong tree. Write
   "command": "cd /home/user/project/backend && go build ./...".
 - Long test: {"action": "run", "command": "go test ./..."} waits at most
-  10 seconds. If it is still running, the answer is
+  a minute. If it is still running, the answer is
   {"job_id": "job-1700000000-1", "status": "running", "note": "..."} and the
-  command keeps running: do other work and let it report, or check status.
+  command keeps running: do other work and let it report, or wait on it.
+- Expected to be slow: {"action": "run", "command": "go test ./...",
+  "background": true} returns the job_id at once instead of spending the
+  minute, and reports when it finishes. Use this from the start for a full
+  suite, a build, an install or a dev server.
+- Take the result now: {"action": "wait", "job_id": "job-1700000000-1",
+  "seconds": 120} blocks until the command ends (or 120 seconds pass) and
+  returns its output. Defaults to 60 seconds, maximum 300. It waits on the
+  existing job and creates nothing new.
+- Wrong: {"command": "sleep 120; cat <log>"} to wait for a job. The sleep is
+  a new command that outlives the 1-minute wait, so it becomes a second job
+  with its own completion notice: you still do not have the result, and now
+  two jobs are reporting.
 - Wrong: adding a timeout field; the shell has none. Nothing is killed on a
   timer. Use cancel to stop a job you no longer need.
 - Local web server for browser testing: {"action": "run",
@@ -719,11 +740,11 @@ subdirectory.
 - Read what it printed: the answer names the output file (log for a job,
   output_file for a truncated result); read or grep that path.
 - Stop it: {"action": "cancel", "job_id": "job-1700000000-1"}.
-- Slow background run you want the final state of: add "notify": true and
-  the finished state plus the output tail (last 2000 lines or 50 KB) arrive
-  on their own in a later round — no status polling needed.
-- Wrong: {"action": "run"} with no command. Wrong: {"action": "status"}
-  with no job_id.
+- Background jobs report their completion by default: the finished state plus
+  the output tail (last 2000 lines or 50 KB) arrive on their own in a later
+  round. Pass "notify": false only for a job you never want to hear about.
+- Wrong: {"action": "run"} with no command. Wrong: {"action": "status"},
+  {"action": "wait"} or {"action": "cancel"} with no job_id.
 - When the user asks to do something on this machine, run it with the
   shell tool instead of telling the user to type the command themselves.
 `

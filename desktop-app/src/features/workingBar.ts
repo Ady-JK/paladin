@@ -21,7 +21,13 @@ export function workingLabel(tool: ToolInfo): string {
   switch (tool.name) {
     case "shell": {
       const command = str("command") || str("cmd");
-      return command ? `Running ${command.split("\n")[0]}` : "Running a command";
+      if (command) return `Running ${command.split("\n")[0]}`;
+      const action = str("action");
+      const job = str("job_id");
+      if (action === "wait") return job ? `Waiting for ${job}` : "Waiting for a background job";
+      if (action === "status") return job ? `Checking ${job}` : "Checking a background job";
+      if (action === "cancel") return job ? `Stopping ${job}` : "Stopping a background job";
+      return "Running a command";
     }
     case "read":
       return str("path") ? `Reading ${tail(str("path"))}` : "Reading a file";

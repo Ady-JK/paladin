@@ -39,8 +39,8 @@ type JobRecord struct {
 	ExitCode  *int      `json:"exitCode,omitempty"`
 	// Command is the shell command line, shown in the running-jobs panel.
 	Command string `json:"command,omitempty"`
-	// Auto marks a foreground command that outlived its 10s wait and was
-	// moved to the background automatically; only those report every 5m.
+	// Auto marks a foreground command that outlived its foreground wait
+	// and was moved to the background automatically; only those report every 5m.
 	Auto bool `json:"auto,omitempty"`
 	// Candidate marks a foreground command that may still become an auto
 	// job. It is not a tracked job until it backgrounds.
