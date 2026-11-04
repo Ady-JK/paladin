@@ -17,6 +17,7 @@ import {
   estimatedSpend,
   formatCost,
   heatmap,
+  isEstimatedSpend,
   roundTo,
   stackedComposition,
   trimNum,
@@ -126,9 +127,11 @@ function sessionsTable(u: OverallUsage, filter: string): string {
     .map((s) => {
       const hit = cacheHitRate(s);
       const title = s.title || s.sessionId.slice(0, 8);
-      const badge = s.hasCost
-        ? `<span class="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400">BILLED</span>`
-        : `<span class="rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">FREE</span>`;
+      const badge = isEstimatedSpend(s)
+        ? `<span class="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-400">EST.</span>`
+        : s.hasCost
+          ? `<span class="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400">BILLED</span>`
+          : `<span class="rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">UNKNOWN</span>`;
       return `<tr class="border-b border-slate-800/60 hover:bg-slate-800/30">
         <td class="py-2.5 pr-3 font-semibold text-accent-400">${escapeHtml(s.sessionId.slice(0, 8))}<div class="max-w-44 truncate text-[10px] font-normal text-slate-500">${escapeHtml(title)}</div></td>
         <td class="py-2.5 pr-3 text-slate-200">${escapeHtml(s.model || "—")}<div class="text-[10px] text-slate-500">${s.calls} calls</div></td>
@@ -188,10 +191,10 @@ function render(u: OverallUsage): void {
   const hit = cacheHitRate(filtered);
   const kpis = [
     hero({
-      label: filtered.costEstimated ? "Est. total cost" : "Total cost",
+      label: isEstimatedSpend(filtered) ? "Est. total cost" : "Total cost",
       value: filtered.hasCost ? formatCost(estimatedSpend(filtered)) : "—",
       sub: filtered.hasCost
-        ? filtered.costEstimated
+        ? isEstimatedSpend(filtered)
           ? "list price · subscription billed $0"
           : `avg ${formatCost(filtered.calls > 0 ? estimatedSpend(filtered) / filtered.calls : 0)}/run`
         : `${filtered.sessionCount} sessions`,

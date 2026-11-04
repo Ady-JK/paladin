@@ -180,6 +180,46 @@ test("a subscription plan shows its list-price spend, not $0", async ({ page }) 
   await expect(body).not.toContainText("vs list");
 });
 
+// Ledgers written before costEstimated existed have no marker. Their
+// numbers alone — charged 0 beside a nonzero list price — must still
+// show the price of the session instead of $0.
+test("a session recorded before the estimate marker still shows its price", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eUsage = {
+      sessionId: "sess-legacy-1",
+      model: "deepseek-v4.1-flash",
+      contextWindow: 200000,
+      contextKnown: true,
+      calls: 55,
+      promptTokens: 3271142,
+      completionTokens: 17981,
+      reasoningTokens: 4892,
+      cacheReadTokens: 3194112,
+      cacheWriteTokens: 0,
+      totalTokens: 3289123,
+      cost: 0,
+      listCost: 0.06385086,
+      hasCost: true,
+      lastInputTokens: 83636,
+      fillPercent: 41.8,
+      models: [],
+    };
+  });
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+
+  const pill = page.locator("#usagePill");
+  await expect(pill).toBeVisible();
+  await expect(page.locator("#usageLabel")).toContainText("$0.06");
+  expect(await pill.getAttribute("title")).toContain("est. value");
+
+  await page.click("#usagePill");
+  const body = page.locator("#usageBody");
+  await expect(body).toContainText("Est. total cost");
+  await expect(body).toContainText("$0.06");
+  await expect(body).not.toContainText("$0.00");
+});
+
 test("clicking the pill opens the analytics dashboard", async ({ page }) => {
   await page.fill("#promptInput", "hello agent");
   await page.click("#sendBtn");

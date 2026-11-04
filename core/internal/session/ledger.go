@@ -35,7 +35,26 @@ func ReadLedger(path string) (UsageTotals, error) {
 	if err := json.Unmarshal(data, &totals); err != nil {
 		return UsageTotals{}, fmt.Errorf("%w: %w", ErrLedgerCorrupt, err)
 	}
+	normalizeEstimated(&totals)
 	return totals, nil
+}
+
+// normalizeEstimated backfills CostEstimated on a ledger written before
+// the field existed. A recorded charge of 0 beside a nonzero list price
+// is a subscription or free plan whose tokens were still priced — not
+// free tokens — and showing the charge alone would read as $0.
+func normalizeEstimated(t *UsageTotals) {
+	t.CostEstimated = t.Estimated()
+	for _, m := range t.Models {
+		if m != nil {
+			m.CostEstimated = m.Estimated()
+		}
+	}
+	for _, d := range t.Daily {
+		if d != nil {
+			d.CostEstimated = d.Estimated()
+		}
+	}
 }
 
 // RecordCall folds one LLM call into the usage.json at path. Billing

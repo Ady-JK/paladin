@@ -42,13 +42,22 @@ export function formatCost(cost: number): string {
   return `$${trimNum(roundTo(cost, 2))}`;
 }
 
+// isEstimatedSpend marks a tally whose cost is a list price, not a bill:
+// a subscription or free plan charges nothing while still pricing the
+// tokens it serves. Ledgers written before costEstimated existed are
+// inferred from the numbers themselves, so an old session never reads
+// as a misleading $0.
+export function isEstimatedSpend(u: { cost: number; listCost: number; costEstimated?: boolean }): boolean {
+  return u.listCost > 0 && (u.costEstimated === true || u.cost <= 0);
+}
+
 // estimatedSpend is the dollar figure to show for a usage tally. A
 // gateway that charged nothing (a subscription plan such as OpenCode Go,
 // or a free tier) reports cost 0 with the tokens' list price beside it;
 // showing cost would read as "free" for millions of tokens, so the list
 // price is used and labelled. Everything else shows what it charged.
 export function estimatedSpend(u: { cost: number; listCost: number; costEstimated?: boolean }): number {
-  return u.costEstimated && u.listCost > 0 ? u.listCost : u.cost;
+  return isEstimatedSpend(u) ? u.listCost : u.cost;
 }
 
 // formatUsd renders money with cents ($0.40, $2.00); sub-cent spend
@@ -102,7 +111,7 @@ function pillTitle(usage: SessionUsage): string {
     parts.push(`${usage.totalTokens.toLocaleString()} tokens (window unknown)`);
   }
   if (usage.hasCost) {
-    parts.push(`spent ${formatCost(estimatedSpend(usage))}${usage.costEstimated ? " (est. value)" : ""}`);
+    parts.push(`spent ${formatCost(estimatedSpend(usage))}${isEstimatedSpend(usage) ? " (est. value)" : ""}`);
   } else {
     parts.push("spend unknown");
   }
@@ -365,7 +374,7 @@ function spendMixCard(usage: SessionUsage): string | null {
   }
   return donutCard(
     "Spend by model",
-    usage.costEstimated ? "list price of tokens served" : "gateway-reported cost",
+    isEstimatedSpend(usage) ? "list price of tokens served" : "gateway-reported cost",
     segments,
     formatCost(estimatedSpend(usage)),
     "spent",
@@ -555,10 +564,10 @@ function overviewHtml(usage: SessionUsage): string {
   const hit = cacheHitRate(usage);
   const heroes = [
     heroCard({
-      label: usage.costEstimated ? "Est. total cost" : "Total cost",
+      label: isEstimatedSpend(usage) ? "Est. total cost" : "Total cost",
       value: usage.hasCost ? formatCost(spend) : "—",
       sub:
-        usage.hasCost && usage.costEstimated
+        usage.hasCost && isEstimatedSpend(usage)
           ? `list price · subscription billed $0`
           : usage.hasCost
             ? `avg ${formatCost(avgCost)}/run`

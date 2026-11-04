@@ -45,15 +45,29 @@ func (c *Counters) Add(o Counters) {
 		c.Cost += o.Cost
 		c.ListCost += o.ListCost
 		c.HasCost = true
+		// A call that was priced but not charged is a subscription or
+		// free plan. Older ledgers have no marker, so infer it from the
+		// numbers themselves: charge 0 beside a nonzero list price.
+		if o.CostEstimated || (o.Cost <= 0 && o.ListCost > 0) {
+			c.CostEstimated = true
+		}
 	}
 	c.CostEstimated = c.CostEstimated || o.CostEstimated
+}
+
+// Estimated reports whether SpendUsd is the list price of tokens the
+// plan did not bill. Ledgers written before CostEstimated existed are
+// inferred from "charged 0 but priced above 0", so an upgrade does not
+// turn a subscription session back into a misleading $0.
+func (c Counters) Estimated() bool {
+	return c.CostEstimated || (c.Cost <= 0 && c.ListCost > 0)
 }
 
 // SpendUsd is the dollar figure to show: the amount charged, or, for a
 // subscription or free plan that charged nothing, the list price of
 // what it served.
 func (c Counters) SpendUsd() float64 {
-	if c.CostEstimated && c.ListCost > 0 {
+	if c.Estimated() && c.ListCost > 0 {
 		return c.ListCost
 	}
 	return c.Cost
@@ -191,11 +205,15 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 		LastInputTokens: t.LastInputTokens,
 		FillPercent:     fillPercent(t.LastInputTokens, window, known),
 	}
+	// Surface the inferred flag so the client labels a subscription's
+	// list price as an estimate even when the ledger predates the field.
+	out.CostEstimated = out.Estimated()
 	for name, m := range t.Models {
 		if m == nil {
 			continue
 		}
 		mv := ModelUsageView{Model: name, Counters: m.Counters, LastInputTokens: m.LastInputTokens}
+		mv.CostEstimated = mv.Estimated()
 		if windowOf != nil {
 			if w, ok := windowOf(name); ok {
 				mv.ContextWindow, mv.ContextKnown = w, true
@@ -206,6 +224,9 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 	}
 	SortModelsHeaviestFirst(out.Models)
 	out.Daily = DailyPoints(t.Daily)
+	for i := range out.Daily {
+		out.Daily[i].CostEstimated = out.Daily[i].Estimated()
+	}
 	return out
 }
 
