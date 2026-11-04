@@ -257,6 +257,11 @@ func googleUsageOf(m *googleUsage) *Usage {
 		if m.Opencode.ListCost != nil {
 			out.ListCost = *m.Opencode.ListCost
 			out.HasCost = true
+			// Charged nothing for priced tokens: a subscription or free
+			// plan. Mirrors applyGatewayCost's rule.
+			if out.Cost <= 0 && out.ListCost > 0 {
+				out.CostEstimated = true
+			}
 		}
 		if m.Opencode.Tokens != nil {
 			out.CacheWriteTokens = m.Opencode.Tokens.CacheWrite5m + m.Opencode.Tokens.CacheWrite1h

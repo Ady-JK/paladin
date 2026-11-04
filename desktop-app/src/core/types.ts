@@ -192,6 +192,10 @@ type UsageModel = {
   cost: number;
   listCost: number;
   hasCost: boolean;
+  // costEstimated marks spend the gateway did not charge (a subscription
+  // or free plan): cost is 0 and listCost is what the tokens would have
+  // cost. Show `estimatedSpend` from features/usage.ts, not cost.
+  costEstimated?: boolean;
   fillPercent?: number;
 };
 
@@ -236,6 +240,10 @@ export type SessionUsage = {
   cost: number;
   listCost: number;
   hasCost: boolean;
+  // costEstimated marks spend the gateway did not charge (a subscription
+  // or free plan): cost is 0 and listCost is what the tokens would have
+  // cost. Show `estimatedSpend` from features/usage.ts, not cost.
+  costEstimated?: boolean;
   fillPercent?: number;
   models?: UsageModel[];
   daily?: DailyPoint[];
@@ -254,6 +262,10 @@ export type DailyPoint = {
   cost: number;
   listCost: number;
   hasCost: boolean;
+  // costEstimated marks spend the gateway did not charge (a subscription
+  // or free plan): cost is 0 and listCost is what the tokens would have
+  // cost. Show `estimatedSpend` from features/usage.ts, not cost.
+  costEstimated?: boolean;
 };
 
 // OverallSessionEntry is one session's slice of the fleet-wide rollup.
@@ -273,6 +285,10 @@ type OverallSessionEntry = {
   cost: number;
   listCost: number;
   hasCost: boolean;
+  // costEstimated marks spend the gateway did not charge (a subscription
+  // or free plan): cost is 0 and listCost is what the tokens would have
+  // cost. Show `estimatedSpend` from features/usage.ts, not cost.
+  costEstimated?: boolean;
 };
 
 // OverallUsage is the fleet-wide rollup from `overallUsage`.
@@ -289,6 +305,10 @@ export type OverallUsage = {
   cost: number;
   listCost: number;
   hasCost: boolean;
+  // costEstimated marks spend the gateway did not charge (a subscription
+  // or free plan): cost is 0 and listCost is what the tokens would have
+  // cost. Show `estimatedSpend` from features/usage.ts, not cost.
+  costEstimated?: boolean;
   updatedAt: number;
   models?: UsageModel[];
   sessions?: OverallSessionEntry[];

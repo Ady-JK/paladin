@@ -42,6 +42,15 @@ export function formatCost(cost: number): string {
   return `$${trimNum(roundTo(cost, 2))}`;
 }
 
+// estimatedSpend is the dollar figure to show for a usage tally. A
+// gateway that charged nothing (a subscription plan such as OpenCode Go,
+// or a free tier) reports cost 0 with the tokens' list price beside it;
+// showing cost would read as "free" for millions of tokens, so the list
+// price is used and labelled. Everything else shows what it charged.
+export function estimatedSpend(u: { cost: number; listCost: number; costEstimated?: boolean }): number {
+  return u.costEstimated && u.listCost > 0 ? u.listCost : u.cost;
+}
+
 // formatUsd renders money with cents ($0.40, $2.00); sub-cent spend
 // keeps formatCost's extra digits so it never reads $0.00.
 export function formatUsd(n: number): string {
@@ -73,7 +82,7 @@ export function cacheHitRate(usage: { promptTokens: number; cacheReadTokens: num
 // the fill percentage; without one it shows raw tokens instead of a
 // misleading zero.
 function pillText(usage: SessionUsage): string {
-  const spend = usage.hasCost ? ` · ${formatCost(usage.cost)}` : "";
+  const spend = usage.hasCost ? ` · ${formatCost(estimatedSpend(usage))}` : "";
   if (usage.contextKnown && usage.fillPercent !== undefined) {
     return `${trimNum(roundTo(usage.fillPercent, 1))}%${spend}`;
   }
@@ -93,9 +102,7 @@ function pillTitle(usage: SessionUsage): string {
     parts.push(`${usage.totalTokens.toLocaleString()} tokens (window unknown)`);
   }
   if (usage.hasCost) {
-    const spend =
-      usage.listCost > 0 ? `${formatCost(usage.cost)} (list ${formatCost(usage.listCost)})` : formatCost(usage.cost);
-    parts.push(`spent ${spend}`);
+    parts.push(`spent ${formatCost(estimatedSpend(usage))}${usage.costEstimated ? " (est. value)" : ""}`);
   } else {
     parts.push("spend unknown");
   }
@@ -341,18 +348,29 @@ function tokenMixCard(usage: SessionUsage): string {
 }
 
 function spendMixCard(usage: SessionUsage): string | null {
-  const models = (usage.models ?? []).filter((m) => m.hasCost && m.cost > 0);
+  const models = (usage.models ?? []).filter((m) => m.hasCost && estimatedSpend(m) > 0);
   if (!usage.hasCost || models.length === 0) {
     return null;
   }
   const palette = [NEON.amber, NEON.rose, NEON.blue, NEON.emerald, NEON.purple];
   const top = models.slice(0, 4);
-  const restCost = models.slice(4).reduce((n, m) => n + m.cost, 0);
-  const segments = top.map((m, i) => ({ label: m.model, value: m.cost, color: palette[i % palette.length] }));
+  const restCost = models.slice(4).reduce((n, m) => n + estimatedSpend(m), 0);
+  const segments = top.map((m, i) => ({
+    label: m.model,
+    value: estimatedSpend(m),
+    color: palette[i % palette.length],
+  }));
   if (restCost > 0) {
     segments.push({ label: `${models.length - 4} more`, value: restCost, color: "#64748b" });
   }
-  return donutCard("Spend by model", "gateway-reported cost", segments, formatCost(usage.cost), "spent", formatCost);
+  return donutCard(
+    "Spend by model",
+    usage.costEstimated ? "list price of tokens served" : "gateway-reported cost",
+    segments,
+    formatCost(estimatedSpend(usage)),
+    "spent",
+    formatCost,
+  );
 }
 
 // areaChart renders a hand-rolled SVG time series with a gradient
@@ -363,7 +381,7 @@ export function areaChart(daily: DailyPoint[], metric: "tokens" | "cost", id: st
   if (pts.length < 2) {
     return "";
   }
-  const values = pts.map((d) => (metric === "cost" ? d.cost : d.totalTokens));
+  const values = pts.map((d) => (metric === "cost" ? estimatedSpend(d) : d.totalTokens));
   const max = Math.max(...values, 1e-9);
   const w = 560;
   const h = 180;
@@ -372,13 +390,14 @@ export function areaChart(daily: DailyPoint[], metric: "tokens" | "cost", id: st
   const y = (v: number): number => h - pad - (v / max) * (h - pad * 2 - 18);
   const line = pts
     .map(
-      (d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(metric === "cost" ? d.cost : d.totalTokens).toFixed(1)}`,
+      (d, i) =>
+        `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(metric === "cost" ? estimatedSpend(d) : d.totalTokens).toFixed(1)}`,
     )
     .join(" ");
   const fill = `${line} L${x(pts.length - 1).toFixed(1)},${h - pad} L${x(0).toFixed(1)},${h - pad} Z`;
   const dots = pts
     .map((d, i) => {
-      const v = metric === "cost" ? d.cost : d.totalTokens;
+      const v = metric === "cost" ? estimatedSpend(d) : d.totalTokens;
       const tip = `${d.date}: ${metric === "cost" ? formatCost(v) : `${v.toLocaleString()} tok`} · ${d.calls} calls`;
       return `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3.5" fill="#3b82f6" stroke="#090d16" stroke-width="1.5"><title>${escapeHtml(tip)}</title></circle>`;
     })
@@ -531,16 +550,16 @@ export function stackedComposition(
 }
 
 function overviewHtml(usage: SessionUsage): string {
-  const avgCost = usage.calls > 0 && usage.hasCost ? usage.cost / usage.calls : 0;
+  const spend = estimatedSpend(usage);
+  const avgCost = usage.calls > 0 && usage.hasCost ? spend / usage.calls : 0;
   const hit = cacheHitRate(usage);
-  const saved = usage.hasCost && usage.listCost > usage.cost ? usage.listCost - usage.cost : 0;
   const heroes = [
     heroCard({
-      label: "Est. total cost",
-      value: usage.hasCost ? formatCost(usage.cost) : "—",
+      label: usage.costEstimated ? "Est. total cost" : "Total cost",
+      value: usage.hasCost ? formatCost(spend) : "—",
       sub:
-        saved > 0
-          ? `saved ${formatCost(saved)} vs list`
+        usage.hasCost && usage.costEstimated
+          ? `list price · subscription billed $0`
           : usage.hasCost
             ? `avg ${formatCost(avgCost)}/run`
             : "spend not reported",
@@ -578,8 +597,8 @@ function overviewHtml(usage: SessionUsage): string {
       glow: "amber",
     }),
   ].join("");
-  const spend = spendMixCard(usage);
-  const charts = spend ? `${tokenMixCard(usage)}${spend}` : tokenMixCard(usage);
+  const spendCard = spendMixCard(usage);
+  const charts = spendCard ? `${tokenMixCard(usage)}${spendCard}` : tokenMixCard(usage);
   const timeline = areaChart(usage.daily ?? [], "tokens", "sess-timeline");
   const heat = heatmap(usage.daily ?? [], "sess-heat");
   return `<div class="space-y-5">
@@ -603,7 +622,7 @@ function modelsHtml(usage: SessionUsage): string {
         m.contextKnown && m.fillPercent !== undefined
           ? `<div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"><div class="h-full rounded-full" style="width:${Math.min(100, m.fillPercent).toFixed(2)}%;background:linear-gradient(90deg,#3b82f6,#a855f7)"></div></div>`
           : "";
-      const spend = m.hasCost ? formatCost(m.cost) : "—";
+      const spend = m.hasCost ? formatCost(estimatedSpend(m)) : "—";
       const hit = cacheHitRate(m);
       return `<div class="glass-panel rounded-2xl p-4">
         <div class="flex items-baseline justify-between gap-3">

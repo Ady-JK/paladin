@@ -66,7 +66,9 @@ func (a *Agent) sessionSpend() spendState {
 			st.incomplete = true
 			continue
 		}
-		st.spent += totals.Cost
+		// SpendUsd, not Cost: a subscription plan charges $0, so a
+		// budget over one would never trip if it counted the charge.
+		st.spent += totals.SpendUsd()
 		st.known = st.known || totals.HasCost
 		st.incomplete = st.incomplete || totals.SpendIncomplete()
 	}

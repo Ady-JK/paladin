@@ -565,6 +565,7 @@ func UsageCounters(u inference.Usage) session.Counters {
 		Cost:             u.Cost,
 		ListCost:         u.ListCost,
 		HasCost:          u.HasCost,
+		CostEstimated:    u.CostEstimated,
 	}
 }
 

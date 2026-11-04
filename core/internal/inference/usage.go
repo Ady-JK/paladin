@@ -30,6 +30,23 @@ type Usage struct {
 	Cost     float64
 	ListCost float64
 	HasCost  bool
+	// CostEstimated marks a cost the gateway did not charge: a
+	// subscription plan (OpenCode Go), a free tier, or a gateway that
+	// reports list_cost but no cost. Cost then holds the plan's list
+	// price and EstimatedCost() prefers it. Without this flag a
+	// subscription would report $0 for a million tokens and read as
+	// free, which is what the analytics pages used to show.
+	CostEstimated bool
+}
+
+// EstimatedCost is the dollar figure to show for this call: the actual
+// charge when the gateway made one, else the list price of a
+// subscription or free call.
+func (u Usage) EstimatedCost() float64 {
+	if u.CostEstimated {
+		return u.ListCost
+	}
+	return u.Cost
 }
 
 // Empty reports whether nothing was recorded.
@@ -51,6 +68,7 @@ func (u *Usage) Add(o Usage) {
 		u.Cost += o.Cost
 		u.ListCost += o.ListCost
 		u.HasCost = true
+		u.CostEstimated = u.CostEstimated || o.CostEstimated
 	}
 }
 
@@ -85,42 +103,77 @@ type opencodeExtras struct {
 	} `json:"prompt_tokens_details"`
 }
 
+// gatewayEnvelope is a cost envelope as parsed from a response body.
+// HasCost and HasList record which numbers the gateway actually sent,
+// which is what distinguishes "charged nothing" from "said nothing".
+type gatewayEnvelope struct {
+	Cost, ListCost        float64
+	CacheRead, CacheWrite int64
+	HasCost, HasList      bool
+}
+
 // gatewayCost pulls cost and cache extras out of a raw response body.
 // raw is the full response JSON (completion, chunk or response); the
-// usage object is found one level down. Returns ok=false when neither
-// gateway sent a cost envelope, e.g. plain non-OpenCode providers.
-func gatewayCost(raw string) (cost, listCost float64, cacheRead, cacheWrite int64, ok bool) {
+// usage object is found one level down. ok is false when the body sent
+// no cost envelope at all, e.g. a plain non-gateway provider.
+func gatewayCost(raw string) (gatewayEnvelope, bool) {
+	var ge gatewayEnvelope
 	if raw == "" {
-		return 0, 0, 0, 0, false
+		return ge, false
 	}
 	var outer struct {
 		Usage json.RawMessage `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(raw), &outer); err != nil || len(outer.Usage) == 0 {
-		return 0, 0, 0, 0, false
+		return ge, false
 	}
 	var ex opencodeExtras
 	if err := json.Unmarshal(outer.Usage, &ex); err != nil {
-		return 0, 0, 0, 0, false
+		return ge, false
 	}
 	if ex.Cost != nil {
-		cost = *ex.Cost
-		ok = true
+		ge.Cost, ge.HasCost = *ex.Cost, true
 	}
 	if ex.Opencode != nil {
 		if ex.Opencode.ListCost != nil {
-			listCost = *ex.Opencode.ListCost
-			ok = true
+			ge.ListCost, ge.HasList = *ex.Opencode.ListCost, true
 		}
 		if ex.Opencode.Tokens != nil {
-			cacheRead = ex.Opencode.Tokens.CacheRead
-			cacheWrite = ex.Opencode.Tokens.CacheWrite5m + ex.Opencode.Tokens.CacheWrite1h
+			ge.CacheRead = ex.Opencode.Tokens.CacheRead
+			ge.CacheWrite = ex.Opencode.Tokens.CacheWrite5m + ex.Opencode.Tokens.CacheWrite1h
 		}
 	}
 	if ex.PromptTokensDetails != nil && ex.PromptTokensDetails.CacheWriteTokens != nil {
-		cacheWrite += *ex.PromptTokensDetails.CacheWriteTokens
+		ge.CacheWrite += *ex.PromptTokensDetails.CacheWriteTokens
 	}
-	return cost, listCost, cacheRead, cacheWrite, ok
+	return ge, ge.HasCost || ge.HasList
+}
+
+// applyGatewayCost records a gateway cost envelope on u.
+//
+// A gateway that reports only list_cost (a subscription plan such as
+// OpenCode Go, or a free tier) is charged nothing for the tokens it
+// served, so Cost stays 0 — but the list price is what those tokens
+// would have cost, and reporting a flat $0 for millions of tokens reads
+// as broken. CostEstimated marks that case so the UI shows the list
+// price instead. A gateway that reports neither number gave no cost
+// data at all; it stays unknown, so a plain provider is never mistaken
+// for a free one.
+func applyGatewayCost(u *Usage, cost, listCost float64, hasCost, hasList bool) {
+	if !hasCost && !hasList {
+		return
+	}
+	u.HasCost = true
+	u.Cost, u.ListCost = cost, listCost
+	// Charged nothing for tokens that carry a list price: a subscription
+	// plan (OpenCode Go sends an explicit cost 0 beside a nonzero
+	// list_cost) or a free tier. The plan did not bill, but $0 for
+	// millions of tokens reads as broken, so the list price is shown and
+	// marked as an estimate. A zero with no list price is a gateway
+	// saying "nothing to charge" — a real free call, no estimate.
+	if cost <= 0 && hasList && listCost > 0 {
+		u.CostEstimated = true
+	}
 }
 
 // liteLLMCostHeader carries the call's USD cost on LiteLLM responses.

@@ -56,6 +56,130 @@ test("the usage pill falls back to tokens when the window is unknown", async ({ 
   expect(title).toContain("window unknown");
 });
 
+// A subscription plan (OpenCode Go) charges nothing and reports the
+// tokens' list price beside the zero. Showing the charge alone read as
+// "$0" after millions of tokens, which is the bug this covers.
+test("a subscription plan shows its list-price spend, not $0", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eUsage = {
+      sessionId: "sess-sub-1",
+      model: "deepseek-v4.1-flash",
+      contextWindow: 200000,
+      contextKnown: true,
+      calls: 164,
+      promptTokens: 18042705,
+      completionTokens: 69216,
+      reasoningTokens: 32130,
+      cacheReadTokens: 17876096,
+      cacheWriteTokens: 0,
+      totalTokens: 18111921,
+      cost: 0,
+      listCost: 0.16143655,
+      hasCost: true,
+      costEstimated: true,
+      lastInputTokens: 158495,
+      fillPercent: 79.2,
+      models: [],
+    };
+  });
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+
+  const pill = page.locator("#usagePill");
+  await expect(pill).toBeVisible();
+  // The list price, not the $0 charge.
+  await expect(page.locator("#usageLabel")).toContainText("$0.16");
+  const title = await pill.getAttribute("title");
+  expect(title).toContain("est. value");
+
+  // And the dashboard agrees. The stub's overallUsage is a billed fleet,
+  // so point it at the subscription shape too before opening the pane.
+  // Arrays are populated like the real rollup: the pane renders models,
+  // sessions and days, and an empty fleet is not what this covers.
+  const day = new Date().toISOString().slice(0, 10);
+  await page.evaluate((d) => {
+    (window as any).__e2eOverall = {
+      sessionCount: 1,
+      sessionsWithUsage: 1,
+      calls: 164,
+      promptTokens: 18042705,
+      completionTokens: 69216,
+      reasoningTokens: 32130,
+      cacheReadTokens: 17876096,
+      cacheWriteTokens: 0,
+      totalTokens: 18111921,
+      cost: 0,
+      listCost: 0.16143655,
+      hasCost: true,
+      costEstimated: true,
+      updatedAt: Math.floor(Date.now() / 1000),
+      models: [
+        {
+          model: "deepseek-v4.1-flash",
+          contextWindow: 200000,
+          contextKnown: true,
+          calls: 164,
+          promptTokens: 18042705,
+          completionTokens: 69216,
+          reasoningTokens: 32130,
+          cacheReadTokens: 17876096,
+          cacheWriteTokens: 0,
+          totalTokens: 18111921,
+          cost: 0,
+          listCost: 0.16143655,
+          hasCost: true,
+          costEstimated: true,
+          fillPercent: 79.2,
+        },
+      ],
+      sessions: [
+        {
+          sessionId: "sess-sub-1",
+          title: "subscription session",
+          model: "deepseek-v4.1-flash",
+          createdAt: Math.floor(Date.now() / 1000) - 86400,
+          updatedAt: Math.floor(Date.now() / 1000),
+          calls: 164,
+          promptTokens: 18042705,
+          completionTokens: 69216,
+          reasoningTokens: 32130,
+          cacheReadTokens: 17876096,
+          cacheWriteTokens: 0,
+          totalTokens: 18111921,
+          cost: 0,
+          listCost: 0.16143655,
+          hasCost: true,
+          costEstimated: true,
+        },
+      ],
+      daily: [
+        {
+          date: d,
+          calls: 164,
+          promptTokens: 18042705,
+          completionTokens: 69216,
+          reasoningTokens: 32130,
+          cacheReadTokens: 17876096,
+          cacheWriteTokens: 0,
+          totalTokens: 18111921,
+          cost: 0,
+          listCost: 0.16143655,
+          hasCost: true,
+          costEstimated: true,
+        },
+      ],
+    };
+  }, day);
+  await page.click("#usagePill");
+  // The pill opens the usage dashboard (#usageBody); #analyticsBody is
+  // the Settings → Analytics pane, which the next test covers.
+  const body = page.locator("#usageBody");
+  await expect(body).toContainText("Est. total cost");
+  await expect(body).toContainText("$0.16");
+  // The removed "saved vs list" line must not come back.
+  await expect(body).not.toContainText("vs list");
+});
+
 test("clicking the pill opens the analytics dashboard", async ({ page }) => {
   await page.fill("#promptInput", "hello agent");
   await page.click("#sendBtn");

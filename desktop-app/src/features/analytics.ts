@@ -14,6 +14,7 @@ import {
   cacheHitRate,
   compactTokens,
   donut,
+  estimatedSpend,
   formatCost,
   heatmap,
   roundTo,
@@ -73,7 +74,9 @@ function banner(u: OverallUsage): string {
 }
 
 function modelDonut(u: OverallUsage): string {
-  const models = (u.models ?? []).filter((m) => (metric === "cost" ? m.hasCost && m.cost > 0 : m.totalTokens > 0));
+  const models = (u.models ?? []).filter((m) =>
+    metric === "cost" ? m.hasCost && estimatedSpend(m) > 0 : m.totalTokens > 0,
+  );
   const useTokens = metric === "tokens" || models.length === 0;
   const source = useTokens ? (u.models ?? []).filter((m) => m.totalTokens > 0) : models;
   if (source.length === 0) {
@@ -81,7 +84,7 @@ function modelDonut(u: OverallUsage): string {
   }
   const palette = [PALETTE.purple, PALETTE.cyan, PALETTE.blue, PALETTE.emerald, PALETTE.amber];
   const top = source.slice(0, 5);
-  const sum = (m: (typeof source)[number]): number => (useTokens ? m.totalTokens : m.cost);
+  const sum = (m: (typeof source)[number]): number => (useTokens ? m.totalTokens : estimatedSpend(m));
   const rest = source.slice(5).reduce((n, m) => n + sum(m), 0);
   const total = source.reduce((n, m) => n + sum(m), 0);
   const segs = top.map((m, i) => ({
@@ -101,7 +104,7 @@ function modelDonut(u: OverallUsage): string {
   const center = useTokens
     ? compactTokens(u.totalTokens)
     : u.hasCost
-      ? formatCost(u.cost)
+      ? formatCost(estimatedSpend(u))
       : compactTokens(u.totalTokens);
   return `<div class="glass-panel flex-1 rounded-2xl p-5">
     <div class="mb-1 flex items-center justify-between">
@@ -131,7 +134,7 @@ function sessionsTable(u: OverallUsage, filter: string): string {
         <td class="py-2.5 pr-3 text-slate-200">${escapeHtml(s.model || "—")}<div class="text-[10px] text-slate-500">${s.calls} calls</div></td>
         <td class="py-2.5 pr-3 font-bold text-slate-100">${compactTokens(s.totalTokens)}</td>
         <td class="py-2.5 pr-3 text-emerald-400">${trimNum(roundTo(hit, 0))}%</td>
-        <td class="py-2.5 pr-3 font-bold text-slate-200">${s.hasCost ? formatCost(s.cost) : "—"}</td>
+        <td class="py-2.5 pr-3 font-bold text-slate-200">${s.hasCost ? formatCost(estimatedSpend(s)) : "—"}</td>
         <td class="py-2.5 text-right">${badge}</td>
       </tr>`;
     })
@@ -183,17 +186,15 @@ function render(u: OverallUsage): void {
           sessions: (u.sessions ?? []).filter((s) => s.model === modelFilter),
         };
   const hit = cacheHitRate(filtered);
-  const saved = filtered.hasCost && filtered.listCost > filtered.cost ? filtered.listCost - filtered.cost : 0;
   const kpis = [
     hero({
-      label: "Est. total cost",
-      value: filtered.hasCost ? formatCost(filtered.cost) : "—",
-      sub:
-        saved > 0
-          ? `saved ${formatCost(saved)} vs list`
-          : filtered.hasCost
-            ? `avg ${formatCost(filtered.calls > 0 ? filtered.cost / filtered.calls : 0)}/run`
-            : `${filtered.sessionCount} sessions`,
+      label: filtered.costEstimated ? "Est. total cost" : "Total cost",
+      value: filtered.hasCost ? formatCost(estimatedSpend(filtered)) : "—",
+      sub: filtered.hasCost
+        ? filtered.costEstimated
+          ? "list price · subscription billed $0"
+          : `avg ${formatCost(filtered.calls > 0 ? estimatedSpend(filtered) / filtered.calls : 0)}/run`
+        : `${filtered.sessionCount} sessions`,
       iconName: "dollar-sign",
       glow: "blue",
     }),
@@ -249,7 +250,11 @@ function dailyForModel(u: OverallUsage, model: string): DailyPoint[] {
   // labelled as such.
   const share =
     u.totalTokens > 0 ? ((u.models ?? []).find((m) => m.model === model)?.totalTokens ?? 0) / u.totalTokens : 0;
-  return (u.daily ?? []).map((d) => ({ ...d, totalTokens: Math.round(d.totalTokens * share), cost: d.cost * share }));
+  return (u.daily ?? []).map((d) => ({
+    ...d,
+    totalTokens: Math.round(d.totalTokens * share),
+    cost: estimatedSpend(d) * share,
+  }));
 }
 
 function wireControls(): void {

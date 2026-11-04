@@ -465,6 +465,8 @@ async function __paladinBaseInvoke(cmd, args) {
           cost: 0.0042,
           listCost: 0.008,
           hasCost: true,
+          // costEstimated is omitted: this fixture is a billed session,
+          // so the pages must show $0.0042, not the $0.008 list price.
           updatedAt: Math.floor(Date.now() / 1000),
           models: [
             {

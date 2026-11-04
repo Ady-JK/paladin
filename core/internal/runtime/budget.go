@@ -60,7 +60,10 @@ func (r *AgentRuntime) BudgetGet(cwd, sessionID string) (BudgetView, error) {
 		}
 	}
 	totals := r.subagents.familyUsage(sess)
-	v.SpentUsd, v.HasCost, v.Calls = totals.Cost, totals.HasCost, totals.Calls
+	// SpendUsd, not Cost: a subscription plan (OpenCode Go) charges $0
+	// but its list price is what the session would have cost, and a
+	// budget that reads $0 after millions of tokens is worse than none.
+	v.SpentUsd, v.HasCost, v.Calls = totals.SpendUsd(), totals.HasCost, totals.Calls
 	return v, nil
 }
 

@@ -43,7 +43,9 @@ func (m *subagentManager) familyUsage(sess transcript.Session) session.UsageTota
 	for _, s := range members {
 		t, _ := readUsage(s)
 		total.Cost += t.Cost
+		total.ListCost += t.ListCost
 		total.HasCost = total.HasCost || t.HasCost
+		total.CostEstimated = total.CostEstimated || t.CostEstimated
 		total.Calls += t.Calls
 	}
 	return total

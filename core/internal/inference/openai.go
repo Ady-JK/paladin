@@ -349,13 +349,13 @@ func chatUsage(u openai.CompletionUsage, raw string) *Usage {
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.PromptTokens + out.CompletionTokens
 	}
-	if cost, list, cr, cw, ok := gatewayCost(raw); ok {
-		out.Cost, out.ListCost, out.HasCost = cost, list, true
+	if ge, ok := gatewayCost(raw); ok {
+		applyGatewayCost(out, ge.Cost, ge.ListCost, ge.HasCost, ge.HasList)
 		if out.CacheReadTokens == 0 {
-			out.CacheReadTokens = cr
+			out.CacheReadTokens = ge.CacheRead
 		}
 		if out.CacheWriteTokens == 0 {
-			out.CacheWriteTokens = cw
+			out.CacheWriteTokens = ge.CacheWrite
 		}
 	}
 	if *out == (Usage{}) {

@@ -25,17 +25,23 @@ func TestUsageAddAndEmpty(t *testing.T) {
 
 func TestGatewayCostOpencodeShape(t *testing.T) {
 	raw := `{"id":"chatcmpl-1","usage":{"prompt_tokens":53,"completion_tokens":8,"total_tokens":61,"cost":0,"opencode":{"billing_source":"go","list_cost":0.000772,"tokens":{"input":53,"output":8,"reasoning":7,"cache_read":10,"cache_write_5m":2,"cache_write_1h":3}}}}`
-	cost, list, cr, cw, ok := gatewayCost(raw)
-	if !ok || cost != 0 || list != 0.000772 || cr != 10 || cw != 5 {
-		t.Fatalf("got %v %v %v %v %v", cost, list, cr, cw, ok)
+	ge, ok := gatewayCost(raw)
+	if !ok || ge.Cost != 0 || ge.ListCost != 0.000772 || ge.CacheRead != 10 || ge.CacheWrite != 5 {
+		t.Fatalf("got %+v ok=%v", ge, ok)
+	}
+	if !ge.HasCost || !ge.HasList {
+		t.Fatalf("both numbers were sent: %+v", ge)
 	}
 }
 
 func TestGatewayCostOpenRouterShape(t *testing.T) {
 	raw := `{"id":"gen-1","usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14,"cost":0.00014,"prompt_tokens_details":{"cache_write_tokens":6}}}`
-	cost, list, _, cw, ok := gatewayCost(raw)
-	if !ok || cost != 0.00014 || list != 0 || cw != 6 {
-		t.Fatalf("got %v %v %v %v", cost, list, cw, ok)
+	ge, ok := gatewayCost(raw)
+	if !ok || ge.Cost != 0.00014 || ge.ListCost != 0 || ge.CacheWrite != 6 {
+		t.Fatalf("got %+v ok=%v", ge, ok)
+	}
+	if !ge.HasCost || ge.HasList {
+		t.Fatalf("only cost was sent: %+v", ge)
 	}
 }
 
@@ -47,7 +53,7 @@ func TestGatewayCostAbsent(t *testing.T) {
 		`{"usage":null}`,
 		`not json`,
 	} {
-		if _, _, _, _, ok := gatewayCost(raw); ok {
+		if _, ok := gatewayCost(raw); ok {
 			t.Fatalf("ok for %q", raw)
 		}
 	}

@@ -11,7 +11,9 @@ test("the analytics pane shows the fleet dashboard", async ({ page }) => {
   await expect(page.locator("#settingsModal")).toBeVisible();
   await page.click("#settingsNavAnalytics");
   const body = page.locator("#analyticsBody");
-  await expect(body).toContainText("Est. total cost");
+  // The stub is a billed session (costEstimated absent), so the label is
+  // "Total cost"; "Est." appears only for a subscription's list price.
+  await expect(body).toContainText("Total cost");
   await expect(body).toContainText("Total tokens");
   await expect(body).toContainText("Sessions");
   await expect(body).toContainText("Prompt cache hit");

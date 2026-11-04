@@ -25,6 +25,11 @@ type Counters struct {
 	Cost             float64 `json:"cost"`
 	ListCost         float64 `json:"listCost"`
 	HasCost          bool    `json:"hasCost"`
+	// CostEstimated marks spend the gateway did not charge: a
+	// subscription plan or free tier, where Cost is 0 and ListCost is
+	// what the tokens would have cost. The UI shows ListCost then, so a
+	// subscription reads as "est. value" instead of a misleading $0.
+	CostEstimated bool `json:"costEstimated,omitempty"`
 }
 
 // Add folds o into c. Spend only moves when o reported it.
@@ -41,6 +46,17 @@ func (c *Counters) Add(o Counters) {
 		c.ListCost += o.ListCost
 		c.HasCost = true
 	}
+	c.CostEstimated = c.CostEstimated || o.CostEstimated
+}
+
+// SpendUsd is the dollar figure to show: the amount charged, or, for a
+// subscription or free plan that charged nothing, the list price of
+// what it served.
+func (c Counters) SpendUsd() float64 {
+	if c.CostEstimated && c.ListCost > 0 {
+		return c.ListCost
+	}
+	return c.Cost
 }
 
 // UsageTotals is the persisted per-session ledger (usage.json). The
