@@ -268,11 +268,6 @@ type Agent struct {
 	// nor tool calls; three in a row ends the turn (done with progress,
 	// failed without) instead of spinning on a dead gateway.
 	emptyRounds int
-	// toolCalls counts tool calls actually run this turn; past
-	// maxToolCallsPerTurn the turn fails instead of looping forever.
-	// A syntactic loop guard (doomGuard) cannot catch a spiral of
-	// ever-varying searches and reads, so this is the backstop.
-	toolCalls int
 	// retries counts retried rounds after retryable provider errors
 	// (rate limits, 5xx, transport blips); three per turn, then the
 	// turn fails. Any round progress resets it alongside emptyRounds.

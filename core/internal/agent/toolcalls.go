@@ -14,14 +14,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
-// maxToolCallsPerTurn bounds the tool calls one turn may run. Normal
-// turns (even large explorations and refactors) stay far below it; a
-// model stuck re-issuing ever-varying searches and reads — which the
-// identical-call doomGuard cannot see — hits it and the turn ends with
-// a resumable error instead of looping until the context or the user's
-// patience runs out.
-const maxToolCallsPerTurn = 200
-
 // canonicalizeCalls rewrites each call's name to the tool that will
 // really run, so a model asking for "bash" is recorded, announced,
 // judged by hooks and the gate, and replayed to the model as "shell".
@@ -38,11 +30,6 @@ func canonicalizeCalls(reg *tools.Registry, calls []inference.ToolCall) {
 }
 
 func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
-	if a.toolCalls+len(calls) > maxToolCallsPerTurn {
-		a.settleAborted(calls)
-		return turnFailed{msg: "tool call budget exhausted: over 200 tool calls in one turn without finishing — ending the turn so it can't loop forever. The transcript is saved; resume with a narrower task to continue."}
-	}
-	a.toolCalls += len(calls)
 	if a.noteReadOnlyRound(calls) {
 		// Refuse the whole round: many consecutive rounds only searched
 		// or read without acting. History still needs a result for every

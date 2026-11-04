@@ -6,7 +6,7 @@
 // model to batch the remaining fixes and verify with a shell
 // build/test run instead of guessing. A productive edit to the path,
 // or a successful shell run, clears the streak. Guidance only — the
-// per-turn tool-call budget remains the hard backstop.
+// turn runs until the model answers, you stop it, or a guard breaks.
 
 package agent
 
