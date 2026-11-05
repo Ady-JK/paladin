@@ -12,6 +12,7 @@ import {
   ipcMain,
   nativeTheme,
   Notification,
+  protocol,
   session,
   shell,
   WebContentsView,
@@ -26,6 +27,7 @@ import { remoteOpenRefusal } from "./browserPolicy";
 import { runBrowserSmoke } from "./browserSmoke";
 import { refuseAll } from "./browserEgress";
 import { appFrameNavigationAllowed, appNavigationAllowed, isMainWindowFrame } from "./mainWindowPolicy";
+import { PluginHost } from "./pluginHost";
 
 type ViewBounds = { x: number; y: number; width: number; height: number };
 
@@ -38,6 +40,24 @@ app.commandLine.appendSwitch("remote-debugging-port", "0");
 // Every renderer runs in Chromium's sandbox, whatever its webPreferences
 // say (each already asks for it; this makes it the rule).
 app.enableSandbox();
+// Plugin panels are served from this scheme. It is standard and secure,
+// but not privileged with extra APIs: frames get an opaque origin and
+// only the bridge in preload.ts.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "plugin",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: false,
+      corsEnabled: false,
+      allowServiceWorkers: false,
+    },
+  },
+]);
+// The manifest allow-list is read at boot and refreshed when plugins
+// reload. Requests are checked again against the real path.
+const pluginHost = new PluginHost();
 // Defaults for any web contents the app creates: no <webview> guests and
 // no new windows. The windows and views below set their own window-open
 // handlers after this, which replace the deny where they allow more.
@@ -661,6 +681,7 @@ app
     connection = loadConnection();
     agent = createAgent(connection);
     if (!process.argv.includes("--smoke-browser")) agent.start();
+    protocol.handle("plugin", (request) => pluginHost.handle(request));
 
     function handleTrusted<T extends unknown[], R>(
       channel: string,
@@ -679,6 +700,7 @@ app
 
     handleTrusted("agent:invoke", (_e, method: unknown, params: unknown) => {
       if (typeof method !== "string" || !method) throw new Error("agent:invoke needs a method name");
+      if (method === "toolsReload") pluginHost.refresh();
       return agent.invoke(method, params);
     });
     handleTrusted("app:metrics", () => {
