@@ -322,7 +322,9 @@ export class PluginHost {
     try {
       const raw = fs.readFileSync(manifestPath);
       if (raw.length > MAX_MANIFEST) throw new Error("manifest is too large");
-      manifest = JSON.parse(raw.toString("utf8")) as ManifestInput;
+      const parsed: unknown = JSON.parse(raw.toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("manifest must be an object");
+      manifest = parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

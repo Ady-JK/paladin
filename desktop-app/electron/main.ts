@@ -778,6 +778,11 @@ function createWindow(): void {
     if (!details.isMainFrame && !appFrameNavigationAllowed(appURL, details.url)) details.preventDefault();
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  // A renderer reload drops every plugin frame; their grants must go too,
+  // or stale panels would keep counting against the caps.
+  win.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame) panels.clear();
+  });
 
   if (!app.isPackaged && process.argv.includes("--smoke-browser")) {
     win.loadFile(path.join(HERE, "..", "dist", "index.html")).catch(console.error);
@@ -797,6 +802,7 @@ function createWindow(): void {
   win.on("closed", () => {
     browsers.windowClosed();
     win = null;
+    panels.clear();
     views.clear();
     visibleView = null;
   });

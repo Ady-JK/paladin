@@ -67,6 +67,7 @@ function resultOf(tool: ToolInfo): unknown {
 }
 
 function fallback(wrapper: HTMLElement, record: CardRecord, tool: ToolInfo): void {
+  live.delete(wrapper);
   record.iframe?.remove();
   record.iframe = null;
   window.clearTimeout(record.timer);
