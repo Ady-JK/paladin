@@ -43,7 +43,7 @@ var methodClass = map[string]runClass{
 	"sessionHistoryPage": runRead, "sessionImages": runRead,
 	"sessionImage": runRead,
 	"sessionTodos": runRead, "sessionUsage": runRead, "budgetGet": runRead, "thinkingGet": runRead,
-	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "fileExcerpt": runRead, "worktreeStatus": runRead, "attach": runRead,
+	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "fileExcerpt": runRead, "filePreview": runRead, "worktreeStatus": runRead, "attach": runRead,
 	"permissionsGet": runRead, "listAgents": runRead, "interruptAgent": runRead,
 	"listSideChats": runRead, "loadSideChat": runRead, "hooksList": runRead, "mcpList": runRead,
 	"mcpConfig": runRead, "mcpParse": runRead, "toolsList": runRead, "customList": runRead, "customGet": runRead,

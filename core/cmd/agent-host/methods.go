@@ -231,6 +231,9 @@ var methods = map[string]handler{
 	"fileExcerpt": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.FileExcerpt(a.str("sessionId"), a.str("cwd"), a.str("path"), a.num("start", 1), a.num("end", 0))
 	},
+	"filePreview": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.FilePreview(a.str("cwd"), a.str("path"))
+	},
 	"revertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RevertSession(a.str("sessionId"), a.str("cwd"), a.num("index", -1))
 	},

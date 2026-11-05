@@ -808,6 +808,13 @@ async function __paladinBaseInvoke(cmd, args) {
           isDir: false,
         },
         {
+          path: "assets/shot.png",
+          display: "shot.png",
+          resolvedPath: "/home/tester/project/assets/shot.png",
+          outside: false,
+          isDir: false,
+        },
+        {
           path: "../sibling/outside.txt",
           display: "outside.txt",
           resolvedPath: "/home/tester/sibling/outside.txt",
@@ -818,6 +825,23 @@ async function __paladinBaseInvoke(cmd, args) {
       const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
       const want = norm(q).toLowerCase();
       return all.filter((e) => norm(e.path).toLowerCase().includes(want));
+    }
+    case "filePreview": {
+      const path = (args && args.path) || "";
+      const project = "/home/tester/project/";
+      const rel = String(path).startsWith(project) ? String(path).slice(project.length) : String(path).split("/").pop();
+      if (String(path).endsWith("/src/server")) return { path, rel: "src/server", kind: "dir" };
+      if (/\.(png|jpe?g|gif|webp)$/i.test(String(path))) {
+        return {
+          path,
+          rel,
+          kind: "image",
+          dataUrl:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+        };
+      }
+      if (String(path).includes("/sibling/")) return { path, rel, kind: "outside" };
+      return { path, rel, kind: "text", lines: ["package main", "", "func main() {", "}"], truncated: true };
     }
     case "fsList": {
       const at = (args && args.path) || "/home/tester";

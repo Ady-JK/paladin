@@ -2,16 +2,19 @@
 //
 // Typing `@` opens a popup backed by the `fileComplete` sidecar
 // method (ripgrep-powered, .gitignore honored, `../` escapes to the
-// workspace parent). Picking a row inserts the row's OS-specific
-// absolute path into the message, so the agent sees exactly which
-// file or folder was tagged. Hand-typed `@paths` are resolved the
-// same way at send time; tokens that match nothing stay untouched.
+// workspace parent). Picking a row turns it into a preview card above
+// the composer (tags.ts) and leaves a compact `@name` in the text; the
+// card puts the row's OS-specific absolute path into the message, so the
+// agent sees exactly which file or folder was tagged. Hand-typed
+// `@paths` are resolved the same way at send time; tokens that match
+// nothing stay untouched.
 
 import * as api from "../core/api";
 import { inputEl } from "../core/dom";
 import { escapeHtml } from "../core/format";
 import { state } from "../core/state";
 import type { FileEntry } from "../core/types";
+import { addTag } from "./tags";
 
 let popup: HTMLElement | null = null;
 let items: FileEntry[] = [];
@@ -106,7 +109,10 @@ function scheduleRefresh(query: string): void {
   debounce = window.setTimeout(() => void refreshMention(query, requestSeq), 120);
 }
 
-// acceptMention swaps the `@token` for the row's OS-specific path.
+// acceptMention turns the `@token` under the caret into a tag card and
+// leaves a compact `@name` in the text. The card carries the absolute
+// path into the message; the text stays readable instead of showing a
+// full path (and a path at the start must not look like a slash command).
 function acceptMention(idx: number): boolean {
   if (!open || items.length === 0) {
     return false;
@@ -120,11 +126,12 @@ function acceptMention(idx: number): boolean {
     return false;
   }
   const end = caret;
-  const insert = entry.resolvedPath;
+  const insert = `@${entry.display.replace(/[\\/]+$/, "")}`;
   inputEl.value = `${value.slice(0, start)}${insert}${value.slice(end)}`;
   const next = start + insert.length;
   inputEl.selectionStart = next;
   inputEl.selectionEnd = next;
+  addTag(entry);
   closeMention();
   inputEl.focus();
   return true;
@@ -185,9 +192,9 @@ function normMentionPath(p: string): string {
 }
 
 // expandMentions resolves hand-typed `@paths` to their OS-specific
-// absolute paths. Popup-accepted mentions are already absolute; this
-// covers tokens typed without touching the popup. Only exact matches
-// expand — emails and unknown paths stay as-is.
+// absolute paths. A mention card appends its own absolute path on send;
+// this covers tokens typed without touching the popup. Only exact
+// matches expand — emails and unknown paths stay as-is.
 export async function expandMentions(text: string): Promise<string> {
   const tokens = new Set<string>();
   for (const m of text.matchAll(/(^|\s)@([^\s@]+)/g)) {

@@ -191,7 +191,7 @@ test("attach picker selects files and folders with crumbs and hidden toggle", as
   await page.fill("#fileSearch", "");
   await expect(page.locator("#fileList")).toContainText("project");
 
-  // Select file inserts the highlighted file and closes.
+  // Select file tags the highlighted file and closes.
   await page.locator('#fileList [data-fb-select][data-fb-kind="file"]').first().click();
   await expect(page.locator('#fileList [data-fb-select][aria-selected="true"]')).toHaveCount(1);
 
@@ -204,14 +204,13 @@ test("attach picker selects files and folders with crumbs and hidden toggle", as
 
   await page.click("#fileSelectFileBtn");
   await expect(dialog).toBeHidden();
-  await expect(page.locator("#promptInput")).not.toBeEmpty();
+  await expect(page.locator("#tagCards .tag-card")).toHaveCount(1);
 
-  // Select folder with nothing highlighted inserts the current folder.
-  await page.fill("#promptInput", "");
+  // Select folder with nothing highlighted tags the current folder.
   await page.click("#attachBtn");
   await expect(page.locator("#fileModal")).toBeVisible();
   await page.click("#fileSelectFolderBtn");
   await expect(page.locator("#fileModal")).toBeHidden();
-  await expect(page.locator("#promptInput")).not.toBeEmpty();
+  await expect(page.locator("#tagCards .tag-card")).toHaveCount(2);
   await page.keyboard.press("Escape");
 });

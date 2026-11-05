@@ -39,14 +39,23 @@ test("/new resets the session and keeps follow-up text", async ({ page }) => {
   await expect(page.locator("#promptInput")).toHaveValue("fresh start");
 });
 
-test("@ popup completes to the OS-specific path", async ({ page }) => {
+test("@ popup tags a file as a preview card, not a raw path", async ({ page }) => {
   await page.click("#promptInput");
   await page.fill("#promptInput", "@src/ma");
   const popup = page.locator("#mentionPopup");
   await expect(popup).toBeVisible();
   await expect(popup).toContainText("src/main.go");
   await page.keyboard.press("Enter");
-  await expect(page.locator("#promptInput")).toHaveValue("/home/tester/project/src/main.go");
+  // The text keeps a compact @name; the card carries the path and preview.
+  await expect(page.locator("#promptInput")).toHaveValue("@main.go");
+  const card = page.locator("#tagCards .tag-card");
+  await expect(card).toContainText("main.go");
+  await expect(card.locator(".tag-card-line").first()).toHaveText("package main");
+  // The full path is still what reaches the agent, appended on send.
+  await page.click("#sendBtn");
+  const chats = await page.evaluate(() => (window as any).__e2eChats || []);
+  expect(chats).toHaveLength(1);
+  expect(chats[0].message).toContain("/home/tester/project/src/main.go");
 });
 
 test("a delayed mention lookup cannot replace the current selection", async ({ page }) => {
@@ -68,7 +77,8 @@ test("a delayed mention lookup cannot replace the current selection", async ({ p
   await expect(page.locator("#mentionPopup")).toContainText("README.md");
   await page.evaluate(() => (window as any).__releaseOldMention());
   await page.keyboard.press("Enter");
-  await expect(page.locator("#promptInput")).toHaveValue("/home/tester/project/README.md");
+  await expect(page.locator("#promptInput")).toHaveValue("@README.md");
+  await expect(page.locator("#tagCards .tag-card")).toContainText("README.md");
 });
 
 test("a hand-typed @path expands to the OS path on send", async ({ page }) => {
@@ -88,7 +98,8 @@ test("@../ tags a file outside the workspace", async ({ page }) => {
   await expect(popup).toBeVisible();
   await expect(popup).toContainText("../sibling/outside.txt");
   await page.keyboard.press("Enter");
-  await expect(page.locator("#promptInput")).toHaveValue("/home/tester/sibling/outside.txt");
+  await expect(page.locator("#promptInput")).toHaveValue("@outside.txt");
+  await expect(page.locator("#tagCards .tag-card")).toContainText("outside the workspace");
 });
 
 test("the slash popup completes /he to /help with Tab", async ({ page }) => {

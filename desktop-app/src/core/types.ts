@@ -859,6 +859,17 @@ export type FindingsReport = {
 // FileExcerpt is a window of a workspace file (fileExcerpt).
 export type FileExcerpt = { path: string; rel: string; startLine: number; lines: string[]; truncated: boolean };
 
+// FilePreview is a tagged file's composer card: a few text lines, or a
+// small image as a data URL.
+export type FilePreview = {
+  path: string;
+  rel: string;
+  kind: "text" | "image" | "binary" | "dir" | "outside" | "missing";
+  lines?: string[];
+  dataUrl?: string;
+  truncated?: boolean;
+};
+
 // CustomItem is one editable built-in (Settings → Customize).
 export type CustomItem = {
   id: string;

@@ -7,6 +7,7 @@ import type {
   CustomItem,
   CustomState,
   FileExcerpt,
+  FilePreview,
   ToolBehavior,
   ThinkingView,
   HookScope,
@@ -555,6 +556,11 @@ export function fileExcerpt(
   end: number,
 ): Promise<FileExcerpt> {
   return invoke<FileExcerpt>("fileExcerpt", { sessionId, cwd, path, start, end });
+}
+
+// filePreview reads the start of a tagged file for its composer card.
+export function filePreview(cwd: string | null, path: string): Promise<FilePreview> {
+  return invoke<FilePreview>("filePreview", { cwd, path });
 }
 
 // customList lists every editable built-in (prompts, tool guidance,

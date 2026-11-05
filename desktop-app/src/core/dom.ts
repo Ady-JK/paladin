@@ -13,6 +13,8 @@ export const chatViewEl = $("#chatView");
 export const parentBarEl = $("#parentBar");
 export const sidePaneEl = $("#sidePane");
 export const inputEl = $<HTMLTextAreaElement>("#promptInput");
+// Holds the preview cards for @-tagged files, folders and images.
+export const tagCardsEl = $("#tagCards");
 // Tags a file or folder from the composer.
 export const attachBtnEl = $<HTMLButtonElement>("#attachBtn");
 export const sendBtn = $<HTMLButtonElement>("#sendBtn");

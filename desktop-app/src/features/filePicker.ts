@@ -3,9 +3,9 @@
 // browser: breadcrumbs on top, search plus a persisted "Hidden"
 // checkbox, a single-select list, and explicit Select file / Select
 // folder / Cancel buttons. Single click selects, double-click (or the
-// chevron) opens a folder. Select file inserts the highlighted file;
-// Select folder inserts the highlighted folder, or the current folder
-// when a file (or nothing) is highlighted.
+// chevron) opens a folder. Select file tags the highlighted file;
+// Select folder tags the highlighted folder, or the current folder when
+// a file (or nothing) is highlighted.
 
 import * as api from "../core/api";
 import {
@@ -26,6 +26,7 @@ import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { autosizeComposer } from "./chat";
 import { crumbsHTML, filterEntries, getShowHidden, rowsHTML, setShowHidden, type PickerSelection } from "./picker";
+import { addTagPath } from "./tags";
 
 let pickDir = "";
 let currentList: FsList | null = null;
@@ -107,17 +108,10 @@ async function browseFilePicker(path?: string): Promise<void> {
   }
 }
 
-// insertPickedPath drops the path at the caret with word spacing,
-// then hands focus back to the composer.
-function insertPickedPath(path: string): void {
-  const caret = inputEl.selectionStart ?? inputEl.value.length;
-  const before = inputEl.value.slice(0, caret);
-  const after = inputEl.value.slice(caret);
-  const prefix = before && !/\s$/.test(before) ? " " : "";
-  inputEl.value = `${before}${prefix}${path} ${after}`;
-  const next = before.length + prefix.length + path.length + 1;
-  inputEl.selectionStart = next;
-  inputEl.selectionEnd = next;
+// insertPickedPath adds the pick to the composer's tag strip, then
+// hands focus back to the composer.
+function insertPickedPath(path: string, isDir: boolean): void {
+  addTagPath(path, isDir);
   closeFilePicker();
   inputEl.focus();
   autosizeComposer();
@@ -132,15 +126,15 @@ function confirmSelection(which: "file" | "folder"): void {
       toast("Pick a file from the list first");
       return;
     }
-    insertPickedPath(selection.path);
+    insertPickedPath(selection.path, false);
     return;
   }
   if (selection?.kind === "folder") {
-    insertPickedPath(selection.path);
+    insertPickedPath(selection.path, true);
     return;
   }
   if (currentList) {
-    insertPickedPath(currentList.currentPath);
+    insertPickedPath(currentList.currentPath, true);
   }
 }
 

@@ -32,6 +32,7 @@ import { applyToolDraft, syncTools } from "./toolSwitches";
 import { applyBudgetDraft, syncBudget } from "./budget";
 import { showTerminalResult } from "./sidePane";
 import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
+import { clearTags, hasTags, initTags, tagPaths, tagsLabel } from "./tags";
 
 // TurnPlan is what a composer line resolves to before it is sent.
 interface TurnPlan {
@@ -154,12 +155,16 @@ async function runBang(line: string): Promise<void> {
 
 async function send(): Promise<void> {
   const message = inputEl.value.trim();
-  if (!message && !hasAttachments()) {
+  if (!message && !hasAttachments() && !hasTags()) {
     return;
   }
   if (message.startsWith("!")) {
     if (hasAttachments()) {
       toast("Send attachments in a chat message, separate from ! commands", "error");
+      return;
+    }
+    if (hasTags()) {
+      toast("Send tagged files in a chat message, separate from ! commands", "error");
       return;
     }
     return runBang(inputEl.value.trimStart());
@@ -183,7 +188,8 @@ async function send(): Promise<void> {
   if (!route?.compact) {
     dropFinishedPanel();
   }
-  const { skill, display } = planTurn(message || "Please inspect the attached files.", route);
+  const fallback = hasTags() ? tagsLabel() : "Please inspect the attached files.";
+  const { skill, display } = planTurn(message || fallback, route);
 
   // Hand-typed @paths resolve to OS-specific absolute paths here;
   // popup-accepted rows are already absolute. The bubble keeps the
@@ -192,10 +198,10 @@ async function send(): Promise<void> {
   autosizeComposer();
   let outgoing: string;
   try {
-    outgoing = await expandMentions(route ? route.message : display);
+    outgoing = withTags(await expandMentions(route ? route.message : display), tagPaths());
   } catch (error) {
     console.warn(`expandMentions failed: ${String(error)}`);
-    outgoing = display;
+    outgoing = withTags(display, tagPaths());
   }
 
   try {
@@ -222,6 +228,7 @@ async function send(): Promise<void> {
       attachmentIds: attachmentBatch.ids,
     });
     attachmentBatch.consume();
+    clearTags();
     noteSubmitted(info);
   } catch (error) {
     if (!inputEl.value && !route?.compact) {
@@ -247,6 +254,16 @@ async function send(): Promise<void> {
   }
 }
 
+// withTags appends tagged paths the message does not already contain:
+// expandMentions turns a matching @token into the absolute path, and
+// then adding it again would only repeat it.
+function withTags(outgoing: string, paths: string[]): string {
+  const missing = paths.filter((path) => !outgoing.includes(path));
+  if (missing.length === 0) return outgoing;
+  const base = outgoing.trimEnd();
+  return base ? `${base}\n\n${missing.join("\n")}` : missing.join("\n");
+}
+
 // steer adds the composer line to the running turn: the agent reads it
 // before its next model call instead of after the turn ends. Slash
 // lines, idle sessions and a turn that already finished fall back to a
@@ -261,12 +278,13 @@ async function steer(): Promise<void> {
   autosizeComposer();
   let outgoing: string;
   try {
-    outgoing = await expandMentions(message);
+    outgoing = withTags(await expandMentions(message), tagPaths());
   } catch {
-    outgoing = message;
+    outgoing = withTags(message, tagPaths());
   }
   try {
     await api.steerChat(state.sessionId, outgoing, message);
+    clearTags();
   } catch {
     if (!inputEl.value) inputEl.value = message;
     return send();
@@ -291,6 +309,7 @@ function requestStop(): void {
 export function initChat(): void {
   initMessageLinks();
   initAttachments();
+  initTags();
   setSlashRunner(() => void send());
   initPermissions();
   initMode(() => {

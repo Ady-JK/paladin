@@ -99,6 +99,7 @@ const READ_METHODS = new Set([
   "sessionChanges",
   "sessionDiff",
   "fileExcerpt",
+  "filePreview",
   "worktreeStatus",
   "attach",
   "permissionsGet",
