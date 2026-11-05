@@ -527,6 +527,21 @@ function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[], t
 
 let changeRequest = 0;
 
+// runningTurn is the change turn a live row belongs to. While a turn
+// runs its tool calls are not in the transcript yet, so callIds cannot
+// match; the newest change turn is the running one as long as its index
+// is past every persisted user row. That also avoids attaching the
+// previous turn's card to a turn that has not changed anything yet.
+function runningTurn(turns: SessionChanges["turns"]): SessionChanges["turns"][number] | null {
+  const last = turns[turns.length - 1];
+  if (!last) return null;
+  let persisted = -1;
+  for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
+    persisted = Math.max(persisted, Number(row.dataset.turnIndex));
+  }
+  return last.turn > persisted ? last : null;
+}
+
 // Refresh after a tool settles or a session is opened. Persisted user
 // rows carry transcript indices; the current live row is passed in.
 // noteToolChange coalesces the live changes marker after a mutating
@@ -571,7 +586,7 @@ export async function refreshChanges(
       paintTurnMarker(row, turn, byTurn.get(turn) ?? [], totals.get(turn));
     }
     if (liveRow && callId) {
-      const turn = data.turns.find((item) => item.callIds?.includes(callId));
+      const turn = data.turns.find((item) => item.callIds?.includes(callId)) ?? runningTurn(data.turns);
       if (turn) paintTurnMarker(liveRow, turn.turn, turn.files, totals.get(turn.turn));
     }
     const tab = sets.get(sessionId)?.tabs.find((t): t is ChangesTab => t.kind === "changes");

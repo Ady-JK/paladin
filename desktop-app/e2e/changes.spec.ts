@@ -89,6 +89,56 @@ test("a finished write shows its file indicator while the turn is still running"
   await expect(page.locator("#sessionChangesBtn")).toContainText("1");
 });
 
+test("a running turn shows its changes card as soon as it edits, before it persists", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    // A running turn has no transcript entry yet, so its change turn
+    // carries no callIds: the card must still attach to the live row.
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "core/a.go", status: "created" }] }],
+      files: [{ path: "core/a.go", status: "created" }],
+    };
+    w.__e2eRunTurn = (_params: any, handlers: any) =>
+      new Promise(() => {
+        w.__changeHandlers = handlers;
+      });
+  });
+  await page.goto("/");
+  await page.fill("#promptInput", "write a file");
+  await page.click("#sendBtn");
+  await page.waitForFunction(() => Boolean((window as any).__changeHandlers));
+  // No persisted user row yet.
+  await expect(page.locator("#messages [data-turn-index]")).toHaveCount(0);
+  await page.evaluate(() => {
+    (window as any).__changeHandlers.onTool({
+      id: "write-1",
+      name: "write",
+      arguments: '{"path":"core/a.go"}',
+      result: '{"created":true}',
+      status: "ok",
+    });
+  });
+  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
+  await expect(card).toContainText("1 file");
+  await expect(card).toHaveAttribute("aria-expanded", "false");
+  // A second write grows the same card without waiting for the turn end.
+  await page.evaluate(() => {
+    const changes = (window as any).__e2eChanges;
+    changes.turns[0].files.push({ path: "core/b.go", status: "created" });
+    changes.files.push({ path: "core/b.go", status: "created" });
+    (window as any).__changeHandlers.onTool({
+      id: "write-2",
+      name: "edit",
+      arguments: '{"path":"core/b.go"}',
+      result: '{"lines":1}',
+      status: "ok",
+    });
+  });
+  await expect(card).toContainText("2 files");
+});
+
 test("a finished turn shows its file changes even with no live call id", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
