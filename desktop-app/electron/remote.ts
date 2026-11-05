@@ -22,6 +22,22 @@ function shellQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
+// hostEnv is the environment the sidecar runs under. Local cores get
+// ELECTRON_NODE: this binary doubles as Node 24 under
+// ELECTRON_RUN_AS_NODE, so extension plugins run on a machine without a
+// separate Node install. A remote core sets its own.
+export function hostEnv(
+  connection: CoreConnection,
+  base: NodeJS.ProcessEnv = process.env,
+  exec: string = process.execPath,
+) {
+  const env: NodeJS.ProcessEnv = { ...base };
+  // Electron's own runtime variables would leak into the sidecar.
+  delete env.ELECTRON_RUN_AS_NODE;
+  if (connection.mode === "local" && exec) env.ELECTRON_NODE = exec;
+  return env;
+}
+
 export function hostCommand(connection: CoreConnection, localBinary: string): { command: string; args: string[] } {
   if (connection.mode === "local") return { command: localBinary, args: [] };
   return {

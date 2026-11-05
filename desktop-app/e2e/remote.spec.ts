@@ -1,5 +1,16 @@
 import { expect, test } from "@playwright/test";
-import { hostCommand, validateConnection } from "../electron/remote";
+import { hostCommand, hostEnv, validateConnection } from "../electron/remote";
+
+test("a local core gets the Electron binary as its extension Node", () => {
+  const env = hostEnv({ mode: "local" }, { PATH: "/usr/bin", ELECTRON_RUN_AS_NODE: "1" }, "/app/electron");
+  expect(env.ELECTRON_NODE).toBe("/app/electron");
+  // Electron's own run-as-node flag must not leak into the sidecar.
+  expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  expect(env.PATH).toBe("/usr/bin");
+  // A remote core runs on the other machine, so it gets no local path.
+  const remote = hostEnv({ mode: "ssh", target: "host", binary: "/bin/agent-host" }, {}, "/app/electron");
+  expect(remote.ELECTRON_NODE).toBe(undefined);
+});
 
 test("remote connection uses batch SSH with strict host verification", () => {
   const value = validateConnection({ mode: "ssh", target: "dev@example.internal", binary: "/opt/paladin/agent-host" });

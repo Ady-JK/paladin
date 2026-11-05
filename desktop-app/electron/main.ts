@@ -19,7 +19,7 @@ import {
 } from "electron";
 import { noteFor } from "./turnNotify";
 import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
-import { hostCommand, validateConnection, type CoreConnection } from "./remote";
+import { hostCommand, hostEnv, validateConnection, type CoreConnection } from "./remote";
 import { allowedChatPopup, guestPermissionAllowed } from "./guestPolicy";
 import { BrowserManager, type BrowserRequest, type BrowserState, type EgressSetup } from "./browser";
 import { remoteOpenRefusal } from "./browserPolicy";
@@ -142,6 +142,7 @@ function loadConnection(): CoreConnection {
 function createAgent(selected: CoreConnection): Sidecar {
   const sidecar = new Sidecar({
     ...hostCommand(selected, agentBin()),
+    env: hostEnv(selected),
     onEvent: forwardEvent,
     // The renderer re-reads sessions and ends any interrupted turns.
     onRestart: () => {
