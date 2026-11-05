@@ -191,7 +191,10 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
 }
 
 // parseSlashLine splits a `/name args` line. Arguments keep later
-// lines: `/review\nfocus on auth` passes both.
+// lines: `/review\nfocus on auth` passes both. A leading slash followed
+// by a path (`/home/me/notes.md`) is a path, not a command: command
+// names are single words, so a token with a separator is left to the
+// message.
 function parseSlashLine(message: string): { trimmed: string; name: string; rest: string } | null {
   const trimmed = message.trimStart();
   if (!trimmed.startsWith("/")) {
@@ -200,6 +203,9 @@ function parseSlashLine(message: string): { trimmed: string; name: string; rest:
   const firstLine = trimmed.split("\n", 1)[0];
   const space = firstLine.search(/\s/);
   const name = (space < 0 ? firstLine : firstLine.slice(0, space)).slice(1).toLowerCase();
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
+    return null;
+  }
   const rest = (space < 0 ? trimmed.slice(firstLine.length) : trimmed.slice(space)).trim();
   return { trimmed, name, rest };
 }

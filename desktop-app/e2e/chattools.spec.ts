@@ -81,6 +81,15 @@ test("a delayed mention lookup cannot replace the current selection", async ({ p
   await expect(page.locator("#tagCards .tag-card")).toContainText("README.md");
 });
 
+test("a leading absolute path is a message, not a slash command", async ({ page }) => {
+  await page.fill("#promptInput", "/home/tester/project/README.md please review");
+  await page.click("#sendBtn");
+  const chats = await page.evaluate(() => (window as any).__e2eChats || []);
+  expect(chats).toHaveLength(1);
+  expect(chats[0].message).toContain("/home/tester/project/README.md");
+  await expect(page.locator("#toastText")).not.toContainText("Unknown command");
+});
+
 test("a hand-typed @path expands to the OS path on send", async ({ page }) => {
   await page.fill("#promptInput", "look at @src/main.go please");
   await page.click("#sendBtn");
