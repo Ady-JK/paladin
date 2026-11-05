@@ -115,7 +115,7 @@ const READ_METHODS = new Set([
   "customList",
   "customGet",
 ]);
-const LONG_METHODS = new Set(["refreshProviders", "sideQuestion"]);
+const LONG_METHODS = new Set(["refreshProviders", "sideQuestion", "pluginInvoke"]);
 
 export function isReadMethod(method: string): boolean {
   return READ_METHODS.has(method);

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
@@ -429,6 +430,21 @@ var methods = map[string]handler{
 	},
 	"pluginViews": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.PluginViews(), nil
+	},
+	"pluginInvoke": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			SessionID   string          `json:"sessionId"`
+			Cwd         string          `json:"cwd"`
+			Plugin      string          `json:"plugin"`
+			View        string          `json:"view"`
+			Tool        string          `json:"tool"`
+			Args        json.RawMessage `json:"args"`
+			Destructive bool            `json:"destructive"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.PluginInvoke(p.SessionID, p.Cwd, p.Plugin, p.View, p.Tool, p.Args, p.Destructive)
 	},
 	"toolsAccept": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var p struct {

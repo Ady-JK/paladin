@@ -115,6 +115,7 @@ separate setup command, not a JSONL method.
 | `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
 | `toolsReload` | `{cwd?,sessionId?}` | `ToolsOverview`; re-reads `extensions.json` and every enabled plugin, drops the warm plugin runners and returns the refreshed view. A running turn keeps the tools it started with: the new set applies from the next turn |
 | `pluginViews` | `{}` | `{views: [{plugin,view,title,mount,permissions,destructive?}], cards: [{plugin,tool,exposed}], errors?: string[]}`: the side-pane panels and inline tool-result cards enabled plugins ship. Reads manifests and checks files only; starts no plugin process |
+| `pluginInvoke` | `{sessionId,cwd?,plugin,view,tool,args?,destructive?}` | `{content,isError}`: runs one tool for a plugin panel through the normal permission gate. An approval publishes `plugin/approval` and waits for `answerApproval`; the view's `invokeTool`/`invokeToolDestructive` check happens in Electron main |
 | `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only`, `auto` (default) or `full-access` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
@@ -265,6 +266,17 @@ Streaming (between `turn/start` and `turn/done`):
 {"event": "chat/delta", "seq": 10, "sessionId": "...", "turnId": "t1-3", "delta": "..."}
 {"event": "chat/tool", "seq": 11, "sessionId": "...", "turnId": "t1-3", "tool": {...}}
 ```
+
+A plugin panel's `invokeTool` may need approval. That request is not part
+of a turn, so it arrives as a `plugin/approval` event with an
+`approval` payload and no `turnId`:
+
+```json
+{"event": "plugin/approval", "sessionId": "...", "approval": {"id": "plugin-...", "kind": "extension", "state": "pending", ...}}
+```
+
+The client answers it with `answerApproval(sessionId, approval.id, decision)`.
+`pluginInvoke` then returns the tool result or the denial.
 
 Events are written to stdout in `seq` order by one writer that never
 holds up the agent. If the client stops reading, the writer buffers up

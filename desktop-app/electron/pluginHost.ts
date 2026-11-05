@@ -84,6 +84,7 @@ type ManifestInput = { views?: unknown; cards?: unknown };
 export class PluginHost {
   private views = new Map<string, HostedView>();
   private cards = new Map<string, HostedCard>();
+  private dirs = new Map<string, string>();
   private errors: string[] = [];
   private statCache = new Map<string, { at: number; ok: boolean }>();
 
@@ -95,6 +96,7 @@ export class PluginHost {
   refresh(): void {
     this.views.clear();
     this.cards.clear();
+    this.dirs.clear();
     this.errors = [];
     this.statCache.clear();
     const root = path.join(this.dataDir, "config", "extensions");
@@ -132,6 +134,17 @@ export class PluginHost {
 
   listErrors(): string[] {
     return [...this.errors];
+  }
+
+  // pluginDir is the real plugin folder, for the plugin's own store.
+  pluginDir(name: string): string | undefined {
+    const exact = this.dirs.get(name);
+    if (exact) return exact;
+    const lower = name.toLowerCase();
+    for (const [key, dir] of this.dirs) {
+      if (key.toLowerCase() === lower) return dir;
+    }
+    return undefined;
   }
 
   view(plugin: string, id: string): HostedView | undefined {
@@ -262,6 +275,7 @@ export class PluginHost {
   private loadPlugin(root: string, name: string): void {
     const dir = fs.realpathSync(path.join(root, name));
     if (!this.within(fs.realpathSync(root), dir)) throw new Error("plugin links outside the extensions folder");
+    this.dirs.set(name, dir);
     if (!fs.statSync(dir).isDirectory()) throw new Error("not a directory");
     const manifestPath = path.join(dir, "paladin-plugin.json");
     let manifest: ManifestInput = {};

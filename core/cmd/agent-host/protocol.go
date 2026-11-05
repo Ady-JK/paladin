@@ -115,6 +115,12 @@ func installToolsSink(rt *runtime.AgentRuntime) { rt.SetToolsSink(emitToolsEvent
 
 func emitToolsEvent(e runtime.ToolsEvent) { notices.push(e) }
 
+// installPluginSink streams plugin-panel events, such as an approval a
+// panel's invokeTool is waiting on.
+func installPluginSink(rt *runtime.AgentRuntime) {
+	rt.SetPluginSink(func(e runtime.PluginEvent) { notices.push(e) })
+}
+
 // installAgentsSink streams agents/changed events (subagent spawned or
 // changed status).
 func installAgentsSink(rt *runtime.AgentRuntime) { rt.SetAgentsSink(emitAgentsEvent) }

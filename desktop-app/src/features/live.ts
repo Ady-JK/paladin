@@ -23,6 +23,7 @@ import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget } from "./budget";
 import { noteToolChange, refreshChanges } from "./sidePane";
+import { handlePluginApproval } from "./pluginApproval";
 import { createTurnStats } from "./turnStats";
 import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
 
@@ -312,6 +313,10 @@ function firstQueued(e: Entry): HTMLElement | null {
 
 function apply(e: Entry, ev: TurnEvent): void {
   const turn = ev.turn;
+  if (ev.event === "plugin/approval") {
+    handlePluginApproval(ev.sessionId, ev.approval);
+    return;
+  }
   switch (ev.event) {
     case "turn/queued": {
       if (!turn || e.finished.has(turn.turnId) || e.running?.turnId === turn.turnId) return;

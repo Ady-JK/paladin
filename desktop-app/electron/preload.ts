@@ -6,6 +6,25 @@ import { contextBridge, ipcRenderer } from "electron";
 const listeners = new Set<(msg: unknown) => void>();
 let armed = false;
 
+// Plugin panels get their own event stream. Main sends only the events a
+// frame subscribed to, so this listener is per-frame, not global.
+const pluginListeners = new Set<(msg: unknown) => void>();
+let pluginArmed = false;
+
+function armPlugins(): void {
+  if (pluginArmed) return;
+  pluginArmed = true;
+  ipcRenderer.on("plugin:event", (_e, msg: unknown) => {
+    for (const cb of pluginListeners) {
+      try {
+        cb(msg);
+      } catch (err) {
+        console.error("plugin event listener failed", err);
+      }
+    }
+  });
+}
+
 // arm installs the single agent:event listener on first subscribe and
 // fans every turn event out to the onEvent subscribers.
 function arm(): void {
@@ -42,6 +61,27 @@ contextBridge.exposeInMainWorld("paladin", {
     const fn = (_e: unknown, id: string): void => cb(id);
     ipcRenderer.on("app:open-session", fn);
     return () => ipcRenderer.removeListener("app:open-session", fn);
+  },
+
+  // Plugin panels: the frame is untrusted; every call is checked against
+  // the panel grant in main. No raw agent invoke is exposed.
+  plugins: {
+    open: (plugin: string, view: string, sessionId: string, workspace: string) =>
+      ipcRenderer.invoke("plugins:open", { plugin, view, sessionId, workspace }),
+    close: (id: string) => ipcRenderer.invoke("plugins:close", id),
+    getContext: () => ipcRenderer.invoke("plugins:getContext"),
+    invokeTool: (tool: string, args: unknown) => ipcRenderer.invoke("plugins:invokeTool", { tool, args }),
+    readFile: (rel: string) => ipcRenderer.invoke("plugins:readFile", { rel }),
+    readStore: (key: string) => ipcRenderer.invoke("plugins:readStore", { key }),
+    writeStore: (key: string, value: unknown) => ipcRenderer.invoke("plugins:writeStore", { key, value }),
+    openExternal: (url: string) => ipcRenderer.invoke("plugins:openExternal", { url }),
+    subscribe: (filter: unknown) => ipcRenderer.invoke("plugins:subscribe", filter),
+    unsubscribe: (id: string) => ipcRenderer.invoke("plugins:unsubscribe", { id }),
+    onEvent: (cb: (msg: unknown) => void): (() => void) => {
+      armPlugins();
+      pluginListeners.add(cb);
+      return () => pluginListeners.delete(cb);
+    },
   },
   takePendingOpen: (): Promise<string | null> => ipcRenderer.invoke("app:takePendingOpen"),
   metrics: (): Promise<{ cpu: number; rss: number; procs: number }> => ipcRenderer.invoke("app:metrics"),

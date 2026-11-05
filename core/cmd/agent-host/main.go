@@ -70,6 +70,7 @@ func main() {
 	installTurnSink(rt)
 	installMCPSink(rt)
 	installToolsSink(rt)
+	installPluginSink(rt)
 	installAgentsSink(rt)
 	installBrowserSink(rt)
 	rt.StartMCP()

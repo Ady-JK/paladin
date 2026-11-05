@@ -4,6 +4,7 @@
 
 import path from "node:path";
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
   app,
@@ -17,6 +18,7 @@ import {
   shell,
   WebContentsView,
   type IpcMainInvokeEvent,
+  type WebFrameMain,
 } from "electron";
 import { noteFor } from "./turnNotify";
 import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
@@ -28,6 +30,7 @@ import { runBrowserSmoke } from "./browserSmoke";
 import { refuseAll } from "./browserEgress";
 import { appFrameNavigationAllowed, appNavigationAllowed, isMainWindowFrame } from "./mainWindowPolicy";
 import { PluginHost } from "./pluginHost";
+import { storeKeyValid, toolAllowed } from "./pluginPolicy";
 
 type ViewBounds = { x: number; y: number; width: number; height: number };
 
@@ -235,6 +238,150 @@ function liveWindow(): BrowserWindow | null {
   return win && !win.isDestroyed() ? win : null;
 }
 
+// ---- plugin panels ----
+
+type Rate = { start: number; count: number };
+type PanelGrant = {
+  id: string;
+  plugin: string;
+  view: string;
+  sessionId: string;
+  workspace: string;
+  permissions: Set<string>;
+  frame: WebFrameMain | null;
+  subs: Map<string, { events: Set<string> | null; dropped: number }>;
+  rates: Record<"tool" | "file" | "external" | "events", Rate>;
+};
+
+const panels = new Map<string, PanelGrant>();
+const PLUGIN_EVENTS = new Set([
+  "chat/delta",
+  "chat/tool",
+  "turn/start",
+  "turn/done",
+  "browser/navigated",
+  "session/changes",
+  "plugin/updated",
+  "tools/pending",
+]);
+const PANEL_LIMIT_PER_SESSION = 2;
+const PANEL_LIMIT_TOTAL = 4;
+
+function pathInside(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function allowRate(grant: PanelGrant, key: keyof PanelGrant["rates"], max: number): boolean {
+  const now = Date.now();
+  const rate = grant.rates[key];
+  if (now - rate.start >= 60_000) {
+    rate.start = now;
+    rate.count = 0;
+  }
+  if (rate.count >= max) return false;
+  rate.count++;
+  return true;
+}
+
+function newGrant(
+  id: string,
+  plugin: string,
+  view: string,
+  sessionId: string,
+  workspace: string,
+  permissions: string[],
+): PanelGrant {
+  return {
+    id,
+    plugin,
+    view,
+    sessionId,
+    workspace,
+    permissions: new Set(permissions),
+    frame: null,
+    subs: new Map(),
+    rates: {
+      tool: { start: Date.now(), count: 0 },
+      file: { start: Date.now(), count: 0 },
+      external: { start: Date.now(), count: 0 },
+      events: { start: Date.now(), count: 0 },
+    },
+  };
+}
+
+// panelGrant maps a bridge call back to the frame that was opened. The
+// panel id is unguessable and the URL's plugin/view must still match, so
+// a frame cannot borrow another panel's permissions.
+function panelGrant(event: IpcMainInvokeEvent): PanelGrant {
+  const frame = event.senderFrame;
+  if (!frame || !win || event.sender.id !== win.webContents.id || frame === win.webContents.mainFrame) {
+    throw new Error("plugin bridge calls require a plugin frame");
+  }
+  let url: URL;
+  try {
+    url = new URL(frame.url);
+  } catch {
+    throw new Error("plugin frame has no URL");
+  }
+  if (url.protocol !== "plugin:") throw new Error("plugin frame has no plugin:// URL");
+  const id = url.searchParams.get("panel") ?? "";
+  const grant = panels.get(id);
+  if (!grant) throw new Error("plugin panel is closed");
+  const view = url.pathname.split("/").filter(Boolean)[0] ?? "";
+  if (url.hostname.toLowerCase() !== grant.plugin.toLowerCase() || view !== grant.view) {
+    throw new Error("plugin frame does not match its panel");
+  }
+  grant.frame = frame;
+  return grant;
+}
+
+function pluginViewUrl(plugin: string, view: string, entry: string, id: string): string {
+  const rel = entry
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `plugin://${plugin}/${view}/${rel}?panel=${encodeURIComponent(id)}`;
+}
+
+function storePath(grant: PanelGrant): string | null {
+  const dir = pluginHost.pluginDir(grant.plugin);
+  return dir ? path.join(dir, ".store.json") : null;
+}
+
+function readStore(grant: PanelGrant): Record<string, unknown> {
+  const file = storePath(grant);
+  if (!file) return {};
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function forwardToPlugins(msg: HostMessage): void {
+  const event = typeof msg.event === "string" ? msg.event : "";
+  if (!PLUGIN_EVENTS.has(event)) return;
+  const sessionId = typeof msg.sessionId === "string" ? msg.sessionId : "";
+  for (const grant of panels.values()) {
+    if (grant.sessionId !== sessionId || !grant.frame) continue;
+    for (const [id, sub] of grant.subs) {
+      if (sub.events && !sub.events.has(event)) continue;
+      if (!allowRate(grant, "events", 240)) {
+        sub.dropped++;
+        continue;
+      }
+      try {
+        grant.frame.send("plugin:event", { sub: id, event, data: msg, dropped: sub.dropped });
+        sub.dropped = 0;
+      } catch {
+        // The frame went away; close drops it.
+      }
+    }
+  }
+}
+
 // Streaming deltas are merged for one short tick before crossing IPC.
 // Each event used to be its own renderer wake-up even though the
 // renderer coalesces paints anyway; a fast model can emit dozens per
@@ -278,6 +425,7 @@ function sendToRenderer(msg: HostMessage): void {
       // Renderer is reloading; it re-attaches on boot.
     }
   }
+  forwardToPlugins(msg);
   if (w && w.isFocused()) return;
   const note = noteFor(msg);
   if (!note || !Notification.isSupported()) return;
@@ -700,8 +848,180 @@ app
 
     handleTrusted("agent:invoke", (_e, method: unknown, params: unknown) => {
       if (typeof method !== "string" || !method) throw new Error("agent:invoke needs a method name");
-      if (method === "toolsReload") pluginHost.refresh();
+      if (method === "toolsReload") {
+        pluginHost.refresh();
+        liveWindow()?.webContents.send("agent:event", { event: "plugin/updated" });
+      }
       return agent.invoke(method, params);
+    });
+
+    // ---- plugin panels ----
+
+    function handlePlugin<T extends unknown[], R>(
+      channel: string,
+      handler: (grant: PanelGrant, event: IpcMainInvokeEvent, ...args: T) => R,
+    ): void {
+      ipcMain.handle(channel, (event, ...args: unknown[]) => {
+        const grant = panelGrant(event);
+        return handler(grant, event, ...(args as T));
+      });
+    }
+
+    handleTrusted("plugins:open", (_e, value: unknown) => {
+      if (connection.mode !== "local") throw new Error("plugin UI runs local plugin files; switch to a local core");
+      const input = (value ?? {}) as { plugin?: unknown; view?: unknown; sessionId?: unknown; workspace?: unknown };
+      const plugin = typeof input.plugin === "string" ? input.plugin : "";
+      const viewId = typeof input.view === "string" ? input.view : "";
+      const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
+      const workspace = typeof input.workspace === "string" ? input.workspace : "";
+      if (!plugin || !viewId || !sessionId) throw new Error("plugins:open needs plugin, view and sessionId");
+      if (!path.isAbsolute(workspace)) throw new Error("plugins:open needs an absolute workspace");
+      pluginHost.refresh();
+      const view = pluginHost.view(plugin, viewId);
+      if (!view) throw new Error("plugin view is not available");
+      const sessionCount = [...panels.values()].filter((p) => p.sessionId === sessionId).length;
+      if (sessionCount >= PANEL_LIMIT_PER_SESSION)
+        throw new Error("this session already has the maximum plugin panels open");
+      if (panels.size >= PANEL_LIMIT_TOTAL) throw new Error("the maximum number of plugin panels is already open");
+      const id = randomUUID();
+      panels.set(id, newGrant(id, view.plugin, view.id, sessionId, workspace, view.permissions));
+      console.error(`[plugin] ${view.plugin}/${view.id} opened for session ${sessionId}`);
+      return { id, url: pluginViewUrl(view.plugin, view.id, view.entry, id), title: view.title };
+    });
+
+    handleTrusted("plugins:close", (_e, id: unknown) => {
+      if (typeof id !== "string") return false;
+      return panels.delete(id);
+    });
+
+    handlePlugin("plugins:getContext", (grant) => ({
+      sessionId: grant.sessionId,
+      workspace: grant.workspace,
+      plugin: grant.plugin,
+      view: grant.view,
+      theme: appTheme,
+    }));
+
+    handlePlugin("plugins:invokeTool", async (grant, _e, value: unknown) => {
+      const input = (value ?? {}) as { tool?: unknown; args?: unknown };
+      const tool = typeof input.tool === "string" ? input.tool : "";
+      if (!tool) return { ok: false, error: "invokeTool needs a tool name" };
+      if (!toolAllowed([...grant.permissions], grant.plugin, tool)) {
+        return { ok: false, error: `this panel may not call ${tool}` };
+      }
+      if (!allowRate(grant, "tool", 60)) return { ok: false, error: "this panel is calling tools too quickly" };
+      console.error(`[plugin] ${grant.plugin}/${grant.view} invoked ${tool}`);
+      try {
+        const result = (await agent.invoke("pluginInvoke", {
+          sessionId: grant.sessionId,
+          cwd: grant.workspace,
+          plugin: grant.plugin,
+          view: grant.view,
+          tool,
+          args: input.args ?? {},
+          destructive: grant.permissions.has("invokeToolDestructive"),
+        })) as { content?: unknown; isError?: unknown };
+        const content = typeof result?.content === "string" ? result.content : "";
+        if (result?.isError) return { ok: false, error: content || "the tool failed" };
+        return { ok: true, result: content };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    handlePlugin("plugins:readFile", async (grant, _e, value: unknown) => {
+      if (!grant.permissions.has("readFile")) return { ok: false, error: "this panel may not read files" };
+      if (!allowRate(grant, "file", 120)) return { ok: false, error: "this panel is reading files too quickly" };
+      const rel = typeof (value as { rel?: unknown } | null)?.rel === "string" ? (value as { rel: string }).rel : "";
+      if (!rel || path.isAbsolute(rel)) return { ok: false, error: "readFile needs a relative path" };
+      try {
+        const root = fs.realpathSync(grant.workspace);
+        const target = fs.realpathSync(path.resolve(root, rel));
+        if (!pathInside(root, target)) return { ok: false, error: "path is outside the workspace" };
+        const info = fs.statSync(target);
+        if (!info.isFile()) return { ok: false, error: "not a regular file" };
+        if (info.size > 1 << 20) return { ok: false, error: "file is larger than 1 MiB" };
+        const data = fs.readFileSync(target);
+        if (data.includes(0)) return { ok: false, error: "binary files are not readable" };
+        return { ok: true, text: data.toString("utf8") };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    handlePlugin("plugins:readStore", async (grant, _e, value: unknown) => {
+      const key = typeof (value as { key?: unknown } | null)?.key === "string" ? (value as { key: string }).key : "";
+      if (!storeKeyValid(key)) return null;
+      const store = readStore(grant);
+      return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+    });
+
+    handlePlugin("plugins:writeStore", async (grant, _e, value: unknown) => {
+      const input = (value ?? {}) as { key?: unknown; value?: unknown };
+      const key = typeof input.key === "string" ? input.key : "";
+      if (!storeKeyValid(key)) return { ok: false, error: "invalid store key" };
+      let encoded: string;
+      try {
+        encoded = JSON.stringify(input.value ?? null);
+      } catch {
+        return { ok: false, error: "value is not JSON" };
+      }
+      if (Buffer.byteLength(encoded) > 100 << 10) return { ok: false, error: "value is larger than 100 KiB" };
+      const file = storePath(grant);
+      if (!file) return { ok: false, error: "plugin folder is not available" };
+      const store = readStore(grant);
+      store[key] = input.value ?? null;
+      const data = JSON.stringify(store);
+      if (Buffer.byteLength(data) > 1 << 20) return { ok: false, error: "plugin store is larger than 1 MiB" };
+      try {
+        const pending = `${file}.tmp`;
+        fs.writeFileSync(pending, data, { mode: 0o600 });
+        fs.renameSync(pending, file);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+
+    handlePlugin("plugins:openExternal", async (grant, _e, value: unknown) => {
+      if (!grant.permissions.has("openExternal")) return { ok: false, error: "this panel may not open links" };
+      if (!allowRate(grant, "external", 3)) return { ok: false, error: "too many links opened; try again later" };
+      const url = typeof (value as { url?: unknown } | null)?.url === "string" ? (value as { url: string }).url : "";
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return { ok: false, error: "invalid URL" };
+      }
+      if (parsed.protocol !== "https:") return { ok: false, error: "only https links may be opened" };
+      console.error(`[plugin] ${grant.plugin}/${grant.view} opened ${url}`);
+      await shell.openExternal(url);
+      return { ok: true };
+    });
+
+    handlePlugin("plugins:subscribe", async (grant, _e, value: unknown) => {
+      if (!grant.permissions.has("events")) return "";
+      const filter = (value ?? {}) as { sessionId?: unknown; events?: unknown };
+      if (typeof filter.sessionId === "string" && filter.sessionId !== grant.sessionId) {
+        throw new Error("a panel may only watch its own session");
+      }
+      let events: Set<string> | null = null;
+      if (Array.isArray(filter.events) && filter.events.length) {
+        events = new Set();
+        for (const event of filter.events) {
+          if (typeof event !== "string" || !PLUGIN_EVENTS.has(event))
+            throw new Error(`unknown plugin event ${String(event)}`);
+          events.add(event);
+        }
+      }
+      const id = randomUUID();
+      grant.subs.set(id, { events, dropped: 0 });
+      return id;
+    });
+
+    handlePlugin("plugins:unsubscribe", async (grant, _e, value: unknown) => {
+      const id = typeof (value as { id?: unknown } | null)?.id === "string" ? (value as { id: string }).id : "";
+      return id ? grant.subs.delete(id) : false;
     });
     handleTrusted("app:metrics", () => {
       let cpu = 0;

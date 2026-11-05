@@ -126,6 +126,7 @@ type AgentRuntime struct {
 	extensions *extension.Registry
 	toolsMu    sync.Mutex
 	toolsSink  atomic.Pointer[toolsSink]
+	pluginSink atomic.Pointer[pluginSink]
 	hooks      *hooks.Manager
 	// started holds sessions whose SessionStart hooks ran in this process.
 	started   map[string]bool

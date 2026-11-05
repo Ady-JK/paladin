@@ -49,6 +49,7 @@ var methodClass = map[string]runClass{
 	"mcpConfig": runRead, "mcpParse": runRead, "toolsList": runRead, "customList": runRead, "customGet": runRead,
 
 	"submitChat": runSession, "steerChat": runSession, "openSession": runSession,
+	"pluginInvoke":   runSession,
 	"saveAttachment": runSession,
 	"terminalStart":  runSession,
 	"renameSession":  runSession, "forkSession": runSession, "deleteSession": runSession,

@@ -15,6 +15,31 @@ export interface PaladinBridge {
   takePendingOpen?: () => Promise<string | null>;
   // metrics sums Electron's own processes (main, renderer, GPU, ...).
   metrics?: () => Promise<{ cpu: number; rss: number; procs: number } | null>;
+  // plugins is the narrower bridge available to sandboxed plugin frames.
+  plugins?: {
+    open: (
+      plugin: string,
+      view: string,
+      sessionId: string,
+      workspace: string,
+    ) => Promise<{ id: string; url: string; title: string }>;
+    close: (id: string) => Promise<boolean>;
+    getContext: () => Promise<{
+      sessionId: string;
+      workspace: string;
+      plugin: string;
+      view: string;
+      theme: "dark" | "light";
+    }>;
+    invokeTool: (tool: string, args: unknown) => Promise<{ ok: true; result: unknown } | { ok: false; error: string }>;
+    readFile: (rel: string) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+    readStore: (key: string) => Promise<unknown>;
+    writeStore: (key: string, value: unknown) => Promise<{ ok: true } | { ok: false; error: string }>;
+    openExternal: (url: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    subscribe: (filter: { sessionId?: string; events?: string[] }) => Promise<string>;
+    unsubscribe: (id: string) => Promise<boolean>;
+    onEvent: (cb: (msg: { sub: string; event: string; data: unknown; dropped?: number }) => void) => () => void;
+  };
   views: {
     ensure: (name: string, url: string, partition: string) => Promise<boolean>;
     show: (name: string) => Promise<boolean>;
