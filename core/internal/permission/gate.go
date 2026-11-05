@@ -132,8 +132,16 @@ type Gate struct {
 	// Plan asks once/deny for every MCP call (a server cannot prove a
 	// tool is read-only); only deny rules skip the question.
 	Plan bool
-	// Extension identifies extension tools; nil means none.
-	Extension func(name string) bool
+	// Extension reports an extension tool's plugin and its own tool name,
+	// so rules can name them; nil means no extension tools.
+	Extension func(name string) (ExtensionRef, bool)
+}
+
+// ExtensionRef names an extension tool: its plugin folder (empty for a
+// legacy loose file) and the plugin's own tool name.
+type ExtensionRef struct {
+	Plugin string
+	Tool   string
 }
 
 // Auth is the gate's answer for one call.
@@ -158,8 +166,11 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 			req, gated = ClassifyMCP(name, info, args), true
 		}
 	}
-	if !gated && g.Extension != nil && g.Extension(name) {
-		req, gated = classifyExtension(name, args), true
+	if !gated && g.Extension != nil {
+		if ref, ok := g.Extension(name); ok {
+			req = classifyExtension(Request{Tool: name, ExtensionPlugin: ref.Plugin, ExtensionTool: ref.Tool}, args)
+			gated = true
+		}
 	}
 	if !gated {
 		return Auth{Run: true}

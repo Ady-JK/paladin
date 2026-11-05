@@ -209,6 +209,18 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	return r
 }
 
+// extensionRef tells the permission gate which plugin an extension tool
+// belongs to, so its rules can name the plugin or one of its tools.
+func extensionRef(registry *tools.Registry) func(string) (permission.ExtensionRef, bool) {
+	return func(name string) (permission.ExtensionRef, bool) {
+		if !registry.IsExtension(name) {
+			return permission.ExtensionRef{}, false
+		}
+		info, _ := registry.ExtensionOf(name)
+		return permission.ExtensionRef{Plugin: info.Plugin, Tool: info.Tool}, true
+	}
+}
+
 func (r *AgentRuntime) settingsPath() string {
 	return filepath.Join(r.dataDir, "config", "settings.json")
 }
@@ -351,7 +363,7 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 
 			ExtraWritable: extraWritable,
 			MCP:           registry.MCPInfo,
-			Extension:     registry.IsExtension,
+			Extension:     extensionRef(registry),
 		},
 	}, req)
 	if err != nil {

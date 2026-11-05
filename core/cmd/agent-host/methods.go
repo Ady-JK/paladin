@@ -421,6 +421,9 @@ var methods = map[string]handler{
 	"toolBehaviorSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.ToolBehaviorSet(a.str("key"), a.flag("enabled"), a.str("cwd"), a.str("sessionId"))
 	},
+	"toolsReload": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ToolsReload(a.str("cwd"), a.str("sessionId"))
+	},
 	"toolsAccept": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var p struct {
 			Cwd       string   `json:"cwd"`

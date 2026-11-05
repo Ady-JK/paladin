@@ -84,7 +84,7 @@ separate setup command, not a JSONL method.
 | `cancelAsk` | `{sessionId,callId}` | `bool` |
 | `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder`, `global` or `deny` (must be one of the card's `choices`); unknown calls fail |
 | `permissionsGet` | `{cwd?,sessionId?}` | `{global: Rule[], folder: Rule[], session: Rule[], folders: [{cwd,rules}], sandbox: {kind}, presets}`; `sandbox.kind` is `seatbelt`, `landlock` or `""` (approvals only) |
-| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp\|web, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`, web patterns a domain (`example.com`, covering its subdomains); `*` matches all |
+| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp\|web\|project\|extension, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`, web patterns a domain (`example.com`, covering its subdomains), extension patterns a plugin (`jira`), one of its tools (`jira/lookup`) or everything (`jira/*`); `*` matches all |
 | `mcpList` | `{cwd?}` | `MCPOverview`: `{servers: ServerStatus[], globalPath, folderPath?, hasFolderConfig, trusted, errors?: {global?, folder?}}` — global servers plus `cwd`'s own (see MCP servers) |
 | `mcpConfig` | `{scope,cwd?}` | `{path, text, exists}`: one `mcp.json` for editing (`scope` `global` or `folder`; a missing file returns a starter `text`) |
 | `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
@@ -103,7 +103,7 @@ separate setup command, not a JSONL method.
 | `hooksSetConfig` | `{scope,cwd?,text}` | `HooksOverview`; validates and writes the global or folder `hooks.json` (blank `text` deletes it). A folder file saved here is trusted |
 | `hooksTrust` | `{cwd,path,trust,fingerprint}` | `HooksOverview`; approves (or revokes) one of the folder's hooks files; `fingerprint` is the listed source's, and trust fails if the file changed since |
 | `hooksToggle` | `{cwd?,key,enabled}` | `HooksOverview`; turns one handler on or off |
-| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[], extensionErrors?: string[], behavior: {formatOnWrite, verifyNudge, lspDiagnostics, webPrivateNetwork}, languageServers: {id,root,state,pid?,error?}[]}` (see Tool switches) |
+| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[], extensionErrors?: string[], extensions?: PluginInfo[], runners?: RunnerInfo[], behavior: {formatOnWrite, verifyNudge, lspDiagnostics, webPrivateNetwork}, languageServers: {id,root,state,pid?,error?}[]}` (see Tool switches and Local extensions) |
 | `toolsSet` | `{scope,cwd?,sessionId?,names,enabled}` | `ToolsOverview`; `scope` `global` or `session`; `enabled` `true`/`false`, or `null` to clear the switch |
 | `toolBehaviorSet` | `{key,enabled,cwd?,sessionId?}` | `ToolsOverview`; app-wide tool behavior saved in `settings.json`; `key` `formatOnWrite`, `verifyNudge`, `lspDiagnostics` or `webPrivateNetwork` (off by default: lets web tools reach private addresses) |
 | `customList` | `{}` | `CustomItem[]`: every editable built-in, by group (System prompt, Tool guidance, Tool descriptions, Modes, Reminders, Subagents, Compaction, Commands, Skills, Settings files): `{id, group, title, description, kind: text\|command\|skill\|json, vars?, customized, enabled?}` (`enabled` for skills) |
@@ -112,6 +112,7 @@ separate setup command, not a JSONL method.
 | `customReset` | `{id}` | `CustomState`; deletes the override so the default applies (for `settings.json`: every setting returns to its default) |
 | `skillEnabledSet` | `{name,enabled}` | `true`; turns a skill on or off by name (`settings.json` `disabledSkills`), whatever its source |
 | `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
+| `toolsReload` | `{cwd?,sessionId?}` | `ToolsOverview`; re-reads `extensions.json` and every enabled plugin, drops the warm plugin runners and returns the refreshed view. A running turn keeps the tools it started with: the new set applies from the next turn |
 | `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only`, `auto` (default) or `full-access` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
@@ -522,6 +523,62 @@ prompt cache: the turn runs without them and emits
 `toolsAccept` (or switching the tool on for the session) lets the next
 turn use them. Tools that disappear are simply dropped. New sessions
 never have pending tools.
+
+### Local extensions
+
+Tools the user writes themselves live in `<data>/config/extensions`.
+`extensions.json` lists what is enabled, and each entry is either a
+plugin folder or a legacy loose file:
+
+```jsonc
+{"enabled": ["my-plugin", "legacy.ts"]}
+```
+
+A **plugin folder** is `config/extensions/<name>/` with an `index.ts` (or
+`index.js`), an optional `package.json` plus `node_modules` of its own,
+and an optional `paladin-plugin.json`:
+
+```jsonc
+{
+  "entry": "index.ts",         // relative to the folder; default index.ts then index.js
+  "tools": null,               // static declarations; null asks the plugin instead
+  "timeoutMs": 120000,         // per call, clamped to 1000..300000
+  "idleMs": 300000,            // reap the warm process after this idle; 0 = never
+  "env": {"FOO": "bar"},       // extra environment; PATH is refused
+  "node": "/opt/node/bin/node",// absolute path, this plugin only
+  "permissions": ["network"]   // "network" | "spawn" | "fs-outside-workspace"
+}
+```
+
+The module's default export is `{tools: [{name, description,
+parameters, execute(args, ctx)}], onActivate?(ctx),
+onDeactivate?()}`. Every tool of a plugin folder runs on one long-lived
+Node process (one per plugin), started on first use and reused across
+turns and tool calls; it is reaped when idle, restarted after a crash,
+and asked to shut down when the app exits. `ctx` is `{pluginDir, pid,
+workspace}`. A plugin's tools are exposed as
+`extension__<folder>__<tool>`; a loose file `legacy.ts` keeps
+`extension__legacy__<tool>`, so moving `legacy.ts` into `legacy/`
+does not change the names the model learned.
+
+Runners resolve Node in this order: the plugin's own `node`, the
+Electron binary the app passes down (`ELECTRON_NODE`, i.e. Electron's
+bundled Node 24 via `ELECTRON_RUN_AS_NODE`), `PALADIN_NODE`, then `node`
+on `PATH` (24 or newer). A setting that is present but broken fails that
+plugin loudly instead of falling through.
+
+Calls are gated like MCP tools: each asks until a rule allows the plugin,
+one of its tools or everything. Approval cards offer `once`, `session`,
+`folder`, `global` and `deny`, and the saved rule reads `jira`,
+`jira/lookup`, `jira/*` or `*` (rules in older installs that name an
+exposed tool must be rewritten). Extension tools are left out of
+read-only and plan mode.
+
+`extensions` in `ToolsOverview` reports each enabled plugin (`kind`,
+`path`, declared `permissions`, its `tools`, or an `error`), `runners`
+reports the warm processes (`plugin`, `pid`, `node`, `lastUsed`,
+`inflight`, `generation`, a `stderr` tail), and `toolsReload` re-reads
+everything and drops the warm runners.
 
 ### Subagents
 

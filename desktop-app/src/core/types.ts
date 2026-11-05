@@ -803,10 +803,36 @@ export type LanguageServer = {
   pid?: number;
   error?: string;
 };
+// PluginInfo is one enabled local extension: a plugin folder or a legacy
+// loose file. error explains why it is not usable.
+export type PluginInfo = {
+  name: string;
+  kind: "plugin" | "file";
+  path: string;
+  permissions?: string[];
+  tools?: string[];
+  error?: string;
+};
+
+// RunnerInfo is a plugin with a live Node process behind it.
+export type RunnerInfo = {
+  plugin: string;
+  warm: boolean;
+  pid?: number;
+  node?: string;
+  electron?: boolean;
+  lastUsed?: string;
+  inflight?: number;
+  generation?: number;
+  stderr?: string;
+};
+
 export type ToolsOverview = {
   tools: ToolSwitch[];
   pending: string[];
   extensionErrors?: string[];
+  extensions?: PluginInfo[];
+  runners?: RunnerInfo[];
   behavior?: ToolBehavior;
   languageServers?: LanguageServer[];
 };

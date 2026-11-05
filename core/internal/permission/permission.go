@@ -87,8 +87,9 @@ func (r Rule) validate() error {
 		!siteName.MatchString(strings.TrimPrefix(strings.ToLower(p), "*.")) {
 		return fmt.Errorf("web rule pattern must be \"*\", a domain like example.com or localhost:PORT, got %q", p)
 	}
-	if r.Tool == ToolExtension && p != matchAnyRule && !extensionName.MatchString(p) {
-		return fmt.Errorf("extension rule pattern must be \"*\" or a tool name, got %q", p)
+	if r.Tool == ToolExtension && p != matchAnyRule && !extensionPattern.MatchString(p) {
+		return fmt.Errorf("extension rule pattern must be \"*\", a plugin name, \"plugin/tool\" or "+
+			"\"plugin/*\", got %q", p)
 	}
 	if r.Tool == ToolMCP && p != matchAnyRule {
 		server, tool, hasTool := strings.Cut(p, "/")
@@ -104,7 +105,7 @@ func (r Rule) normalized() Rule {
 	switch {
 	case r.Tool == ToolShell:
 		r.Pattern = strings.Join(strings.Fields(r.Pattern), " ")
-	case r.Tool == ToolMCP:
+	case r.Tool == ToolMCP, r.Tool == ToolExtension:
 	case r.Tool == ToolWeb:
 		r.Pattern = strings.TrimSuffix(strings.TrimPrefix(strings.ToLower(r.Pattern), "*."), ".")
 	case r.Pattern != matchAnyRule:
@@ -310,20 +311,53 @@ func decideMCP(p Preset, req Request, rules []Rule) Decision {
 	return Decision{Verdict: Ask, Reasons: []string{reason}, Remember: remember, Choices: allChoices()}
 }
 
-// extensionName is an extension tool's name.
-var extensionName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
+// extensionPattern is a plugin name, "plugin/tool" or "plugin/*".
+var extensionPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*(/[a-zA-Z][a-zA-Z0-9_-]*|/\*)?$`)
 
 // decideExtension: an extension tool runs the user's local code with no
-// sandbox, so each call asks unless a rule names the tool (or "*").
+// sandbox, so each call asks unless a rule names its plugin, the tool, or
+// everything ("*").
 func decideExtension(req Request, rules []Rule) Decision {
 	for i := range rules {
 		r := &rules[i]
-		if r.Tool == ToolExtension && r.Action == ActionAllow && (r.Pattern == matchAnyRule || r.Pattern == req.Tool) {
+		if r.Tool == ToolExtension && r.Action == ActionAllow && extensionMatches(r.Pattern, req) {
 			return Decision{Verdict: Allow, Rule: r}
 		}
 	}
 	return Decision{Verdict: Ask, Reasons: []string{"extension tool: it runs local code without the sandbox"},
-		Remember: []Rule{{Tool: ToolExtension, Pattern: req.Tool, Action: ActionAllow}}, Choices: writeChoices()}
+		Remember: []Rule{{Tool: ToolExtension, Pattern: extensionPatternOf(req), Action: ActionAllow}},
+		Choices:  writeChoices()}
+}
+
+// extensionPatternOf is the rule pattern a call is remembered by: the
+// plugin and the tool ("jira/lookup"), or the exposed tool name when the
+// plugin is unknown.
+func extensionPatternOf(req Request) string {
+	if req.ExtensionPlugin == "" {
+		return req.Tool
+	}
+	return req.ExtensionPlugin + "/" + req.ExtensionTool
+}
+
+// extensionMatches reports whether a rule pattern names this call. A
+// plugin rule covers every tool of that plugin, "plugin/*" does the same,
+// "plugin/tool" names one, and a bare name matches a legacy loose-file
+// extension, whose exposed tools have no separate plugin directory.
+func extensionMatches(pattern string, req Request) bool {
+	if pattern == matchAnyRule {
+		return true
+	}
+	if req.ExtensionPlugin == "" {
+		return pattern == req.Tool
+	}
+	if pattern == req.ExtensionPlugin {
+		return true
+	}
+	plugin, tool, hasTool := strings.Cut(pattern, "/")
+	if plugin != req.ExtensionPlugin {
+		return false
+	}
+	return !hasTool || tool == matchAnyRule || tool == req.ExtensionTool
 }
 
 func allowingMCP(req Request, rules []Rule) *Rule {
@@ -483,7 +517,7 @@ func denyingRule(req Request, rules []Rule) *Rule {
 				return r
 			}
 		case KindExtension:
-			if r.Tool == ToolExtension && (r.Pattern == matchAnyRule || r.Pattern == req.Tool) {
+			if r.Tool == ToolExtension && extensionMatches(r.Pattern, req) {
 				return r
 			}
 		case KindWeb:

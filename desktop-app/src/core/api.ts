@@ -604,6 +604,12 @@ export function toolsSet(
   return invoke<ToolsOverview>("toolsSet", { scope, cwd, sessionId, names, enabled });
 }
 
+// toolsReload re-reads the enabled extensions and drops their warm
+// runners; the new tool set applies from the next turn.
+export function toolsReload(cwd: string | null, sessionId: string | null): Promise<ToolsOverview> {
+  return invoke<ToolsOverview>("toolsReload", { cwd, sessionId });
+}
+
 // toolsAccept lets the session use pending tools (all when names is
 // empty) from its next turn.
 export function toolsAccept(cwd: string | null, sessionId: string, names: string[]): Promise<ToolsOverview> {

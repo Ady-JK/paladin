@@ -63,7 +63,9 @@ var methodClass = map[string]runClass{
 	"hooksTrust": runGlobal, "hooksToggle": runGlobal, "mcpSetConfig": runGlobal,
 	"mcpSetEnabled": runGlobal, "mcpRestart": runGlobal, "mcpTrust": runGlobal,
 	"mcpAdd": runGlobal, "toolsSet": runGlobal, "toolsAccept": runGlobal, "toolBehaviorSet": runGlobal,
-	"customSet": runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
+	// Reload stops the warm plugin runners, so it is a global mutation.
+	"toolsReload": runGlobal,
+	"customSet":   runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
 
 	"refreshProviders": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong,
 }

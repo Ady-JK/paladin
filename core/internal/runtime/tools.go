@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/custom"
+	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/lsp"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
@@ -51,9 +52,21 @@ type ToolsOverview struct {
 	Tools           []ToolInfo   `json:"tools"`
 	Pending         []string     `json:"pending"`
 	ExtensionErrors []string     `json:"extensionErrors,omitempty"`
-	Behavior        ToolBehavior `json:"behavior"`
+	// Extensions are the enabled local plugins and their tools.
+	Extensions []extension.PluginInfo `json:"extensions,omitempty"`
+	// Runners are the plugins with a warm Node process right now.
+	Runners  []extension.RunnerInfo `json:"runners,omitempty"`
+	Behavior ToolBehavior           `json:"behavior"`
 	// LanguageServers are the running (or recently failed) servers.
 	LanguageServers []lsp.ServerStatus `json:"languageServers"`
+}
+
+// ToolsReload re-reads the enabled extensions, drops their warm runners
+// and returns the refreshed overview. A running turn keeps the tools it
+// started with; the next turn sees the new set.
+func (r *AgentRuntime) ToolsReload(cwd, sessionID string) (ToolsOverview, error) {
+	r.extensions.Reload()
+	return r.ToolsList(cwd, sessionID)
 }
 
 // ToolBehavior is how the built-in tools act, app-wide.
@@ -224,7 +237,8 @@ func (r *AgentRuntime) ToolsList(cwd, sessionID string) (ToolsOverview, error) {
 	if pending == nil {
 		pending = []string{}
 	}
-	view := ToolsOverview{Tools: list, Pending: pending, Behavior: r.toolBehavior(), LanguageServers: r.lsp.Status()}
+	view := ToolsOverview{Tools: list, Pending: pending, Behavior: r.toolBehavior(),
+		Extensions: r.extensions.PluginList(), Runners: r.extensions.Runners(), LanguageServers: r.lsp.Status()}
 	for _, err := range extensionErrors {
 		view.ExtensionErrors = append(view.ExtensionErrors, err.Error())
 	}

@@ -61,6 +61,21 @@ func TestToolsMethods(t *testing.T) {
 	mustFail(t, callUnary(rt, "7", "toolsAccept", map[string]any{"cwd": ws}), "sessionId")
 }
 
+// toolsReload re-reads the enabled extensions and reports the refreshed
+// overview; it works with no plugins at all.
+func TestToolsReloadMethod(t *testing.T) {
+	rt := testRuntime(t)
+	t.Cleanup(func() { rt.ShutdownTurns(3 * time.Second) })
+	ws := t.TempDir()
+	ov := decodeAs[runtime.ToolsOverview](t, callUnary(rt, "1", "toolsReload", map[string]any{"cwd": ws}))
+	if len(ov.Tools) == 0 || ov.Pending == nil {
+		t.Fatalf("%+v", ov)
+	}
+	if len(ov.Extensions) != 0 || len(ov.Runners) != 0 {
+		t.Fatalf("no plugins expected: %+v %+v", ov.Extensions, ov.Runners)
+	}
+}
+
 func TestMCPParseAndAddMethods(t *testing.T) {
 	rt := testRuntime(t)
 	t.Cleanup(func() { rt.ShutdownTurns(3 * time.Second) })
