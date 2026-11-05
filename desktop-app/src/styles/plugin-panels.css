@@ -1,0 +1,187 @@
+/* ============ Plugin panels ============
+   The Plugins menu in the side-pane header and the sandboxed iframe in a
+   side-pane tab. The frame fills its tab; main serves it over plugin://. */
+
+#headerStatusActions {
+  position: relative;
+}
+#headerStatusActions .plugins-menu {
+  top: calc(100% + 8px);
+  right: 0;
+  left: auto;
+}
+.plugins-menu {
+  width: 320px;
+  max-height: 420px;
+  padding: 0;
+  overflow: hidden;
+}
+.plugins-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px 7px;
+  border-bottom: 1px solid var(--color-slate-200);
+  color: var(--color-slate-600);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.dark .plugins-menu-head {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+.plugins-refresh {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--color-slate-500);
+}
+.plugins-refresh:hover {
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .plugins-refresh:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--color-slate-100);
+}
+.plugins-list {
+  max-height: 378px;
+  overflow-y: auto;
+  padding: 5px;
+}
+.plugin-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  border-radius: 9px;
+  padding: 8px;
+  text-align: left;
+}
+.plugin-row:hover,
+.plugin-row:focus-visible {
+  background: var(--color-slate-100);
+}
+.dark .plugin-row:hover,
+.dark .plugin-row:focus-visible {
+  background: rgb(255 255 255 / 0.07);
+}
+.plugin-row-ico {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 8px;
+  background: rgb(128 128 128 / 0.12);
+  color: var(--color-accent-600);
+}
+.dark .plugin-row-ico {
+  color: var(--color-accent-400);
+}
+.plugin-row-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.plugin-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-800);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dark .plugin-row-title {
+  color: var(--color-slate-100);
+}
+.plugin-row-plugin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-500);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+}
+.plugin-row-badges {
+  display: flex;
+  max-width: 110px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 3px;
+}
+.plugin-badge {
+  border-radius: 9999px;
+  background: rgb(128 128 128 / 0.12);
+  padding: 1px 6px;
+  color: var(--color-slate-500);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.plugin-badge.is-danger {
+  background: rgb(244 63 94 / 0.12);
+  color: #be123c;
+}
+.dark .plugin-badge.is-danger {
+  color: #fda4af;
+}
+
+.pane-plugin {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-slate-50);
+}
+.dark .pane-plugin {
+  background: var(--color-slate-950);
+}
+.plugin-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+.plugin-panel-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--color-slate-500);
+  font-size: 12px;
+  text-align: center;
+}
+.plugin-stale {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-slate-700);
+  border-radius: 10px;
+  background: var(--color-slate-900);
+  padding: 6px 8px 6px 10px;
+  color: var(--color-slate-200);
+  font-size: 11px;
+  box-shadow: 0 10px 26px rgb(0 0 0 / 0.35);
+}
+.plugin-stale button {
+  border-radius: 6px;
+  background: var(--color-accent-600);
+  padding: 3px 8px;
+  color: #fff;
+  font-weight: 600;
+}
+.plugin-stale button:hover {
+  background: var(--color-accent-700);
+}

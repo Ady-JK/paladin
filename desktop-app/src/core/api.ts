@@ -8,6 +8,7 @@ import type {
   CustomState,
   FileExcerpt,
   FilePreview,
+  PluginUI,
   ToolBehavior,
   ThinkingView,
   HookScope,
@@ -561,6 +562,12 @@ export function fileExcerpt(
 // filePreview reads the start of a tagged file for its composer card.
 export function filePreview(cwd: string | null, path: string): Promise<FilePreview> {
   return invoke<FilePreview>("filePreview", { cwd, path });
+}
+
+// pluginViews lists the side-pane panels and result cards extensions
+// ship. Reading manifests starts no plugin process.
+export function pluginViews(): Promise<PluginUI> {
+  return invoke<PluginUI>("pluginViews", {});
 }
 
 // customList lists every editable built-in (prompts, tool guidance,

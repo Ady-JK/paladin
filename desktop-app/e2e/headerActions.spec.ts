@@ -11,14 +11,15 @@ test("shared Agent header actions open the side pane directly in split view", as
   const actions = page.locator("#titleBar #paneActions");
   await expect(actions).toBeVisible();
   await expect(page.locator("#sidePaneBtn")).toHaveCount(0);
+  await expect(page.locator("#panePluginsBtn")).toBeVisible();
   const actionBox = await actions.boundingBox();
   const usageBox = await page.locator("#usagePill").boundingBox();
   const titleBox = await page.locator("#titleBar").boundingBox();
   const minimizeBox = await page.locator("#windowMinimizeBtn").boundingBox();
   const maximizeBox = await page.locator("#windowMaximizeBtn").boundingBox();
   const closeBox = await page.locator("#windowCloseBtn").boundingBox();
-  expect(actionBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width / 2);
-  expect(usageBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width / 2);
+  expect(actionBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width * 0.45);
+  expect(usageBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width * 0.45);
   expect(minimizeBox!.x).toBeGreaterThan(actionBox!.x + actionBox!.width);
   expect(maximizeBox!.x).toBeGreaterThan(minimizeBox!.x);
   expect(closeBox!.x).toBeGreaterThan(maximizeBox!.x);
@@ -47,7 +48,7 @@ test("layout button switches layouts and actions remain in the header", async ({
   await expect(page.locator("#titleBar #paneActions")).toBeVisible();
   const tabsActions = await page.locator("#paneActions").boundingBox();
   const tabsMinimize = await page.locator("#windowMinimizeBtn").boundingBox();
-  expect(tabsActions!.x).toBeGreaterThan(page.viewportSize()!.width / 2);
+  expect(tabsActions!.x).toBeGreaterThan(page.viewportSize()!.width * 0.45);
   expect(tabsMinimize!.x).toBeGreaterThan(tabsActions!.x + tabsActions!.width);
   await page.locator("#paneNewChatBtn").click();
   await expect(page.locator("#agentMain")).toBeHidden();

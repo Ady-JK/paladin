@@ -278,6 +278,13 @@ of a turn, so it arrives as a `plugin/approval` event with an
 The client answers it with `answerApproval(sessionId, approval.id, decision)`.
 `pluginInvoke` then returns the tool result or the denial.
 
+`plugin/updated` has no session and no payload: plugin manifests were
+re-read (a `toolsReload`), so an open panel should offer to reload.
+
+```json
+{"event": "plugin/updated"}
+```
+
 Events are written to stdout in `seq` order by one writer that never
 holds up the agent. If the client stops reading, the writer buffers up
 to about 20,000 events or 8 MB; past that it drops streaming chunks

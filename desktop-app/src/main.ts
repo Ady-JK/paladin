@@ -26,6 +26,7 @@ import { initModelPicker, loadProviders } from "./features/models";
 import { syncPermChip } from "./features/permissions";
 import { closeConfirm, initSessions, openSession, refreshSessions } from "./features/sessions";
 import { initSidePane } from "./features/sidePane";
+import { initPluginPanels } from "./features/pluginPanels";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
 import { closeNewSite, initSites, openNewSite, refreshExternalVisibility } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
@@ -114,6 +115,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initMemory();
   initSessions();
   initSidePane();
+  initPluginPanels();
   initUndo();
   initLive((id) => void openSession(id));
   initUsage();

@@ -837,6 +837,23 @@ export type ToolsOverview = {
   languageServers?: LanguageServer[];
 };
 
+// PluginView is one side-pane panel an extension ships (pluginViews).
+export type PluginView = {
+  plugin: string;
+  view: string;
+  title: string;
+  mount: "side-pane";
+  permissions: string[];
+  destructive?: boolean;
+};
+
+// PluginUI is the pluginViews result.
+export type PluginUI = {
+  views: PluginView[];
+  cards: { plugin: string; tool: string; exposed: string }[];
+  errors?: string[];
+};
+
 // Finding is one issue a /review recorded with report_findings.
 export type Finding = {
   id: string;
