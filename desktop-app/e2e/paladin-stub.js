@@ -187,6 +187,8 @@ async function __paladinBaseInvoke(cmd, args) {
     case "toolsReload":
     case "toolBehaviorSet":
       return window.__e2eToolsInvoke(cmd, args || {});
+    case "pluginViews":
+      return window.__e2ePluginViews || { views: [], cards: [], errors: [] };
     case "customList":
     case "customGet":
     case "customSet":

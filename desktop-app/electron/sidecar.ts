@@ -100,6 +100,7 @@ const READ_METHODS = new Set([
   "sessionDiff",
   "fileExcerpt",
   "filePreview",
+  "pluginViews",
   "worktreeStatus",
   "attach",
   "permissionsGet",

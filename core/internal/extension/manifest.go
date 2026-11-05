@@ -64,6 +64,10 @@ type Manifest struct {
 	Node string `json:"node,omitempty"`
 	// Permissions are the capabilities the plugin says it needs.
 	Permissions []string `json:"permissions,omitempty"`
+	// Views are side-pane panels the plugin ships.
+	Views []View `json:"views,omitempty"`
+	// Cards are inline renderers for the plugin's tool results.
+	Cards []Card `json:"cards,omitempty"`
 }
 
 // timeout is the per-call timeout the manifest asks for.
@@ -103,6 +107,12 @@ type plugin struct {
 	entry string
 	// Manifest is the plugin's paladin-plugin.json (zero when absent).
 	Manifest
+	// views and cards are the UI entries that passed validation.
+	views []View
+	cards []Card
+	// uiErrs are UI entries that were skipped; they never fail the
+	// plugin's tools.
+	uiErrs []error
 }
 
 // loadManifest reads and validates one plugin directory. fail reports a
@@ -154,6 +164,7 @@ func loadManifest(root, name string) (plugin, error) {
 		return plugin{}, err
 	}
 	p.entry = entry
+	p.validateUI()
 	return p, nil
 }
 

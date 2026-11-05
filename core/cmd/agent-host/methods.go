@@ -427,6 +427,9 @@ var methods = map[string]handler{
 	"toolsReload": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.ToolsReload(a.str("cwd"), a.str("sessionId"))
 	},
+	"pluginViews": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.PluginViews(), nil
+	},
 	"toolsAccept": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var p struct {
 			Cwd       string   `json:"cwd"`
