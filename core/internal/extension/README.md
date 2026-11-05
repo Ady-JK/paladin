@@ -150,7 +150,9 @@ never copies or snapshots that folder.
 
 Extension tools are gated like MCP tools. A call asks unless a rule says
 otherwise, and the card remembers `jira/lookup` (one tool), `jira/*`
-(every tool of the plugin) or `*` (every extension). Rules are saved from
+(every tool of the plugin) or `*` (every extension). A loose file counts
+as the plugin of the same name, so `legacy.ts` and `legacy/index.ts` are
+both covered by `legacy/*`. Rules are saved from
 the card with its scope buttons (`session`, `folder`, `global`) or edited
 in Settings → Permissions, where the pattern field completes from the
 installed plugins. Deny rules always win, even at full access.

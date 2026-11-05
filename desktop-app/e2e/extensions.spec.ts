@@ -160,4 +160,8 @@ test("an extension approval card names the plugin and its tool", async ({ page }
   await card.locator('[data-approve="session"]').click();
   const answers = await page.evaluate(() => (window as any).__e2eApprovalAnswers);
   expect(answers).toEqual([{ sessionId: "sess-notify-1", callId: "x1", decision: "session" }]);
+  // The rule the card offered, and that the answer saves, names the plugin
+  // and the tool.
+  await expect(card.locator(".approval-receipt")).toContainText("Allowed for this session");
+  await expect(card).toHaveClass(/is-resolved/);
 });

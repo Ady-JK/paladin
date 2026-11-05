@@ -570,9 +570,12 @@ plugin loudly instead of falling through.
 Calls are gated like MCP tools: each asks until a rule allows the plugin,
 one of its tools or everything. Approval cards offer `once`, `session`,
 `folder`, `global` and `deny`, and the saved rule reads `jira`,
-`jira/lookup`, `jira/*` or `*` (rules in older installs that name an
-exposed tool must be rewritten). Extension tools are left out of
-read-only and plan mode.
+`jira/lookup`, `jira/*` or `*`. A loose file counts as the plugin of the
+same name (`legacy.ts` → `legacy/…`), so a rule keeps working when the
+file moves into a folder; rules that name an exposed tool
+(`extension__jira__lookup`) were refused by the validator before this
+grammar, so none are stored. Extension tools are left out of read-only
+and plan mode.
 
 `extensions` in `ToolsOverview` reports each enabled plugin (`kind`,
 `path`, declared `permissions`, its `tools`, or an `error`), `runners`
