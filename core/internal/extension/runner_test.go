@@ -337,3 +337,115 @@ export default {
 		t.Fatalf("lifecycle file %q", data)
 	}
 }
+
+// Concurrent first calls share one process: one spawn, one runner.
+func TestConcurrentColdStartsShareOneProcess(t *testing.T) {
+	pool, pl := poolFor(t, map[string]string{"index.ts": `
+export default { tools: [{
+  name: "pid", description: "Report the process", parameters: { type: "object" },
+  execute() { return process.pid; },
+}] };`})
+	var wg sync.WaitGroup
+	pids := make([]int, 8)
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			out, err := callPlugin(t, pool, pl, "pid", map[string]any{})
+			if err != nil {
+				t.Errorf("call %d: %v", i, err)
+				return
+			}
+			pids[i] = int(out.(float64))
+		}(i)
+	}
+	wg.Wait()
+	if pool.spawns != 1 {
+		t.Fatalf("%d spawns for one plugin, want 1", pool.spawns)
+	}
+	for _, pid := range pids {
+		if pid != pids[0] {
+			t.Fatalf("calls reached different processes: %v", pids)
+		}
+	}
+}
+
+// A reload never cuts a call off mid-flight: the running call finishes on
+// the old process, and the next call gets a fresh one.
+func TestReloadLetsACallFinish(t *testing.T) {
+	pool, pl := poolFor(t, map[string]string{"index.ts": `
+export default { tools: [{
+  name: "slow", description: "Answer after a pause", parameters: { type: "object" },
+  execute() { return new Promise((done) => setTimeout(() => done(process.pid), 600)); },
+}] };`})
+	started := make(chan struct{})
+	result := make(chan outcomePair, 1)
+	go func() {
+		close(started)
+		out, err := callPlugin(t, pool, pl, "slow", map[string]any{})
+		result <- outcomePair{out: out, err: err}
+	}()
+	<-started
+	// Let the call reach the runner, then reload under it.
+	for range 100 {
+		if running := pool.Running(); len(running) == 1 && running[0].Inflight == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pool.Drain()
+	if got := <-result; got.err != nil || got.out == nil {
+		t.Fatalf("the reload cut the call off: %v %v", got.out, got.err)
+	}
+	if len(pool.Running()) != 0 {
+		t.Fatalf("a drained pool kept a runner: %+v", pool.Running())
+	}
+	// The next call works on a new process, with a new generation.
+	out, err := callPlugin(t, pool, pl, "slow", map[string]any{})
+	if err != nil || out == nil {
+		t.Fatalf("after reload: %v %v", out, err)
+	}
+	if len(pool.Running()) != 1 || pool.Running()[0].Generation == 0 {
+		t.Fatalf("generation not bumped: %+v", pool.Running())
+	}
+}
+
+type outcomePair struct {
+	out any
+	err error
+}
+
+// A cold start slower than the caller's deadline fails that call but not
+// the plugin: the process stays pooled, so the next call reuses it
+// instead of spawning a second Node.
+func TestSlowColdStartKeepsTheRunner(t *testing.T) {
+	pool, pl := poolFor(t, map[string]string{"index.ts": `
+await new Promise((done) => setTimeout(done, 900));
+export default { tools: [{
+  name: "pid", description: "Report the process", parameters: { type: "object" },
+  execute() { return process.pid; },
+}] };`})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	raw := json.RawMessage(`{"args":{},"context":{"workspace":"/tmp"}}`)
+	if _, err := pool.Call(ctx, pl, "pid", raw, 10*time.Second); err == nil {
+		t.Fatal("the cold start was slower than the call deadline, so the call should fail")
+	}
+	if pool.spawns != 1 {
+		t.Fatalf("%d spawns, want 1", pool.spawns)
+	}
+	if len(pool.Running()) != 1 {
+		t.Fatalf("the process was dropped: %+v", pool.Running())
+	}
+	// The import is still running; this call waits for it on the same pid.
+	out, err := callPlugin(t, pool, pl, "pid", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out.(float64); !ok {
+		t.Fatalf("call after the slow start returned %T %v", out, out)
+	}
+	if pool.spawns != 1 {
+		t.Fatalf("%d spawns after reuse, want 1", pool.spawns)
+	}
+}

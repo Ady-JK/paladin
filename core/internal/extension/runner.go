@@ -37,6 +37,9 @@ const (
 	maxColdStarts = 4
 	// coldQueueTimeout bounds how long a cold start waits for a slot.
 	coldQueueTimeout = 30 * time.Second
+	// softRSS is the memory a runner may use before it is reported: a
+	// warning only, never a kill. The next idle reap stops it.
+	softRSS = 512 << 20
 )
 
 // request is one line written to a runner.
@@ -100,9 +103,23 @@ type runnerProc struct {
 	inflight int
 	seq      uint64
 	// exited is closed when the process is gone.
-	exited   chan struct{}
-	lastUsed time.Time
-	starting bool
+	exited chan struct{}
+	// ready is closed once the start attempt is over (started or failed),
+	// so concurrent callers wait for one process instead of starting two.
+	ready chan struct{}
+	// startErr is why the start failed; read after ready is closed.
+	startErr error
+	// retired marks a runner a reload is dropping: it takes no new calls
+	// and stops as soon as the ones in flight finish.
+	retired bool
+	// stopping marks a stop already in progress, so the idle check and
+	// the reaper cannot race two shutdowns onto one process.
+	stopping bool
+	// rssWarned marks the soft memory budget already reported, so the
+	// reaper logs once per generation instead of every 30 s.
+	rssWarned bool
+	lastUsed  time.Time
+	starting  bool
 	// stderr keeps the tail of the plugin's own logging.
 	stderr *ringBuffer
 }
@@ -170,15 +187,17 @@ func (p *Pool) Close() {
 		wg.Add(1)
 		go func(r *runnerProc) {
 			defer wg.Done()
-			r.stop(shutdownGrace)
+			r.stop()
 		}(r)
 	}
 	wg.Wait()
 	p.cleanRunnerScript()
 }
 
-// Drain stops every runner without closing the pool: a reload keeps
-// serving new calls, on fresh processes.
+// Drain drops every runner without closing the pool: a reload keeps
+// serving new calls, on fresh processes. An idle runner stops at once; one
+// with calls in flight takes no more and stops when the last of them ends,
+// so a reload never cuts a plugin off mid-call.
 func (p *Pool) Drain() {
 	p.mu.Lock()
 	list := make([]*runnerProc, 0, len(p.runners))
@@ -189,10 +208,13 @@ func (p *Pool) Drain() {
 	p.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, r := range list {
+		if !r.retire() {
+			continue
+		}
 		wg.Add(1)
 		go func(r *runnerProc) {
 			defer wg.Done()
-			r.stop(shutdownGrace)
+			r.stop()
 		}(r)
 	}
 	wg.Wait()
@@ -208,8 +230,8 @@ func (p *Pool) Running() []RunnerInfo {
 	p.mu.Unlock()
 	out := make([]RunnerInfo, 0, len(list))
 	for _, r := range list {
-		info := RunnerInfo{Plugin: r.plugin.name, Warm: true, Node: r.node.path, Electron: r.node.runAsNode}
 		r.mu.Lock()
+		info := RunnerInfo{Plugin: r.plugin.name, Warm: true, Node: r.node.path, Electron: r.node.runAsNode}
 		if r.cmd != nil && r.cmd.Process != nil {
 			info.PID = r.cmd.Process.Pid
 		}
@@ -269,23 +291,113 @@ func (p *Pool) ensure(ctx context.Context, pl plugin) (*runnerProc, error) {
 	}
 	// Re-check under the lock: another caller may have started it while
 	// this one waited for a cold-start slot.
-	if r := p.runners[pl.name]; r != nil && r.alive() {
+	existing := p.runners[pl.name]
+	p.mu.Unlock()
+	if existing != nil {
+		r, err := existing.await(ctx)
+		if err == nil {
+			return r, nil
+		}
+		// A caller that gave up waiting must not take a healthy runner
+		// down with it; only a failed start or a dead process is dropped.
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		// A start that failed, or a process that died since, is dropped
+		// so the next call can cold-start a fresh one.
+		p.drop(runnerDrop{name: pl.name, runner: existing, reason: err})
+	}
+	return p.startFresh(ctx, pl)
+}
+
+// runnerDrop identifies one runner to forget.
+type runnerDrop struct {
+	name   string
+	runner *runnerProc
+	reason error
+}
+
+// startFresh registers and starts a new runner for pl, releasing every
+// caller waiting on it with the outcome.
+func (p *Pool) startFresh(ctx context.Context, pl plugin) (*runnerProc, error) {
+	p.mu.Lock()
+	select {
+	case <-p.closed:
 		p.mu.Unlock()
-		return r, nil
+		return nil, errors.New("extension pool is closed")
+	default:
+	}
+	// Another caller may have started one while this one waited for a slot.
+	if r := p.runners[pl.name]; r != nil {
+		p.mu.Unlock()
+		return r.await(ctx)
 	}
 	gen := p.nextGen
 	p.nextGen++
 	p.spawns++
 	r := &runnerProc{plugin: pl, gen: gen, pending: map[string]waiter{}, exited: make(chan struct{}),
-		lastUsed: p.now(), starting: true, stderr: newRingBuffer(stderrCap)}
+		ready: make(chan struct{}), lastUsed: p.now(), starting: true, stderr: newRingBuffer(stderrCap)}
 	p.runners[pl.name] = r
 	p.mu.Unlock()
 
 	if err := p.start(ctx, r); err != nil {
+		// A slow cold start fails the call, not the plugin: a process that
+		// did come up stays pooled, so the next call finds it warm instead
+		// of spawning a second one.
+		if r.alive() {
+			r.finishStart(nil)
+			return nil, err
+		}
+		r.finishStart(err)
 		p.forget(r)
 		return nil, err
 	}
+	r.finishStart(nil)
 	return r, nil
+}
+
+// drop forgets one runner, if it is still the pooled one.
+func (p *Pool) drop(d runnerDrop) {
+	p.mu.Lock()
+	if p.runners[d.name] == d.runner {
+		delete(p.runners, d.name)
+	}
+	p.mu.Unlock()
+	d.runner.finishGone(d.reason)
+}
+
+// await waits for a start already in progress, so two callers of the
+// same plugin share one process instead of racing two spawns.
+func (r *runnerProc) await(ctx context.Context) (*runnerProc, error) {
+	select {
+	case <-r.ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	r.mu.Lock()
+	err := r.startErr
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if !r.alive() {
+		return nil, errRunnerExited
+	}
+	return r, nil
+}
+
+// finishStart releases waiters with the outcome of the start attempt.
+func (r *runnerProc) finishStart(err error) {
+	r.mu.Lock()
+	if r.startErr == nil {
+		r.startErr = err
+	}
+	r.mu.Unlock()
+	select {
+	case <-r.ready:
+	default:
+		close(r.ready)
+	}
 }
 
 // acquireCold takes a cold-start slot, or gives up after the queue
@@ -362,6 +474,28 @@ func (p *Pool) start(ctx context.Context, r *runnerProc) error {
 	return nil
 }
 
+// retire marks a runner for removal: it takes no new calls, and stops as
+// soon as the calls already in flight finish (a reload must not cut a
+// plugin off mid-call). stopNow reports that there was nothing to wait
+// for, so the caller can stop it right away.
+func (r *runnerProc) retire() (stopNow bool) {
+	r.mu.Lock()
+	r.retired = true
+	idle := r.inflight == 0
+	r.mu.Unlock()
+	return idle
+}
+
+// stopWhenIdle stops a retired runner whose last call just finished.
+func (r *runnerProc) stopWhenIdle() {
+	r.mu.Lock()
+	done := r.retired && r.inflight == 0
+	r.mu.Unlock()
+	if done {
+		go r.stop()
+	}
+}
+
 // reapIdle stops runners unused past their manifest's idle time. A
 // runner with calls in flight is left alone.
 func (p *Pool) reapIdle() {
@@ -371,7 +505,14 @@ func (p *Pool) reapIdle() {
 		r.mu.Lock()
 		limit := r.plugin.idle()
 		unused := r.inflight == 0 && limit > 0 && p.now().Sub(r.lastUsed) > limit
+		pid := 0
+		if r.cmd != nil && r.cmd.Process != nil {
+			pid = r.cmd.Process.Pid
+		}
 		r.mu.Unlock()
+		if pid > 0 {
+			p.warnBigRunner(r, pid)
+		}
 		if unused {
 			delete(p.runners, name)
 			p.reaps++
@@ -381,8 +522,27 @@ func (p *Pool) reapIdle() {
 	p.mu.Unlock()
 	for _, r := range idle {
 		fmt.Fprintf(os.Stderr, "extension: plugin %s: runner reaped after sitting idle\n", r.plugin.name)
-		go r.stop(shutdownGrace)
+		go r.stop()
 	}
+}
+
+// warnBigRunner logs once when a runner passes the soft memory budget.
+// It is a warning, not a kill: only the idle reap stops a process, so a
+// busy plugin is never cut off mid-call.
+func (p *Pool) warnBigRunner(r *runnerProc, pid int) {
+	rss, err := runnerResidentBytes(pid)
+	if err != nil || rss <= softRSS {
+		return
+	}
+	r.mu.Lock()
+	warned := r.rssWarned
+	r.rssWarned = true
+	r.mu.Unlock()
+	if warned {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "extension: plugin %s: runner is using %d MiB (soft budget %d MiB); it is reaped once idle\n",
+		r.plugin.name, rss>>20, softRSS>>20)
 }
 
 // alive reports whether the process is still there.
@@ -466,6 +626,7 @@ func (r *runnerProc) forgetPending(id string) {
 		}
 	}
 	r.mu.Unlock()
+	r.stopWhenIdle()
 }
 
 // read routes reply lines to their waiting callers.
@@ -511,6 +672,7 @@ func (r *runnerProc) deliver(rep reply) {
 	}
 	if rep.OK {
 		w.ch <- outcome{result: rep.Result}
+		r.stopWhenIdle()
 		return
 	}
 	msg := strings.TrimSpace(rep.Error)
@@ -518,6 +680,7 @@ func (r *runnerProc) deliver(rep reply) {
 		msg = "the plugin reported a failure"
 	}
 	w.ch <- outcome{err: errors.New(msg)}
+	r.stopWhenIdle()
 }
 
 // finish marks the process gone and fails everything waiting on it.
@@ -568,8 +731,13 @@ func (r *runnerProc) finishGone(reason error) {
 var errRunnerExited = errors.New("extension runner exited")
 
 // stop asks the runner to shut down, then kills it after grace.
-func (r *runnerProc) stop(grace time.Duration) {
+func (r *runnerProc) stop() {
 	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		return
+	}
+	r.stopping = true
 	cmd, stdin, running := r.cmd, r.stdin, r.cmd != nil && r.running()
 	r.mu.Unlock()
 	if !running {
@@ -583,14 +751,14 @@ func (r *runnerProc) stop(grace time.Duration) {
 	select {
 	case <-r.exited:
 		return
-	case <-time.After(grace):
+	case <-time.After(shutdownGrace):
 	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
 	select {
 	case <-r.exited:
-	case <-time.After(grace):
+	case <-time.After(shutdownGrace):
 	}
 	r.finishGone(errRunnerExited)
 }

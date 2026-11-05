@@ -186,3 +186,4 @@ local code that could change anything.
 | Plugins starting at once | 4 (others queue for up to 30 s) |
 | Manifest / `extensions.json` | 64 KiB |
 | Runner stderr kept | 10 KiB |
+| Runner memory (soft) | 512 MiB, logged; reaped once idle |
