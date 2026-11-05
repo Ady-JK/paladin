@@ -48,8 +48,13 @@ const RULE_HINT: Record<PermissionRule["tool"], string> = {
   mcp: "server/tool   or   server",
   web: "example.com or localhost:PORT   or   *",
   project: "/abs/project whose own tools (node_modules/.bin, .venv) may run",
-  extension: "tool_name   or   *",
+  extension: "plugin   or   plugin/tool   or   plugin/*   or   *",
 };
+
+// extensionTargets is what an extension rule can name, from Settings →
+// Tools: every plugin (its whole tool set) and each of its tools.
+type ExtensionTarget = { value: string; label: string };
+let extensionTargets: ExtensionTarget[] = [];
 
 const SANDBOX: Record<string, string> = {
   seatbelt: "macOS Seatbelt sandbox",
@@ -240,6 +245,40 @@ function ruleRow(r: PermissionRule, i: number): string {
   );
 }
 
+// extensionExamples lists the installed plugins so an extension rule can
+// be picked instead of typed from memory. The list comes from toolsList,
+// so it also shows plugins whose tools are switched off.
+function extensionExamples(): string {
+  return extensionTargets.map((t) => `<option value="${escapeHtml(t.value)}">${escapeHtml(t.label)}</option>`).join("");
+}
+
+// refreshExtensionExamples refills the datalist from what was loaded.
+function refreshExtensionExamples(): void {
+  const list = permBodyEl.querySelector<HTMLDataListElement>("#permRuleExt");
+  if (list) list.innerHTML = extensionExamples();
+}
+
+// refreshExtensionTargets reloads the plugin list a rule pattern can name.
+async function refreshExtensionTargets(): Promise<void> {
+  try {
+    const v = await api.toolsList(folderCwd || null, state.sessionId || null);
+    const targets: ExtensionTarget[] = [];
+    for (const p of v.extensions ?? []) {
+      if (p.error) continue;
+      targets.push({ value: `${p.name}/*`, label: `${p.name} (every tool)` });
+      for (const tool of p.tools ?? []) {
+        // extension__<plugin>__<tool> → <plugin>/<tool>
+        const parts = tool.split("__");
+        if (parts.length === 3) targets.push({ value: `${parts[1]}/${parts[2]}`, label: `${parts[1]} / ${parts[2]}` });
+      }
+    }
+    extensionTargets = targets;
+    refreshExtensionExamples();
+  } catch {
+    // An older core has no plugin list; the pattern stays free-form.
+  }
+}
+
 function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): string {
   const head =
     scope === "global"
@@ -253,7 +292,8 @@ function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): stri
     `<ul class="mem-list">${rows}</ul>` +
     `<div class="perm-add">` +
     `<select data-rule-tool aria-label="Rule kind"><option value="shell">command</option><option value="write">write</option><option value="read">read</option><option value="mcp">mcp</option><option value="web">site</option><option value="project">project tools</option><option value="extension">extension</option></select>` +
-    `<input data-rule-pattern type="text" spellcheck="false" placeholder="${RULE_HINT.shell}" aria-label="Pattern" />` +
+    `<input data-rule-pattern type="text" spellcheck="false" placeholder="${RULE_HINT.shell}" aria-label="Pattern" list="permRuleExt" />` +
+    `<datalist id="permRuleExt">${extensionExamples()}</datalist>` +
     `<select data-rule-action aria-label="Action"><option value="allow">allow</option><option value="deny">deny</option></select>` +
     `<button type="button" class="perm-add-btn" data-rule-add>Add</button>` +
     `</div></section>`
@@ -370,5 +410,7 @@ export function initPermissionsPane(): void {
     if (!t.matches("[data-rule-tool]")) return;
     const input = t.closest("[data-rules]")?.querySelector<HTMLInputElement>("[data-rule-pattern]");
     if (input) input.placeholder = RULE_HINT[t.value as PermissionRule["tool"]] ?? "";
+    // Extension rules pick from the installed plugins rather than guess.
+    if (t.value === "extension") void refreshExtensionTargets();
   });
 }

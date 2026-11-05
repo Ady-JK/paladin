@@ -147,14 +147,20 @@ test("Settings → Tools search filters rows", async ({ page }) => {
 test("enabled local extensions have their own group and show load errors", async ({ page }) => {
   await seed(page, {
     tools: [...TOOLS, { name: "extension__hello__hello", source: "extension", description: "Return a greeting" }],
+    extensions: [
+      { name: "hello", kind: "plugin", path: "/data/config/extensions/hello", tools: ["extension__hello__hello"] },
+      { name: "broken", kind: "file", path: "/data/config/extensions/broken.ts", error: "failed to import" },
+    ],
     extensionErrors: ["extension broken.ts: failed to import"],
   });
   await boot(page);
   await page.click("#settingsBtn");
   await page.click("#settingsNavTools");
   const pane = page.locator("#settingsPaneTools");
+  // The tools keep a switch group of their own, and the plugins (with
+  // their load errors) are listed above them.
   await expect(pane.locator('.tsw-group[data-group="extension"]')).toContainText("extension__hello__hello");
-  await expect(pane.locator(".mem-error")).toContainText("extension broken.ts: failed to import");
+  await expect(pane.locator('.tsw-ext[data-plugin="broken"] .tsw-ext-error')).toContainText("failed to import");
 });
 
 test("the composer Tools popover sets session switches that beat global", async ({ page }) => {

@@ -184,6 +184,7 @@ async function __paladinBaseInvoke(cmd, args) {
     case "toolsList":
     case "toolsSet":
     case "toolsAccept":
+    case "toolsReload":
     case "toolBehaviorSet":
       return window.__e2eToolsInvoke(cmd, args || {});
     case "customList":
@@ -981,6 +982,8 @@ window.__e2eToolsInvoke = (cmd, args) => {
       }),
       pending,
       extensionErrors: t.extensionErrors || [],
+      extensions: t.extensions || [],
+      runners: t.runners || [],
       behavior: { formatOnWrite: true, verifyNudge: true, lspDiagnostics: true, ...(t.behavior || {}) },
       languageServers: t.languageServers || [],
     };
@@ -1002,6 +1005,11 @@ window.__e2eToolsInvoke = (cmd, args) => {
     case "toolBehaviorSet":
       t.behavior = { ...(t.behavior || {}), [args.key]: !!args.enabled };
       return overview();
+    case "toolsReload": {
+      // A reload re-reads the plugins and drops their warm runners.
+      if (t.dropsRunners) t.runners = [];
+      return overview();
+    }
     case "toolsAccept": {
       const names = args.names && args.names.length ? args.names : t.pending[sid] || [];
       t.pending[sid] = (t.pending[sid] || []).filter((n) => !names.includes(n));

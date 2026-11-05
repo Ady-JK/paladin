@@ -805,7 +805,7 @@ export type LanguageServer = {
 };
 // PluginInfo is one enabled local extension: a plugin folder or a legacy
 // loose file. error explains why it is not usable.
-export type PluginInfo = {
+type PluginInfo = {
   name: string;
   kind: "plugin" | "file";
   path: string;
@@ -815,7 +815,7 @@ export type PluginInfo = {
 };
 
 // RunnerInfo is a plugin with a live Node process behind it.
-export type RunnerInfo = {
+type RunnerInfo = {
   plugin: string;
   warm: boolean;
   pid?: number;

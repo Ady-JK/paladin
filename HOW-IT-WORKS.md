@@ -278,12 +278,34 @@ flowchart LR
         m1["mcp__github__create_issue"]
         m2["mcp__dummy__echo"]
     end
+    subgraph EXT["🧩 Extension plugins"]
+        e1["extension__jira__lookup"]
+    end
     Registry["Tool registry"] --> Builtin
     Registry --> MCP
+    Registry --> EXT
     Switches["🎚️ Tool switches<br/>session > global"] --> Filter["Filter"]
     Registry --> Filter --> Model["Tools the model sees<br/>this turn"]
     Plan["Plan mode?<br/>read-only only"] --> Filter
 ```
+
+### Extension plugins (tools you write)
+
+Tools of your own live under `<data>/config/extensions/`, one folder per
+plugin, listed in `extensions.json`. A folder plugin gets **one warm Node
+process** (started on its first call, reused across calls and turns, reaped
+when idle, restarted after a crash) and can keep its own `node_modules`; a
+loose `foo.ts` keeps the older spawn-per-call path and logs a deprecation
+notice. A `paladin-plugin.json` may pin the entry, the call timeout, the idle
+TTL, extra environment, its own Node binary, and declare the capabilities it
+needs (shown in the UI, not enforced).
+
+Calls are gated like MCP tools, with the rule naming the plugin
+(`jira`), one of its tools (`jira/lookup`) or everything (`jira/*`). Settings →
+Tools lists each plugin with its warm process (pid, node, stderr tail) and any
+load error, plus **Reload plugins** (`toolsReload`), which re-reads the files
+and drops the warm processes; the new set applies from the next turn.
+`core/internal/extension/README.md` is the full reference.
 
 ### The web: web_fetch and the browser
 

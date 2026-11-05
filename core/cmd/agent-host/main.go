@@ -39,8 +39,18 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == sandbox.HelperArg {
 		os.Exit(sandbox.RunHelper(os.Args[2:]))
 	}
-	if len(os.Args) == 3 && os.Args[1] == "extensions" && os.Args[2] == "init" {
-		dir, err := extension.Init(config.DataDir())
+	if len(os.Args) > 2 && os.Args[1] == "extensions" && os.Args[2] == "init" {
+		example := false
+		for _, arg := range os.Args[3:] {
+			switch arg {
+			case "--example-plugin":
+				example = true
+			default:
+				fmt.Fprintf(os.Stderr, "unknown option %q for extensions init\n", arg)
+				os.Exit(2)
+			}
+		}
+		dir, err := extension.Init(config.DataDir(), example)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -49,7 +59,8 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: agent-host [extensions init] (without arguments, speak JSONL on stdin/stdout)")
+		fmt.Fprintln(os.Stderr, "usage: agent-host [extensions init [--example-plugin]] "+
+			"(without arguments, speak JSONL on stdin/stdout)")
 		os.Exit(2)
 	}
 	dataDir := config.DataDir()

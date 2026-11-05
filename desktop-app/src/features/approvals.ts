@@ -30,6 +30,14 @@ function title(ap: Approval): string {
   return ap.tool === "edit" ? "Edit this file?" : "Write this file?";
 }
 
+// extensionName splits an extension tool's exposed name
+// (extension__<plugin>__<tool>) for the card; a legacy name is shown as
+// written.
+function extensionName(ap: Approval): { plugin: string; tool: string } {
+  const match = /^extension__(.+)__(.+)$/.exec(ap.tool);
+  return match ? { plugin: match[1], tool: match[2] } : { plugin: "extension", tool: ap.tool };
+}
+
 function subject(ap: Approval): string {
   if (ap.kind === "mcp" && ap.server) return `${ap.server} › ${ap.mcpTool || ap.tool}`;
   if (ap.kind === "web") return ap.url || ap.host || ap.tool;
@@ -128,9 +136,14 @@ function pendingHtml(ap: Approval): string {
         `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(ap.mcpTool || ap.tool)}</span></div>` +
         `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
       : ap.kind === "extension"
-        ? `<div class="approval-mcp"><span class="approval-mcp-server">extension</span>` +
-          `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(ap.tool)}</span></div>` +
-          `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
+        ? (() => {
+            const name = extensionName(ap);
+            return (
+              `<div class="approval-mcp"><span class="approval-mcp-server">${escapeHtml(name.plugin)}</span>` +
+              `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(name.tool)}</span></div>` +
+              `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
+            );
+          })()
         : ap.kind === "web"
           ? `<div class="approval-web"><span class="approval-web-host">${escapeHtml(ap.host ?? "")}</span>` +
             `<span class="approval-web-url" title="${escapeHtml(ap.url ?? "")}">${revealHidden(escapeHtml(ap.url ?? ""))}</span>` +

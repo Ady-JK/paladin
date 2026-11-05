@@ -49,9 +49,9 @@ type ToolInfo struct {
 
 // ToolsOverview lists every tool a folder (and session) can see.
 type ToolsOverview struct {
-	Tools           []ToolInfo   `json:"tools"`
-	Pending         []string     `json:"pending"`
-	ExtensionErrors []string     `json:"extensionErrors,omitempty"`
+	Tools           []ToolInfo `json:"tools"`
+	Pending         []string   `json:"pending"`
+	ExtensionErrors []string   `json:"extensionErrors,omitempty"`
 	// Extensions are the enabled local plugins and their tools.
 	Extensions []extension.PluginInfo `json:"extensions,omitempty"`
 	// Runners are the plugins with a warm Node process right now.

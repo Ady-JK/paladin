@@ -190,29 +190,50 @@ The agent browser stays in Electron on the desktop. To preview a development
 server running on the remote machine, forward that server's port separately
 over SSH to `127.0.0.1` on the desktop, then open that local URL in Paladin.
 
-# Local TypeScript extensions
+# Local extension plugins
 
-The machine running the core needs Node 24 or newer for built-in TypeScript
-type stripping. Run `agent-host extensions init` on that machine to create
-`config/extensions/hello.ts`, `config/extensions/paladin.d.ts`, and a disabled
-`config/extensions.json` manifest under Paladin's data directory. The command
-never replaces existing files. Set `PALADIN_DATA_DIR` to choose a different
-data directory.
+Extensions add tools of your own. They live under Paladin's data directory
+(`PALADIN_DATA_DIR` picks it): a **plugin folder** per extension, with its own
+module, its own `node_modules` if it needs dependencies, and an optional
+`paladin-plugin.json` manifest.
 
-An extension exports `{ tools: [...] }` as its default value. Each tool needs a
-unique `name`, a `description`, an object JSON Schema in `parameters`, and an
-`execute(args, context)` function. The generated example is directly usable.
-To enable it, edit `config/extensions.json` to:
-
-```json
-{"enabled":["hello.ts"]}
+```sh
+core/bin/agent-host extensions init               # hello.ts + paladin.d.ts + extensions.json
+core/bin/agent-host extensions init --example-plugin   # also scaffolds hello/
 ```
 
-The core loads only listed regular files. Tools appear as
-`extension__hello__hello` in the model tool list and Paladin's Tools settings;
-existing sessions still hold back newly introduced tools until accepted.
-Extensions run with the core user's OS permissions in separate Node processes,
-so enable only code you trust. A failed module is skipped and logged; each
-tool call has a 120 second limit and a 1 MiB output cap. TypeScript support is
-for erasable types; Node's type stripping does not compile enums or TS path
-aliases. Extension code runs on the remote machine when the core is remote.
+Nothing runs until its name is in `config/extensions.json`:
+
+```json
+{"enabled":["hello"]}
+```
+
+A plugin folder is `config/extensions/hello/` with an `index.ts` (or
+`index.js`) whose default export is `{tools: [...], onActivate?, onDeactivate?}`.
+Each tool needs a unique `name`, a `description`, an object JSON Schema in
+`parameters`, and an `execute(args, context)` function. A folder plugin gets
+one long-lived Node process, started on its first call and reused across tool
+calls and turns: it is reaped when idle, restarted after a crash, and asked to
+shut down when the app exits. Loose files (`hello.ts` listed directly) still
+work through the older spawn-per-call path and log a deprecation notice;
+moving one into a folder of the same name keeps its tool names.
+
+Tools appear as `extension__<folder>__<tool>` in the model tool list and
+Paladin's Tools settings, where each plugin also shows its declared
+capabilities, its warm process and any load error, next to a **Reload plugins**
+button (the `toolsReload` RPC). Existing sessions still hold back newly
+introduced tools until accepted.
+
+Node resolution: the plugin's own `node` from its manifest, then the app's
+Electron binary (its bundled Node 24, used when no separate Node is
+installed), then `PALADIN_NODE`, then `node` on `PATH` (24 or newer).
+
+Extensions run with the core user's OS permissions, which is why every call
+asks until a permission rule allows the plugin (`jira`), one of its tools
+(`jira/lookup`) or everything (`*`); the manifest's `permissions` list is
+informational only. A failed plugin is skipped and logged, never blocking the
+built-in tools. Each call has a timeout (120 s by default, set per plugin) and
+a 1 MiB reply cap. TypeScript support is for erasable types; Node's type
+stripping does not compile enums or TS path aliases. Extension code runs on
+the remote machine when the core is remote. See
+`core/internal/extension/README.md` for the full reference.

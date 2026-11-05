@@ -602,3 +602,46 @@
   white-space: nowrap;
   font-family: var(--font-mono);
 }
+
+/* ============ Local extensions ============ */
+/* One row per enabled plugin: its name, whether a Node process is warm,
+   its declared capabilities and, when it could not load, why. */
+.tsw-ext-state {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-slate-200);
+  color: var(--color-slate-500);
+}
+.dark .tsw-ext-state {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-400);
+}
+.tsw-ext-state.is-warm {
+  border-color: rgb(22 163 74 / 0.35);
+  color: rgb(21 128 61);
+  background: rgb(22 163 74 / 0.08);
+}
+.dark .tsw-ext-state.is-warm {
+  color: rgb(74 222 128);
+}
+.tsw-ext-state.is-error {
+  border-color: rgb(225 86 104 / 0.4);
+  color: rgb(190 42 62);
+  background: rgb(225 86 104 / 0.08);
+}
+.dark .tsw-ext-state.is-error {
+  color: rgb(252 165 165);
+}
+.tsw-ext-error {
+  color: rgb(190 42 62);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dark .tsw-ext-error {
+  color: rgb(252 165 165);
+}

@@ -35,7 +35,8 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// callTool runs one tool and decodes its JSON output.
+// callTool runs one tool and decodes its JSON output; text that is not
+// JSON comes back as the string it is.
 func callTool(t *testing.T, tool tools.Tool, args map[string]any) (any, error) {
 	t.Helper()
 	raw, err := json.Marshal(args)
@@ -46,11 +47,17 @@ func callTool(t *testing.T, tool tools.Tool, args map[string]any) (any, error) {
 	if callErr != nil {
 		return nil, callErr
 	}
+	return decodeOutput(out), nil
+}
+
+// decodeOutput turns a tool result into the value a test wants to check:
+// the decoded JSON, or the raw text when it is not JSON.
+func decodeOutput(out string) any {
 	var value any
-	if err := json.Unmarshal([]byte(out), &value); err != nil {
-		return out, nil
+	if json.Unmarshal([]byte(out), &value) == nil {
+		return value
 	}
-	return value, nil
+	return out
 }
 
 // resetNodeCache lets a test swap the node probe and see it again.
@@ -62,21 +69,20 @@ func resetNodeCache() {
 	}{}
 }
 
-// withNode resolves the PATH node once, skipping when there is none.
+// withNode points the runtime hooks at the real PATH node and restores
+// them afterwards, so a test that swapped them (or the resolution tests)
+// cannot leak into the next one.
 func withNode(t *testing.T) {
 	t.Helper()
 	if _, err := nodeFor(t); err != nil {
 		t.Skip(err)
 	}
 	resetNodeCache()
-	t.Cleanup(resetNodeCache)
-	if err := os.Unsetenv(electronNodeEnv); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Unsetenv(paladinNodeEnv); err != nil {
-		t.Fatal(err)
-	}
 	resetEnv()
+	t.Cleanup(func() {
+		resetNodeCache()
+		resetEnv()
+	})
 }
 
 // resetEnv restores the hooks the resolution tests swap.

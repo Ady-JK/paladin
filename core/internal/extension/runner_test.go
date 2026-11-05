@@ -43,14 +43,10 @@ func callPlugin(t *testing.T, pool *Pool, pl plugin, tool string, args any) (any
 	// A tool's result is a JSON string holding the plugin's own JSON (or
 	// plain text), which is what the tool sees.
 	var text string
-	if json.Unmarshal(out, &text) != nil {
-		return string(out), nil
+	if json.Unmarshal(out, &text) == nil {
+		return decodeOutput(text), nil
 	}
-	var value any
-	if json.Unmarshal([]byte(text), &value) != nil {
-		return text, nil
-	}
-	return value, nil
+	return string(out), nil
 }
 
 // A throwing call answers that call and leaves the runner alive.

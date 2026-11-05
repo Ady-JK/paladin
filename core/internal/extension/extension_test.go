@@ -30,10 +30,10 @@ func TestInitNeverOverwritesUserFiles(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"enabled":["mine.ts"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Init(dir); err != nil {
+	if _, err := Init(dir, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Init(dir); err != nil {
+	if _, err := Init(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -44,7 +44,7 @@ func TestInitNeverOverwritesUserFiles(t *testing.T) {
 
 func TestDisabledExtensionDoesNotExecute(t *testing.T) {
 	dir := t.TempDir()
-	moduleDir, err := Init(dir)
+	moduleDir, err := Init(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestDisabledExtensionDoesNotExecute(t *testing.T) {
 func TestEnabledTypeScriptTool(t *testing.T) {
 	withNode(t)
 	dir := t.TempDir()
-	if _, err := Init(dir); err != nil {
+	if _, err := Init(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	manifest := filepath.Join(dir, "config", "extensions.json")
@@ -87,7 +87,7 @@ func TestEnabledTypeScriptTool(t *testing.T) {
 
 func TestManifestRejectsPathEscape(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Init(dir); err != nil {
+	if _, err := Init(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	manifest := filepath.Join(dir, "config", "extensions.json")
