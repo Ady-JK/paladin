@@ -63,6 +63,16 @@ The iframe is `sandbox="allow-scripts"` with no same-origin, forms,
 popups, modals or top navigation. It cannot fetch anything (`connect-src
 'none'`), so all data comes through the bridge.
 
+**Scripts must be external.** The panel CSP is
+`script-src 'self' plugin:` with no `'unsafe-inline'`, so:
+
+```html
+<script src="./board.js" type="module"></script>
+```
+
+works, while an inline `<script>…</script>` is blocked. Styles may be
+inline (`style-src 'unsafe-inline'`) or in a relative `.css` file.
+
 ### Bridge
 
 ```ts
@@ -152,7 +162,9 @@ load; a missing, failed or slow card falls back to the raw result text.
 At most 20 live card frames are kept; older ones fall back.
 
 Cards may not call the bridge, open windows, or load network resources.
-Keep them pure: render the result; put interaction in a panel.
+Keep them pure: render the result; put interaction in a panel. The card
+script is served as a classic script; relative imports are not served,
+so keep it self-contained.
 
 ## Security model
 

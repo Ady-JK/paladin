@@ -180,7 +180,8 @@ func TestBuiltinSkillsShipAndCanBeReplacedOrTurnedOff(t *testing.T) {
 		byName[s.Name] = s
 	}
 	for _, name := range []string{"debugging", "test-driven-development", "safe-refactoring", "code-review",
-		"security-review", "web-research", "diagrams-and-charts", "writing-docs", "writing-an-extension"} {
+		"security-review", "web-research", "diagrams-and-charts", "writing-docs", "writing-an-extension",
+		"writing-a-plugin-ui"} {
 		s, ok := byName[name]
 		if !ok || s.Source != SourceBuiltin || s.Description == "" || strings.HasPrefix(s.Description, "---") {
 			t.Fatalf("built-in %s: %+v", name, s)
