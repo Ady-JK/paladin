@@ -110,6 +110,8 @@ are an error, to catch typos.
 | `env` | Extra environment variables for the process. `PATH` is refused; the user's own environment is inherited. |
 | `node` | Absolute path to a Node binary for this plugin only. A broken path fails the plugin; it does not fall through. |
 | `permissions` | What the plugin says it needs: `network`, `spawn`, `fs-outside-workspace`. |
+| `views` | Side-pane panels: at most 4. Each is `{id,title,entry,mount,permissions}`; `entry` is under `ui/` and ends in `.html` (≤ 2 MiB), `mount` is `side-pane`, and `permissions` are `invokeTool`, `invokeToolDestructive`, `events`, `readFile`, `openExternal`. |
+| `cards` | Inline result renderers: at most 16. Each is `{tool,entry,inline}`; `entry` is under `ui/`, ends in `.js` (≤ 512 KiB), and `inline` may only be true. |
 
 `permissions` is **advisory**. Paladin shows the list in Settings → Tools;
 it does not enforce it. A plugin runs as your user with your network and
@@ -145,6 +147,27 @@ npm install some-package
 The runner starts with the plugin folder as its working directory, so
 `import "some-package"` resolves from `my-plugin/node_modules`. Paladin
 never copies or snapshots that folder.
+
+## Panels and cards
+
+A plugin can ship UI inside its folder:
+
+```jsonc
+{
+  "views": [
+    {"id": "board", "title": "Ticket Board", "entry": "ui/board.html",
+     "mount": "side-pane", "permissions": ["invokeTool", "events"]}
+  ],
+  "cards": [
+    {"tool": "lookup", "entry": "ui/card.js", "inline": true}
+  ]
+}
+```
+
+Panels open as sandboxed side-pane tabs served over `plugin://<plugin>/<view>/ui/…`;
+cards render one tool result in a separate sandbox. Both are local-only.
+The full authoring guide, bridge API, permissions, limits and security
+model live in [`docs/PLUGIN-UI.md`](../../../docs/PLUGIN-UI.md).
 
 ## Permissions
 

@@ -1093,7 +1093,15 @@ app
     handleTrusted("window:isMaximized", () => win?.isMaximized() ?? false);
 
     handleTrusted("views:setTheme", (_e, theme: string) => {
-      applyTheme(theme === "light" ? "light" : "dark");
+      const next = theme === "light" ? "light" : "dark";
+      applyTheme(next);
+      for (const grant of panels.values()) {
+        try {
+          grant.frame?.send("plugin:event", { sub: "theme", event: "theme", data: { theme: next } });
+        } catch {
+          // The frame is gone; its grant is closed with the tab.
+        }
+      }
       return true;
     });
     handleTrusted("views:drop", (_e, name: string) => {

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func uiManifest(body string) string {
@@ -223,5 +224,33 @@ func TestPluginUIRejectsOversizeView(t *testing.T) {
 	ui := NewRegistry(dataDir).UI()
 	if len(ui.Views) != 0 || len(ui.Errors) == 0 || !strings.Contains(ui.Errors[0], "exceeds") {
 		t.Fatalf("ui: %+v", ui)
+	}
+}
+
+// A menu open scans every enabled manifest. With ten plugins it must
+// stay well under the interactive budget: no runner may start.
+func TestPluginUIScanBudget(t *testing.T) {
+	dataDir := t.TempDir()
+	for i := 0; i < 10; i++ {
+		name := "p" + string(rune('a'+i))
+		dir := writePlugin(t, dataDir, name, map[string]string{
+			"index.ts":            "export default { tools: [] };",
+			"paladin-plugin.json": uiManifest(`[{"id":"` + name + `","title":"` + name + `","entry":"ui/board.html"}]`),
+		})
+		writeUI(t, dir)
+	}
+	enable(t, dataDir, "pa", "pb", "pc", "pd", "pe", "pf", "pg", "ph", "pi", "pj")
+	reg := NewRegistry(dataDir)
+	start := time.Now()
+	for i := 0; i < 20; i++ {
+		if ui := reg.UI(); len(ui.Views) != 10 {
+			t.Fatalf("views = %d", len(ui.Views))
+		}
+	}
+	if elapsed := time.Since(start) / 20; elapsed > 50*time.Millisecond {
+		t.Fatalf("pluginViews scan took %v, budget 50ms", elapsed)
+	}
+	if len(reg.Runners()) != 0 {
+		t.Fatal("scanning UI started a runner")
 	}
 }

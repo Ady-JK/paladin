@@ -567,7 +567,14 @@ and an optional `paladin-plugin.json`:
   "idleMs": 300000,            // reap the warm process after this idle; 0 = never
   "env": {"FOO": "bar"},       // extra environment; PATH is refused
   "node": "/opt/node/bin/node",// absolute path, this plugin only
-  "permissions": ["network"]   // "network" | "spawn" | "fs-outside-workspace"
+  "permissions": ["network"],  // "network" | "spawn" | "fs-outside-workspace"
+  "views": [                   // optional side-pane panels, max 4
+    {"id": "board", "title": "Ticket Board", "entry": "ui/board.html",
+     "mount": "side-pane", "permissions": ["invokeTool", "events"]}
+  ],
+  "cards": [                   // optional inline result renderers, max 16
+    {"tool": "lookup", "entry": "ui/card.js", "inline": true}
+  ]
 }
 ```
 
@@ -603,6 +610,30 @@ and plan mode.
 reports the warm processes (`plugin`, `pid`, `node`, `lastUsed`,
 `inflight`, `generation`, a `stderr` tail), and `toolsReload` re-reads
 everything and drops the warm runners.
+
+### Plugin UI
+
+`pluginViews` lists the panels and cards the enabled plugins ship;
+`pluginInvoke` runs one tool for a panel through the normal gate (see
+the method table). The desktop app serves panel files over a private
+`plugin://` scheme: `plugin://<plugin>/<view>/<path>` where `<path>` is
+under the plugin's `ui/` folder. Frames are sandboxed with
+`allow-scripts` only (opaque origin, no storage, no network) and get a
+`window.paladin.plugins` bridge instead of the raw `agent:invoke`:
+
+| Call | Permission | Notes |
+|---|---|---|
+| `getContext()` | — | `{sessionId, workspace, plugin, view, theme}` |
+| `invokeTool(tool,args)` | `invokeTool` | own tools + `read`/`grep`/`glob`/`list`; other tools need `invokeToolDestructive`; 60/min |
+| `readFile(rel)` | `readFile` | relative to the panel's workspace, ≤1 MiB text; 120/min |
+| `readStore(key)` / `writeStore(key,value)` | — | per-plugin JSON store, 100 KiB per key / 1 MiB total |
+| `openExternal(url)` | `openExternal` | `https:` only; 3/min |
+| `subscribe(filter)` / `unsubscribe(id)` / `onEvent(cb)` | `events` | chat/delta, chat/tool, turn/start, turn/done, browser/navigated, plugin/updated; own session only; 240 events/min |
+| `card.js` | — | no bridge; a card is a pure renderer |
+
+A tool call that needs approval publishes `plugin/approval` and waits for
+`answerApproval`; the card is rendered by the host, never by the panel.
+The plugin UI guide is `docs/PLUGIN-UI.md`.
 
 ### Subagents
 

@@ -1381,11 +1381,6 @@ window.paladin = {
       window.__e2ePluginOpensExternal = (window.__e2ePluginOpensExternal || []).concat([url]);
       return { ok: true };
     },
-    cardScript: async (plugin, exposed) => {
-      window.__e2ePluginCardAsks = (window.__e2ePluginCardAsks || []).concat([{ plugin, exposed }]);
-      if (window.__e2ePluginCardScript) return { ok: true, text: window.__e2ePluginCardScript };
-      return { ok: false, error: "card is not available" };
-    },
     subscribe: async (filter) => {
       window.__e2ePluginSubs = (window.__e2ePluginSubs || []).concat([filter]);
       return `sub-${window.__e2ePluginSubs.length}`;

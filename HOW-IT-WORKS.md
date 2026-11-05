@@ -305,7 +305,14 @@ Calls are gated like MCP tools, with the rule naming the plugin
 Tools lists each plugin with its warm process (pid, node, stderr tail) and any
 load error, plus **Reload plugins** (`toolsReload`), which re-reads the files
 and drops the warm processes; the new set applies from the next turn.
-`core/internal/extension/README.md` is the full reference.
+A plugin can also ship UI: `views` become sandboxed side-pane tabs served
+over a private `plugin://` scheme, and `cards` render one tool result inline.
+Panels get a narrow `window.paladin.plugins` bridge (invoke a tool, read a
+workspace file, a per-plugin store, session events, https links); cards get
+no bridge. Every tool call still passes the normal permission gate, and an
+approval is drawn by the host, never by the plugin frame. UI is local-only.
+`core/internal/extension/README.md` is the reference and `docs/PLUGIN-UI.md`
+is the authoring guide.
 
 ### The web: web_fetch and the browser
 
