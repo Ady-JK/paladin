@@ -168,24 +168,12 @@ export class PluginHost {
     return undefined;
   }
 
-  // cardScript returns a card renderer's source for inlining into srcdoc.
-  // Only the plugin's own declared card can be read.
-  cardScript(plugin: string, exposed: string): string | undefined {
-    const card = this.find(this.cards, `${plugin}/${exposed}`);
-    if (!card) return undefined;
-    const target = this.safeFile(card.dir, card.entry, MAX_CARD);
-    if (!target) return undefined;
-    try {
-      return fs.readFileSync(target, "utf8");
-    } catch {
-      return undefined;
-    }
-  }
-
   // handle serves one `plugin://<plugin>/<view>/<path>` request. Every
   // failure is a plain 404: no directory listings, no manifest leaks and
   // no error detail from the plugin folder.
   async handle(request: Request): Promise<Response> {
+    const card = this.cardResponse(request.url);
+    if (card) return card;
     const target = this.resolve(request.url);
     if (!target) return notFound();
     let data: Buffer;
@@ -206,6 +194,58 @@ export class PluginHost {
         "cache-control": "no-store",
       },
     });
+  }
+
+  // cardResponse serves the per-result card document and its script.
+  // Cards have no bridge and no panel grant; the document is only a
+  // renderer for one tool result.
+  private cardResponse(raw: string): Response | null {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "plugin:") return null;
+    const parts = splitPath(url.pathname);
+    if (!parts || parts[0] !== "__card__" || parts.length < 3) return null;
+    const plugin = url.hostname;
+    const tool = parts[1] ?? "";
+    const card = this.find(this.cards, `${plugin}/extension__${plugin}__${tool}`);
+    if (!card) return notFound();
+    const rel = parts.slice(2).join("/");
+    if (rel === "index.html") {
+      return new Response(cardDocument(card), {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "content-security-policy":
+            "default-src 'none'; script-src 'self' plugin: 'unsafe-inline'; style-src 'unsafe-inline'; " +
+            "img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; " +
+            "base-uri 'none'; form-action 'none'",
+          "x-content-type-options": "nosniff",
+          "cache-control": "no-store",
+        },
+      });
+    }
+    if (rel === "card.js") {
+      const file = this.safeFile(card.dir, card.entry, MAX_CARD);
+      if (!file) return notFound();
+      try {
+        const data = fs.readFileSync(file);
+        return new Response(new Uint8Array(data), {
+          status: 200,
+          headers: {
+            "content-type": "text/javascript; charset=utf-8",
+            "x-content-type-options": "nosniff",
+            "cache-control": "no-store",
+          },
+        });
+      } catch {
+        return notFound();
+      }
+    }
+    return notFound();
   }
 
   // resolve maps a URL to a real file inside the view's plugin folder.
@@ -383,6 +423,53 @@ function splitPath(pathname: string): string[] | null {
     parts.push(part);
   }
   return parts;
+}
+
+// cardDocument is the host page for one card. The plugin script is an
+// external file so the app shell's CSP (which forbids inline scripts)
+// does not apply to it; this document has its own, stricter policy.
+function cardDocument(card: HostedCard): string {
+  const tool = escapeAttribute(card.tool);
+  return (
+    `<!doctype html><html data-theme="dark"><head><meta charset="utf-8">` +
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; ` +
+    `script-src 'self' plugin: 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; ` +
+    `frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">` +
+    `<style>html,body{margin:0;background:transparent;color:#94a3b8;font:12px/1.45 ui-sans-serif,system-ui,sans-serif}` +
+    `body{padding:6px 8px}#root{min-height:32px}pre{margin:0;white-space:pre-wrap;font:11px/1.4 ui-monospace,monospace}</style>` +
+    `</head><body><div id="root"></div><script src="card.js" data-card="${tool}"></script>` +
+    `<script>${CARD_HOST}</script></body></html>`
+  );
+}
+
+const CARD_HOST = `
+const root = document.getElementById("root");
+const send = (msg) => parent.postMessage(msg, "*");
+const height = () => {
+  const h = Math.ceil(Math.max(document.body.scrollHeight, root.scrollHeight, 48));
+  send({ type: "paladin:card-height", height: h });
+};
+window.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.type !== "paladin:card") return;
+  const card = window.__paladin_card;
+  try {
+    const out = card && typeof card.render === "function" ? card.render(data.result, data.ctx) : null;
+    root.replaceChildren();
+    if (typeof out === "string") root.innerHTML = out;
+    else if (out instanceof Node) root.append(out);
+    if (data.ctx && data.ctx.theme) document.documentElement.dataset.theme = data.ctx.theme;
+  } catch (error) {
+    root.textContent = "This card could not render: " + String(error && error.message ? error.message : error);
+  }
+  height();
+});
+new ResizeObserver(height).observe(root);
+window.addEventListener("load", () => send({ type: "paladin:card-ready" }));
+`;
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function notFound(): Response {

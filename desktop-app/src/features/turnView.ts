@@ -26,6 +26,7 @@ import {
   setDividerLabel,
 } from "./chatView";
 import { createFindingsCard, paintFindings } from "./findings";
+import { createPluginCard, hasPluginCard, paintPluginCard } from "./pluginCards";
 import { createVisualCard, updateVisualCard } from "./visuals";
 
 // CARD_TOOLS draw their call as a card of its own in the flow instead
@@ -69,6 +70,7 @@ export class TurnView {
   private reply = "";
   private readonly tools = new Map<string, ToolRun>();
   private readonly cards = new Map<string, HTMLElement>();
+  private readonly pluginCards = new Map<string, HTMLElement>();
   // run is the open group of consecutive calls; text closes it.
   private run: ToolRun | null = null;
   private retryNotice: HTMLElement | null = null;
@@ -253,6 +255,10 @@ export class TurnView {
     this.clearRetry();
     this.endThinking();
     this.hooks.tool(tool);
+    if (hasPluginCard(tool.name)) {
+      this.pluginCard(tool);
+      return;
+    }
     if (CARD_TOOLS[tool.name]) {
       this.card(tool);
       return;
@@ -273,6 +279,24 @@ export class TurnView {
       this.segment = "";
       this.segEl = this.newSegment(run.el);
     }
+    this.tail();
+  }
+
+  // pluginCard draws a plugin's own result renderer in its own sandbox.
+  private pluginCard(tool: ToolInfo): void {
+    let card = this.pluginCards.get(tool.id);
+    if (card) {
+      paintPluginCard(card, tool);
+      this.tail();
+      return;
+    }
+    this.flushSegment();
+    card = createPluginCard(this.hooks.sessionId, tool);
+    this.pluginCards.set(tool.id, card);
+    this.container.insertBefore(card, this.segEl.nextSibling);
+    this.segment = "";
+    this.segEl = this.newSegment(card);
+    this.run = null;
     this.tail();
   }
 

@@ -188,6 +188,7 @@ async function __paladinBaseInvoke(cmd, args) {
     case "toolBehaviorSet":
       return window.__e2eToolsInvoke(cmd, args || {});
     case "pluginViews":
+      window.__e2ePluginViewsLoaded = true;
       return window.__e2ePluginViews || { views: [], cards: [], errors: [] };
     case "customList":
     case "customGet":
@@ -1379,6 +1380,11 @@ window.paladin = {
     openExternal: async (url) => {
       window.__e2ePluginOpensExternal = (window.__e2ePluginOpensExternal || []).concat([url]);
       return { ok: true };
+    },
+    cardScript: async (plugin, exposed) => {
+      window.__e2ePluginCardAsks = (window.__e2ePluginCardAsks || []).concat([{ plugin, exposed }]);
+      if (window.__e2ePluginCardScript) return { ok: true, text: window.__e2ePluginCardScript };
+      return { ok: false, error: "card is not available" };
     },
     subscribe: async (filter) => {
       window.__e2ePluginSubs = (window.__e2ePluginSubs || []).concat([filter]);

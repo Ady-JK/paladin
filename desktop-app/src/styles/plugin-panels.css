@@ -185,3 +185,50 @@
 .plugin-stale button:hover {
   background: var(--color-accent-700);
 }
+
+/* ---- Tool-result cards ---- */
+.plugin-card {
+  margin: 7px 0;
+  overflow: hidden;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 12px;
+  background: rgb(128 128 128 / 0.04);
+}
+.dark .plugin-card {
+  border-color: var(--color-slate-800);
+}
+.plugin-card-head {
+  display: flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--color-slate-200);
+  color: var(--color-slate-500);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+}
+.dark .plugin-card-head {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-400);
+}
+.plugin-card-body {
+  min-height: 48px;
+}
+.plugin-card-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+}
+.plugin-card-fallback {
+  padding: 8px 10px;
+}
+.plugin-card-fallback pre {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--color-slate-500);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}

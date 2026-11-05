@@ -847,10 +847,13 @@ export type PluginView = {
   destructive?: boolean;
 };
 
+// PluginCard is one inline tool-result renderer an extension ships.
+export type PluginCard = { plugin: string; tool: string; exposed: string };
+
 // PluginUI is the pluginViews result.
 export type PluginUI = {
   views: PluginView[];
-  cards: { plugin: string; tool: string; exposed: string }[];
+  cards: PluginCard[];
   errors?: string[];
 };
 

@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld("paladin", {
     readStore: (key: string) => ipcRenderer.invoke("plugins:readStore", { key }),
     writeStore: (key: string, value: unknown) => ipcRenderer.invoke("plugins:writeStore", { key, value }),
     openExternal: (url: string) => ipcRenderer.invoke("plugins:openExternal", { url }),
+    cardScript: (plugin: string, exposed: string) => ipcRenderer.invoke("plugins:cardScript", { plugin, exposed }),
     subscribe: (filter: unknown) => ipcRenderer.invoke("plugins:subscribe", filter),
     unsubscribe: (id: string) => ipcRenderer.invoke("plugins:unsubscribe", { id }),
     onEvent: (cb: (msg: unknown) => void): (() => void) => {

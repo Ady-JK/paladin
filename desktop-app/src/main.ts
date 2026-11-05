@@ -27,6 +27,7 @@ import { syncPermChip } from "./features/permissions";
 import { closeConfirm, initSessions, openSession, refreshSessions } from "./features/sessions";
 import { initSidePane } from "./features/sidePane";
 import { initPluginPanels } from "./features/pluginPanels";
+import { initPluginCards } from "./features/pluginCards";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
 import { closeNewSite, initSites, openNewSite, refreshExternalVisibility } from "./features/sites";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
@@ -116,6 +117,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSessions();
   initSidePane();
   initPluginPanels();
+  void initPluginCards();
   initUndo();
   initLive((id) => void openSession(id));
   initUsage();

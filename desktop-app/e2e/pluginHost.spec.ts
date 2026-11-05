@@ -140,7 +140,7 @@ test("an invalid view is reported and the valid one still serves", async () => {
   expect(host.listErrors().join("\n")).toContain("missing or too large");
 });
 
-test("cards only expose the plugin's declared renderer", () => {
+test("cards are served as a document and its script", async () => {
   const { data } = pluginDir({
     "ui/board.html": "<p>board</p>",
     "ui/card.js": "window.__paladin_card = { render: () => 'ok' };",
@@ -149,9 +149,20 @@ test("cards only expose the plugin's declared renderer", () => {
   });
   enable(data, "board");
   const host = new PluginHost(data);
-  expect(host.cardScript("board", "extension__board__lookup")).toContain("__paladin_card");
-  expect(host.cardScript("board", "extension__board__other")).toBeUndefined();
-  expect(host.cardScript("other", "extension__board__lookup")).toBeUndefined();
+  const doc = await host.handle(new Request("plugin://board/__card__/lookup/index.html"));
+  expect(doc.status).toBe(200);
+  expect(doc.headers.get("content-type")).toContain("text/html");
+  expect(doc.headers.get("content-security-policy")).toContain("script-src 'self' plugin:");
+  const html = await doc.text();
+  expect(html).toContain('src="card.js"');
+  expect(html).toContain("__paladin_card");
+  const script = await host.handle(new Request("plugin://board/__card__/lookup/card.js"));
+  expect(script.status).toBe(200);
+  expect(script.headers.get("content-type")).toContain("text/javascript");
+  expect(await script.text()).toContain("__paladin_card");
+  expect((await host.handle(new Request("plugin://board/__card__/other/index.html"))).status).toBe(404);
+  expect((await host.handle(new Request("plugin://other/__card__/lookup/index.html"))).status).toBe(404);
+  expect((await host.handle(new Request("plugin://board/__card__/lookup/../card.js"))).status).toBe(404);
 });
 
 test("a symlinked plugin folder is refused", () => {
