@@ -71,6 +71,9 @@ function fallback(wrapper: HTMLElement, record: CardRecord, tool: ToolInfo): voi
   record.iframe?.remove();
   record.iframe = null;
   window.clearTimeout(record.timer);
+  const body = wrapper.querySelector<HTMLElement>(".plugin-card-body");
+  if (body && record.fallback.parentElement !== body) body.append(record.fallback);
+  wrapper.style.height = "";
   const text = document.createElement("pre");
   text.textContent = tool.status === "running" ? "Running…" : tool.result || "No result";
   record.fallback.replaceChildren(text);
