@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/custom"
-	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/lsp"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
@@ -186,7 +185,7 @@ func (r *AgentRuntime) ToolsList(cwd, sessionID string) (ToolsOverview, error) {
 			})
 		}
 	}
-	added, extensionErrors := extension.Load(context.Background(), r.dataDir)
+	added, extensionErrors := r.extensions.Load(context.Background())
 	for _, tool := range added {
 		list = append(list, ToolInfo{Name: tool.Name(), Description: tool.Definition().Description, Source: "extension"})
 	}

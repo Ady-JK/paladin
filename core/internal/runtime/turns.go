@@ -87,6 +87,9 @@ func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) {
 	r.hub.Shutdown(timeout)
 	r.mcp.Close()
 	r.lsp.Close()
+	// Plugins get a shutdown line and a short grace; nothing may keep the
+	// app from exiting.
+	r.extensions.Close()
 }
 
 // ListAgents lists a session's subagents with their live status.

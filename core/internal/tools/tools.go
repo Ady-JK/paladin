@@ -276,6 +276,34 @@ type ExtensionTool interface {
 	Extension() bool
 }
 
+// ExtensionInfo names the plugin an extension tool belongs to and the
+// tool's own name, so permission rules can say "plugin" or
+// "plugin/tool".
+type ExtensionInfo struct {
+	Plugin string
+	Tool   string
+}
+
+// ExtensionToolInfo is implemented by extension tools that know their
+// plugin.
+type ExtensionToolInfo interface {
+	ExtensionInfo() ExtensionInfo
+}
+
+// ExtensionOf reports the plugin and plugin-side tool name of an
+// extension tool; ok is false for anything else.
+func (r *Registry) ExtensionOf(name string) (ExtensionInfo, bool) {
+	resolved, ok := r.resolveName(name)
+	if !ok {
+		return ExtensionInfo{}, false
+	}
+	info, ok := r.tools[resolved].(ExtensionToolInfo)
+	if !ok {
+		return ExtensionInfo{}, false
+	}
+	return info.ExtensionInfo(), true
+}
+
 // IsExtension reports whether the named tool is an extension.
 func (r *Registry) IsExtension(name string) bool {
 	resolved, ok := r.resolveName(name)

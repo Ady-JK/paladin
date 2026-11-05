@@ -122,9 +122,11 @@ type AgentRuntime struct {
 	cacheMu       sync.Mutex
 	mcp           *mcp.Manager
 	mcpSink       atomic.Pointer[mcpSink]
-	toolsMu       sync.Mutex
-	toolsSink     atomic.Pointer[toolsSink]
-	hooks         *hooks.Manager
+	// extensions owns the enabled plugins and their warm runners.
+	extensions *extension.Registry
+	toolsMu    sync.Mutex
+	toolsSink  atomic.Pointer[toolsSink]
+	hooks      *hooks.Manager
 	// started holds sessions whose SessionStart hooks ran in this process.
 	started   map[string]bool
 	startedMu sync.Mutex
@@ -189,6 +191,8 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		shellTool.Observe(r.jobs)
 	}
 	r.mcp = newMCPManager(dataDir, &r.mcpSink)
+	r.extensions = extension.NewRegistry(dataDir)
+	r.extensions.Start()
 	r.lsp = lsp.NewManager(dataDir)
 	r.registerKnowledgeTools()
 	r.subagents = newSubagentManager(r)
@@ -293,7 +297,7 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		registry = r.childTools(sess, *child)
 	} else {
 		extra := r.mcpTools(ctx, project)
-		extensionTools, extensionErrors := extension.Load(ctx, r.dataDir)
+		extensionTools, extensionErrors := r.extensions.Load(ctx)
 		for _, err := range extensionErrors {
 			fmt.Fprintf(os.Stderr, "extension: %v\n", err)
 		}

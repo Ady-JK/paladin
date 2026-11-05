@@ -1,0 +1,87 @@
+package extension
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"sync"
+	"testing"
+
+	"github.com/Ady-JK/paladin/core/internal/tools"
+)
+
+// nodeFor skips a test when no Node 24+ is installed. Plugin tests need
+// a real Node; the resolution tests use shims instead.
+func nodeFor(t *testing.T) (string, error) {
+	t.Helper()
+	path, err := exec.LookPath("node")
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	major, err := nodeMajor(string(out))
+	if err != nil || major < minNodeMajor {
+		return "", errNoNode
+	}
+	return path, nil
+}
+
+var errNoNode = errString("test needs Node 24 or newer")
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+// callTool runs one tool and decodes its JSON output.
+func callTool(t *testing.T, tool tools.Tool, args map[string]any) (any, error) {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, callErr := tool.Call(raw, &tools.ToolCtx{Workspace: t.TempDir(), Project: t.TempDir(), SessionID: "s1"})
+	if callErr != nil {
+		return nil, callErr
+	}
+	var value any
+	if err := json.Unmarshal([]byte(out), &value); err != nil {
+		return out, nil
+	}
+	return value, nil
+}
+
+// resetNodeCache lets a test swap the node probe and see it again.
+func resetNodeCache() {
+	nodeCache = struct {
+		once sync.Once
+		bin  nodeBin
+		err  error
+	}{}
+}
+
+// withNode resolves the PATH node once, skipping when there is none.
+func withNode(t *testing.T) {
+	t.Helper()
+	if _, err := nodeFor(t); err != nil {
+		t.Skip(err)
+	}
+	resetNodeCache()
+	t.Cleanup(resetNodeCache)
+	if err := os.Unsetenv(electronNodeEnv); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Unsetenv(paladinNodeEnv); err != nil {
+		t.Fatal(err)
+	}
+	resetEnv()
+}
+
+// resetEnv restores the hooks the resolution tests swap.
+func resetEnv() {
+	pathNode = func() (string, error) { return exec.LookPath("node") }
+	runtimeEnv = os.Getenv
+	verser = defaultVerser
+}
