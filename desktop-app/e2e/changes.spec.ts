@@ -178,3 +178,61 @@ test("a finished turn shows its file changes even with no live call id", async (
   expect(order.s).toBeGreaterThanOrEqual(0);
   expect(order.c).toBeGreaterThan(order.s);
 });
+
+test("the collapsed card spans the conversation and does not repaint while a turn runs", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "created" }], callIds: ["t1"] }],
+      files: [{ path: "index.html", status: "created" }],
+    };
+    w.__e2ePatch = "diff --git a/index.html b/index.html\n@@ -0,0 +1 @@\n+<h1>Hi</h1>\n";
+    // A busy turn: four mutating tools settle in a row, each one asking
+    // for the changes again.
+    w.__e2eRunTurn = async (_p: unknown, h: any) => {
+      for (let i = 1; i <= 4; i++) {
+        h?.onTool?.({
+          id: "t" + i,
+          name: "shell",
+          arguments: '{"cmd":"echo ' + i + '"}',
+          result: JSON.stringify({ status: "done", exit_code: 0, output: "x" }),
+          status: "done",
+        });
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      await new Promise((r) => setTimeout(r, 600));
+      return { reply: "done" };
+    };
+  });
+  await page.goto("/");
+
+  // Count every rewrite of the card's own children: an innerHTML
+  // assignment replaces all of them at once, which is what flickered.
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__cardPaints = 0;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        const target = record.target as HTMLElement;
+        if (target.classList?.contains("turn-change-card") && record.addedNodes.length) w.__cardPaints++;
+      }
+    }).observe(document.getElementById("messages")!, { childList: true, subtree: true });
+  });
+
+  await page.fill("#promptInput", "change stuff");
+  await page.click("#sendBtn");
+  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
+  await expect(card).toContainText("Edited 1 file");
+  // Let every tool settle, then let the turn end.
+  await expect.poll(() => page.evaluate(() => (window as any).__cardPaints), { timeout: 8000 }).toBeLessThanOrEqual(1);
+
+  // Full conversation width, like the turn's own rows.
+  const box = await card.boundingBox();
+  const msgs = await page.locator("#messages").boundingBox();
+  expect(box && msgs).toBeTruthy();
+  expect(Math.abs(box!.width - msgs!.width)).toBeLessThan(2);
+
+  await expect(card).toHaveAttribute("aria-expanded", "false");
+});

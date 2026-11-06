@@ -131,11 +131,14 @@
 }
 .turn-change-card {
   display: flex;
-  width: min(100%, 48rem);
+  /* Full conversation width: a card capped at 48rem and centered in the
+     pane left the collapsed floater floating mid-air instead of lining
+     up with the turn's own rows. */
+  width: 100%;
   flex-direction: column;
   align-items: stretch;
   gap: 0;
-  margin: 12px auto 20px;
+  margin: 12px 0 20px;
   padding: 0;
   overflow: hidden;
   white-space: normal;
