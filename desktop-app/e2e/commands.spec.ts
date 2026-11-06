@@ -151,7 +151,7 @@ test("the memory pane says when a store moved past the session's snapshot", asyn
   await expect.poll(() => page.evaluate(() => (window as any).__e2eSnapshotRefreshes || 0)).toBe(1);
 });
 
-test("a running turn shows the working bar with elapsed time", async ({ page }) => {
+test("a running turn shows its status on the Context strip, with elapsed time", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eChatEvents = [
       {
@@ -163,11 +163,14 @@ test("a running turn shows the working bar with elapsed time", async ({ page }) 
   });
   await page.fill("#promptInput", "run the tests");
   await page.click("#sendBtn");
-  const bar = page.locator("#workingBar");
+  // The status docks on the right of the Context strip rather than
+  // floating on its own line, so both share one row above the composer.
+  const bar = page.locator("#contextBox #workingBar");
   await expect(bar).toBeVisible();
-  await expect(bar).toContainText("Working");
+  await expect(bar).toContainText("Running a command");
   await expect(bar).toContainText(/\d+s/);
-  await expect(bar).toContainText("make test");
+  // The command itself belongs to the turn's tool row, not the strip.
+  await expect(page.locator("#contextBox")).not.toContainText("make test");
   await showSidebar(page);
   await expect(page.locator('#sessionList .session-row[data-live="running"] .live-spinner').first()).toBeVisible();
   await expect(bar).toBeHidden({ timeout: 5000 });

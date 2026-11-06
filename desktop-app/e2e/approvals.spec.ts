@@ -1,5 +1,5 @@
 // approvals.spec.ts covers the permission UI: the in-chat approval card,
-// the composer's preset chip, the sidebar/working-bar waiting state and
+// the composer's preset chip, the sidebar/composer status waiting state and
 // the Settings → Permissions pane.
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
@@ -63,7 +63,7 @@ test("an approval card shows the command and allows it for the folder", async ({
   await expect(card).toContainText("not on the safe list");
   await expect(card.locator("[data-approve]")).toHaveCount(4);
   await expect(card.locator('[data-approve="folder"]')).toContainText("npm install");
-  await expect(page.locator("#workingBar")).toContainText("Waiting for approval");
+  await expect(page.locator("#contextBox #workingBar")).toContainText("Waiting for approval");
   await expect(page.locator('.session-row[data-live="approval"]')).toHaveCount(1);
 
   await card.locator('[data-approve="folder"]').click();

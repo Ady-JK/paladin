@@ -31,6 +31,71 @@
   padding: 3px 6px 3px 4px;
 }
 
+/* The head row carries the context summary on the left and the running
+   turn's status on the right. The status slot is always present, so the
+   row is the same height whether a turn runs or not. */
+.working-slot {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  margin-left: auto;
+}
+.context-box[data-has-context="0"] .context-toggle {
+  cursor: default;
+}
+.context-box[data-has-context="0"] .context-chevron {
+  display: none;
+}
+
+.working-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--color-slate-500);
+  white-space: nowrap;
+}
+.dark .working-status {
+  color: var(--color-slate-400);
+}
+.working-status.hidden {
+  display: none;
+}
+.working-status .working-what {
+  font-weight: 500;
+  color: var(--color-slate-700);
+}
+.dark .working-status .working-what {
+  color: var(--color-slate-200);
+}
+.working-status[data-phase="approval"] .working-what {
+  color: #b58900;
+  font-weight: 600;
+}
+.dark .working-status[data-phase="approval"] .working-what {
+  color: #e0b84a;
+}
+.working-status .working-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-slate-400);
+}
+.working-spin {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1.75px solid rgb(146 134 214 / 0.25);
+  border-top-color: var(--color-accent-500);
+  animation: live-spin 0.8s linear infinite;
+}
+html[data-motion="reduced"] .working-spin {
+  animation-duration: 1.2s !important;
+  animation-iteration-count: infinite !important;
+}
+
 .context-toggle {
   display: flex;
   min-width: 0;

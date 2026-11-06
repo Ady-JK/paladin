@@ -1,43 +1,35 @@
-// workingBar.ts is the "Working · 12s · Reading main.go" strip above
-// the composer: its DOM, its labels and its time format. live.ts decides
-// what it shows.
+// workingBar.ts owns the running-turn status: its short activity verbs,
+// its elapsed-time format and the DOM that live.ts paints. The status is
+// not a bar of its own — it docks on the right of the Context strip's
+// head row, so one line above the composer carries both the context
+// that loads automatically and what the turn is doing right now.
+//
+// The verbs are deliberately short and omit arguments: the command, the
+// path and the query live in the turn's tool rows, and repeating them
+// here only widened the strip enough to push the context summary out.
 
 import type { ToolInfo } from "../core/types";
-import { sendBtn } from "../core/dom";
 
 export type WorkingPhase = "thinking" | "writing" | "retrying" | "compacting";
 
-// workingLabel is the working bar's one-line summary of a tool call.
+// workingLabel is the status's short summary of a tool call.
 export function workingLabel(tool: ToolInfo): string {
-  let args: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(tool.arguments || "{}");
-    if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
-  } catch {
-    // Streaming arguments may be partial; fall back to the name.
-  }
-  const str = (k: string) => (typeof args[k] === "string" ? args[k] : "");
-  const tail = (p: string) => p.split(/[\\/]/).filter(Boolean).slice(-2).join("/") || p;
   switch (tool.name) {
-    case "shell": {
-      const command = str("command") || str("cmd");
-      if (command) return `Running ${command.split("\n")[0]}`;
-      const action = str("action");
-      const job = str("job_id");
-      if (action === "wait") return job ? `Waiting for ${job}` : "Waiting for a background job";
-      if (action === "status") return job ? `Checking ${job}` : "Checking a background job";
-      if (action === "cancel") return job ? `Stopping ${job}` : "Stopping a background job";
+    case "shell":
       return "Running a command";
-    }
     case "read":
-      return str("path") ? `Reading ${tail(str("path"))}` : "Reading a file";
+      return "Reading";
     case "write":
-      return str("path") ? `Writing ${tail(str("path"))}` : "Writing a file";
+      return "Writing";
     case "edit":
-      return str("path") ? `Editing ${tail(str("path"))}` : "Editing a file";
+      return "Editing";
     case "search":
     case "grep":
-      return str("pattern") || str("query") ? `Searching for ${str("pattern") || str("query")}` : "Searching";
+      return "Searching";
+    case "glob":
+      return "Finding files";
+    case "list":
+      return "Listing files";
     case "ask":
       return "Waiting for your answer";
     case "todo":
@@ -45,9 +37,15 @@ export function workingLabel(tool: ToolInfo): string {
     case "memory":
       return "Updating memory";
     case "skill":
-      return str("name") ? `Loading skill ${str("name")}` : "Loading a skill";
+      return "Loading a skill";
     case "session_search":
       return "Searching past sessions";
+    case "browser":
+      return "Using the browser";
+    case "web_fetch":
+      return "Fetching a page";
+    case "visual":
+      return "Drawing a visual";
     default:
       return `Using ${tool.name}`;
   }
@@ -55,33 +53,28 @@ export function workingLabel(tool: ToolInfo): string {
 
 export const PHASE_TEXT: Record<WorkingPhase, string> = {
   thinking: "Thinking",
-  writing: "Writing the reply",
-  retrying: "Retrying the model",
-  compacting: "Compacting context",
+  writing: "Replying",
+  retrying: "Retrying",
+  compacting: "Compacting",
 };
 
-let bar: HTMLElement | null = null;
+let status: HTMLElement | null = null;
 
-// workingBar lazily mounts the bar above the composer.
-export function workingBar(): HTMLElement {
-  if (bar) return bar;
+// workingStatus builds the right-hand slot of the Context head row: a
+// spinner and one verb. It stays in the DOM and is hidden by its host,
+// so the head row keeps its height whether or not a turn is running.
+export function workingStatus(): HTMLElement {
+  if (status) return status;
   const el = document.createElement("div");
   el.id = "workingBar";
-  el.className = "working-bar hidden";
+  el.className = "working-status hidden";
   el.setAttribute("role", "status");
   el.setAttribute("aria-live", "polite");
   el.innerHTML =
     `<span class="working-spin" aria-hidden="true"></span>` +
-    `<span class="working-title">Working</span>` +
-    `<span class="working-time"></span>` +
-    `<span class="working-sep" aria-hidden="true">·</span>` +
     `<span class="working-what"></span>` +
-    `<span class="working-more"></span>` +
-    `<span class="working-hint">Esc Esc to stop</span>`;
-  const footer = sendBtn.closest("footer");
-  const host = footer?.firstElementChild ?? footer;
-  host?.prepend(el);
-  bar = el;
+    `<span class="working-time"></span>`;
+  status = el;
   return el;
 }
 

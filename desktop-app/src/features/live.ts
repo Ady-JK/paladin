@@ -22,10 +22,11 @@ import { onAgentsChanged, renderSessions, scheduleRefreshSessions } from "./sess
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget, scheduleBudgetRefresh } from "./budget";
+import { showContextBox } from "./contextBox";
 import { noteToolChange, refreshChanges } from "./sidePane";
 import { handlePluginApproval } from "./pluginApproval";
 import { createTurnStats } from "./turnStats";
-import { PHASE_TEXT, formatElapsed, workingBar, workingLabel, type WorkingPhase } from "./workingBar";
+import { PHASE_TEXT, formatElapsed, workingLabel, workingStatus, type WorkingPhase } from "./workingBar";
 
 export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "approval";
 
@@ -423,17 +424,21 @@ function noteApproval(e: Entry, ap: Approval | undefined): boolean {
 // ticker refreshes the working bar's elapsed time once a second.
 let ticker = 0;
 
-// paintWorking shows what the visible session's running turn is doing:
-// a spinner, how long it has run, and its current step. It stays up for
-// the whole turn so a quiet stretch never looks like a stall.
+// paintWorking shows what the visible session's running turn is doing in
+// the Context strip's right-hand slot: a spinner, one short verb and the
+// elapsed time. It stays up for the whole turn so a quiet stretch never
+// looks like a stall. The plan-mode title goes on the strip's hover text
+// because the head row has no room for a second label.
 function paintWorking(): void {
-  const el = workingBar();
+  const el = workingStatus();
   const e = state.sessionId ? entries.get(state.sessionId) : undefined;
   const turn = e?.running;
   if (!e || !turn) {
     el.classList.add("hidden");
+    el.dataset.phase = "";
     window.clearInterval(ticker);
     ticker = 0;
+    showContextBox();
     return;
   }
   if (!e.since) {
@@ -445,20 +450,22 @@ function paintWorking(): void {
   const what = waiting
     ? "Waiting for approval"
     : turn.compact
-      ? "Compacting context"
+      ? "Compacting"
       : labels.length
         ? labels[labels.length - 1]
         : PHASE_TEXT[e.phase];
+  el.querySelector(".working-what")!.textContent = what;
+  el.querySelector(".working-time")!.textContent = formatElapsed(Date.now() - e.since);
   el.classList.remove("hidden");
   el.dataset.phase = waiting ? "approval" : labels.length ? "tool" : e.phase;
-  el.querySelector(".working-title")!.textContent = turn.mode === "plan" ? "Planning" : "Working";
-  el.querySelector(".working-time")!.textContent = formatElapsed(Date.now() - e.since);
-  const whatEl = el.querySelector<HTMLElement>(".working-what")!;
-  whatEl.textContent = what;
-  whatEl.title = what;
-  const more = labels.length > 1 ? `+${labels.length - 1} more` : "";
-  const queued = e.queued.length ? `${e.queued.length} queued` : "";
-  el.querySelector(".working-more")!.textContent = [more, queued].filter(Boolean).join(" · ");
+  // Hover text keeps the detail the old bar spelled out: the plan-mode
+  // verb, how long the turn has run, and what else is in flight.
+  const more = labels.length > 1 ? `, ${labels.length - 1} more tool${labels.length > 2 ? "s" : ""}` : "";
+  const queued = e.queued.length ? `, ${e.queued.length} queued` : "";
+  el.title = `${turn.mode === "plan" ? "Planning" : "Working"}: ${what}${more}${queued} · ${formatElapsed(Date.now() - e.since)}`;
+  // The status may be the only reason the strip is up (a folder with no
+  // auto-loaded context), so let the strip re-evaluate its visibility.
+  showContextBox();
   if (!ticker) {
     ticker = window.setInterval(() => {
       const cur = state.sessionId ? entries.get(state.sessionId) : undefined;

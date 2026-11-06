@@ -404,6 +404,13 @@ that actually load appear: a `CLAUDE.md` shadowed by an `AGENTS.md` in the same 
 switches off, is not listed. Files the session folder does not cover — the nested instructions above — are not in the
 box, since the prompt does not carry them either.
 
+The strip's head row is shared with the running turn: the context summary sits on the left and a **status** on the
+right — a spinner, one short verb (`Thinking`, `Running a command`, `Reading`, `Writing`, `Searching`, `Waiting for
+approval`) and the elapsed time. There is no separate working bar. The verbs carry no arguments; the command and the
+path belong to the turn's tool rows, and repeating them here pushed the context summary out. The status slot is always
+mounted, so the row keeps its exact height and width whether a turn runs or not, and the strip stays expandable
+mid-turn. A folder with nothing auto-loaded still gets the strip while a turn runs, so the status always has a home.
+
 ### AGENTS.md in subfolders
 
 The system prompt holds the AGENTS.md files from the project root down to the session folder. In a monorepo the rules
@@ -788,7 +795,7 @@ flowchart TB
     settings["settings.ts<br/>the Settings modal"] --> mcp["mcp.ts"] & toolSwitches["toolSwitches.ts"] & memory["memory.ts"] & permissions["permissions.ts"]
     approvals["approvals.ts<br/>approval cards"]
     undo["undo.ts / worktrees.ts"]
-    workingBar["workingBar.ts<br/>'Working…' bar"]
+    workingBar["workingBar.ts<br/>turn status for the Context strip"]
     resources["resources.ts<br/>CPU/RAM per session"]
     todos["todos.ts<br/>plan checklist above composer"]
     sidePane["sidePane.ts<br/>right pane: side chats,<br/>live subagents, terminals, web tabs"]

@@ -203,14 +203,6 @@
   background: #e0a800;
   animation: soft-ping 1.6s ease-out infinite;
 }
-.working-bar[data-phase="approval"] .working-what {
-  color: #b58900;
-  font-weight: 500;
-}
-.dark .working-bar[data-phase="approval"] .working-what {
-  color: #e0b84a;
-}
-
 /* ---- web request (web_fetch, browser open) ---- */
 .approval-web {
   margin: 8px 0 10px;

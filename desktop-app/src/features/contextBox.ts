@@ -15,6 +15,7 @@ import { loadText, saveText } from "../core/storage";
 import { state } from "../core/state";
 import type { ContextEntry, ContextView } from "../core/types";
 import { icon } from "../icons";
+import { workingStatus } from "./workingBar";
 
 const OPEN_KEY = "paladin.contextBox.open";
 const RECHECK_MS = 4000;
@@ -67,6 +68,9 @@ function headline(v: ContextView): string {
 }
 
 // ensureBox builds the strip once; later paints only touch its innards.
+// The head row is one line: the context summary on the left, the
+// running turn's status on the right. The status slot never leaves the
+// DOM, so the row keeps its height whether a turn is running or not.
 function ensureBox(): HTMLElement {
   if (box) return box;
   const slot = document.getElementById("contextBoxSlot");
@@ -80,12 +84,14 @@ function ensureBox(): HTMLElement {
     `<span class="context-title">Context</span>` +
     `<span id="contextSummary" class="context-summary"></span>` +
     `</button>` +
+    `<div id="workingSlot" class="working-slot"></div>` +
     `</div>` +
     `<div id="contextList" class="context-list" role="region" aria-label="Auto-loaded context"></div>`;
   (slot ?? document.body).appendChild(wrap);
   box = wrap;
   list = wrap.querySelector<HTMLElement>("#contextList");
   summary = wrap.querySelector<HTMLElement>("#contextSummary");
+  wrap.querySelector<HTMLElement>("#workingSlot")!.appendChild(workingStatus());
   if (!slot) wrap.classList.add("hidden");
 
   wrap.querySelector<HTMLElement>("#contextToggle")?.addEventListener("click", () => {
@@ -172,17 +178,31 @@ function paintRow(row: HTMLElement, entry: ContextEntry): void {
     : "";
 }
 
-// paint repaints the strip from the cached view.
+// paint repaints the strip from the cached view. The strip also hosts the
+// running turn's status, so it stays up while a turn runs even when the
+// folder has no context and the sidecar has no `contextSources`: hiding
+// it then would take the status down with it.
 function paint(): void {
   const wrap = ensureBox();
   const v = view;
-  wrap.classList.toggle("hidden", !v);
-  if (!v) return;
+  const busy = !workingStatus().classList.contains("hidden");
+  wrap.classList.toggle("hidden", !v && !busy);
   wrap.dataset.open = open ? "1" : "0";
-  const toggle = wrap.querySelector<HTMLElement>("#contextToggle")!;
-  toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  toggle.title = open ? "Hide what loads automatically" : "Show what loads automatically";
-  if (summary && summary.textContent !== headline(v)) summary.textContent = headline(v);
+  // With no context view there is nothing to expand, so the head row is
+  // a plain line and the chevron goes away.
+  wrap.dataset.hasContext = v ? "1" : "0";
+  const toggle = wrap.querySelector<HTMLButtonElement>("#contextToggle")!;
+  toggle.disabled = !v;
+  toggle.setAttribute("aria-expanded", v && open ? "true" : "false");
+  toggle.title = !v ? "" : open ? "Hide what loads automatically" : "Show what loads automatically";
+  if (summary) {
+    const text = v ? headline(v) : "";
+    if (summary.textContent !== text) summary.textContent = text;
+  }
+  if (!v) {
+    list!.classList.add("hidden");
+    return;
+  }
 
   const host = list!;
   host.classList.toggle("hidden", !open);
@@ -244,6 +264,14 @@ export function reloadContextSources(): Promise<void> {
 export function clearContextBox(): void {
   seq++;
   view = null;
+  paint();
+}
+
+// showContextBox reveals the strip for the running turn when the folder
+// has no context to list. paint() then decides visibility from the view
+// and the status together, so the status is never painted into a hidden
+// strip. A no-op when a context view is already loaded.
+export function showContextBox(): void {
   paint();
 }
 
