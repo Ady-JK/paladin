@@ -32,6 +32,30 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
+func TestParseRetryHint(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want time.Duration
+	}{
+		{`Upstream request failed: [prefill_cap_refused] the cell is at capacity; retry shortly (after 30 s)`, 30 * time.Second},
+		{`{"type":"server_error","message":"Upstream request failed: [ttft_admission_refused] the cell is at capacity; retry shortly (after 42 s)"}`, 42 * time.Second},
+		{"rate limited: retry after 30 seconds", 30 * time.Second},
+		{"gateway is retrying in 12s", 12 * time.Second},
+		{"try again in 1.5s", 1500 * time.Millisecond},
+		{"please wait 2 minutes", 2 * time.Minute},
+		{"retry after 250 ms", 250 * time.Millisecond},
+		{"retry in 0s", 0},
+		{"status 429: slow down", 0},
+		{"the model is overloaded", 0},
+		{"", 0},
+	}
+	for _, c := range cases {
+		if got := parseRetryHint(c.msg); got != c.want {
+			t.Errorf("%q: got %v want %v", c.msg, got, c.want)
+		}
+	}
+}
+
 func TestStreamCarriesStatusAndRetryAfterWithoutHiddenRetries(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +79,36 @@ func TestStreamCarriesStatusAndRetryAfterWithoutHiddenRetries(t *testing.T) {
 	}
 	d := Classify(err)
 	if !d.Retryable || d.RetryAfter != 7*time.Second || d.Timeout {
+		t.Fatalf("classify: %+v", d)
+	}
+}
+
+func TestStreamParsesRetryHintFromBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"error":{"type":"server_error","message":"Upstream request failed: [prefill_cap_refused] the cell is at capacity; retry shortly (after 30 s)"}}`)
+	}))
+	defer srv.Close()
+	err := providerFor(srv.URL).StreamTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "s", make(chan Chunk, 8), make(chan struct{}))
+	var pe *ProviderError
+	if !errors.As(err, &pe) {
+		t.Fatalf("got %T %v", err, err)
+	}
+	if pe.Status != 429 || pe.RetryAfter != 30*time.Second {
+		t.Fatalf("want status 429 retry-after 30s from the message, got %+v", pe)
+	}
+	d := Classify(err)
+	if !d.Retryable || d.RetryAfter != 30*time.Second || d.Timeout {
+		t.Fatalf("classify: %+v", d)
+	}
+}
+
+func TestClassifyParsesRetryHintFromMessage(t *testing.T) {
+	err := &ProviderError{Kind: "request", Status: 429,
+		Message: `p: stream: status 429: {"message":"at capacity; retry shortly (after 12 s)"}`}
+	d := Classify(err)
+	if !d.Retryable || d.RetryAfter != 12*time.Second {
 		t.Fatalf("classify: %+v", d)
 	}
 }

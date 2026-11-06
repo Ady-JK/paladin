@@ -557,6 +557,9 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 		if apiErr.Response != nil {
 			retryAfter = parseRetryAfter(apiErr.Response.Header, time.Now())
 		}
+		if retryAfter == 0 {
+			retryAfter = parseRetryHint(body)
+		}
 		return &ProviderError{Kind: "request", Message: msg, Status: apiErr.StatusCode, RetryAfter: retryAfter}
 	}
 	return RequestError(fmt.Sprintf("%s: %s: %v", p.name, op, err))

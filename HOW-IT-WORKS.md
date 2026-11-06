@@ -216,7 +216,7 @@ flowchart TD
     Budget -- "yes" --> WrapUp(["Tools off → model writes<br/>'done / still left' summary → end"])
     Budget -- no --> Steer["📨 Read any steer messages<br/>you sent mid-turn"] --> Round["Ask the model<br/>(streaming)"]
     Round --> Fail{"Network error /<br/>rate limit?"}
-    Fail -- "yes, nothing streamed yet" --> Retry["⏱️ Wait (2s, 4s, 8s… max 30s)<br/>honor Retry-After"] --> Round
+    Fail -- "yes, nothing streamed yet" --> Retry["⏱️ Wait (2s, 4s, 8s… max 30s)<br/>honor Retry-After or the message hint"] --> Round
     Fail -- no --> Calls{"Did the model<br/>ask for tools?"}
     Calls -- no --> Done(["✅ Answer done → save"])
     Calls -- yes --> Doom{"Same exact call<br/>3× in a row?"}
@@ -232,7 +232,7 @@ flowchart TD
 | Net | What it does |
 |---|---|
 | **Streaming watchdog** | If the model goes silent too long, hang up and retry instead of waiting forever. |
-| **Retry with backoff** | Wait a bit longer each time (2s, 4s, 8s…) with some randomness, so all sessions don't retry at the same moment. |
+| **Retry with backoff** | Wait a bit longer each time (2s, 4s, 8s…) with some randomness, so all sessions don't retry at the same moment. A provider's `Retry-After` header wins, and so does a wait hint in the error text ("retry shortly (after 30 s)") when a gateway such as OpenCode Go omits the header. Six attempts per stretch, and a requested wait over 5 minutes fails fast instead of sitting through a daily quota. |
 | **Empty-reply rescue** | If the stream came back empty, ask once more without streaming. |
 | **Doom-loop guard** | If the model keeps asking for the exact same thing (or loops A, B, A, B… through the same 2–4 calls three times), say "that won't change, try something else." The turn keeps going; the model has to adapt. Re-reads get a sharper variant: the content has not changed, use what you have. |
 | **Denial breaker** | Three tool calls denied in a row (user declines, permission rule blocks) end the turn with a saved error instead of pestering forever. Any other result resets the count. |

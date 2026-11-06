@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -40,7 +41,11 @@ func Classify(err error) RetryDecision {
 			return RetryDecision{Retryable: true, Timeout: true, RetryAfter: pe.RetryAfter}
 		}
 		if pe.Status != 0 {
-			return RetryDecision{Retryable: retryableStatus(pe.Status), RetryAfter: pe.RetryAfter}
+			retryAfter := pe.RetryAfter
+			if retryAfter == 0 {
+				retryAfter = parseRetryHint(pe.Message)
+			}
+			return RetryDecision{Retryable: retryableStatus(pe.Status), RetryAfter: retryAfter}
 		}
 	}
 	return RetryDecision{Retryable: IsRetryable(err)}
@@ -86,6 +91,35 @@ func parseRetryAfter(h http.Header, now time.Time) time.Duration {
 	return 0
 }
 
+// retryHintRe finds a wait hint embedded in an error message, used by
+// gateways that omit Retry-After. OpenCode Go, for example, refuses a
+// request at capacity with 429 and the wording
+// "retry shortly (after 30 s)".
+var retryHintRe = regexp.MustCompile(`(?i)\b(?:retry(?:ing)?|try again|try|wait)\b[^0-9]{0,40}?(\d+(?:\.\d+)?)\s*(ms|milliseconds?|seconds?|secs?|minutes?|mins?|s|m)\b`)
+
+// parseRetryHint reads the server-requested wait from error text such as
+// "retry shortly (after 30 s)", "retry after 30 seconds" or "try again
+// in 30s". It returns 0 when the text carries no such hint.
+func parseRetryHint(msg string) time.Duration {
+	m := retryHintRe.FindStringSubmatch(msg)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.ParseFloat(m[1], 64)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	unit := strings.ToLower(m[2])
+	switch {
+	case strings.HasPrefix(unit, "ms"), strings.HasPrefix(unit, "milli"):
+		return time.Duration(n * float64(time.Millisecond))
+	case strings.HasPrefix(unit, "m"):
+		return time.Duration(n * float64(time.Minute))
+	default:
+		return time.Duration(n * float64(time.Second))
+	}
+}
+
 // statusErrorFrom builds a status-coded error from an HTTP response.
 func statusErrorFrom(name, op string, resp *http.Response, body string) *ProviderError {
 	short := []rune(strings.TrimSpace(body))
@@ -96,7 +130,11 @@ func statusErrorFrom(name, op string, resp *http.Response, body string) *Provide
 	if len(short) > 0 {
 		msg += ": " + string(short)
 	}
-	return &ProviderError{Kind: "request", Message: msg, Status: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header, time.Now())}
+	retryAfter := parseRetryAfter(resp.Header, time.Now())
+	if retryAfter == 0 {
+		retryAfter = parseRetryHint(body)
+	}
+	return &ProviderError{Kind: "request", Message: msg, Status: resp.StatusCode, RetryAfter: retryAfter}
 }
 
 // idleWatchdog cancels a stream's context after streamIdleTimeout of

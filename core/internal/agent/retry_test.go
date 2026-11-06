@@ -51,6 +51,30 @@ func TestRetryHonorsRetryAfterAndReportsStatus(t *testing.T) {
 	}
 }
 
+func TestRetryHonorsMessageHintWithoutHeader(t *testing.T) {
+	fastRetries(t)
+	limited := &inference.ProviderError{Kind: "request", Status: 429,
+		Message: `p: stream: status 429: {"message":"at capacity; retry shortly (after 150 ms)"}`}
+	prov := &mockProvider{streams: []streamScript{
+		{err: limited},
+		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
+	}}
+	a, _, tx, done := testAgent(t, prov)
+	defer close(done)
+	start := time.Now()
+	outcome, err := a.Run()
+	if err != nil || outcome.Reply != "ok" {
+		t.Fatalf("got %+v %v", outcome, err)
+	}
+	if time.Since(start) < 150*time.Millisecond {
+		t.Fatal("the message's retry hint was not honored")
+	}
+	rs := retryChunks(drainChunks(tx))
+	if len(rs) != 1 || rs[0].DelayMs < 150 {
+		t.Fatalf("retry status %+v", rs)
+	}
+}
+
 func TestRetryBudgetIsSixAttempts(t *testing.T) {
 	fastRetries(t)
 	prov := &mockProvider{streamsErr: inference.RequestError("p: stream: status 503")}

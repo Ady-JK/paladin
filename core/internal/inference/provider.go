@@ -129,7 +129,8 @@ type ProviderError struct {
 	Message string
 	// Status is the HTTP status when the provider answered with one.
 	Status int
-	// RetryAfter is the server-requested wait (Retry-After headers).
+	// RetryAfter is the server-requested wait: a Retry-After header,
+	// or a wait hint in the error message when the gateway sends none.
 	RetryAfter time.Duration
 	// Timeout marks deadline/idle-stall failures.
 	Timeout bool
