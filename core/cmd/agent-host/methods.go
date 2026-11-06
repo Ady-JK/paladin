@@ -156,6 +156,9 @@ var methods = map[string]handler{
 	"memoryConfig": func(rt *runtime.AgentRuntime, _ args) (any, error) {
 		return rt.MemoryConfig(), nil
 	},
+	"contextSources": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ContextSources(a.str("cwd")), nil
+	},
 
 	// Sessions
 	"openSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
