@@ -140,11 +140,6 @@ const BEHAVIORS: { key: keyof ToolBehavior; name: string; desc: string }[] = [
     desc: "Runs the formatter the project already has installed (gofmt, rustfmt, ruff or black when configured, prettier from node_modules). Never downloads anything.",
   },
   {
-    key: "verifyNudge",
-    name: "Check before finishing",
-    desc: "When a turn changed code and ran nothing since, remind the agent once to build or test before it ends.",
-  },
-  {
     key: "lspDiagnostics",
     name: "Language server errors",
     desc: "After write and edit, ask an installed language server (gopls, typescript-language-server, pyright, rust-analyzer, clangd) for errors in the file and show them to the agent.",

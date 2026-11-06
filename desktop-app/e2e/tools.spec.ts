@@ -97,14 +97,10 @@ test("Settings → Tools switches how the built-in tools behave", async ({ page 
   await expect(sw).toHaveAttribute("aria-checked", "true");
   await sw.click();
   await expect(sw).toHaveAttribute("aria-checked", "false");
-  const verify = group.locator('.tsw-row[data-behavior="verifyNudge"] [data-tsw-behavior]');
-  await expect(group.locator('.tsw-row[data-behavior="verifyNudge"]')).toContainText("Check before finishing");
-  await expect(verify).toHaveAttribute("aria-checked", "true");
-  await verify.click();
-  await expect(verify).toHaveAttribute("aria-checked", "false");
+  // The check-before-finishing nudge is gone, so its switch is too.
+  await expect(group.locator('.tsw-row[data-behavior="verifyNudge"]')).toHaveCount(0);
   expect(await calls(page, "toolBehaviorSet")).toEqual([
     { key: "formatOnWrite", enabled: false, cwd: CWD, sessionId: null },
-    { key: "verifyNudge", enabled: false, cwd: CWD, sessionId: null },
   ]);
   const lsp = group.locator('.tsw-row[data-behavior="lspDiagnostics"]');
   await expect(lsp).toContainText("Language server errors");

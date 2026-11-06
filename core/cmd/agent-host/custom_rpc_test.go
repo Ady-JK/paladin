@@ -12,15 +12,15 @@ func TestCustomizeRPCs(t *testing.T) {
 	if len(list) < 20 {
 		t.Fatalf("only %d items", len(list))
 	}
-	got := decodeAs[runtime.CustomState](t, callUnary(rt, "2", "customGet", map[string]any{"id": "reminder.verify"}))
+	got := decodeAs[runtime.CustomState](t, callUnary(rt, "2", "customGet", map[string]any{"id": "reminder.plan"}))
 	if got.Customized || got.Value != got.DefaultVal || len(got.Vars) != 1 {
 		t.Fatalf("get %+v", got)
 	}
-	set := decodeAs[runtime.CustomState](t, callUnary(rt, "3", "customSet", map[string]any{"id": "reminder.verify", "text": "Check {{files}}."}))
-	if !set.Customized || set.Value != "Check {{files}}." {
+	set := decodeAs[runtime.CustomState](t, callUnary(rt, "3", "customSet", map[string]any{"id": "reminder.plan", "text": "Finish {{steps}}."}))
+	if !set.Customized || set.Value != "Finish {{steps}}." {
 		t.Fatalf("set %+v", set)
 	}
-	reset := decodeAs[runtime.CustomState](t, callUnary(rt, "4", "customReset", map[string]any{"id": "reminder.verify"}))
+	reset := decodeAs[runtime.CustomState](t, callUnary(rt, "4", "customReset", map[string]any{"id": "reminder.plan"}))
 	if reset.Customized {
 		t.Fatalf("reset %+v", reset)
 	}

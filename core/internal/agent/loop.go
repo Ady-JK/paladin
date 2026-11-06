@@ -266,9 +266,6 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 	if a.stopRequested() {
 		return false, turnStop{}
 	}
-	if a.verifyNudge() {
-		return true, nil
-	}
 	if a.planNudge() {
 		return true, nil
 	}

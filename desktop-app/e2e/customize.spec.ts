@@ -23,34 +23,34 @@ test("built-ins are listed by group and open in the editor", async ({ page }) =>
     "Skills",
     "Settings files",
   ]);
-  await pane.locator('[data-cz-item="reminder.verify"]').click();
-  await expect(pane.locator(".cz-title")).toContainText("Check before finishing");
-  await expect(pane.locator(".cz-vars code")).toHaveText("{{files}}");
-  await expect(pane.locator(".cz-path")).toContainText("/data/config/custom/reminder.verify.md");
-  await expect(pane.locator(".cz-text")).toHaveValue("Check {{files}}.");
+  await pane.locator('[data-cz-item="reminder.plan"]').click();
+  await expect(pane.locator(".cz-title")).toContainText("Unfinished plan");
+  await expect(pane.locator(".cz-vars code")).toHaveText("{{steps}}");
+  await expect(pane.locator(".cz-path")).toContainText("/data/config/custom/reminder.plan.md");
+  await expect(pane.locator(".cz-text")).toHaveValue("Still open:\n{{steps}}");
   await expect(pane.locator("[data-cz-reset]")).toBeDisabled();
 });
 
 test("saving marks the item edited, warns about a dropped placeholder, and reset restores it", async ({ page }) => {
   const pane = await openCustomize(page);
-  await pane.locator('[data-cz-item="reminder.verify"]').click();
-  await pane.locator(".cz-text").fill("Run the tests before you stop.");
+  await pane.locator('[data-cz-item="reminder.plan"]').click();
+  await pane.locator(".cz-text").fill("Keep going before you stop.");
   await expect(pane.locator(".cz-status")).toHaveText("Unsaved changes");
   await pane.locator("[data-cz-save]").click();
   await expect(pane.locator(".cz-status")).toHaveText("Saved. Applies from the next turn.");
-  await expect(pane.locator(".cz-warn")).toContainText("{{files}}");
-  await expect(pane.locator('[data-cz-item="reminder.verify"] .cz-badge')).toHaveText("edited");
+  await expect(pane.locator(".cz-warn")).toContainText("{{steps}}");
+  await expect(pane.locator('[data-cz-item="reminder.plan"] .cz-badge')).toHaveText("edited");
   expect(await calls(page)).toContainEqual({
     cmd: "customSet",
-    id: "reminder.verify",
-    text: "Run the tests before you stop.",
+    id: "reminder.plan",
+    text: "Keep going before you stop.",
   });
   // Reset asks once more before it deletes the override.
   await pane.locator("[data-cz-reset]").click();
   await expect(pane.locator("[data-cz-reset]")).toHaveText("Confirm reset");
   await pane.locator("[data-cz-reset]").click();
-  await expect(pane.locator(".cz-text")).toHaveValue("Check {{files}}.");
-  await expect(pane.locator('[data-cz-item="reminder.verify"] .cz-badge')).toHaveCount(0);
+  await expect(pane.locator(".cz-text")).toHaveValue("Still open:\n{{steps}}");
+  await expect(pane.locator('[data-cz-item="reminder.plan"] .cz-badge')).toHaveCount(0);
 });
 
 test("invalid JSON is refused with the reason, and unsaved edits are not lost by a click", async ({ page }) => {
@@ -87,7 +87,7 @@ test("search filters the list and a skill switches off", async ({ page }) => {
 
 test("an unsaved draft survives other tabs and closing Settings", async ({ page }) => {
   const pane = await openCustomize(page);
-  await pane.locator('[data-cz-item="reminder.verify"]').click();
+  await pane.locator('[data-cz-item="reminder.plan"]').click();
   await pane.locator(".cz-text").fill("Draft I have not saved");
   await page.locator("#settingsNavWorkspace").click();
   await page.locator("#settingsNavCustomize").click();
@@ -98,13 +98,13 @@ test("an unsaved draft survives other tabs and closing Settings", async ({ page 
   await expect(pane.locator(".cz-text")).toHaveValue("Draft I have not saved");
   await expect(pane.locator(".cz-status")).toHaveText("Unsaved changes");
   await pane.locator("[data-cz-revert]").click();
-  await expect(pane.locator(".cz-text")).toHaveValue("Check {{files}}.");
+  await expect(pane.locator(".cz-text")).toHaveValue("Still open:\n{{steps}}");
 });
 
 test("text typed while Customize loads is never overwritten", async ({ page }) => {
   const pane = await openCustomize(page);
-  await pane.locator('[data-cz-item="reminder.verify"]').click();
-  await expect(pane.locator(".cz-text")).toHaveValue("Check {{files}}.");
+  await pane.locator('[data-cz-item="reminder.plan"]').click();
+  await expect(pane.locator(".cz-text")).toHaveValue("Still open:\n{{steps}}");
   await page.evaluate(() => ((window as any).__e2eCustomDelay = 400));
   // A refresh of the list (coming back to the tab) is still loading.
   await page.locator("#settingsNavWorkspace").click();

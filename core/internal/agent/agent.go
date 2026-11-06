@@ -79,9 +79,6 @@ type Request struct {
 	// FormatOnWrite runs the project's formatter after write and edit.
 	// The runtime sets it from settings; never on the wire.
 	FormatOnWrite bool `json:"-"`
-	// VerifyNudge reminds the model once to check changed code before
-	// the turn ends. The runtime sets it from settings; never on the wire.
-	VerifyNudge bool `json:"-"`
 	// Diagnose and Warm connect write/edit/read to language servers
 	// (tools.ToolCtx); nil means none. Set by the runtime.
 	Diagnose func(path string, trust func(string) bool) tools.Diagnosis `json:"-"`
@@ -213,7 +210,6 @@ type runConfig struct {
 	ledgers     func() []string
 	format      bool
 	web         tools.WebOptions
-	verify      bool
 	diagnose    func(string, func(string) bool) tools.Diagnosis
 	warm        func(string, func(string) bool)
 	session     transcript.Session
@@ -352,13 +348,6 @@ type Agent struct {
 	// hook's continue:false.
 	stopContinuations int
 	halt              hookHalt
-	// verify turns on the check-before-finishing nudge (verify.go);
-	// unverified are code files changed since the last passing check;
-	// verifyFailed is set when the last check run failed.
-	verify       bool
-	verifyNudged bool
-	unverified   []string
-	verifyFailed bool
 	// planNudges counts unfinished-plan reminders sent back-to-back this
 	// turn (plan.go); capped so a model that will not settle its list
 	// still ends. A round that runs tools resets it.
@@ -410,7 +399,6 @@ func newAgent(c runConfig) *Agent {
 		tx:       c.tx,
 		done:     c.done,
 
-		verify:      c.verify,
 		persistGate: c.persistGate,
 		gate:        c.gate,
 		steer:       c.steer,

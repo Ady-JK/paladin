@@ -814,7 +814,6 @@ export type ToolSwitch = {
 // ToolBehavior is how the built-in tools act, app-wide (settings.json).
 export type ToolBehavior = {
   formatOnWrite: boolean;
-  verifyNudge: boolean;
   lspDiagnostics: boolean;
   webPrivateNetwork?: boolean;
 };

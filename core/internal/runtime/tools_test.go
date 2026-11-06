@@ -187,7 +187,7 @@ func TestToolBehaviorDefaultsOnAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ov.Behavior.FormatOnWrite || !ov.Behavior.VerifyNudge || !ov.Behavior.LspDiagnostics {
+	if !ov.Behavior.FormatOnWrite || !ov.Behavior.LspDiagnostics {
 		t.Fatalf("behaviors default on: %+v", ov.Behavior)
 	}
 	if ov.LanguageServers == nil {
@@ -198,9 +198,6 @@ func TestToolBehaviorDefaultsOnAndPersists(t *testing.T) {
 	}
 	if rt.loadSettings().lspDiagnostics() {
 		t.Fatal("lspDiagnostics not saved")
-	}
-	if ov, err := rt.ToolBehaviorSet("verifyNudge", false, "", ""); err != nil || ov.Behavior.VerifyNudge || !ov.Behavior.FormatOnWrite {
-		t.Fatalf("verifyNudge off alone: %+v %v", ov.Behavior, err)
 	}
 	ov, err = rt.ToolBehaviorSet("formatOnWrite", false, "", "")
 	if err != nil || ov.Behavior.FormatOnWrite {

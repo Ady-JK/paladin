@@ -69,7 +69,6 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			if result.IsError {
 				a.logErrorf("tool:"+result.Name, "%s %s\n%s", call.ID, call.Arguments, result.Content)
 			}
-			a.noteVerify(&call, &result)
 			a.appendToolResult(&call, &result)
 			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
 				a.settleAborted(calls[k+1:])

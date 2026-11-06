@@ -73,9 +73,6 @@ func (r *AgentRuntime) ToolsReload(cwd, sessionID string) (ToolsOverview, error)
 type ToolBehavior struct {
 	// FormatOnWrite runs the project's formatter after write and edit.
 	FormatOnWrite bool `json:"formatOnWrite"`
-	// VerifyNudge reminds the model to check changed code before a turn
-	// ends.
-	VerifyNudge bool `json:"verifyNudge"`
 	// LspDiagnostics reports language server errors after write/edit.
 	LspDiagnostics bool `json:"lspDiagnostics"`
 	// WebPrivateNetwork lets web_fetch and the browser reach private and
@@ -85,7 +82,7 @@ type ToolBehavior struct {
 
 func (r *AgentRuntime) toolBehavior() ToolBehavior {
 	s := r.loadSettings()
-	return ToolBehavior{FormatOnWrite: s.formatOnWrite(), VerifyNudge: s.verifyNudge(), LspDiagnostics: s.lspDiagnostics(),
+	return ToolBehavior{FormatOnWrite: s.formatOnWrite(), LspDiagnostics: s.lspDiagnostics(),
 		WebPrivateNetwork: s.Web.AllowPrivateNetwork}
 }
 
@@ -96,8 +93,6 @@ func (r *AgentRuntime) ToolBehaviorSet(key string, on bool, cwd, sessionID strin
 	switch key {
 	case "formatOnWrite":
 		apply = func(s *Settings) { s.FormatOnWrite = &on }
-	case "verifyNudge":
-		apply = func(s *Settings) { s.VerifyNudge = &on }
 	case "lspDiagnostics":
 		apply = func(s *Settings) { s.LspDiagnostics = &on }
 	case "webPrivateNetwork":

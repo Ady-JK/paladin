@@ -47,9 +47,6 @@ type Settings struct {
 	// FormatOnWrite runs the project's formatter after write and edit;
 	// absent means on.
 	FormatOnWrite *bool `json:"formatOnWrite,omitempty"`
-	// VerifyNudge reminds the model once to check changed code before a
-	// turn ends; absent means on.
-	VerifyNudge *bool `json:"verifyNudge,omitempty"`
 	// LspDiagnostics asks installed language servers for errors after
 	// write and edit; absent means on.
 	LspDiagnostics *bool `json:"lspDiagnostics,omitempty"`
@@ -82,9 +79,6 @@ func (s Settings) formatOnWrite() bool { return s.FormatOnWrite == nil || *s.For
 
 // lspDiagnostics reports the setting, defaulting to on.
 func (s Settings) lspDiagnostics() bool { return s.LspDiagnostics == nil || *s.LspDiagnostics }
-
-// verifyNudge reports the setting, defaulting to on.
-func (s Settings) verifyNudge() bool { return s.VerifyNudge == nil || *s.VerifyNudge }
 
 type AgentRuntime struct {
 	dataDir       string
@@ -326,7 +320,6 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	req.Budget = r.turnBudget(req.Cwd, req.SessionID)
 	settings := r.loadSettings()
 	req.FormatOnWrite = settings.formatOnWrite()
-	req.VerifyNudge = settings.verifyNudge()
 	req.Web = settings.Web.options()
 	// The window the provider's catalog published beats the built-in
 	// table; the agent's own resolution covers the rest. The model is the

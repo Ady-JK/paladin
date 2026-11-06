@@ -1041,7 +1041,7 @@ window.__e2eToolsInvoke = (cmd, args) => {
       extensionErrors: t.extensionErrors || [],
       extensions: t.extensions || [],
       runners: t.runners || [],
-      behavior: { formatOnWrite: true, verifyNudge: true, lspDiagnostics: true, ...(t.behavior || {}) },
+      behavior: { formatOnWrite: true, lspDiagnostics: true, ...(t.behavior || {}) },
       languageServers: t.languageServers || [],
     };
   };
@@ -1523,10 +1523,15 @@ window.__e2eCustomInvoke = (cmd, args) => {
     w.__e2eCustom = [
       item("prompt.tool-guidance", "Tool guidance", "When to use which tool", "text", "Tools:\n- Read before editing."),
       item("tool.read.description", "Tool descriptions", "read", "text", "Read a file."),
-      item("reminder.verify", "Reminders", "Check before finishing", "text", "Check {{files}}.", { vars: ["files"] }),
       item("skill.debugging", "Skills", "debugging", "skill", "# Debugging", { enabled: true }),
       item("file.settings", "Settings files", "settings.json", "json", "{}\n"),
     ];
+    // Slotted where the real list keeps it, so the group order matches.
+    w.__e2eCustom.splice(
+      2,
+      0,
+      item("reminder.plan", "Reminders", "Unfinished plan", "text", "Still open:\n{{steps}}", { vars: ["steps"] }),
+    );
   }
   const find = (id) => {
     const it = w.__e2eCustom.find((x) => x.id === id);

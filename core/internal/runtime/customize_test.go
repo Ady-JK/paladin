@@ -18,7 +18,7 @@ func TestCustomizeListsEveryKindOfBuiltin(t *testing.T) {
 	}
 	for _, id := range []string{"prompt.system", "prompt.tool-guidance", "prompt.shell-guidance", "prompt.examples",
 		"prompt.plan-mode", "tool.read.description", "tool.web_fetch.description", "tool.visual.description",
-		"tool.spawn_agent.description", "tool.report_findings.description", "reminder.verify", "reminder.budget", "reminder.plan",
+		"tool.spawn_agent.description", "tool.report_findings.description", "reminder.budget", "reminder.plan",
 		"note.nested-held", "subagent.preamble", "subagent.shell", "subagent.explore", "compact.system", "side.question",
 		"section.tools-off", "command.review", "command.init", "skill.debugging", "file.settings", "file.lsp"} {
 		if _, ok := ids[id]; !ok {
@@ -28,7 +28,7 @@ func TestCustomizeListsEveryKindOfBuiltin(t *testing.T) {
 	if it := ids["skill.debugging"]; it.Enabled == nil || !*it.Enabled || it.Kind != custom.KindSkill {
 		t.Fatalf("skill row %+v", it)
 	}
-	if ids["reminder.verify"].Vars[0] != "files" {
+	if ids["reminder.plan"].Vars[0] != "steps" {
 		t.Fatal("placeholders are listed")
 	}
 }
@@ -116,8 +116,8 @@ func TestCustomizeChecksSettingsFiles(t *testing.T) {
 		t.Fatalf("settings %+v", s)
 	}
 	// Placeholders a text dropped are reported, and the text still saves.
-	st, err := rt.CustomSet("reminder.verify", "Run the tests before you stop.")
-	if err != nil || len(st.Missing) != 1 || st.Missing[0] != "files" {
+	st, err := rt.CustomSet("reminder.plan", "Keep going before you stop.")
+	if err != nil || len(st.Missing) != 1 || st.Missing[0] != "steps" {
 		t.Fatalf("missing %v %+v", err, st.Missing)
 	}
 }

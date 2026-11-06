@@ -234,3 +234,31 @@ func TestPlanStaleListDoesNotFailTurn(t *testing.T) {
 		t.Fatalf("reply %q", out.Reply)
 	}
 }
+
+// TestNoCheckNudgeAfterEditing pins the removal of the old
+// check-before-finishing reminder: a turn that only edits code and stops
+// now ends on the model's own answer, with no injected user message.
+func TestNoCheckNudgeAfterEditing(t *testing.T) {
+	prov := &mockProvider{}
+	a, ws := planAgent(t, prov)
+	// Register the real write tool: a call to an unregistered tool errors
+	// out, which would take the old reminder down with it and make this
+	// test pass for the wrong reason.
+	a.tools.Register(&tools.WriteTool{})
+	a.toolDefs = append(a.toolDefs, inference.ToolDefinition{Name: "write", Description: "w"})
+	prov.streams = []streamScript{
+		callRound("w", "write", `{"path":"`+filepath.Join(ws.Dir, "x.go")+`","content":"package x"}`),
+		textRound("done"),
+	}
+	if _, err := a.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 2 {
+		t.Fatalf("a plain edit should end the turn: %d calls", prov.calls)
+	}
+	for _, m := range prov.streamMsgs[1] {
+		if m.Role == "user" && strings.Contains(m.Content, "Before you finish") {
+			t.Fatalf("a check reminder was injected: %q", m.Content)
+		}
+	}
+}

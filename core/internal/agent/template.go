@@ -268,7 +268,6 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		notices:     req.Notices,
 		format:      req.FormatOnWrite,
 		web:         req.Web,
-		verify:      req.VerifyNudge,
 		diagnose:    req.Diagnose,
 		warm:        req.Warm,
 		ledgers:     req.SpendLedgers,
