@@ -213,13 +213,10 @@ func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.Tur
 			continue
 		}
 		// Stats land on the row built from the turn's last message; see
-		// the function comment. Deleted once claimed so a caller reusing
-		// the map does not attach the same cost twice.
-		var turnStats *transcript.TurnStats
-		if stats, ok := statsAt[i]; ok {
-			turnStats = stats
-			delete(statsAt, i)
-		}
+		// the function comment. The lookup is by index, so nothing has
+		// to be consumed from statsAt (and this stays safe for callers
+		// that hand the same map to two views).
+		turnStats := statsAt[i]
 		if msg.IsCompaction() {
 			kind := "compaction"
 			out = append(out, HistoryMessage{
