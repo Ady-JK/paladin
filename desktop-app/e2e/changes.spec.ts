@@ -236,3 +236,52 @@ test("the collapsed card spans the conversation and does not repaint while a tur
 
   await expect(card).toHaveAttribute("aria-expanded", "false");
 });
+
+test("the card sits close to the Context strip below it", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "created" }], callIds: ["t1"] }],
+      files: [{ path: "index.html", status: "created" }],
+    };
+    w.__e2ePatch = "diff --git a/index.html b/index.html\n@@ -0,0 +1 @@\n+<h1>Hi</h1>\n";
+    w.__e2eRunTurn = async (_p: unknown, h: any) => {
+      h?.onTool?.({
+        id: "t1",
+        name: "write",
+        arguments: '{"path":"index.html"}',
+        result: JSON.stringify({ status: "done" }),
+        status: "done",
+      });
+      await new Promise((r) => setTimeout(r, 700));
+      return { reply: "done", index: 0 };
+    };
+  });
+  await page.goto("/");
+  await page.fill("#promptInput", "write it");
+  await page.click("#sendBtn");
+
+  const card = page.locator("#messages .turn-changes").first();
+  await expect(card).toContainText("Edited 1 file");
+  const gap = await page.evaluate(() => {
+    const card = document.querySelector("#messages .turn-changes") as HTMLElement;
+    const ctx = document.getElementById("contextBox") as HTMLElement;
+    const style = getComputedStyle(card);
+    return {
+      // Only the card's own margin is ours to tune: the rest of the gap
+      // is the chat pane's bottom padding plus the footer's top padding,
+      // which are fixed. Asserting the measured gap would depend on how
+      // much content the pane happens to hold.
+      marginBottom: parseFloat(style.marginBottom),
+      marginTop: parseFloat(style.marginTop),
+      // And the two floaters still share an edge, so the smaller margin
+      // reads as a pair rather than a misalignment.
+      sameWidth: Math.abs(card.getBoundingClientRect().width - ctx.getBoundingClientRect().width) < 40,
+    };
+  });
+  expect(gap.marginBottom).toBeLessThanOrEqual(4);
+  expect(gap.marginTop).toBeLessThanOrEqual(12);
+  expect(gap.sameWidth).toBe(true);
+});
