@@ -85,6 +85,7 @@ const READ_METHODS = new Set([
   "memoryGet",
   "memoryConfig",
   "memoryProjects",
+  "contextSources",
   "listSessions",
   "sessionHistory",
   "sessionHistoryPage",

@@ -391,6 +391,19 @@ are used, nothing is downloaded: `gopls`, `typescript-language-server`, `pyright
   (it would run commands from a cloned repo).
 - Files over 1 MB are never sent to a server: they can still be read in pages, they just get no diagnostics.
 
+### The Context box
+
+Everything the core adds to the system prompt on its own — no user trigger, no tool call — is listed in the collapsible
+**Context** strip above the composer: the global AGENTS.md, each AGENTS.override.md / AGENTS.md / CLAUDE.md from the
+`.git` root down to the session folder, the enabled memory stores with entries, the skill catalog, and the MCP server
+notes. Each row shows its path and size and opens to the exact text the prompt carries (the first 24 lines), so a
+repository's implicit context is never a mystery. `contextSources {cwd}` builds the list by rendering the same helpers
+the turn path uses (`instructions.Discover`, `memory.Render`, `tools.SkillCatalog`, `mcpSection`), so the sizes match
+what the model receives; it is cached per folder and re-read every few seconds while the window is visible. Only files
+that actually load appear: a `CLAUDE.md` shadowed by an `AGENTS.md` in the same folder, or a store memory.json
+switches off, is not listed. Files the session folder does not cover — the nested instructions above — are not in the
+box, since the prompt does not carry them either.
+
 ### AGENTS.md in subfolders
 
 The system prompt holds the AGENTS.md files from the project root down to the session folder. In a monorepo the rules
