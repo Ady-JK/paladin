@@ -4,6 +4,7 @@
 
 import type {
   BudgetView,
+  ContextView,
   CustomItem,
   CustomState,
   FileExcerpt,
@@ -146,6 +147,13 @@ export function memorySet(target: MemoryTarget, cwd: string | null, entries: str
 
 export function memoryProjects(): Promise<MemoryProject[]> {
   return invoke<MemoryProject[]>("memoryProjects");
+}
+
+// contextSources lists everything a turn in cwd loads into its system
+// prompt without the user or the agent asking: instruction files,
+// memory stores, the skill catalog and MCP notes.
+export function contextSources(cwd: string | null): Promise<ContextView> {
+  return invoke<ContextView>("contextSources", { cwd });
 }
 
 // memoryRefreshSnapshot drops a session's frozen memory snapshot so its

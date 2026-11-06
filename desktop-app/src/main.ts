@@ -39,6 +39,7 @@ import { initSlash } from "./features/slash";
 import { initSkills } from "./features/skills";
 import { initWindow } from "./features/window";
 import { initResources } from "./features/resources";
+import { clearContextBox, initContextBox, reloadContextSources } from "./features/contextBox";
 import { initMotion } from "./ui/motion";
 import { initUndo } from "./features/undo";
 import { bootLive, initLive, openPendingSession, syncComposer } from "./features/live";
@@ -71,6 +72,8 @@ async function connect(): Promise<void> {
     syncTools();
     void syncBudget();
     void syncThinking();
+    clearContextBox();
+    void reloadContextSources();
     sessionLabelEl.textContent = "—";
     clearUsage();
     clearTodos();
@@ -122,6 +125,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initLive((id) => void openSession(id));
   initUsage();
   initResources();
+  initContextBox();
 
   modelAdvancedBtn.addEventListener("click", () => {
     closeMenu(modelMenu);

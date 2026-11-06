@@ -40,6 +40,7 @@ import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
 import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
+import { clearContextBox, reloadContextSources } from "./contextBox";
 import { loadJson, saveJson } from "../core/storage";
 import {
   autoOpenChildTabs,
@@ -467,6 +468,7 @@ export async function openSession(id: string): Promise<void> {
     syncMcp();
     syncTools();
     void syncBudget();
+    void reloadContextSources();
 
     sessionLabelEl.textContent = state.sessionId.slice(0, 8);
     paintResources();
@@ -767,6 +769,8 @@ export function newSession(): void {
   syncWorktreeChip();
   syncTools();
   void syncBudget();
+  clearContextBox();
+  void reloadContextSources();
 
   messagesEl.innerHTML = "";
   renderGreeting();

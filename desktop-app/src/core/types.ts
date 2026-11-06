@@ -52,6 +52,31 @@ export type MemoryProject = {
   limit: number;
 };
 
+/**
+ * One file or store the core adds to the system prompt on its own — no
+ * user trigger, no tool call. Content is the injected text, for preview.
+ */
+export type ContextEntry = {
+  kind: "instructions" | "memory" | "skills" | "mcp";
+  scope: string;
+  title: string;
+  path?: string;
+  detail?: string;
+  bytes: number;
+  truncated?: boolean;
+  content?: string;
+};
+
+/** Everything a turn in a folder loads automatically, plus its totals. */
+export type ContextView = {
+  cwd: string;
+  sections: ContextEntry[];
+  bytes: number;
+  files: number;
+  skills: number;
+  mcp: number;
+};
+
 export type SessionInfo = {
   sessionId: string;
   cwd: string;

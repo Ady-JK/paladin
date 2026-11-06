@@ -205,6 +205,36 @@ async function __paladinBaseInvoke(cmd, args) {
       return { frozen: true, stale: !!window.__e2eMemoryStale, changed: window.__e2eMemoryStale ? ["global"] : [] };
     case "memoryConfig":
       return { limits: { user: 1500, global: 2500, project: 4000 }, disabled: [], provider: "file", reviewTurns: 12 };
+    case "contextSources":
+      return (
+        window.__e2eContext || {
+          cwd: (args && args.cwd) || "/home/tester/project",
+          sections: [
+            {
+              kind: "instructions",
+              scope: "global",
+              title: "AGENTS.md",
+              path: "/home/tester/.config/paladin/config/AGENTS.md",
+              detail: "Your global instructions, added to every session",
+              bytes: 21,
+              content: "Answer in short sentences.",
+            },
+            {
+              kind: "instructions",
+              scope: "project",
+              title: "AGENTS.md",
+              path: "/home/tester/project/AGENTS.md",
+              detail: "Project instructions for /home/tester/project",
+              bytes: 34,
+              content: "Run make test before every commit.",
+            },
+          ],
+          bytes: 55,
+          files: 2,
+          skills: 0,
+          mcp: 0,
+        }
+      );
     case "gitInfo":
       return window.__e2eGit || { repo: false, hasCommits: false };
     case "revertPreview":

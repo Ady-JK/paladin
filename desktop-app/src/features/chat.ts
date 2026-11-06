@@ -30,6 +30,7 @@ import { shortPath } from "../core/format";
 import { syncMcp } from "./mcp";
 import { applyToolDraft, syncTools } from "./toolSwitches";
 import { applyBudgetDraft, syncBudget } from "./budget";
+import { reloadContextSources } from "./contextBox";
 import { showTerminalResult } from "./sidePane";
 import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
 import { clearTags, hasTags, initTags, tagPaths, tagsLabel } from "./tags";
@@ -82,6 +83,8 @@ async function ensureSession(title: string): Promise<void> {
     workspaceInputEl.value = state.cwd;
     setWorktree(opened.worktree);
     syncMcp();
+    // A worktree is a different folder: its instruction files differ.
+    void reloadContextSources();
   }
   await applyToolDraft(state.sessionId);
   syncTools();
