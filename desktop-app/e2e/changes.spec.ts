@@ -241,9 +241,17 @@ test("the card sits close to the Context strip below it", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     const w = window as any;
+    // Enough prior conversation to fill the chat pane, so the live turn's
+    // card really is the last thing above the composer stack.
+    const at = Math.floor(Date.now() / 1000);
+    w.__e2eHistory = Array.from({ length: 24 }, (_, i) =>
+      i % 2 === 0
+        ? { role: "user", content: `question ${i} ${"x".repeat(120)}`, createdAt: at, index: i }
+        : { role: "assistant", content: `answer ${i} ${"y".repeat(120)}`, createdAt: at },
+    );
     w.__e2eChanges = {
       available: true,
-      turns: [{ turn: 0, files: [{ path: "index.html", status: "created" }], callIds: ["t1"] }],
+      turns: [{ turn: 24, files: [{ path: "index.html", status: "created" }], callIds: ["t1"] }],
       files: [{ path: "index.html", status: "created" }],
     };
     w.__e2ePatch = "diff --git a/index.html b/index.html\n@@ -0,0 +1 @@\n+<h1>Hi</h1>\n";
@@ -256,10 +264,13 @@ test("the card sits close to the Context strip below it", async ({ page }) => {
         status: "done",
       });
       await new Promise((r) => setTimeout(r, 700));
-      return { reply: "done", index: 0 };
+      return { reply: "done", index: 24 };
     };
   });
   await page.goto("/");
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await expect(page.locator("#messages .turn-row")).toHaveCount(24);
   await page.fill("#promptInput", "write it");
   await page.click("#sendBtn");
 
@@ -268,20 +279,24 @@ test("the card sits close to the Context strip below it", async ({ page }) => {
   const gap = await page.evaluate(() => {
     const card = document.querySelector("#messages .turn-changes") as HTMLElement;
     const ctx = document.getElementById("contextBox") as HTMLElement;
-    const style = getComputedStyle(card);
+    const chat = document.getElementById("chatView") as HTMLElement;
+    // The card only joins the composer stack when it is the last thing
+    // in the transcript, so make sure the pane is scrolled to the end.
+    chat.scrollTop = chat.scrollHeight;
+    const cardBox = card.getBoundingClientRect();
+    const ctxBox = ctx.getBoundingClientRect();
     return {
-      // Only the card's own margin is ours to tune: the rest of the gap
-      // is the chat pane's bottom padding plus the footer's top padding,
-      // which are fixed. Asserting the measured gap would depend on how
-      // much content the pane happens to hold.
-      marginBottom: parseFloat(style.marginBottom),
-      marginTop: parseFloat(style.marginTop),
-      // And the two floaters still share an edge, so the smaller margin
+      // The visible gap from the card's bottom edge to the Context strip:
+      // 8px, matching the strip's gap above the composer.
+      gap: ctxBox.top - cardBox.bottom,
+      marginTop: parseFloat(getComputedStyle(card).marginTop),
+      // And the two floaters still share an edge, so the smaller gap
       // reads as a pair rather than a misalignment.
-      sameWidth: Math.abs(card.getBoundingClientRect().width - ctx.getBoundingClientRect().width) < 40,
+      sameWidth: Math.abs(cardBox.width - ctxBox.width) < 40,
     };
   });
-  expect(gap.marginBottom).toBeLessThanOrEqual(4);
+  expect(gap.gap).toBeGreaterThanOrEqual(7);
+  expect(gap.gap).toBeLessThanOrEqual(9);
   expect(gap.marginTop).toBeLessThanOrEqual(12);
   expect(gap.sameWidth).toBe(true);
 });

@@ -138,16 +138,29 @@
   flex-direction: column;
   align-items: stretch;
   gap: 0;
-  /* The gap to the Context strip below is this margin plus the pane's
-     own bottom padding and the footer's top padding (24 + 8). Kept at
-     4px so the two floaters sit as closely as the composer does under
-     the strip, instead of leaving a hole above the composer. */
   margin: 12px 0 4px;
   padding: 0;
   overflow: hidden;
   white-space: normal;
   text-align: left;
   border-radius: 16px;
+}
+
+/* When the change card is the last thing in the transcript it reads as
+   part of the composer stack: drop the chat pane's bottom padding and
+   the card's own bottom margin, leaving only the footer's 8px top gap —
+   the same gap the Context strip has above the composer. The card can
+   sit directly under #messages or inside a display:contents live root. */
+#chatView:has(#messages > .turn-change-card:last-child),
+#chatView:has(#messages > :last-child > .turn-change-card:last-child) {
+  padding-bottom: 0;
+}
+#chatView:has(#messages > .turn-change-card:last-child) > #messages > .turn-change-card:last-child,
+#chatView:has(#messages > :last-child > .turn-change-card:last-child)
+  > #messages
+  > :last-child
+  > .turn-change-card:last-child {
+  margin-bottom: 0;
 }
 .turn-change-heading {
   display: flex;
