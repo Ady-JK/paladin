@@ -730,10 +730,12 @@ with the previous `start` loads older rows. `sessionImages` returns
 just the image rows, which is what a finished turn needs to mount a
 screenshot without downloading the transcript.
 
-`sessionHistory` user rows carry `index`, their transcript position, and
-`stats` (`{durationMs, tokens}`, optional) for the turn that row starts,
-so a reopened session shows the same end-of-turn summary the live turn
-did.
+`sessionHistory` rows carry `stats` (`{durationMs, tokens}`, optional) on
+the row that ends a turn — its last row, which is what survives paging:
+a page of the newest rows begins mid-turn, so the turn's first row is
+often not in it. A user row also carries `index`, its transcript
+position. A reopened session therefore shows the same end-of-turn
+summary the live turn did.
 `revertSession` restores the folder to the snapshot taken before that
 user message, exactly: files changed since go back to their old content,
 and files created since are deleted. It then drops that message and

@@ -700,13 +700,17 @@ export function buildHistory(
   };
 
   for (const [index, message] of history.entries()) {
+    // A turn's summary closes it, so a pending one is flushed as soon as
+    // the next turn begins: a user row starts one, and a row that
+    // carries its own stats is the last row of one (see the core's
+    // HistoryViewStats, which anchors the summary on the turn's end).
+    if (pendingStats && (message.role === "user" || message.stats)) {
+      container.append(pendingStats);
+      pendingStats = null;
+    }
     if (message.role === "user") {
       agentBody = null;
       run = null;
-      if (pendingStats) {
-        container.append(pendingStats);
-        pendingStats = null;
-      }
       const turn = createTurn("user", message.content, {
         index: message.index,
         revertable: revertable && message.index !== undefined,
@@ -722,7 +726,6 @@ export function buildHistory(
         }
       }
       container.append(turn.wrapper);
-      if (message.stats) pendingStats = createTurnStats(message.stats);
     } else if (message.role === "assistant" && message.kind === "thinking") {
       if (!agentBody) {
         openAgent("");
@@ -750,6 +753,7 @@ export function buildHistory(
       });
       if (message.image && agentBody) mountImage(agentBody, sessionId, message.image.path, "Browser screenshot");
     }
+    if (message.stats) pendingStats = createTurnStats(message.stats);
   }
   if (pendingStats) container.append(pendingStats);
 }

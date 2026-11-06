@@ -179,9 +179,16 @@ func HistoryView(msgs []transcript.Message) []HistoryMessage {
 	return HistoryViewStats(msgs, nil)
 }
 
-// HistoryViewStats is HistoryView with per-turn costs: statsAt maps a
-// turn's first message index to its cost, and the user row that starts
-// that turn carries it.
+// HistoryViewStats is HistoryView with per-turn costs: statsAt maps the
+// transcript index of a turn's last message to that turn's cost, and the
+// row built from that message carries the summary.
+//
+// The end of a turn is the reliable anchor. Its start is not: a resumed
+// turn (a steer, or a parent driving a subagent) begins with an
+// assistant or tool message rather than a user row, and the newest page
+// of a long session begins mid-turn, so the turn's first message need
+// not be in msgs at all. Every page that holds any part of a turn holds
+// its end, so the summary survives paging and a restart.
 func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.TurnStats) []HistoryMessage {
 	calls := map[string]transcript.ToolCall{}
 	for _, msg := range msgs {
@@ -205,11 +212,19 @@ func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.Tur
 		if msg.Replay {
 			continue
 		}
+		// Stats land on the row built from the turn's last message; see
+		// the function comment. Deleted once claimed so a caller reusing
+		// the map does not attach the same cost twice.
+		var turnStats *transcript.TurnStats
+		if stats, ok := statsAt[i]; ok {
+			turnStats = stats
+			delete(statsAt, i)
+		}
 		if msg.IsCompaction() {
 			kind := "compaction"
 			out = append(out, HistoryMessage{
 				Role: "system", Content: msg.Content,
-				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind,
+				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: turnStats,
 			})
 			continue
 		}
@@ -240,6 +255,7 @@ func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.Tur
 				Name:       msg.Name,
 				Arguments:  argsPtr,
 				Status:     &status,
+				Stats:      turnStats,
 			})
 			continue
 		}
@@ -247,8 +263,11 @@ func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.Tur
 			kind := "thinking"
 			out = append(out, HistoryMessage{
 				Role: "assistant", Content: msg.Reasoning,
-				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind,
+				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: turnStats,
 			})
+			// The thinking row took the summary; the reply starts a
+			// second row for the same message.
+			turnStats = nil
 		}
 		if !msg.Visible() {
 			continue
@@ -273,14 +292,16 @@ func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.Tur
 			Content:     content,
 			CreatedAt:   msg.CreatedAt.Unix(),
 			Attachments: msg.Attachments,
+			Stats:       turnStats,
 		}
 		if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
 			idx := i
 			row.Index = &idx
-			row.Stats = statsAt[i]
 		}
 		out = append(out, row)
 	}
+	// A page can start in the middle of a turn, so the turn's first
+	// message may not be in msgs at all.
 	if out == nil {
 		out = []HistoryMessage{}
 	}

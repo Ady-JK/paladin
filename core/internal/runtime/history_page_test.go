@@ -129,7 +129,8 @@ func TestSessionImagesReportsOnlyImageRows(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 // A turn's persisted stats reach the history row the renderer anchors
-// the summary on.
+// the summary on: the turn's last row, which every page holding any part
+// of that turn contains.
 func TestSessionHistoryCarriesTurnStats(t *testing.T) {
 	rt, dir := testRuntime(t)
 	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
@@ -157,7 +158,63 @@ func TestSessionHistoryCarriesTurnStats(t *testing.T) {
 	if len(history) != 2 {
 		t.Fatalf("rows = %d", len(history))
 	}
-	if history[0].Stats == nil || history[0].Stats.DurationMs != 65_000 || history[0].Stats.Tokens != 1_234 {
-		t.Fatalf("stats = %+v", history[0].Stats)
+	if history[1].Stats == nil || history[1].Stats.DurationMs != 65_000 || history[1].Stats.Tokens != 1_234 {
+		t.Fatalf("stats = %+v", history[1].Stats)
+	}
+	if history[0].Stats != nil {
+		t.Fatalf("the user row should not carry the summary: %+v", history[0].Stats)
+	}
+}
+
+// A page that starts in the middle of a turn still carries that turn's
+// summary, because the turn's end is in the page even when its start is
+// not. This is what a restarted app shows for a long session.
+func TestSessionHistoryPageKeepsStatsForTheLastTurn(t *testing.T) {
+	rt, dir := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.OpenSession("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := rt.transcripts.Load(dir, sess.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One long turn: a user row, then a run of tool rows, then the reply
+	// that ends it.
+	msgs := []transcript.Message{{Role: transcript.RoleUser, Content: "long"}}
+	for i := 0; i < 8; i++ {
+		msgs = append(msgs, transcript.Message{Role: transcript.RoleTool, Content: "{}", Name: ptr("shell")})
+	}
+	msgs = append(msgs, transcript.Message{Role: transcript.RoleAssistant, Content: "done"})
+	stats := &transcript.TurnStats{DurationMs: 90_000, Tokens: 4_321}
+	if err := stored.AppendTurnWithStats(msgs, stats); err != nil {
+		t.Fatal(err)
+	}
+	// A page of the newest 3 rows begins mid-turn: the user row is gone.
+	page, err := rt.SessionHistoryPage(sess.SessionID, dir, 3, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 3 {
+		t.Fatalf("page rows = %d", len(page.Messages))
+	}
+	found := false
+	for _, row := range page.Messages {
+		if row.Stats != nil {
+			found = true
+			if row.Stats.Tokens != 4_321 {
+				t.Fatalf("stats = %+v", row.Stats)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the page lost the turn summary: %+v", page.Messages)
+	}
+	last := page.Messages[len(page.Messages)-1]
+	if last.Stats == nil || last.Role != "assistant" {
+		t.Fatalf("summary should sit on the turn's last row: %+v", last)
 	}
 }

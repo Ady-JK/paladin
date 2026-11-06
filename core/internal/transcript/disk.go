@@ -111,16 +111,21 @@ func LoadTurns(dir string) ([]Turn, error) {
 }
 
 // Flatten expands turns into messages and maps each turn's stats to the
-// index of its first message, so a history view can attach them.
+// index of its **last** message, so a history view can attach them.
+//
+// The end is the anchor, not the start: it is the one message of a turn
+// that every page holding any part of that turn contains, and a resumed
+// turn has no user row to hang a summary on. See HistoryViewStats.
 func Flatten(turns []Turn) ([]Message, map[int]*TurnStats) {
 	var msgs []Message
 	var stats map[int]*TurnStats
 	for _, t := range turns {
-		if t.Stats != nil {
+		end := len(msgs) + len(t.Messages) - 1
+		if t.Stats != nil && end >= 0 {
 			if stats == nil {
 				stats = map[int]*TurnStats{}
 			}
-			stats[len(msgs)] = t.Stats
+			stats[end] = t.Stats
 		}
 		msgs = append(msgs, t.Messages...)
 	}

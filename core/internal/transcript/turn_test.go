@@ -179,7 +179,9 @@ func TestTurnStatsRoundTrip(t *testing.T) {
 	if len(msgs) != 3 || contents(msgs) != "ask,answer,plain" {
 		t.Fatalf("messages = %s", contents(msgs))
 	}
-	if statsAt[0] == nil || statsAt[0].Tokens != 12_345 {
+	// The turn's cost maps to its last message, the anchor every page
+	// that holds any of the turn also holds. See Flatten.
+	if statsAt[1] == nil || statsAt[1].Tokens != 12_345 {
 		t.Fatalf("statsAt = %+v", statsAt)
 	}
 	if _, ok := statsAt[2]; ok {
