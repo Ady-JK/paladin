@@ -6,11 +6,12 @@
 desktop-app/
 ├── electron/
 │   ├── main.ts      # window + sidecar spawn + JSONL bridge + WebContentsViews
+│   ├── pluginHost.ts # sandboxed plugin:// panels and cards
 │   └── preload.ts   # window.paladin bridge (stream demux, views, shell, windows)
 ├── src/             # renderer: the classic paladin UI (Tailwind, vanilla TS)
 │   ├── main.ts      # bootstrap (imports styles.css so dev picks up utilities)
 │   ├── core/        # api (bridge invoke), bridge (bridge probe+types), dom/format/state/types
-│   ├── features/    # chat, sessions, models, sites, settings, workspace, window, tools
+│   ├── features/    # chat, sessions, models, web, sidePane, pluginPanels, settings, …
 │   ├── ui/          # toast, status
 │   ├── styles.css   # stylesheet entry: imports the sheets below in cascade order
 │   └── styles/      # Tailwind v4 theme (base.css) + one sheet per feature
@@ -64,21 +65,23 @@ tool also accepts PNG, JPEG, GIF, and WebP files up to 4 MB and sends them as
 image input to a vision-capable model. Browser screenshots are saved under the
 session's `browser/screenshots/` directory and sent to the model visually.
 
-The Agent header keeps the new side chat, browser, terminal, history, and close
-actions visible in either layout, even when the side pane is closed. The
-history menu contains the Split/Tabs choice: split shows chat beside a side
-view, while tabs show one full-width view at a time. Tabs mode includes the main chat,
-side chats, subagents, and the session browser; switching layouts keeps their
-state. Clicking an `http://localhost` or `http://127.0.0.1` link in an agent
-message opens that session's browser tab inside Paladin. Other links still open
-in the system browser. Repeated local links reuse the browser tab.
+The Agent header keeps the new side chat, Web menu, local browser, terminal,
+history, and close actions visible in either layout, even when the side pane is
+closed. The history menu contains the Split/Tabs choice: split shows the agent
+chat beside a side view, while tabs show one full-width view at a time. Tabs mode
+includes the Agent conversation, side chats, subagents, terminals, web tabs, and
+the session browser; switching layouts keeps their state. Clicking an
+`http://localhost` or `http://127.0.0.1` link in an agent message opens that
+session's local browser tab inside Paladin. Other `https` links open in a web tab
+(the integrated browser below); non-http schemes still go to the system.
 
-Browser navigation and network requests are limited to `http://localhost` and
-`http://127.0.0.1`. Session pages use separate in-memory partitions; a hidden
-parking window keeps each page interactive while another session is visible.
-Electron opens a random Chromium debugging port bound to `127.0.0.1` for the
-life of the app so bundled Playwright can control those pages. Software on the
-same computer with access to that port can inspect other open Electron pages.
+The local browser is separate from the integrated web tabs. Its navigation is
+limited to `http://localhost` and `http://127.0.0.1`; session pages use separate
+in-memory partitions; a hidden parking window keeps each page interactive while
+another session is visible. Electron opens a random Chromium debugging port bound
+to `127.0.0.1` for the life of the app so bundled Playwright can control those
+pages. Software on the same computer with access to that port can inspect other
+open Electron pages.
 
 `build:electron` copies the installed, lockfile-resolved `playwright-core` into
 the packaged Electron output. Electron supplies Chromium, so this feature does
@@ -120,35 +123,52 @@ transcript so tool follow-up rounds stay valid.
 
 ## Web embeds
 
-- Chat pages: `WebContentsView` sharing one persistent partition
-  (`persist:paladin-sites`), so a Google login in one page carries over
-  to "Sign in with Google" in any other. (Per-page partitions isolated
-  `accounts.google.com` cookies, forcing a second login; the old
-  `persist:paladin-gemini` / `persist:paladin-chatgpt` jars are
-  abandoned, which costs one re-login.)
-- Single live guest: showing a chat page destroys the previous page's
-  view outright — each hidden SPA pins a full renderer, and keeping
-  visited pages alive ballooned past 2GB. Reloads stay logged in
-  (partitions persist on disk).
-- Guest pages cannot hijack the mouse: a `dom-ready` stylesheet forces
-  `-webkit-app-region: no-drag` on every guest, so a page-declared drag
-  region (ChatGPT's logged-in header) can never swallow real clicks
-  browser-side; our own title bar stays the drag handle.
-- Views stay alive when switching to Agent (hidden, never destroyed);
-  only the selected view gets bounds. Bounds come from the renderer's
-  `#externalHost` rect, one settle move per layout change.
-- Chat mode has no sidebar: pages are browser-style tabs in a fixed-height
-  strip above `#externalHost` (× removes a page, + adds one). A native
-  view always paints above the renderer's HTML, so nothing may float over
-  it; with no sidebar and a fixed strip the page's bounds never change
-  after it is shown. In Agent mode the sidebar is a floating drawer over
-  the full-width main card (closes on an outside click, Escape, a session
-  pick, or clicking the Agent rail button again; there is no separate
-  sidebar button).
-- Defaults on a fresh profile: Gemini, ChatGPT, Claude, DeepSeek. They are
-  ordinary entries and any of them can be removed like a custom page.
-- Views drop after 60s idle on the Agent tab to reclaim RAM; logins
-  persist in the partition.
+The app has one window. There is no separate Chat window; websites are tabs in
+the agent side pane.
+
+- **Web tabs** are for logged-in chat sites (Gemini, ChatGPT, Claude, DeepSeek)
+  and any `https` address. The title bar's **Web** menu opens a saved site or a
+  blank address bar; each tab has back/forward, reload, an address bar and
+  open-in-system-browser. In split layout the page sits beside the agent; in
+  tabs layout either takes the full width. The conversation tab is labelled
+  **Agent**.
+- **One shared login jar.** Web tabs share one persistent partition
+  (`persist:paladin-sites`), so a Google login in one page carries over to
+  "Sign in with Google" in any other and survives restarts. Per-page partitions
+  isolated `accounts.google.com` cookies, forcing a second login; the old
+  `persist:paladin-gemini` / `persist:paladin-chatgpt` jars are abandoned, which
+  costs one re-login.
+- **Every open tab stays alive.** Switching away detaches and throttles the
+  `WebContentsView` but keeps its renderer and JS state, so a chat can finish
+  answering while you read the agent and switching back is instant. Closing the
+  tab destroys the view; reloading the renderer drops every `web:` view. Open
+  tabs are per session and are not restored across app restarts; the saved site
+  list and logins are.
+- **Truthful toolbar.** Main reports `views:state` (`name,url,title,canGoBack,
+  canGoForward`) after navigations, so link clicks and SPA route changes update
+  the tab title and address bar instead of snapping back to the original URL.
+  `views:back` / `views:forward` drive the real navigation history.
+- **Saved sites** live in `localStorage` under `paladin.sites`, with
+  `paladin.sites.seeded` so deleting a default keeps it deleted. A fresh profile
+  seeds Gemini, ChatGPT, Claude and DeepSeek; all are ordinary, removable
+  entries. Only `https` URLs are accepted.
+- **The local browser is separate.** The globe button opens the agent's local
+  browser tab: localhost/local apps, an empty in-memory per-session partition,
+  element picking and pass-to-agent. It never shares cookies with web tabs.
+  Conversation `https` links open web tabs; `localhost` links open this browser.
+- **Guest pages cannot hijack the mouse:** a `dom-ready` stylesheet forces
+  `-webkit-app-region: no-drag` on every guest, so a page-declared drag region
+  (ChatGPT's logged-in header) can never swallow real clicks browser-side; our
+  own title bar stays the drag handle.
+- **Bounds** come from the active tab's surface rect in the renderer. A native
+  view always paints above the renderer's HTML, so modals hide it while they are
+  open. The sidebar is a floating drawer over the full-width main card (closes
+  on an outside click, Escape, a session pick, or clicking the Agent rail button
+  again; there is no separate sidebar button).
+- **Plugin UI is not a WebContentsView.** Enabled plugins can add side-pane
+  panels and tool-result cards; they are sandboxed iframes served over
+  `plugin://` with a strict CSP, a `window.paladin.plugins` bridge, host-rendered
+  approvals and per-plugin rate limits. See `docs/PLUGIN-UI.md`.
 - The window is frameless: the renderer draws the header and the
   minimize/maximize/close buttons, and `views:setTheme` keeps every guest
   view's pre-paint background in the shell colour so opening a page never

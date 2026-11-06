@@ -3,7 +3,7 @@
 Paladin is an AI coding agent desktop app: a Go core (the "agent-host" sidecar) that
 runs agent turns, tools, MCP servers and sandboxing, plus an Electron desktop UI. The
 two halves talk over **one JSON object per line** on stdio — no HTTP, no SSE, no
-WebSocket. `HOW-IT-WORKS.md` is the full architecture doc (751 lines, accurate and
+WebSocket. `HOW-IT-WORKS.md` is the full architecture doc (830 lines, accurate and
 worth reading before large changes); `desktop-app/PROTOCOL.md` is the wire spec.
 
 ## Layout
@@ -18,11 +18,12 @@ worth reading before large changes); `desktop-app/PROTOCOL.md` is the wire spec.
 | `core/internal/permission/`, `sandbox/`, `redact/` | Approval gate, OS sandbox, stored-key masking |
 | `core/internal/transcript/`, `session/`, `memory/`, `atomicfile/` | Persistence |
 | `core/internal/{hooks,lsp,mcp,skills,extension,commands,prompt}/` | Plug-in surfaces |
-| `desktop-app/electron/` | Electron main + preload: spawns the sidecar, IPC bridge, `WebContentsView`s |
+| `desktop-app/electron/` | Electron main + preload: spawns the sidecar, IPC bridge, `WebContentsView`s (web tabs + local browser), sandboxed `plugin://` host |
 | `desktop-app/src/core/` | `api.ts` (the single bridge seam), `state.ts`, `dom.ts`, `format.ts`, `types.ts` |
-| `desktop-app/src/features/` | 45 feature modules, one concern each (`chat`, `live`, `turnView`, `sessions`, `sidePane`, …) |
+| `desktop-app/src/features/` | 50 feature modules, one concern each (`chat`, `live`, `turnView`, `sessions`, `sidePane`, `web`, `pluginPanels`, …) |
 | `desktop-app/src/styles/` | Tailwind v4 theme (`base.css`) + one sheet per feature |
-| `desktop-app/e2e/` | 49 Playwright specs + `paladin-stub.js` (a fake `window.paladin`) |
+| `desktop-app/e2e/` | 60 Playwright specs + `paladin-stub.js` (a fake `window.paladin`) |
+| `docs/PLUGIN-UI.md` | Plugin panel/card guide; `HOW-IT-WORKS.md` and `desktop-app/PROTOCOL.md` are the architecture and wire specs |
 | `core/bin/`, `desktop-app/{dist,dist-electron,release}/` | Build output — never committed |
 
 No CI config exists in the repo; `make test` and `make lint` are the only gates.
@@ -108,6 +109,18 @@ turn is detached (repaint on attach). Transcripts are paged:
 `attach` returns a `HistoryPage`, older rows come from `sessionHistoryPage`, and a
 finished turn fetches only `sessionImages` instead of the whole transcript.
 
+**Browser surfaces.** There is no separate Chat window. Websites are tabs in the agent
+side pane (`src/features/sidePane.ts`): the title-bar **Web** menu (`src/features/web.ts`)
+opens saved sites or any `https:` address, beside the agent in split layout or full width
+in the tabs layout. Web tabs share one persistent `persist:paladin-sites` partition, so
+logins and Google SSO survive restarts. Each open tab keeps its renderer alive while
+hidden; closing the tab (or reloading the renderer) destroys the view. `views:state`
+feeds the live page title, address bar and back/forward buttons. The agent's **local
+browser** is a separate `browser` tab with an empty per-session in-memory profile, the
+element picker and pass-to-agent. Conversation `https` links open web tabs; localhost
+links open the local browser. Plugin panels and tool-result cards are sandboxed
+`plugin://` iframes, not `WebContentsView`s.
+
 **Styling.** Tailwind v4 with CSS-first `@theme` tokens in `src/styles/base.css`. New
 sheets must be imported into `src/styles.css` — cascade order is load-bearing (later
 files override earlier ones).
@@ -142,6 +155,13 @@ serial. Playwright specs drive the real renderer with the fake bridge from
   snapshots are a hidden git repo under the data dir, never `.git` in your workspace.
 - **`PALADIN_E2E_BROWSER`** picks the Playwright browser; fallback order is that var, then
   `/usr/bin/brave-browser`, then Playwright's Chromium, then any cached headless shell.
+- **Web tabs belong to a session.** Opening the Web menu with no open session shows a toast;
+  open tabs are not restored across app restarts (the saved site list and logins are). Web
+  tabs accept only `https:`; `localhost` and local apps stay in the separate local browser.
+- **Plugin UI is local-only.** Panels and cards read local plugin files over `plugin://`; a
+  remote SSH core shows an explanatory message instead of the Plugins menu. Panel
+  `invokeTool` calls go through the normal permission gate, and the approval card is
+  rendered by the host, never by the plugin.
 - **Agent shell commands run as jobs.** Each command streams its output to `<session>/tmp/<job>.log`;
   a foreground call waits 60 s and then hands a still-running command to the background with a job id.
   `action: "wait"` blocks on that job (60 s default, 300 s cap) — a `sleep` poll would itself become a
