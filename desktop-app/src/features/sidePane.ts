@@ -1611,7 +1611,7 @@ function tabHtml(tab: Tab, active: boolean): string {
 }
 
 function mainTabHtml(): string {
-  return `<div class="pane-tab pane-main-tab${paneOpen ? "" : " is-active"}" data-key="main"><button type="button" role="tab" aria-selected="${!paneOpen}" class="pane-tab-pick" title="Main chat">${icon("comments", "h-3 w-3")}<span>Chat</span></button></div>`;
+  return `<div class="pane-tab pane-main-tab${paneOpen ? "" : " is-active"}" data-key="main"><button type="button" role="tab" aria-selected="${!paneOpen}" class="pane-tab-pick" title="Agent chat">${icon("rl-agent", "h-3 w-3")}<span>Agent</span></button></div>`;
 }
 
 let tabsHtml = "";

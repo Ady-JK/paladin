@@ -348,3 +348,9 @@ test("an https link in the conversation opens in the integrated browser", async 
   await expect(page.locator("#sidePane .web-url")).toHaveValue("https://example.com/docs");
   await expect(page.locator("#paneTabs .pane-tab[data-web]")).toContainText("example.com");
 });
+
+test("the tabs layout names the conversation tab Agent", async ({ page }) => {
+  await startSession(page);
+  await page.locator("#paneLayoutBtn").click();
+  await expect(page.locator('[data-key="main"]')).toContainText("Agent");
+});
