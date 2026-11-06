@@ -482,6 +482,65 @@ func (s *ShellTool) PollNotify(owner string) []NotifyResult {
 	return out
 }
 
+// RunningPeekLines is how much of a still-running command's output a
+// running answer carries: enough for the model to see what the command
+// is doing, without pulling a multi-megabyte log into the turn.
+const (
+	RunningPeekLines = 5
+	// RunningPeekBytes bounds the read that produces that peek.
+	RunningPeekBytes = 8 * 1024
+)
+
+// peekTail returns the last RunningPeekLines lines of a log. It reads a bounded
+// window from the end rather than the whole file, because a running
+// command's log can be arbitrarily large and this is only a status peek.
+// truncated reports that the peek dropped earlier output.
+func peekTail(path string) (lines []string, truncated bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return nil, false
+	}
+	size := st.Size()
+	window := int64(RunningPeekBytes)
+	partial := size > window
+	if !partial {
+		window = size
+	}
+	if _, err := f.Seek(size-window, io.SeekStart); err != nil {
+		return nil, false
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, false
+	}
+	slice := data
+	if partial {
+		// The window starts mid-line; drop that fragment so the first
+		// line shown is a whole one.
+		if i := indexByte(slice, '\n'); i >= 0 {
+			slice = slice[i+1:]
+		} else {
+			return nil, true
+		}
+	}
+	text := ToLF(strings.ToValidUTF8(string(slice), "�"))
+	all := strings.Split(text, "\n")
+	// A log that ends in a newline has an empty trailing element.
+	for len(all) > 0 && all[len(all)-1] == "" {
+		all = all[:len(all)-1]
+	}
+	if len(all) > RunningPeekLines {
+		all = all[len(all)-RunningPeekLines:]
+		truncated = true
+	}
+	return all, truncated
+}
+
 // tailFile returns the last bytes of a log file without reading the
 // whole thing.
 func tailFile(path string) (string, bool) {

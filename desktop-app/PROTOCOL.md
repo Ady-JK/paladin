@@ -756,7 +756,11 @@ jobs send no running reminders and report their completion by default; pass
 `notify: false` to opt out. `wait` takes a `job_id` and `seconds` (default 60,
 capped at 300), blocks until the job ends or the time is up, returns its
 output, and consumes the completion notice it saw, so no second notification
-follows.
+follows. When the job is still running, `wait` — like a foreground yield —
+returns `status: "running"` with `output` holding the last 5 lines of the log
+so far, and a `note` that says earlier output was omitted when the peek read
+only the log's tail. That lets the model judge progress without spending
+another wait. The `status` action reports the same fields but no output.
 They are tracked separately: the sidecar keeps a record in
 `<sessionDir>/jobs/<jobId>.json` (`status` running/done/failed/cancelled,
 `startedAt`, `endedAt`, `exitCode`, `command`, `finalized`) so the app can

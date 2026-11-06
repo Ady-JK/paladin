@@ -2,8 +2,12 @@ package tools
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func startBackground(t *testing.T, tool *ShellTool, ctx *ToolCtx, args string) string {
@@ -134,4 +138,142 @@ func waitForJobEnd(t *testing.T, tool *ShellTool, ctx *ToolCtx, id string) {
 		sleepMs(5)
 	}
 	t.Fatalf("job %s did not end", id)
+}
+
+// A wait that times out carries the last few lines of the job's output,
+// so the model can tell a working command from a stuck one without
+// spending another wait on it.
+func TestShellWaitTimeoutIncludesOutputTail(t *testing.T) {
+	ctx, _ := testCtx(t)
+	tool := NewShellTool()
+	id := startBackground(t, tool, ctx,
+		`{"command":"echo one; echo two; echo three; echo four; echo five; echo six; sleep 30","background":true}`)
+	defer func() {
+		_, _ = tool.Call(json.RawMessage(`{"action":"cancel","job_id":"`+id+`"}`), ctx)
+	}()
+	// Wait for the echoes to land before waiting on the job.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := tool.Call(json.RawMessage(`{"action":"status","job_id":"`+id+`"}`), ctx)
+		var peek ShellResponse
+		_ = json.Unmarshal([]byte(out), &peek)
+		if peek.Output != nil && strings.Contains(*peek.Output, "six") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	out, err := tool.Call(json.RawMessage(`{"action":"wait","job_id":"`+id+`","seconds":1}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp ShellResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != JobRunning {
+		t.Fatalf("status = %q, want running", resp.Status)
+	}
+	if resp.Output == nil {
+		t.Fatalf("running answer carried no output peek: %+v", resp)
+	}
+	want := "two\nthree\nfour\nfive\nsix"
+	if *resp.Output != want {
+		t.Fatalf("peek = %q, want %q", *resp.Output, want)
+	}
+	// The note still tells the model what to do next.
+	if resp.Note == nil || !strings.Contains(*resp.Note, "wait again") {
+		t.Fatalf("note = %v", resp.Note)
+	}
+}
+
+// A job that has printed nothing yet carries no peek rather than an
+// empty string.
+func TestShellWaitTimeoutWithoutOutput(t *testing.T) {
+	ctx, _ := testCtx(t)
+	tool := NewShellTool()
+	id := startBackground(t, tool, ctx, `{"command":"sleep 30","background":true}`)
+	defer func() {
+		_, _ = tool.Call(json.RawMessage(`{"action":"cancel","job_id":"`+id+`"}`), ctx)
+	}()
+
+	out, err := tool.Call(json.RawMessage(`{"action":"wait","job_id":"`+id+`","seconds":1}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp ShellResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != JobRunning {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if resp.Output != nil {
+		t.Fatalf("expected no peek, got %q", *resp.Output)
+	}
+	if resp.Note == nil || !strings.Contains(*resp.Note, "wait again") {
+		t.Fatalf("note = %v", resp.Note)
+	}
+}
+
+// peekTail reads a bounded window from the log's end, so a job that has
+// printed megabytes still yields exactly the last lines.
+func TestPeekTailBoundsLargeLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.log")
+	var buf strings.Builder
+	for i := 0; i < 50000; i++ {
+		buf.WriteString("line-" + strconv.Itoa(i) + "\n")
+	}
+	if err := os.WriteFile(path, []byte(buf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, omitted := peekTail(path)
+	if len(lines) != RunningPeekLines {
+		t.Fatalf("got %d lines, want %d: %v", len(lines), RunningPeekLines, lines)
+	}
+	if !omitted {
+		t.Fatal("a 50k-line log should report earlier output omitted")
+	}
+	if want := "line-49999"; lines[len(lines)-1] != want {
+		t.Fatalf("last line = %q, want %q", lines[len(lines)-1], want)
+	}
+	// Every line shown must be whole, never a fragment of a longer one.
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "line-") {
+			t.Fatalf("partial line in the peek: %q", line)
+		}
+	}
+}
+
+// A log with fewer lines than the peek asks for is returned whole, with
+// nothing claimed as omitted.
+func TestPeekTailShortLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "small.log")
+	if err := os.WriteFile(path, []byte("only one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, omitted := peekTail(path)
+	if omitted {
+		t.Fatal("nothing was omitted from a one-line log")
+	}
+	if len(lines) != 1 || lines[0] != "only one" {
+		t.Fatalf("got %v", lines)
+	}
+}
+
+// An empty or missing log yields no peek at all.
+func TestPeekTailEmptyAndMissing(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.log")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if lines, _ := peekTail(empty); len(lines) != 0 {
+		t.Fatalf("empty log gave %v", lines)
+	}
+	if lines, _ := peekTail(filepath.Join(dir, "nope.log")); len(lines) != 0 {
+		t.Fatalf("missing log gave %v", lines)
+	}
 }

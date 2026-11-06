@@ -166,6 +166,9 @@ serial. Playwright specs drive the real renderer with the fake bridge from
   a foreground call waits 60 s and then hands a still-running command to the background with a job id.
   `action: "wait"` blocks on that job (60 s default, 300 s cap) — a `sleep` poll would itself become a
   second job. Nothing is killed on a timer — only `cancel` (or the user, from the running-jobs panel) stops one.
+  Every answer that reports a command still running (a foreground yield and a timed-out wait) carries `output`
+  with the last 5 lines of the log, so the model can tell a working command from a stuck one without spending
+  another wait; it is a bounded read of the log's tail, not the whole file. A `status` check returns no output.
   When a command exits, any processes it left in its process group are killed, and on Linux every child
   carries `Pdeathsig=SIGKILL` (hooks, MCP and LSP servers too). Starting a server with `&` no longer
   survives the call — use `background: true`. Commands run at the same CPU priority as the user's

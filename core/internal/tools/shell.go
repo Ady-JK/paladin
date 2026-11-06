@@ -201,7 +201,29 @@ func (s *ShellTool) runningResult(id, note string) (string, error) {
 	if !ok {
 		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", id))
 	}
-	return shellResponseJSON(snap.id, JobRunning, nil, nil, nil, snap.log, "", note)
+	// A peek at the tail, so the model can tell a working command from a
+	// stuck one without spending another wait on it. Best effort: a job
+	// that has printed nothing yet (or an unreadable log) carries none.
+	lines, omitted := peekTail(snap.log)
+	var output *string
+	if len(lines) > 0 {
+		text := redact.String(ToLF(StripANSI(strings.Join(lines, "\n"))))
+		output = &text
+		tail := fmt.Sprintf("Last %d line", len(lines))
+		if len(lines) != 1 {
+			tail += "s"
+		}
+		tail += " of its output so far"
+		if omitted {
+			tail += ", earlier output omitted"
+		}
+		if note != "" {
+			note += " " + tail + ":"
+		} else {
+			note = tail + ":"
+		}
+	}
+	return shellResponseJSON(snap.id, JobRunning, nil, output, nil, snap.log, "", note)
 }
 
 // yieldLabel renders the foreground wait for model-facing notes.
