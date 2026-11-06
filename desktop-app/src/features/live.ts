@@ -21,7 +21,7 @@ import { refreshUsage, scheduleUsageRefresh } from "./usage";
 import { onAgentsChanged, renderSessions, scheduleRefreshSessions } from "./sessions";
 import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
-import { syncBudget } from "./budget";
+import { syncBudget, scheduleBudgetRefresh } from "./budget";
 import { noteToolChange, refreshChanges } from "./sidePane";
 import { handlePluginApproval } from "./pluginApproval";
 import { createTurnStats } from "./turnStats";
@@ -398,8 +398,13 @@ function track(e: Entry, ev: TurnEvent): boolean {
       return false;
     case "chat/usage":
       // One LLM call just billed: move the pill's spend and context fill
-      // now, not when the turn ends.
-      if (visible(e.sessionId)) scheduleUsageRefresh();
+      // now, not when the turn ends. The budget chip reads the same
+      // moment's ledger (plus a subagent family's), so it moves with the
+      // header instead of waiting for turn/done.
+      if (visible(e.sessionId)) {
+        scheduleUsageRefresh();
+        scheduleBudgetRefresh();
+      }
       return false;
   }
   return false;

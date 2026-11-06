@@ -253,3 +253,19 @@ export function syncBudget(): Promise<void> {
     },
   );
 }
+
+// scheduleBudgetRefresh coalesces the per-call chat/usage signals into
+// one budgetGet, so the chip's spend follows the header pill call by
+// call instead of waiting for turn/done. budgetGet sums a subagent
+// family's ledgers, which sessionUsage does not, so this is its own
+// read rather than a reuse of the pill's numbers.
+let budgetSyncTimer = 0;
+
+export function scheduleBudgetRefresh(): void {
+  if (budgetSyncTimer) return;
+  budgetSyncTimer = window.setTimeout(() => {
+    budgetSyncTimer = 0;
+    if (!state.sessionId) return;
+    void syncBudget();
+  }, 100);
+}

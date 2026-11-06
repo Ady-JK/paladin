@@ -1118,6 +1118,7 @@ const __e2eHub = (() => {
       onCompact: (compaction) => chat(turn, "chat/compact", { compaction }),
       onApproval: (approval) => chat(turn, "chat/approval", { approval }),
       onBudget: (budget) => chat(turn, "chat/budget", { budget }),
+      onUsage: () => chat(turn, "chat/usage"),
       onHook: (hook) => chat(turn, "chat/hook", { hook }),
       onReasoning: (reasoning) => chat(turn, "chat/reasoning", { reasoning }),
       onThinkingDropped: (thinkingDropped) => chat(turn, "chat/thinkingDropped", { thinkingDropped }),
