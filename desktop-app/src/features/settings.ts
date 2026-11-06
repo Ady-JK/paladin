@@ -65,7 +65,6 @@ import { closeModal, openModal } from "../ui/anim";
 import { icon } from "../icons";
 import { loadProviders, syncModelSelects } from "./models";
 import { refreshThinkingOptions } from "./thinking";
-import { refreshExternalVisibility } from "./sites";
 import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
 import { load as loadAnalytics } from "./analytics";
@@ -451,13 +450,11 @@ export const openSettings = (tab: SettingsNav = "workspace"): void => {
       console.warn(`workspace lookup failed: ${String(error)}`);
     }
   })();
-  void refreshExternalVisibility();
 };
 
 export const closeSettings = (): void => {
   closeProviderCard();
   closeModal(settingsModalEl);
-  void refreshExternalVisibility();
 };
 
 function clearWorkspaceError(): void {

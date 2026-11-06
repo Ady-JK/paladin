@@ -84,16 +84,6 @@ test("browser tab expands to full width and the layout survives a reload", async
   await expect(page.locator("#paneLayoutBtn")).toHaveAttribute("data-layout", "tabs");
 });
 
-test("agent tabs stay out of the external Chat header", async ({ page }) => {
-  await switchLayout(page);
-  await expect(page.locator("#titleBar .pane-strip")).toBeVisible();
-  await page.locator("#chatTab").click();
-  await expect(page.locator("#titleBar .pane-strip")).toBeHidden();
-  await expect(page.locator("#headerIdentity")).toBeVisible();
-  await page.locator("#agentTab").click();
-  await expect(page.locator("#titleBar .pane-strip")).toBeVisible();
-});
-
 test("saved side chat menu stays usable in the unified header", async ({ page }) => {
   await switchLayout(page);
   await page.locator("#paneHistoryBtn").click();

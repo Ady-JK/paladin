@@ -668,17 +668,17 @@ export function setExternalTheme(dark: boolean): Promise<unknown> {
   return bridge().views.setTheme(dark ? "dark" : "light");
 }
 
-// partitionFor names the persistent session partition for a chat page.
-// Every site page shares one partition so a Google login done in one
-// page (Gemini) carries over to "Sign in with Google" in another
-// (ChatGPT): Electron partitions are separate cookie jars, so per-page
-// partitions isolated accounts.google.com cookies from each other.
-// The old per-page names (persist:paladin-gemini / -chatgpt) are
-// abandoned, which costs one re-login and buys cross-page SSO.
+// partitionFor names the persistent session partition for an embedded
+// page. Every web tab shares one partition so a Google login done in one
+// page (Gemini) carries over to "Sign in with Google" in another:
+// Electron partitions are separate cookie jars, so per-page partitions
+// isolated accounts.google.com cookies from each other. The old per-page
+// names (persist:paladin-gemini / -chatgpt) are abandoned, which costs
+// one re-login and buys cross-page SSO.
 const SHARED_SITE_PARTITION = "persist:paladin-sites";
 
 function partitionFor(id: string): string {
-  if (id.toLowerCase().startsWith("site:")) {
+  if (id.toLowerCase().startsWith("web:") || id.toLowerCase().startsWith("site:")) {
     return SHARED_SITE_PARTITION;
   }
   const safe = id.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");

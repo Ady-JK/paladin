@@ -1,11 +1,10 @@
 // window.ts owns the desktop shell chrome: theme, sidebar, window buttons.
 
-import { $, paintIcons, sidebarEl } from "../core/dom";
+import { $, agentTabEl, paintIcons, sidebarEl } from "../core/dom";
 import * as api from "../core/api";
 import { state } from "../core/state";
 import { bridge, hasBridge } from "../core/bridge";
 import { icon } from "../icons";
-import { paintSideVisibility } from "./sites";
 
 export type ColorMode = "system" | "light" | "dark";
 const colorKey = "paladin.colorMode";
@@ -41,16 +40,26 @@ function toggleTheme(): void {
   setColorMode(state.dark ? "light" : "dark");
 }
 
-// The sidebar is a floating drawer over the agent view: the main card
-// keeps its full width whether it is open or not, so nothing reflows.
-// Chat mode has no sidebar at all (its pages are tabs), see sites.ts.
-// pickTimer closes the drawer a beat after a session pick, so a
-// double-click (rename) on the same row can still land.
+// paintSideVisibility shows the floating session drawer. The main card
+// keeps its full width whether the drawer is open or not, so nothing
+// reflows while it animates.
+function paintSideVisibility(): void {
+  const open = !state.collapsed;
+  sidebarEl.classList.toggle("is-closed", !open);
+  sidebarEl.inert = !open;
+  agentTabEl.setAttribute("aria-expanded", String(open));
+  agentTabEl.setAttribute("aria-selected", "true");
+  agentTabEl.title = open ? "Agent: hide the sessions" : "Agent: show the sessions";
+}
+
+// The sidebar is a floating drawer over the agent view. pickTimer closes
+// it a beat after a session pick, so a double-click (rename) on the same
+// row can still land.
 let pickTimer = 0;
 
 function setDrawer(open: boolean): void {
   window.clearTimeout(pickTimer);
-  if (state.sideView !== "agent" || state.collapsed === !open) {
+  if (state.collapsed === !open) {
     return;
   }
   state.collapsed = !open;
@@ -58,7 +67,7 @@ function setDrawer(open: boolean): void {
 }
 
 function drawerOpen(): boolean {
-  return state.sideView === "agent" && !state.collapsed;
+  return !state.collapsed;
 }
 
 // Clicks on these never dismiss the drawer: the rail (the Agent button
@@ -105,6 +114,10 @@ function wireDrawer(): void {
     }
   });
   sidebarEl.addEventListener("dblclick", () => window.clearTimeout(pickTimer));
+  agentTabEl.addEventListener("click", () => {
+    state.collapsed = !state.collapsed;
+    paintSideVisibility();
+  });
 }
 
 async function setupWindow(): Promise<void> {
@@ -166,6 +179,7 @@ export function initWindow(): void {
   });
   $("#themeToggleBtn").addEventListener("click", toggleTheme);
   wireDrawer();
+  paintSideVisibility();
 
   void setupWindow();
 }

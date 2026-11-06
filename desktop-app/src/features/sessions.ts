@@ -34,7 +34,6 @@ import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { persistModelChoice, syncModelSelects } from "./models";
 import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
-import { refreshExternalVisibility } from "./sites";
 import { forkSessionById, renameSessionById } from "./sessionActions";
 import { resetDraft, syncPermChip } from "./permissions";
 import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
@@ -385,7 +384,6 @@ function askDelete(id: string): void {
   if (box) box.checked = false;
 
   openModal(confirmModalEl);
-  void refreshExternalVisibility();
 
   // A worktree with uncommitted work is kept unless the user opts in.
   const wt = session?.worktree;
@@ -407,7 +405,6 @@ function askDelete(id: string): void {
 export function closeConfirm(): void {
   closeModal(confirmModalEl);
   state.pendingDelete = "";
-  void refreshExternalVisibility();
 }
 
 async function deleteSession(id: string, discardWorktree = false): Promise<void> {

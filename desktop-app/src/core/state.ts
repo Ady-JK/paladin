@@ -1,7 +1,7 @@
 // state.ts holds the shared mutable frontend state.
 // Features read and write one object so modules stay free of cycles.
 
-import type { ProviderInfo, SessionInfo, SessionUsage, SideView, SubagentLink } from "./types";
+import type { ProviderInfo, SessionInfo, SessionUsage, SubagentLink } from "./types";
 
 // state is the single mutable store the feature modules share.
 export const state = {
@@ -24,12 +24,8 @@ export const state = {
   collapsed: true,
   highlightedModel: "",
   treeFilter: null as { provider: string; lab: string } | null,
-  sideView: "agent" as SideView,
-  chatPage: "",
   customSites: [] as { name: string; url: string }[],
   pendingWorkspace: "",
-  lastSentRect: "",
-  pageUrlShown: "",
   // onProvidersChanged repaints the settings provider tab after a background
   // catalog refresh; the settings module assigns it at init.
   onProvidersChanged: (() => {}) as () => void,

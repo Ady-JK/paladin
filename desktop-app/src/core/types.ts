@@ -478,11 +478,9 @@ export type TodoEntry = {
   status: string;
 };
 
-export type SideView = "agent" | "chat";
-
-export type ChatEntry = {
-  id: string;
-  title: string;
+// WebSite is one saved site in the integrated browser menu.
+export type WebSite = {
+  name: string;
   url: string;
 };
 

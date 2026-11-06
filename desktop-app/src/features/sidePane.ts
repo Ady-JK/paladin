@@ -54,6 +54,19 @@ type BrowserTab = {
   passing: boolean;
 };
 
+// WebTab is one site in the integrated browser: Gemini, ChatGPT or any
+// https page. It uses the shared persistent profile, so a sign-in done
+// in one site carries to the next and survives restarts.
+export type WebTab = {
+  kind: "web";
+  key: string;
+  sessionId: string;
+  viewName: string;
+  title: string;
+  url: string;
+  body: HTMLElement;
+};
+
 type TerminalTab = {
   kind: "terminal";
   key: string;
@@ -105,7 +118,7 @@ export type PluginTab = {
   stale: boolean;
 };
 
-type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | JobsTab | PluginTab | TerminalTab;
+type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | JobsTab | PluginTab | TerminalTab | WebTab;
 type TabSet = { tabs: Tab[]; active: string };
 
 const tabsEl = $("#paneTabs");
@@ -389,7 +402,7 @@ function navigateBrowser(tab: BrowserTab, url: string): void {
       () => {
         tab.url = url;
         status.textContent = url;
-        syncNativeBrowser();
+        syncNativeSurfaces();
       },
       (error: unknown) => {
         status.textContent = errorText(error);
@@ -416,12 +429,12 @@ function openBrowserTab(sessionId: string, url = ""): void {
   }
   if (url) tab.body.querySelector<HTMLInputElement>(".browser-url")!.value = url;
   set.active = tab.key;
-  if (state.sessionId === sessionId && state.sideView === "agent") showPane();
+  if (state.sessionId === sessionId) showPane();
 }
 
 // Chat links use the same one-browser-per-session view as the agent tool.
 export function openLocalBrowserURL(url: string): void {
-  if (!state.sessionId || state.sideView !== "agent") {
+  if (!state.sessionId) {
     toast("Start a conversation to open a local browser.", "error");
     return;
   }
@@ -844,26 +857,199 @@ function openJobsTab(): void {
   void refreshRunningJobs();
 }
 
-function syncNativeBrowser(): void {
-  if (!hasBridge() || !bridge().browser) return;
-  const set = state.sessionId ? sets.get(state.sessionId) : undefined;
-  const tab = set && activeTab(set);
-  const modalOpen = ["settingsModal", "sessionModal", "confirmModal", "siteModal", "askModal"].some((id) => {
+// ---- integrated web tabs ----
+
+// visibleWeb is the view currently attached, so repeated renders only
+// move its bounds instead of telling main to show it again.
+let visibleWeb = "";
+
+function webHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function normalizeWebUrl(raw: string): string | null {
+  let text = raw.trim();
+  if (!text) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = `https://${text}`;
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function setWebStatus(tab: WebTab, text: string): void {
+  const status = tab.body.querySelector<HTMLElement>(".web-status");
+  if (status) status.textContent = text;
+}
+
+function newWebTab(sessionId: string, url: string, title: string): WebTab {
+  const body = document.createElement("div");
+  body.className = "pane-web";
+  body.innerHTML = `<form class="web-toolbar">
+    <button class="web-reload" type="button" title="Reload" aria-label="Reload">${icon("repeat", "h-3.5 w-3.5")}</button>
+    <input class="web-url" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="https://…" aria-label="Website address" />
+    <button class="web-open" type="submit">Open</button>
+    <button class="web-external" type="button" title="Open in the system browser" aria-label="Open in the system browser">${icon("external", "h-3.5 w-3.5")}</button>
+  </form>
+  <p class="web-status" role="status"></p>
+  <div class="web-surface" aria-label="Website"></div>`;
+  const tab: WebTab = {
+    kind: "web",
+    key: `t${++nextKey}`,
+    sessionId,
+    viewName: "",
+    title: title || (url ? webHost(url) : "New tab"),
+    url,
+    body,
+  };
+  tab.viewName = `web:${tab.key}`;
+  const input = body.querySelector<HTMLInputElement>(".web-url")!;
+  input.value = url;
+  if (url) setWebStatus(tab, url);
+  else setWebStatus(tab, "Type an https address.");
+  body.querySelector<HTMLFormElement>(".web-toolbar")!.addEventListener("submit", (event) => {
+    event.preventDefault();
+    navigateWeb(tab, input.value);
+  });
+  body.querySelector<HTMLButtonElement>(".web-reload")!.addEventListener("click", () => {
+    if (!tab.url) {
+      input.focus();
+      return;
+    }
+    void api.reloadExternalPage(tab.viewName).catch((error) => setWebStatus(tab, errorText(error)));
+  });
+  body.querySelector<HTMLButtonElement>(".web-external")!.addEventListener("click", () => {
+    if (!tab.url) return;
+    void api.openExternalPage(tab.url).catch((error) => setWebStatus(tab, errorText(error)));
+  });
+  return tab;
+}
+
+function navigateWeb(tab: WebTab, raw: string): void {
+  const input = tab.body.querySelector<HTMLInputElement>(".web-url")!;
+  const url = normalizeWebUrl(raw);
+  if (!url) {
+    setWebStatus(tab, "Only secure https addresses can be opened.");
+    input.focus();
+    return;
+  }
+  tab.url = url;
+  tab.title = webHost(url);
+  input.value = url;
+  setWebStatus(tab, "Loading…");
+  paintTabs();
+  // Force the next sync through ensure so an already-visible tab actually
+  // navigates instead of only moving its bounds.
+  visibleWeb = "";
+  syncNativeSurfaces();
+}
+
+// openWebTab opens one site in the current session's side pane. A saved
+// site keeps its name; an address shows its host. Opening the same URL
+// again focuses the tab already showing it.
+export function openWebTab(sessionId: string, url: string, title = ""): WebTab | null {
+  if (!sessionId) return null;
+  const set = browserSet(sessionId);
+  if (url) {
+    const existing = set.tabs.find((t): t is WebTab => t.kind === "web" && t.url === url);
+    if (existing) {
+      set.active = existing.key;
+      if (state.sessionId === sessionId) showPane();
+      return existing;
+    }
+  }
+  const tab = newWebTab(sessionId, url, title);
+  set.tabs.push(tab);
+  set.active = tab.key;
+  if (state.sessionId === sessionId) showPane();
+  if (!url) requestAnimationFrame(() => tab.body.querySelector<HTMLInputElement>(".web-url")?.focus());
+  return tab;
+}
+
+// closeWebTabsForUrl closes every tab showing a URL, e.g. after the user
+// deletes that saved site.
+export function closeWebTabsForUrl(url: string): void {
+  if (!url) return;
+  for (const [sessionId, set] of [...sets]) {
+    for (const tab of [...set.tabs]) {
+      if (tab.kind === "web" && tab.url === url) closeTab(tab.key, true, sessionId);
+    }
+  }
+}
+
+function modalCoveringPage(): boolean {
+  return ["settingsModal", "sessionModal", "confirmModal", "siteModal", "askModal"].some((id) => {
     const el = document.getElementById(id);
     return el && !el.classList.contains("hidden");
   });
-  if (!paneOpen || state.sideView !== "agent" || tab?.kind !== "browser" || modalOpen) {
-    void bridge().browser!.show(null);
+}
+
+function hideWebSurface(): void {
+  if (!visibleWeb) return;
+  visibleWeb = "";
+  void api.hideExternalPage().catch(() => undefined);
+}
+
+// syncNativeSurfaces attaches at most one native page over the side pane:
+// the agent's local browser or the active web tab. Everything else is
+// detached but kept alive, so switching back does not reload a chat.
+function syncNativeSurfaces(): void {
+  const set = state.sessionId ? sets.get(state.sessionId) : undefined;
+  const tab = set && activeTab(set);
+  const covered = modalCoveringPage();
+  const web = paneOpen && !covered && tab?.kind === "web" && tab.url !== "" ? tab : null;
+  const browser = paneOpen && !covered && tab?.kind === "browser" ? tab : null;
+  const browserBridge = hasBridge() ? bridge().browser : undefined;
+
+  if (!web) hideWebSurface();
+  if (!hasBridge()) return;
+
+  if (web) {
+    if (browserBridge) void browserBridge.show(null);
+    const surface = web.body.querySelector<HTMLElement>(".web-surface");
+    const rect = surface?.getBoundingClientRect();
+    if (!rect || rect.width < 1 || rect.height < 1) {
+      hideWebSurface();
+      document.body.classList.remove("guest-visible");
+      return;
+    }
+    document.body.classList.add("guest-visible");
+    const bounds = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    if (visibleWeb === web.viewName) {
+      void api.moveExternalPage(bounds).catch(() => undefined);
+      return;
+    }
+    visibleWeb = web.viewName;
+    setWebStatus(web, web.url);
+    void api.showExternalPage(web.viewName, web.url, bounds).catch((error) => {
+      visibleWeb = "";
+      setWebStatus(web, errorText(error));
+      document.body.classList.remove("guest-visible");
+    });
     return;
   }
-  const surface = tab.body.querySelector<HTMLElement>(".browser-surface")!;
+
+  if (!browser || !browserBridge) {
+    if (browserBridge) void browserBridge.show(null);
+    document.body.classList.remove("guest-visible");
+    return;
+  }
+  const surface = browser.body.querySelector<HTMLElement>(".browser-surface")!;
   const rect = surface.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) {
-    void bridge().browser!.show(null);
+    void browserBridge.show(null);
+    document.body.classList.remove("guest-visible");
     return;
   }
-  void bridge().browser!.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
-  void bridge().browser!.show(tab.sessionId);
+  document.body.classList.add("guest-visible");
+  void browserBridge.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+  void browserBridge.show(browser.sessionId);
 }
 
 // ---- plugin panels ----
@@ -1345,25 +1531,29 @@ function tabHtml(tab: Tab, active: boolean): string {
       ? icon("rl-agent", "h-3 w-3")
       : tab.kind === "browser"
         ? icon("globe", "h-3 w-3")
-        : tab.kind === "terminal"
-          ? icon("terminal", "h-3 w-3")
-          : tab.kind === "jobs"
+        : tab.kind === "web"
+          ? icon("rl-chat", "h-3 w-3")
+          : tab.kind === "terminal"
             ? icon("terminal", "h-3 w-3")
-            : tab.kind === "changes"
-              ? icon("tl-file", "h-3 w-3")
-              : tab.kind === "plugin"
-                ? icon("sl-plug", "h-3 w-3")
-                : icon("comments", "h-3 w-3");
+            : tab.kind === "jobs"
+              ? icon("terminal", "h-3 w-3")
+              : tab.kind === "changes"
+                ? icon("tl-file", "h-3 w-3")
+                : tab.kind === "plugin"
+                  ? icon("sl-plug", "h-3 w-3")
+                  : icon("comments", "h-3 w-3");
   const data =
     tab.kind === "agent"
       ? ` data-agent="${escapeAttr(tab.agentId)}"`
       : tab.kind === "browser"
         ? ` data-browser="${escapeAttr(tab.sessionId)}"`
-        : tab.kind === "chat" && tab.chatId
-          ? ` data-chat="${escapeAttr(tab.chatId)}"`
-          : tab.kind === "plugin"
-            ? ` data-plugin="${escapeAttr(tab.plugin)}/${escapeAttr(tab.view)}"`
-            : "";
+        : tab.kind === "web"
+          ? ` data-web="${escapeAttr(tab.viewName)}"`
+          : tab.kind === "chat" && tab.chatId
+            ? ` data-chat="${escapeAttr(tab.chatId)}"`
+            : tab.kind === "plugin"
+              ? ` data-plugin="${escapeAttr(tab.plugin)}/${escapeAttr(tab.view)}"`
+              : "";
   const busy = tab.kind === "chat" ? tab.busy : tab.kind === "agent" && liveBadge(tab.agentId) === "running";
   return (
     `<div class="pane-tab${active ? " is-active" : ""}" data-key="${tab.key}"${data}>` +
@@ -1407,14 +1597,14 @@ function render(): void {
     closeMenu();
     tabsEl.innerHTML = "";
     bodyEl.replaceChildren();
-    syncNativeBrowser();
+    syncNativeSurfaces();
     return;
   }
   const set = currentSet();
   if (!set) {
     paintTabs();
     bodyEl.innerHTML = `<div class="side-empty"><span class="side-empty-ico">${icon("comments", "h-5 w-5")}</span><p class="side-empty-title">Side chat</p><p class="side-empty-text">Send a message first: side chats are about a conversation.</p></div>`;
-    syncNativeBrowser();
+    syncNativeSurfaces();
     return;
   }
   if (paneOpen && set.tabs.length === 0) {
@@ -1436,7 +1626,7 @@ function render(): void {
     void loadAgent(tab);
   }
   if (tab?.kind === "jobs") paintJobsTab(tab);
-  syncNativeBrowser();
+  syncNativeSurfaces();
 }
 
 // After a resync the shown agent tab re-attaches to fetch the events
@@ -1480,6 +1670,11 @@ function closeTab(key: string, dropBrowser = true, sessionId = state.sessionId):
     dismissedAgents.add(removed.agentId);
   }
   if (removed.kind === "browser" && dropBrowser && hasBridge()) void bridge().browser?.drop(removed.sessionId);
+  if (removed.kind === "web") {
+    if (visibleWeb === removed.viewName) visibleWeb = "";
+    removed.body.remove();
+    void api.dropExternalPage(removed.viewName).catch(() => undefined);
+  }
   if (removed.kind === "terminal") {
     removed.closed = true;
     if (removed.terminalId) void api.terminalClose(removed.sessionId, removed.terminalId).catch(() => undefined);
@@ -1513,6 +1708,10 @@ export function disposeSidePanes(ids: string[]): void {
     }
     if (tab.kind === "browser" && hasBridge()) void bridge().browser?.drop(tab.sessionId);
     if (tab.kind === "browser") stopBrowserPick(tab);
+    if (tab.kind === "web") {
+      if (visibleWeb === tab.viewName) visibleWeb = "";
+      void api.dropExternalPage(tab.viewName).catch(() => undefined);
+    }
     if (tab.kind === "terminal") {
       tab.closed = true;
       if (tab.terminalId) void api.terminalClose(tab.sessionId, tab.terminalId).catch(() => undefined);
@@ -1652,17 +1851,17 @@ export function initSidePane(): void {
     bridge().onEvent?.(terminalEvent);
   }
   const observer = new ResizeObserver(() => {
-    syncNativeBrowser();
+    syncNativeSurfaces();
     const set = state.sessionId ? sets.get(state.sessionId) : null;
     const tab = set && activeTab(set);
     if (paneOpen && tab?.kind === "terminal") tab.fit?.fit();
   });
   observer.observe(sidePaneEl);
   observer.observe(bodyEl);
-  window.addEventListener("resize", syncNativeBrowser);
+  window.addEventListener("resize", syncNativeSurfaces);
   for (const id of ["settingsModal", "sessionModal", "confirmModal", "siteModal"]) {
     const el = document.getElementById(id);
-    if (el) new MutationObserver(syncNativeBrowser).observe(el, { attributes: true, attributeFilter: ["class"] });
+    if (el) new MutationObserver(syncNativeSurfaces).observe(el, { attributes: true, attributeFilter: ["class"] });
   }
   new MutationObserver((records) => {
     if (
@@ -1672,7 +1871,7 @@ export function initSidePane(): void {
           .some((node) => node instanceof HTMLElement && node.id === "askModal"),
       )
     ) {
-      syncNativeBrowser();
+      syncNativeSurfaces();
     }
   }).observe(document.body, { childList: true });
   changesBtn.addEventListener("click", () => openChangesTab(null));

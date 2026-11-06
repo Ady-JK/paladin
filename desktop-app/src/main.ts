@@ -29,7 +29,7 @@ import { initSidePane } from "./features/sidePane";
 import { initPluginPanels } from "./features/pluginPanels";
 import { initPluginCards } from "./features/pluginCards";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
-import { closeNewSite, initSites, openNewSite, refreshExternalVisibility } from "./features/sites";
+import { closeNewSite, initWeb } from "./features/web";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
 import { initMemory } from "./features/memory";
@@ -110,7 +110,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initSkills();
   initModelPicker();
   initThinking();
-  initSites();
+  initWeb();
   initSessionDialog();
   initSettings(connect);
   initMemory();
@@ -138,11 +138,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   $("#newSessionBtn").addEventListener("click", () => {
-    if (state.sideView === "chat") {
-      openNewSite();
-    } else {
-      void openNewSession();
-    }
+    void openNewSession();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -156,7 +152,6 @@ window.addEventListener("DOMContentLoaded", () => {
     closeFilePicker();
     closeMenu(modelMenu);
     closeUsageDashboard();
-    void refreshExternalVisibility();
   });
 
   void connect();

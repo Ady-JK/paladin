@@ -659,19 +659,9 @@ function showOnly(name: string | null): void {
     layoutVisible();
     return;
   }
-  // Single live guest: showing a chat page destroys every other guest
-  // outright. Each hidden SPA pins a full renderer (~hundreds of MB), so
-  // keeping visited pages alive is what ballooned the app past 2GB.
-  // Reloads stay logged in (partitions persist on disk); the Agent tab
-  // keeps its 60s idle drop instead, so flipping to the agent and back
-  // does not nuke the reference page immediately.
-  if (name && name !== "agent") {
-    for (const other of [...views.keys()]) {
-      if (other !== name) {
-        dropView(other);
-      }
-    }
-  }
+  // A detached guest keeps its renderer and JS state, so a chat site
+  // keeps answering while the agent is on screen and switching tabs is
+  // instant. The tab owns the lifetime: closing the web tab drops it.
   for (const [, entry] of views) {
     try {
       win.contentView.removeChildView(entry.view);
@@ -781,7 +771,12 @@ function createWindow(): void {
   // A renderer reload drops every plugin frame; their grants must go too,
   // or stale panels would keep counting against the caps.
   win.webContents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame) panels.clear();
+    if (!details.isMainFrame) return;
+    panels.clear();
+    // The renderer reloads with no tabs, so its web views have no owner.
+    for (const name of [...views.keys()]) {
+      if (name.startsWith("web:")) dropView(name);
+    }
   });
 
   if (!app.isPackaged && process.argv.includes("--smoke-browser")) {

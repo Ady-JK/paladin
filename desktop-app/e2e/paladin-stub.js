@@ -1334,15 +1334,31 @@ window.paladin = {
     return id;
   },
   views: {
-    ensure: async () => true,
-    show: async () => true,
-    setBounds: async () => {
+    ensure: async (name, url, partition) => {
+      window.__e2eViewEnsures = (window.__e2eViewEnsures || []).concat([{ name, url, partition }]);
+      return true;
+    },
+    show: async (name) => {
+      window.__e2eViewShown = name;
+      return true;
+    },
+    setBounds: async (bounds) => {
+      window.__e2eViewBounds = bounds;
       window.__e2eMoves = (window.__e2eMoves || 0) + 1;
       return true;
     },
-    navigate: async () => true,
-    reload: async () => true,
-    drop: async () => true,
+    navigate: async (name, url) => {
+      window.__e2eViewEnsures = (window.__e2eViewEnsures || []).concat([{ name, url }]);
+      return true;
+    },
+    reload: async (name) => {
+      window.__e2eViewReloads = (window.__e2eViewReloads || []).concat([name]);
+      return true;
+    },
+    drop: async (name) => {
+      window.__e2eViewDrops = (window.__e2eViewDrops || []).concat([name]);
+      return true;
+    },
     setTheme: async () => true,
   },
   plugins: {

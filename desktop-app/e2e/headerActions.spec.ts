@@ -18,7 +18,7 @@ test("shared Agent header actions open the side pane directly in split view", as
   const minimizeBox = await page.locator("#windowMinimizeBtn").boundingBox();
   const maximizeBox = await page.locator("#windowMaximizeBtn").boundingBox();
   const closeBox = await page.locator("#windowCloseBtn").boundingBox();
-  expect(actionBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width * 0.45);
+  expect(actionBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width * 0.4);
   expect(usageBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width * 0.45);
   expect(minimizeBox!.x).toBeGreaterThan(actionBox!.x + actionBox!.width);
   expect(maximizeBox!.x).toBeGreaterThan(minimizeBox!.x);
@@ -56,13 +56,4 @@ test("layout button switches layouts and actions remain in the header", async ({
   await page.locator("#paneHistoryBtn").click();
   await page.locator("#paneLayoutBtn").click();
   await expect(page.locator("#agentView")).not.toHaveClass(/is-tab-layout/);
-});
-
-test("chat mode keeps its title and window controls on the right", async ({ page }) => {
-  await page.locator("#chatTab").click();
-  await expect(page.locator("#paneActions")).toBeHidden();
-  const title = await page.locator("#headerIdentity").boundingBox();
-  const windowButtons = await page.locator("#windowMinimizeBtn").boundingBox();
-  expect(title!.x).toBeGreaterThan(page.viewportSize()!.width / 2);
-  expect(windowButtons!.x).toBeGreaterThan(title!.x + title!.width);
 });

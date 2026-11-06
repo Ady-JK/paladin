@@ -26,7 +26,6 @@ import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { pickModel } from "./models";
 import { newSession, refreshSessions } from "./sessions";
-import { refreshExternalVisibility } from "./sites";
 import { crumbsHTML, filterEntries, getShowHidden, rowsHTML, setShowHidden, type PickerSelection } from "./picker";
 import { syncMcp } from "./mcp";
 
@@ -116,14 +115,12 @@ export async function openNewSession(): Promise<void> {
   newSessionFolderSearchEl.value = "";
   newSessionShowHiddenEl.checked = showHidden;
   openModal(sessionModalEl);
-  void refreshExternalVisibility();
 
   await browseNewSession();
 }
 
 export function closeNewSession(): void {
   closeModal(sessionModalEl);
-  void refreshExternalVisibility();
 }
 
 function startNewSession(): void {

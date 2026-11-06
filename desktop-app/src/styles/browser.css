@@ -104,3 +104,216 @@
   flex: 1;
   background: #fff;
 }
+
+/* ---- Integrated web tabs (saved sites + any https address) ---- */
+.pane-web {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  background: #fff;
+  color: var(--color-slate-800);
+}
+.dark .pane-web {
+  background: var(--color-slate-900);
+  color: var(--color-slate-200);
+}
+.web-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-slate-200);
+}
+.dark .web-toolbar {
+  border-color: var(--color-slate-800);
+}
+.web-url {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 9px;
+  background: var(--color-slate-50);
+  color: inherit;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.dark .web-url {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-850);
+}
+.web-open,
+.web-reload,
+.web-external {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  padding: 6px 9px;
+  font-size: 12px;
+  color: var(--color-slate-600);
+}
+.dark .web-open,
+.dark .web-reload,
+.dark .web-external {
+  color: var(--color-slate-300);
+}
+.web-open:hover,
+.web-reload:hover,
+.web-external:hover {
+  background: rgb(128 128 128 / 0.12);
+}
+.web-url:focus-visible,
+.web-toolbar button:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+.web-status {
+  min-height: 24px;
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--color-slate-200);
+  color: var(--color-slate-500);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dark .web-status {
+  border-color: var(--color-slate-800);
+}
+.web-surface {
+  min-height: 0;
+  flex: 1;
+  background: #fff;
+}
+.dark .web-surface {
+  background: var(--color-slate-950);
+}
+
+/* The Web menu in the title bar. */
+.web-menu {
+  width: 320px;
+  padding: 0;
+  overflow: hidden;
+}
+.web-menu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 9px 11px 7px;
+  border-bottom: 1px solid var(--color-slate-200);
+  color: var(--color-slate-700);
+  font-size: 11px;
+  font-weight: 600;
+}
+.dark .web-menu-head {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.web-menu-hint {
+  color: var(--color-slate-500);
+  font-size: 10px;
+  font-weight: 400;
+}
+.web-menu-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 5px;
+}
+.web-site-row {
+  display: flex;
+  align-items: center;
+  border-radius: 9px;
+}
+.web-site-row:hover {
+  background: var(--color-slate-100);
+}
+.dark .web-site-row:hover {
+  background: rgb(255 255 255 / 0.07);
+}
+.web-site-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  text-align: left;
+}
+.web-site-ico {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 7px;
+  background: rgb(128 128 128 / 0.12);
+  color: var(--color-accent-600);
+}
+.dark .web-site-ico {
+  color: var(--color-accent-400);
+}
+.web-site-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.web-site-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-800);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dark .web-site-name {
+  color: var(--color-slate-100);
+}
+.web-site-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-500);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+}
+.web-site-del {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  margin-right: 5px;
+  border-radius: 6px;
+  color: var(--color-slate-400);
+}
+.web-site-del:hover {
+  background: rgb(244 63 94 / 0.12);
+  color: #be123c;
+}
+.dark .web-site-del:hover {
+  color: #fda4af;
+}
+.web-menu-action {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-slate-200);
+  text-align: left;
+  color: var(--color-slate-600);
+  font-size: 12px;
+}
+.dark .web-menu-action {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+.web-menu-action:hover {
+  background: var(--color-slate-100);
+}
+.dark .web-menu-action:hover {
+  background: rgb(255 255 255 / 0.07);
+}
