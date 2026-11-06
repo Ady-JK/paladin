@@ -46,8 +46,11 @@ export interface PaladinBridge {
     setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<boolean>;
     navigate: (name: string, url: string) => Promise<boolean>;
     reload: (name: string) => Promise<boolean>;
+    back: (name: string) => Promise<boolean>;
+    forward: (name: string) => Promise<boolean>;
     drop: (name: string) => Promise<boolean>;
     setTheme: (theme: "dark" | "light") => Promise<boolean>;
+    onState: (cb: (state: unknown) => void) => () => void;
   };
   browser?: {
     open: (sessionId: string, url: string) => Promise<unknown>;

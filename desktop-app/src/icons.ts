@@ -62,6 +62,7 @@ const ICONS: Record<string, Icon> = {
   paperplane: { d: "M22 2 11 13m11-11L9 22l2-9 9-11Z" },
   pause: { d: "M8 5v14M16 5v14", line: true },
   "chevron-down": { d: "m6 9 6 6 6-6", line: true },
+  "chevron-left": { d: "m15 6-6 6 6 6", line: true },
   "chevron-right": { d: "m9 6 6 6-6 6", line: true },
   "angles-left": { d: "m11 17-5-5 5-5m6 10 5-5-5-5", line: true },
   brain: {

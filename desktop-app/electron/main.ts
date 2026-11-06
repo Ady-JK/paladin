@@ -621,9 +621,36 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
     popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   });
   defuseGuestDrag(view);
+  const report = (): void => reportViewState(name, view);
+  view.webContents.on("did-navigate", report);
+  view.webContents.on("did-navigate-in-page", report);
+  view.webContents.on("page-title-updated", report);
   views.set(name, { view, url, partition });
   view.webContents.loadURL(url).catch(() => undefined);
   return view;
+}
+
+// reportViewState tells the renderer where a web tab really is after a
+// link click, a redirect or an SPA route change. Without it the tab's
+// saved URL would navigate the page back on the next show.
+function reportViewState(name: string, view: WebContentsView): void {
+  const w = liveWindow();
+  if (!w) return;
+  try {
+    const contents = view.webContents;
+    if (contents.isDestroyed()) return;
+    const tracked = views.get(name);
+    if (tracked && /^https?:/i.test(contents.getURL())) tracked.url = contents.getURL();
+    w.webContents.send("views:state", {
+      name,
+      url: contents.getURL(),
+      title: contents.getTitle(),
+      canGoBack: contents.navigationHistory.canGoBack(),
+      canGoForward: contents.navigationHistory.canGoForward(),
+    });
+  } catch {
+    // The view is being dropped.
+  }
 }
 
 function layoutVisible(): void {
@@ -1075,6 +1102,18 @@ app
     });
     handleTrusted("views:reload", (_e, name: string) => {
       views.get(name)?.view.webContents.reload();
+      return true;
+    });
+    handleTrusted("views:back", (_e, name: string) => {
+      const history = views.get(name)?.view.webContents.navigationHistory;
+      if (!history?.canGoBack()) return false;
+      history.goBack();
+      return true;
+    });
+    handleTrusted("views:forward", (_e, name: string) => {
+      const history = views.get(name)?.view.webContents.navigationHistory;
+      if (!history?.canGoForward()) return false;
+      history.goForward();
       return true;
     });
     handleTrusted("shell:openExternal", (_e, url: unknown) => {

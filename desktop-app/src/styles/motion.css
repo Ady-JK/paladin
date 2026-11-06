@@ -353,12 +353,6 @@
     animation: view-in 220ms ease both;
   }
 
-  /* Fade only: the native page's rect is read as the view appears, so
-     a slide would place it a few pixels off. */
-  #externalView {
-    animation: view-fade 220ms ease both;
-  }
-
   /* ---- Rows drift in ---- */
   .turn-row {
     animation: turn-in 260ms cubic-bezier(0.22, 0.9, 0.36, 1) both;

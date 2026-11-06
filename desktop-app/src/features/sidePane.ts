@@ -892,6 +892,8 @@ function newWebTab(sessionId: string, url: string, title: string): WebTab {
   const body = document.createElement("div");
   body.className = "pane-web";
   body.innerHTML = `<form class="web-toolbar">
+    <button class="web-back" type="button" title="Back" aria-label="Back" disabled>${icon("chevron-left", "h-3.5 w-3.5")}</button>
+    <button class="web-forward" type="button" title="Forward" aria-label="Forward" disabled>${icon("chevron-right", "h-3.5 w-3.5")}</button>
     <button class="web-reload" type="button" title="Reload" aria-label="Reload">${icon("repeat", "h-3.5 w-3.5")}</button>
     <input class="web-url" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="https://…" aria-label="Website address" />
     <button class="web-open" type="submit">Open</button>
@@ -917,6 +919,18 @@ function newWebTab(sessionId: string, url: string, title: string): WebTab {
     event.preventDefault();
     navigateWeb(tab, input.value);
   });
+  body.querySelector<HTMLButtonElement>(".web-back")!.addEventListener("click", () => {
+    if (!tab.url) return;
+    void bridge()
+      .views?.back(tab.viewName)
+      .catch(() => undefined);
+  });
+  body.querySelector<HTMLButtonElement>(".web-forward")!.addEventListener("click", () => {
+    if (!tab.url) return;
+    void bridge()
+      .views?.forward(tab.viewName)
+      .catch(() => undefined);
+  });
   body.querySelector<HTMLButtonElement>(".web-reload")!.addEventListener("click", () => {
     if (!tab.url) {
       input.focus();
@@ -929,6 +943,38 @@ function newWebTab(sessionId: string, url: string, title: string): WebTab {
     void api.openExternalPage(tab.url).catch((error) => setWebStatus(tab, errorText(error)));
   });
   return tab;
+}
+
+// webState follows a web tab's real URL, page title and history. Main
+// reports it after a link click or SPA route change, so showing the tab
+// again never navigates it back to the address it was opened with.
+function webState(raw: unknown): void {
+  if (!raw || typeof raw !== "object") return;
+  const stateEvent = raw as {
+    name?: unknown;
+    url?: unknown;
+    title?: unknown;
+    canGoBack?: unknown;
+    canGoForward?: unknown;
+  };
+  if (typeof stateEvent.name !== "string") return;
+  for (const set of sets.values()) {
+    const tab = set.tabs.find((t): t is WebTab => t.kind === "web" && t.viewName === stateEvent.name);
+    if (!tab) continue;
+    if (typeof stateEvent.url === "string" && /^https?:/i.test(stateEvent.url) && stateEvent.url !== tab.url) {
+      tab.url = stateEvent.url;
+      const input = tab.body.querySelector<HTMLInputElement>(".web-url");
+      if (input && document.activeElement !== input) input.value = stateEvent.url;
+      setWebStatus(tab, stateEvent.url);
+    }
+    if (typeof stateEvent.title === "string" && stateEvent.title.trim()) tab.title = stateEvent.title.trim();
+    const back = tab.body.querySelector<HTMLButtonElement>(".web-back");
+    const forward = tab.body.querySelector<HTMLButtonElement>(".web-forward");
+    if (back) back.disabled = stateEvent.canGoBack !== true;
+    if (forward) forward.disabled = stateEvent.canGoForward !== true;
+    paintTabs();
+    return;
+  }
 }
 
 function navigateWeb(tab: WebTab, raw: string): void {
@@ -1849,6 +1895,7 @@ export function initSidePane(): void {
   if (hasBridge()) {
     bridge().onEvent?.(browserEvent);
     bridge().onEvent?.(terminalEvent);
+    bridge().views?.onState?.(webState);
   }
   const observer = new ResizeObserver(() => {
     syncNativeSurfaces();

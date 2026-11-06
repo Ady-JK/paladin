@@ -276,3 +276,75 @@ test("typing a new address in an open tab navigates it", async ({ page }) => {
     .toBe("https://example.com/");
   expect(await viewShown(page)).toBe("web:t1");
 });
+
+test("page titles and links update the tab, and history buttons drive the page", async ({ page }) => {
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await page.evaluate(() => {
+    (window as any).__e2eViewStateCb({
+      name: "web:t1",
+      url: "https://gemini.google.com/app/abc",
+      title: "Google Gemini",
+      canGoBack: true,
+      canGoForward: false,
+    });
+  });
+  const tab = page.locator("#paneTabs .pane-tab[data-web]");
+  await expect(tab).toContainText("Google Gemini");
+  await expect(page.locator("#sidePane .web-url")).toHaveValue("https://gemini.google.com/app/abc");
+  const back = page.locator("#sidePane .web-back");
+  const forward = page.locator("#sidePane .web-forward");
+  await expect(back).toBeEnabled();
+  await expect(forward).toBeDisabled();
+
+  await back.click();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewBacks || [])).toEqual(["web:t1"]);
+
+  await page.evaluate(() => {
+    (window as any).__e2eViewStateCb({
+      name: "web:t1",
+      url: "https://gemini.google.com/app/abc",
+      title: "Google Gemini",
+      canGoBack: false,
+      canGoForward: true,
+    });
+  });
+  await expect(back).toBeDisabled();
+  await expect(forward).toBeEnabled();
+  await forward.click();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewForwards || [])).toEqual(["web:t1"]);
+});
+
+test("a tab reopened after a link click keeps the new URL", async ({ page }) => {
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await openSite(page, "https://chatgpt.com/");
+  // The hidden Gemini tab navigated to a new route.
+  await page.evaluate(() => {
+    (window as any).__e2eViewStateCb({
+      name: "web:t1",
+      url: "https://gemini.google.com/app/xyz",
+      title: "Gemini chat",
+      canGoBack: true,
+      canGoForward: false,
+    });
+  });
+  await page.locator('#paneTabs .pane-tab[data-web="web:t1"] .pane-tab-pick').click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e2eViewEnsures.at(-1).url))
+    .toBe("https://gemini.google.com/app/xyz");
+});
+
+test("an https link in the conversation opens in the integrated browser", async ({ page }) => {
+  await startSession(page);
+  await page.locator("#messages").evaluate((el) => {
+    el.insertAdjacentHTML(
+      "beforeend",
+      '<a class="md-link" href="#" data-ext="https://example.com/docs">https://example.com/docs</a>',
+    );
+  });
+  await page.locator('#messages a[data-ext="https://example.com/docs"]').click();
+  await expect(page.locator("#sidePane .pane-web")).toBeVisible();
+  await expect(page.locator("#sidePane .web-url")).toHaveValue("https://example.com/docs");
+  await expect(page.locator("#paneTabs .pane-tab[data-web]")).toContainText("example.com");
+});

@@ -6,7 +6,7 @@ import { state } from "../core/state";
 import type { CompactionInfo, RetryInfo, Turn } from "../core/types";
 import * as api from "../core/api";
 import { toast } from "../ui/toast";
-import { openLocalBrowserURL } from "./sidePane";
+import { openLocalBrowserURL, openWebTab } from "./sidePane";
 import { icon } from "../icons";
 
 export function scrollToBottom(): void {
@@ -94,6 +94,7 @@ export function initMessageLinks(): void {
     const url = anchor.getAttribute("data-ext");
     if (url) {
       if (isLocalBrowserURL(url)) openLocalBrowserURL(url);
+      else if (state.sessionId && url.startsWith("https://")) openWebTab(state.sessionId, url);
       else void api.openExternalPage(url).catch((error) => toast(String(error), "error"));
     }
   });

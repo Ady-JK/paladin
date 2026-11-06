@@ -94,8 +94,15 @@ contextBridge.exposeInMainWorld("paladin", {
       ipcRenderer.invoke("views:setBounds", bounds),
     navigate: (name: string, url: string) => ipcRenderer.invoke("views:navigate", name, url),
     reload: (name: string) => ipcRenderer.invoke("views:reload", name),
+    back: (name: string) => ipcRenderer.invoke("views:back", name),
+    forward: (name: string) => ipcRenderer.invoke("views:forward", name),
     drop: (name: string) => ipcRenderer.invoke("views:drop", name),
     setTheme: (theme: "dark" | "light") => ipcRenderer.invoke("views:setTheme", theme),
+    onState: (cb: (state: unknown) => void): (() => void) => {
+      const fn = (_e: unknown, state: unknown): void => cb(state);
+      ipcRenderer.on("views:state", fn);
+      return () => ipcRenderer.removeListener("views:state", fn);
+    },
   },
 
   browser: {

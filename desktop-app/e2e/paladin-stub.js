@@ -1355,6 +1355,20 @@ window.paladin = {
       window.__e2eViewReloads = (window.__e2eViewReloads || []).concat([name]);
       return true;
     },
+    back: async (name) => {
+      window.__e2eViewBacks = (window.__e2eViewBacks || []).concat([name]);
+      return window.__e2eCanGoBack !== false;
+    },
+    forward: async (name) => {
+      window.__e2eViewForwards = (window.__e2eViewForwards || []).concat([name]);
+      return window.__e2eCanGoForward !== false;
+    },
+    onState: (cb) => {
+      window.__e2eViewStateCb = cb;
+      return () => {
+        if (window.__e2eViewStateCb === cb) window.__e2eViewStateCb = null;
+      };
+    },
     drop: async (name) => {
       window.__e2eViewDrops = (window.__e2eViewDrops || []).concat([name]);
       return true;
