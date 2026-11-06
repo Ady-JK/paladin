@@ -9,6 +9,9 @@ export function createTurnStats(stats: TurnStats): HTMLElement {
   const el = document.createElement("div");
   el.className = "turn-stats";
   el.textContent = formatTurnStats(stats);
-  el.title = `${stats.tokens.toLocaleString()} generated tokens`;
+  el.title =
+    stats.genMs > 0
+      ? `${stats.tokens.toLocaleString()} generated tokens in ${(stats.genMs / 1000).toFixed(1)}s of model time`
+      : `${stats.tokens.toLocaleString()} generated tokens`;
   return el;
 }

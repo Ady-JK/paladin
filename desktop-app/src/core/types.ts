@@ -512,8 +512,9 @@ export type WebSite = {
 // TurnState is where a turn sits in the sidecar's turn hub.
 type TurnState = "queued" | "running" | "done";
 
-// TurnStats is what a turn cost: wall time and generated tokens.
-export type TurnStats = { durationMs: number; tokens: number };
+// TurnStats is what a turn cost: wall time, generated tokens, and the
+// part of that wall time spent inside the model calls themselves.
+export type TurnStats = { durationMs: number; tokens: number; genMs: number };
 
 // TurnInfo describes one submitted message (see PROTOCOL.md).
 export type TurnInfo = {

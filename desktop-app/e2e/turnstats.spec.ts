@@ -8,7 +8,7 @@ test("a finished turn shows its duration and token rate", async ({ page }) => {
   await page.addInitScript(() => {
     (window as any).__e2eRunTurn = async () => ({
       reply: "Done.",
-      stats: { durationMs: 609_000, tokens: 63_275 },
+      stats: { durationMs: 609_000, tokens: 63_275, genMs: 609_000 },
     });
   });
   await page.goto("/");
@@ -18,7 +18,7 @@ test("a finished turn shows its duration and token rate", async ({ page }) => {
   const stats = page.locator("#messages .turn-stats");
   await expect(stats).toHaveCount(1);
   await expect(stats).toHaveText("10m 9s · 103.9 tok/s");
-  await expect(stats).toHaveAttribute("title", "63,275 generated tokens");
+  await expect(stats).toHaveAttribute("title", "63,275 generated tokens in 609.0s of model time");
 });
 
 test("a reopened session shows each turn's summary from the transcript", async ({ page }) => {
@@ -29,7 +29,7 @@ test("a reopened session shows each turn's summary from the transcript", async (
     // The core anchors a turn's summary on its last row.
     const history = [
       { role: "user", content: "first", createdAt: 1, index: 0 },
-      { role: "assistant", content: "one", createdAt: 2, stats: { durationMs: 65_000, tokens: 1_300 } },
+      { role: "assistant", content: "one", createdAt: 2, stats: { durationMs: 65_000, tokens: 1_300, genMs: 65_000 } },
       { role: "user", content: "second", createdAt: 3, index: 2 },
       { role: "assistant", content: "two", createdAt: 4 },
     ];
@@ -63,7 +63,7 @@ test("the summary is docked right, in line with the turn's own rows", async ({ p
   await page.addInitScript(() => {
     (window as any).__e2eRunTurn = async () => ({
       reply: "Done.",
-      stats: { durationMs: 60_000, tokens: 6_000 },
+      stats: { durationMs: 60_000, tokens: 6_000, genMs: 60_000 },
     });
   });
   await page.goto("/");
@@ -83,4 +83,47 @@ test("the summary is docked right, in line with the turn's own rows", async ({ p
   const paneRight = pane!.x + pane!.width - 24; // #chatView padding
   expect(Math.abs(statsRight - bubbleRight)).toBeLessThan(12);
   expect(Math.abs(statsRight - paneRight)).toBeLessThan(40);
+});
+
+test("the rate divides by model time, not the turn's wall time", async ({ page }) => {
+  // 6,000 tokens, a 10-minute turn, but only 60s inside the model calls:
+  // a slow turn around a fast model. Dividing by wall time would say
+  // 10.0 tok/s; the model actually generated at 100.0 tok/s.
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    (window as any).__e2eRunTurn = async () => ({
+      reply: "Done.",
+      stats: { durationMs: 600_000, tokens: 6_000, genMs: 60_000 },
+    });
+  });
+  await page.goto("/");
+  await page.fill("#promptInput", "go");
+  await page.click("#sendBtn");
+  const stats = page.locator("#messages .turn-stats");
+  await expect(stats).toHaveCount(1);
+  await expect(stats).toHaveText("10m 0s · 100.0 tok/s");
+});
+
+test("a turn recorded before model time existed shows the duration alone", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    const base = w.__paladinBaseInvoke;
+    const history = [
+      { role: "user", content: "old", createdAt: 1, index: 0 },
+      { role: "assistant", content: "reply", createdAt: 2, stats: { durationMs: 65_000, tokens: 1_300 } },
+    ];
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "sessionHistory") return history;
+      if (cmd === "sessionChanges") return { available: false, turns: [], files: [] };
+      return base(cmd, args);
+    };
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.click('[data-session="sess-notify-1"]');
+  const stats = page.locator("#messages .turn-stats");
+  await expect(stats).toHaveCount(1);
+  // No rate: the old turn never stored how long the model itself ran.
+  await expect(stats).toHaveText("1m 5s");
 });

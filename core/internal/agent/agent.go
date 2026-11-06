@@ -323,6 +323,10 @@ type Agent struct {
 	// outcome reports the same numbers the transcript holds.
 	startedAt  time.Time
 	savedStats *transcript.TurnStats
+	// genMs sums the wall time spent inside the model calls themselves
+	// (each stream, start to finish), so the turn's token rate measures
+	// generation speed rather than turn throughput.
+	genMs int64
 	// savedIndex is the transcript position of the turn's user row, so
 	// the client can place the turn's change card.
 	savedIndex *int
@@ -560,11 +564,33 @@ func (a *Agent) turnStats(resume bool) *transcript.TurnStats {
 	stats := &transcript.TurnStats{
 		DurationMs: time.Since(a.startedAt).Milliseconds(),
 		Tokens:     a.turnUsage.CompletionTokens,
+		GenMs:      a.genMs,
 	}
 	if stats.DurationMs <= 0 && stats.Tokens <= 0 {
 		return nil
 	}
 	return stats
+}
+
+// TimeGen runs one LLM call and adds the wall time it took to the
+// turn's generation clock. It wraps the provider call itself, so the
+// span covers the request, the stream and the final usage chunk, and
+// excludes the tool runs, approvals and retries between calls. A retry
+// that re-enters the loop is timed separately: each call is added once.
+func (a *Agent) TimeGen(call func() error) error {
+	start := time.Now()
+	err := call()
+	a.genMs += time.Since(start).Milliseconds()
+	return err
+}
+
+// timeGenComplete is TimeGen for the buffered completion path, whose
+// provider returns a response rather than just an error.
+func (a *Agent) timeGenComplete(call func() (inference.ToolResponse, error)) (inference.ToolResponse, error) {
+	start := time.Now()
+	resp, err := call()
+	a.genMs += time.Since(start).Milliseconds()
+	return resp, err
 }
 
 // noteCallUsage folds one LLM call's usage into the turn totals and

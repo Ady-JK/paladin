@@ -331,8 +331,10 @@ func (a *Agent) compact(reason string, before int64) error {
 	var resp inference.ToolResponse
 	err := guardProvider(func() error {
 		var cerr error
-		resp, cerr = a.provider.CompleteTools(a.ctx, custom.Text("compact.system"),
-			[]inference.LlmMessage{{Role: "user", Content: prompt}}, nil, a.session.Meta.SessionID)
+		resp, cerr = a.timeGenComplete(func() (inference.ToolResponse, error) {
+			return a.provider.CompleteTools(a.ctx, custom.Text("compact.system"),
+				[]inference.LlmMessage{{Role: "user", Content: prompt}}, nil, a.session.Meta.SessionID)
+		})
 		return cerr
 	})
 	if err == nil && resp.Usage != nil {

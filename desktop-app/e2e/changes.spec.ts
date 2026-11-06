@@ -154,7 +154,7 @@ test("a finished turn shows its file changes even with no live call id", async (
     w.__e2eRunTurn = async () => ({
       reply: "Done.",
       index: 0,
-      stats: { durationMs: 65_000, tokens: 1_000 },
+      stats: { durationMs: 65_000, tokens: 1_000, genMs: 65_000 },
     });
   });
   await page.goto("/");

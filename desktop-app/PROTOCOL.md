@@ -193,10 +193,15 @@ persisted?, reply?, stopped?, cancelled?, awaitingApproval?, error?,
 queuedAt, startedAt?, endedAt?, stats?, index?}`. `index` is the
 transcript position of the turn's user row (absent on a resume turn), so
 the renderer can attach the turn's change card once it ends. `stats` is the turn's cost,
-`{durationMs, tokens}`, where `tokens` counts generated (completion)
-tokens and therefore includes reasoning; it is written on the turn's
-transcript line and repeated on `turn/done` so the renderer can draw the
-summary under the turn without a second read. `awaitingApproval` is true
+`{durationMs, tokens, genMs}`: `tokens` counts generated (completion)
+tokens and therefore includes reasoning, `durationMs` is the whole turn's
+wall time (tool runs, approvals and retries included), and `genMs` is the
+part of it spent inside the model calls themselves, so `tokens / genMs`
+is generation speed while `tokens / durationMs` would be turn
+throughput. Turns recorded before `genMs` existed carry `0` there and the
+renderer shows the duration without a rate. Stats are written on the
+turn's transcript line and repeated on `turn/done` so the renderer can
+draw the summary under the turn without a second read. `awaitingApproval` is true
 while a tool call waits on an approval card. `parentSessionId` marks a
 subagent's turn (the session that gave it the work); the desktop does
 not notify or toast for those.
@@ -730,7 +735,7 @@ with the previous `start` loads older rows. `sessionImages` returns
 just the image rows, which is what a finished turn needs to mount a
 screenshot without downloading the transcript.
 
-`sessionHistory` rows carry `stats` (`{durationMs, tokens}`, optional) on
+`sessionHistory` rows carry `stats` (`{durationMs, tokens, genMs}`, optional) on
 the row that ends a turn — its last row, which is what survives paging:
 a page of the newest rows begins mid-turn, so the turn's first row is
 often not in it. A user row also carries `index`, its transcript

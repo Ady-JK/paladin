@@ -243,12 +243,21 @@ func (s *Session) AppendMessage(msg Message) error {
 	return s.appendMessages([]Message{msg})
 }
 
-// TurnStats is what a turn cost: its wall-clock duration and the
-// generated tokens it billed. It rides on the turn line so a reopened
-// session can show the same summary the live turn did.
+// TurnStats is what a turn cost: its wall-clock duration, the generated
+// tokens it billed and the part of that duration spent inside the model
+// calls themselves. It rides on the turn line so a reopened session can
+// show the same summary the live turn did.
+//
+// GenMs is the model's own time — every LLM call's stream, start to
+// finish, summed. DurationMs covers the whole turn including tool runs,
+// approvals and retries, so tokens over GenMs is generation speed and
+// tokens over DurationMs would be turn throughput. Turns written before
+// GenMs existed decode it as zero, which the client treats as "no rate
+// to show" rather than dividing by it.
 type TurnStats struct {
 	DurationMs int64 `json:"durationMs"`
 	Tokens     int64 `json:"tokens"`
+	GenMs      int64 `json:"genMs"`
 }
 
 // Turn is one transcript line: its messages and, for lines written by

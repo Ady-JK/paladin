@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/session"
+	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -394,4 +396,61 @@ func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
 	if notifyEvents != 1 {
 		t.Fatalf("want 1 notify tool event, got %d", notifyEvents)
 	}
+}
+
+// TestTurnStatsTimesModelCallsOnly pins the token rate's denominator: the
+// turn's genMs counts the model calls, not the wall time a tool spent.
+// A 40ms model reply inside a turn padded by 120ms of tool time must
+// still report roughly the model's own time, or the rate would measure
+// turn throughput instead of generation speed.
+func TestTurnStatsTimesModelCallsOnly(t *testing.T) {
+	sess := testSession(t, "00000000-0000-4000-8000-000000000077")
+	prov := &mockProvider{
+		streams: []streamScript{
+			{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
+				{ID: "c1", Name: "shell", Arguments: `{"cmd":"echo slow"}`}}}}},
+			{chunks: []inference.Chunk{inference.TextChunk("done")}},
+		},
+		afterChunks: func(idx int) {
+			if idx == 0 {
+				time.Sleep(40 * time.Millisecond)
+			}
+		},
+	}
+	a, _, done := newAgentForTest(t, prov, sess, "time it", false, true)
+	defer close(done)
+	// A tool that burns wall time without touching the model clock.
+	a.tools.Register(slowProbe{})
+	outcome, err := a.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats := outcome.Stats
+	if stats == nil {
+		t.Fatal("no stats recorded")
+	}
+	if stats.GenMs <= 0 {
+		t.Fatalf("genMs not recorded: %+v", stats)
+	}
+	// The model slept 40ms; the turn also ran the slow tool twice over.
+	if stats.GenMs >= stats.DurationMs {
+		t.Fatalf("genMs should be a fraction of the turn: %+v", stats)
+	}
+	if stats.GenMs < 30 || stats.GenMs > 110 {
+		t.Fatalf("genMs %d does not reflect the model's 40ms", stats.GenMs)
+	}
+}
+
+// slowProbe is a tool that takes wall time and no model time.
+type slowProbe struct{}
+
+func (p slowProbe) Name() string { return "shell" }
+
+func (p slowProbe) Definition() tools.ToolDefinition {
+	return tools.ToolDefinition{Name: "shell", Parameters: map[string]any{"type": "object"}}
+}
+
+func (p slowProbe) Call(_ json.RawMessage, _ *tools.ToolCtx) (string, error) {
+	time.Sleep(120 * time.Millisecond)
+	return `{"status":"ok","exit_code":0,"output":"slow"}`, nil
 }

@@ -4,12 +4,17 @@
 import type { ProviderInfo, TurnStats } from "./types";
 
 // formatTurnStats renders a finished turn's cost: "10m 9s · 103.9
-// tok/s". The rate uses generated (completion) tokens over the turn's
-// wall time, which is the order of magnitude a provider reports.
+// tok/s". The duration is the turn's wall time; the rate is generation
+// speed — generated (completion) tokens over the time spent inside the
+// model calls themselves, which is the figure a provider dashboard
+// reports. Turns recorded before that model time was stored have no
+// rate to show, so they get the duration alone rather than a rate
+// computed over tool runs and approvals.
 export function formatTurnStats(stats: TurnStats): string {
-  const seconds = Math.max(0, stats.durationMs) / 1000;
-  const rate = seconds > 0 ? stats.tokens / seconds : 0;
-  return `${formatTurnDuration(stats.durationMs)} · ${rate.toFixed(1)} tok/s`;
+  const duration = formatTurnDuration(stats.durationMs);
+  if (!stats.genMs || stats.genMs <= 0) return duration;
+  const rate = stats.tokens / (stats.genMs / 1000);
+  return `${duration} · ${rate.toFixed(1)} tok/s`;
 }
 
 function formatTurnDuration(ms: number): string {

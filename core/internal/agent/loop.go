@@ -144,7 +144,9 @@ func (a *Agent) streamRound() roundResult {
 	go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
 		defer close(prx)
 		providerErr <- guardProvider(func() error {
-			return a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
+			return a.TimeGen(func() error {
+				return a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
+			})
 		})
 	}(append([]inference.LlmMessage(nil), a.messages...), append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
 	var res roundResult
@@ -211,7 +213,9 @@ loop:
 // completion, filling round in. retry asks the loop to start the next
 // round; err ends the turn.
 func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
-	resp, err := a.provider.CompleteTools(a.ctx, a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
+	resp, err := a.timeGenComplete(func() (inference.ToolResponse, error) {
+		return a.provider.CompleteTools(a.ctx, a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
+	})
 	if err != nil {
 		if a.stopRequested() {
 			return false, a.stopWithPartial(round.text)
@@ -382,7 +386,9 @@ func (a *Agent) runPlain() error {
 		defer close(prx)
 		msgs := append([]inference.LlmMessage(nil), a.messages...)
 		providerErr <- guardProvider(func() error {
-			return a.provider.StreamTools(a.ctx, a.system, msgs, nil, a.session.Meta.SessionID, prx, a.done)
+			return a.TimeGen(func() error {
+				return a.provider.StreamTools(a.ctx, a.system, msgs, nil, a.session.Meta.SessionID, prx, a.done)
+			})
 		})
 	}()
 	streamed := false
@@ -437,7 +443,9 @@ loop:
 		return turnStop{}
 	}
 	if !streamed {
-		resp, err := a.provider.CompleteTools(a.ctx, a.system, a.messages, nil, a.session.Meta.SessionID)
+		resp, err := a.timeGenComplete(func() (inference.ToolResponse, error) {
+			return a.provider.CompleteTools(a.ctx, a.system, a.messages, nil, a.session.Meta.SessionID)
+		})
 		if err != nil {
 			if a.stopRequested() {
 				return turnStop{}
