@@ -115,7 +115,7 @@
   .md .md-ol:last-child,
   .md .md-pre:last-child,
   .md .md-quote:last-child,
-  .md .md-table:last-child {
+  .md .md-table-wrap:last-child {
     margin-bottom: 0;
   }
   .md .md-h1 {
@@ -232,13 +232,24 @@
     margin: 0 0 0.5rem;
     color: var(--color-slate-500);
   }
+  /* Tables fill the reading column. Wide headers push the table past the
+     column instead of squeezing cells, so the wrapper scrolls sideways;
+     more than ten rows also get a vertical scroll box. */
+  .md .md-table-wrap {
+    max-width: 100%;
+    margin: 0 0 0.625rem;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  .md .md-table-wrap.is-tall {
+    max-height: 21.5rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .md .md-table {
     border-collapse: collapse;
-    margin: 0 0 0.625rem;
+    width: 100%;
     font-size: 0.75rem;
-    display: block;
-    overflow-x: auto;
-    max-width: 100%;
   }
   .md .md-th,
   .md .md-td {
@@ -249,8 +260,17 @@
   }
   .md .md-th {
     font-weight: 650;
+    white-space: nowrap;
     background: rgb(100 116 139 / 0.1);
     color: var(--color-slate-900);
+  }
+  /* A tall table keeps its header visible while the body scrolls. */
+  .md .md-table-wrap.is-tall .md-th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-slate-100);
+    box-shadow: 0 1px 0 var(--color-slate-200);
   }
   .md .md-link {
     color: var(--color-accent-600);
@@ -284,6 +304,10 @@
   }
   .dark .md .md-th {
     background: rgb(148 163 184 / 0.08);
+  }
+  .dark .md .md-table-wrap.is-tall .md-th {
+    background: var(--color-slate-900);
+    box-shadow: 0 1px 0 var(--color-slate-700);
   }
   .dark .md .md-hr {
     border-top-color: var(--color-slate-700);

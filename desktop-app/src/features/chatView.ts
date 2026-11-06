@@ -45,7 +45,7 @@ export function renderGreeting(): void {
   }
 
   const wrapper = document.createElement("div");
-  wrapper.className = "greet-hero mx-auto w-full max-w-3xl text-xs";
+  wrapper.className = "greet-hero w-full text-xs";
 
   wrapper.innerHTML = `
     <div class="greet-orb"></div>
@@ -147,7 +147,7 @@ export function createTurn(
   const wrapper = document.createElement("div");
   // Block by default so agent text and tool cards stack vertically;
   // the user row becomes a flex row to dock its bubble right.
-  wrapper.className = "turn-row mx-auto w-full max-w-3xl text-xs";
+  wrapper.className = "turn-row w-full text-xs";
 
   const isUser = role === "user";
   const isError = role === "error";

@@ -25,6 +25,22 @@ test("markdown links keep their URL, titles still work, and quotes cannot break 
   expect(bare).not.toMatch(/"\s*onanimationstart=/);
 });
 
+test("markdown tables get a scroll wrapper, taller ones a vertical box", () => {
+  const head = "| Ticket | Owner | Status |\n| --- | --- | --- |\n";
+  const small = renderMarkdown(head + "| PAL-1 | me | open |\n| PAL-2 | you | done |");
+  expect(small).toContain('<div class="md-table-wrap">');
+  expect(small).not.toContain("is-tall");
+  expect(small).toContain('<table class="md-table">');
+  expect(small).toContain('<th class="md-th">Ticket</th>');
+
+  const ten = Array.from({ length: 10 }, (_, i) => `| PAL-${i} | me | open |`).join("\n");
+  expect(renderMarkdown(head + ten)).not.toContain("is-tall");
+
+  const eleven = Array.from({ length: 11 }, (_, i) => `| PAL-${i} | me | open |`).join("\n");
+  const tall = renderMarkdown(head + eleven);
+  expect(tall).toContain('<div class="md-table-wrap is-tall" data-rows="11">');
+});
+
 test("a malicious URL on a web approval card and a todo status stay text", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");

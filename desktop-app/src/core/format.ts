@@ -127,12 +127,19 @@ function renderBlocks(src: string): string {
       const aligns = splitRow(lines[i + 1]).map(alignOf);
       i += 2;
       let body = "";
+      let rows = 0;
       while (i < lines.length && isTableRow(lines[i])) {
         const cells = splitRow(lines[i]);
         body += `<tr>${headCells.map((_, c) => `<td class="md-td"${alignAttr(aligns[c])}>${mdInline(cells[c] ?? "")}</td>`).join("")}</tr>`;
+        rows++;
         i++;
       }
-      html += `<table class="md-table"><thead><tr>${headCells.map((c, k) => `<th class="md-th"${alignAttr(aligns[k])}>${mdInline(c)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+      // More than ten rows become a scroll box so a long table cannot
+      // take over the transcript; wide headers scroll sideways instead
+      // of squeezing every column.
+      const tall = rows > 10 ? " is-tall" : "";
+      const table = `<table class="md-table"><thead><tr>${headCells.map((c, k) => `<th class="md-th"${alignAttr(aligns[k])}>${mdInline(c)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+      html += `<div class="md-table-wrap${tall}"${rows > 10 ? ` data-rows="${rows}"` : ""}>${table}</div>`;
       continue;
     }
     if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(line)) {

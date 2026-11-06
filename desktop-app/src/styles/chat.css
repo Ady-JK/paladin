@@ -72,7 +72,9 @@
 
 /* ---- User message: a muted block docked right. ---- */
 .bubble-user {
-  max-width: 80%;
+  /* The conversation is full width now, so cap the bubble itself: an
+     80%-wide slab on a 1920px window is unreadable. */
+  max-width: min(80%, 42rem);
   border-radius: 14px;
   background: var(--color-slate-100);
   color: var(--color-slate-900);
