@@ -875,11 +875,14 @@ skipped.
 - IPC inputs are validated in main: guest views and
   `shell:openExternal` accept only `http(s)` URLs (plus `mailto:` for
   openExternal), and `views:setBounds` needs finite numbers.
-- WebContentsViews (`views:*` IPC) are independent of the agent: one
-  shared persistent partition (`persist:paladin-sites`) across chat
-  pages so Google SSO cookies carry over, a single live guest (showing
-  a page destroys the previous view; reloads stay logged in), views
-  hidden — never destroyed — on Agent switch, 60s idle drop while hidden.
+- WebContentsViews (`views:*` IPC) back the side pane's web tabs and the
+  agent's local browser. Web tabs use one shared persistent partition
+  (`persist:paladin-sites`) so Google SSO cookies carry over. Each open
+  web tab owns a live guest: switching away detaches and throttles it,
+  and closing the tab (or reloading the renderer) destroys it. The
+  renderer sends `views:back`, `views:forward` and gets `views:state`
+  (`name,url,title,canGoBack,canGoForward`) after navigations so the
+  address bar and tab title stay truthful.
 - The window is frameless; the renderer owns the title bar and sends
   `window:*` for minimize/maximize/close. `views:setTheme` mirrors the
   shell theme onto each guest view's background so the native surface

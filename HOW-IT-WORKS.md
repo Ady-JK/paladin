@@ -38,7 +38,7 @@ flowchart LR
     end
 
     subgraph Renderer["🖥️ Dining room — Renderer (src/)"]
-        UI["Chat view, sidebar,<br/>composer, settings"]
+        UI["Agent view, sidebar,<br/>composer, settings"]
         Live["live.ts<br/>(listens for events)"]
     end
 
@@ -319,7 +319,8 @@ is the authoring guide.
 The agent can read the web two ways. **`web_fetch`** gets one http(s) page and hands the model readable Markdown (or
 plain text / raw HTML): the main content when the page marks it, headings, lists, links, code, tables, no scripts or
 page chrome. Long pages come in chunks (`start_index` / `next_index`). The **`browser`** tool and the side pane's
-browser, which used to open only `localhost`, now open web sites too, for pages that need JavaScript or clicking.
+local browser, which used to open only `localhost`, now open web sites too, for pages that need JavaScript or
+clicking. The separate **Web tabs** (§10) are for you: logged-in Gemini/ChatGPT-style sites beside the agent.
 
 - **Each new site asks first.** The first visit to a domain shows an approval card (once / this session / this folder /
   everywhere / deny). The answer becomes a `web` permission rule (`example.com` also covers its subdomains; `*` is
@@ -664,6 +665,7 @@ flowchart LR
 - **Skills**: packs of instructions the model can pull in when needed (with the `skill` tool), or that you attach to a turn. Paladin ships eight: `debugging`, `test-driven-development`, `safe-refactoring`, `code-review`, `security-review`, `web-research`, `diagrams-and-charts` and `writing-docs`. A skill of the same name in `config/skills/` (global) or `.paladin/skills/` (this folder) replaces a built-in, and `settings.json` `disabledSkills` turns any skill off; Settings → Customize does both.
 - **`/btw [question]`**: whisper a side question to the cook without interrupting. It works **while a turn is running**: Paladin copies the conversation so far (including tools still running), asks the model once with no tools, and shows the answer in a **side chat** tab in the right-hand pane (the speech-bubble button in the title bar opens it). A bare `/btw` just opens an empty side chat, ready to type in. You can keep asking in that tab, open more tabs, and reopen old side chats from the pane's history menu. Side chats are saved next to the session (see §12) but **never added to the main conversation**; their cost counts toward usage and the budget.
 - **Terminal tabs**: the side pane's terminal icon starts a real PTY in the session workspace, with your normal OS permissions. Each tab owns its shell and keeps it running while hidden. This is separate from the agent's sandboxed `shell` tool.
+- **Web tabs**: the title bar's Web menu opens Gemini, ChatGPT, Claude, DeepSeek or any https address as a tab in the side pane, beside the agent in split view or full width in the tabs layout. Saved sites share one persistent profile (`persist:paladin-sites`), so sign-ins and Google SSO carry across sites and survive restarts; an address bar, reload, back/forward and open-in-system-browser sit above each page. A page keeps its renderer and state while its tab exists, even when hidden, so a chat can finish answering while you read the agent; closing the tab drops the view. Clicking an https link in the conversation opens a web tab. This is separate from the agent's local browser tab, which keeps its empty per-session profile, element picker and pass-to-agent.
 - **`! command` and `!! command`**: both run a user command outside the agent sandbox and show its output in the terminal pane. One `!` starts an agent turn after the command finishes, giving the agent the command, exit code and output. Two `!` characters never start a turn or enter agent history.
 
 ---
@@ -777,13 +779,13 @@ flowchart TB
     workingBar["workingBar.ts<br/>'Working…' bar"]
     resources["resources.ts<br/>CPU/RAM per session"]
     todos["todos.ts<br/>plan checklist above composer"]
-    sidePane["sidePane.ts<br/>right pane: side chats + live subagents"]
+    sidePane["sidePane.ts<br/>right pane: side chats,<br/>live subagents, terminals, web tabs"]
 ```
 
 **`live.ts` is the mail sorter.** Every event has a `sessionId`. If it's for the session on screen, it's drawn right away.
 If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
 
-**The sidebar is a drawer.** The app starts with it closed. In the Agent view it floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The Chat view (ChatGPT, Claude…) has no sidebar at all: those pages are real mini-browsers stuck on top of the window, and nothing can be drawn over them, so you switch between them with tabs along the top, like a browser.
+**The sidebar is a drawer.** The app starts with it closed. It floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The separate Chat view is gone: websites live in the side pane's web tabs, so the agent conversation and a Gemini/ChatGPT page can share the window in split view or swap full width in the tabs layout.
 
 ---
 
