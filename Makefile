@@ -39,8 +39,8 @@ app-dev:
 	cd desktop-app && pnpm install --prefer-offline && pnpm build:electron && pnpm dev
 
 test:
-	cd core && go test ./...
-	cd desktop-app && pnpm typecheck && pnpm exec tsc --noEmit -p tsconfig.electron.json && pnpm exec playwright test
+	cd core && go test ./... && go build -o $(AGENT_HOST) ./cmd/agent-host
+	cd desktop-app && pnpm typecheck && pnpm build:electron && pnpm exec playwright test
 
 fmt:
 	cd core && $(GOLANGCI_LINT) fmt ./...

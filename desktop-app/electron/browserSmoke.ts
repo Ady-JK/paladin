@@ -1,8 +1,10 @@
 // Real Electron + Playwright smoke, using only an ephemeral loopback server
 // (web-site names are mapped to it, see main.ts).
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { AddressInfo } from "node:net";
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow, session } from "electron";
 import type { Page } from "@playwright/test";
 import { BrowserManager, type BrowserReply, type BrowserRequest, type EgressSetup } from "./browser";
 
@@ -19,7 +21,8 @@ class FlakyRoutes extends BrowserManager {
 // guardFailureCheck: when Playwright's guard cannot be installed, open
 // fails without loading anything, and a retry guards the page again.
 async function guardFailureCheck(window: () => BrowserWindow | null, egress: EgressSetup, port: number): Promise<void> {
-  const flaky = new FlakyRoutes(window, () => undefined, egress);
+  const events: string[] = [];
+  const flaky = new FlakyRoutes(window, (event) => events.push(event.event), egress);
   const call = (id: string, action: string, extra: Partial<BrowserRequest>): Promise<BrowserReply> =>
     flaky.execute({ event: "browser/request", id, sessionId: "smoke-flaky", action, ...extra });
   try {
@@ -29,6 +32,10 @@ async function guardFailureCheck(window: () => BrowserWindow | null, egress: Egr
     }
     const retry = await call("flaky-2", "open", { url: `http://site-a.test:${port}/` });
     if (!retry.ok) throw new Error(`open after a guard failure: ${retry.error}`);
+    const snapshot = await call("flaky-snapshot", "snapshot", {});
+    if (!snapshot.ok || !events.includes("browser/activity")) {
+      throw new Error("browser tool activity was not reported to the UI");
+    }
     const away = await call("flaky-3", "click", { selector: "#away" });
     const result = away.result as { url?: string; blocked_navigation?: string } | undefined;
     if (!away.ok || !result?.blocked_navigation?.includes("site-b.test") || !result.url?.includes("site-a.test")) {
@@ -83,7 +90,7 @@ export async function runBrowserSmoke(
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(
-      `<html><body><h1>Paladin browser smoke</h1><label>Name <input aria-label="Name"></label><button onclick="document.querySelector('output').textContent='Hello '+document.querySelector('input').value">Greet</button><output></output><a id="route-link" href="${_req.url === "/" ? "/other" : "/"}">Switch page</a><button id="center-target" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%)" onclick="document.querySelector('output').textContent='Picker leaked a click'">Select me</button></body></html>`,
+      `<html><body><h1>Paladin browser smoke</h1><label>Name <input aria-label="Name"></label><button onclick="document.querySelector('output').textContent='Hello '+document.querySelector('input').value">Greet</button><output></output><p id="cookies"></p><script>document.getElementById("cookies").textContent = document.cookie</script><a id="route-link" href="${_req.url === "/" ? "/other" : "/"}">Switch page</a><button id="center-target" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%)" onclick="document.querySelector('output').textContent='Picker leaked a click'">Select me</button></body></html>`,
     );
   });
   await new Promise<void>((resolve, reject) =>
@@ -102,6 +109,18 @@ export async function runBrowserSmoke(
     return reply;
   };
   try {
+    // Personal sign-ins must never be visible to either agent chat.
+    const fixtureURL = `http://127.0.0.1:${port}/`;
+    await session.fromPartition("persist:paladin-sites").cookies.set({
+      url: fixtureURL,
+      name: "personal_fixture",
+      value: "personal-secret-fixture",
+    });
+    await session.fromPartition("paladin-browser-smoke-a").cookies.set({
+      url: fixtureURL,
+      name: "agent_fixture",
+      value: "agent-a-cookie",
+    });
     // The first pages open in panes that are not on screen: Playwright
     // must attach before they load (its navigation guard sees the load),
     // or Chromium holds back a hidden page's timers and it stalls.
@@ -112,6 +131,20 @@ export async function runBrowserSmoke(
     ]);
     if (Date.now() - started > 15_000)
       throw new Error(`the first hidden pages took ${Date.now() - started} ms to open`);
+    const debugPort = Number(
+      readFileSync(path.join(app.getPath("userData"), "DevToolsActivePort"), "utf8").split("\n")[0],
+    );
+    const protectedReply = await browsers.execute({
+      event: "browser/request",
+      id: "debug-test",
+      sessionId: "smoke-protected",
+      action: "open",
+      url: `http://127.0.0.1:${debugPort}/json/version`,
+    });
+    if (protectedReply.ok || !protectedReply.error?.includes("debugging endpoint")) {
+      throw new Error(`agent browser reached the debugging endpoint: ${JSON.stringify(protectedReply)}`);
+    }
+    browsers.drop("smoke-protected");
     for (const id of ["smoke-a", "smoke-b"]) {
       if (browsers.routedLoads(id)[0] !== `http://127.0.0.1:${port}/`) {
         throw new Error(
@@ -129,6 +162,14 @@ export async function runBrowserSmoke(
     const b = await call("smoke-b", "snapshot");
     if (!JSON.stringify(a.result).includes("Hello Ada") || !JSON.stringify(b.result).includes("Hello Grace")) {
       throw new Error("parallel session pages did not stay isolated");
+    }
+    if (
+      !JSON.stringify(a.result).includes("agent-a-cookie") ||
+      JSON.stringify(b.result).includes("agent-a-cookie") ||
+      JSON.stringify(a.result).includes("personal-secret-fixture") ||
+      JSON.stringify(b.result).includes("personal-secret-fixture")
+    ) {
+      throw new Error("personal and per-chat agent browser cookies were not isolated");
     }
     const shot = await call("smoke-a", "screenshot");
     if (!shot.imageBase64 || shot.imageBase64.length < 100) throw new Error("screenshot was empty");

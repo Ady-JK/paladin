@@ -45,6 +45,43 @@ async function emit(page: Page, steps: Array<string | Tool>): Promise<void> {
 
 const runs = (page: Page) => page.locator("#messages [data-tool-run]");
 
+test("an open edit card updates its diff and line counts when the tool changes", async ({ page }) => {
+  await setup(page);
+  const result = { replacements: 1, match_start_line: 1 };
+  await emit(page, [tool("edit-1", "edit", { path: "a.txt", old_string: "old", new_string: "first" }, "ok", result)]);
+  const row = page.locator('.tool-row[data-tool="edit"]');
+  await row.locator(".tool-row-head").click();
+  await expect(row.locator('[data-diffline="add"]')).toContainText("first");
+  await emit(page, [
+    tool("edit-1", "edit", { path: "a.txt", old_string: "old", new_string: "second\nthird" }, "ok", result),
+  ]);
+  await expect(row.locator(".tool-add")).toHaveText("+2");
+  await expect(row.locator('[data-diffline="add"]')).toHaveCount(2);
+  await expect(row).toContainText("second");
+  await expect(row).not.toContainText("first");
+});
+
+test("an unchanged tool update preserves selected text in its open card", async ({ page }) => {
+  await setup(page);
+  const edit = tool("edit-1", "edit", { path: "a.txt", old_string: "old", new_string: "selected" }, "ok", {
+    replacements: 1,
+  });
+  await emit(page, [edit]);
+  const row = page.locator('.tool-row[data-tool="edit"]');
+  await row.locator(".tool-row-head").click();
+  const text = row.locator('[data-diffline="add"] code');
+  await expect(text).toHaveText("selected");
+  await text.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await emit(page, [edit]);
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe("selected");
+});
+
 test("consecutive tool calls fold into one summarized group", async ({ page }) => {
   await setup(page);
   await emit(page, [

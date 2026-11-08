@@ -82,6 +82,7 @@ func (r *AgentRuntime) SetAgentsSink(fn func(AgentsEvent)) {
 type turnSettings struct {
 	Cwd         string
 	Permissions string
+	Mode        string
 	Provider    *string
 	Model       *string
 }
@@ -156,7 +157,7 @@ func (r *AgentRuntime) maxSubagents() int {
 // wait_agent or an earlier turn already took it), which then skips.
 func (m *subagentManager) turnStarted(req agent.Request) (skip bool) {
 	m.mu.Lock()
-	m.last[req.SessionID] = turnSettings{Cwd: req.Cwd, Permissions: req.Permissions, Provider: req.Provider, Model: req.Model}
+	m.last[req.SessionID] = turnSettings{Cwd: req.Cwd, Permissions: req.Permissions, Mode: req.Mode, Provider: req.Provider, Model: req.Model}
 	wake := m.waking[req.SessionID] && req.Resume
 	delete(m.waking, req.SessionID)
 	m.mu.Unlock()
@@ -284,31 +285,96 @@ func (m *subagentManager) resolve(parent transcript.Session, target string) (tra
 		return transcript.Session{}, errors.New("target is required: an agent_id or name from spawn_agent or list_agents")
 	}
 	kids := m.children(parent)
-	var byName []transcript.Session
+	// Full IDs take precedence for compatibility. Short prefixes must be
+	// unique among this parent's children, including completed children.
 	for _, c := range kids {
 		if c.Meta.SessionID == target {
 			return c, nil
 		}
+	}
+	var byName []transcript.Session
+	for _, c := range kids {
 		if c.Meta.Subagent.Name == target {
 			byName = append(byName, c)
 		}
 	}
-	switch len(byName) {
-	case 1:
-		return byName[0], nil
-	case 0:
-		names := make([]string, 0, len(kids))
-		for _, c := range kids {
-			names = append(names, c.Meta.Subagent.Name+" ("+c.Meta.SessionID+")")
-		}
-		known := "none"
-		if len(names) > 0 {
-			known = strings.Join(names, ", ")
-		}
-		return transcript.Session{}, fmt.Errorf("unknown agent %q: it is not a subagent of this session (yours: %s)", target, known)
-	default:
+	if len(byName) > 1 {
 		return transcript.Session{}, fmt.Errorf("agent name %q is ambiguous; use its agent_id", target)
 	}
+	var byID []transcript.Session
+	if len(target) >= 8 {
+		for _, c := range kids {
+			if strings.HasPrefix(c.Meta.SessionID, target) {
+				byID = append(byID, c)
+			}
+		}
+	}
+	if len(byName) == 1 {
+		if len(byID) > 0 && (len(byID) > 1 || byID[0].Meta.SessionID != byName[0].Meta.SessionID) {
+			return transcript.Session{}, fmt.Errorf("agent target %q matches a name and an id; call list_agents for a unique id", target)
+		}
+		return byName[0], nil
+	}
+	if len(byID) == 1 {
+		return byID[0], nil
+	}
+	if len(byID) > 1 {
+		return transcript.Session{}, fmt.Errorf("agent id %q is ambiguous; call list_agents for the full target", target)
+	}
+	names := make([]string, 0, len(kids))
+	for _, c := range kids {
+		names = append(names, c.Meta.Subagent.Name+" ("+m.modelID(parent.Meta.SessionID, c.Meta.SessionID)+")")
+	}
+	known := "none"
+	if len(names) > 0 {
+		known = strings.Join(names, ", ")
+	}
+	return transcript.Session{}, fmt.Errorf("unknown agent %q: it is not a subagent of this session (yours: %s)", target, known)
+}
+
+// modelAgentID returns the shortest unique UUID prefix of at least eight
+// characters. Full IDs remain the persistent and UI-facing identifiers.
+func modelAgentID(id string, ids []string) string {
+	for n := min(8, len(id)); n < len(id); n++ {
+		unique := true
+		for _, other := range ids {
+			if other != id && strings.HasPrefix(other, id[:n]) {
+				unique = false
+				break
+			}
+		}
+		if unique {
+			return id[:n]
+		}
+	}
+	return id
+}
+
+func (m *subagentManager) modelID(parentID, id string) string {
+	parent, err := m.owner(parentID)
+	if err != nil {
+		return id
+	}
+	kids := m.children(parent)
+	ids := make([]string, 0, len(kids))
+	for _, child := range kids {
+		ids = append(ids, child.Meta.SessionID)
+	}
+	prefix := modelAgentID(id, ids)
+	for len(prefix) < len(id) {
+		conflict := false
+		for _, child := range kids {
+			if child.Meta.SessionID != id && child.Meta.Subagent.Name == prefix {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			break
+		}
+		prefix = id[:len(prefix)+1]
+	}
+	return prefix
 }
 
 // forget drops a session being deleted from the manager; without its

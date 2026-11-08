@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -107,6 +108,57 @@ export default { tools: [{
 		if errs[i] != nil || results[i] != float64(10+i) {
 			t.Fatalf("call %d: %v %v", i, results[i], errs[i])
 		}
+	}
+}
+
+func TestRunnerCallsActuallyOverlap(t *testing.T) {
+	pool, pl := poolFor(t, map[string]string{"index.ts": `let waiters=[]; export default {tools:[{name:"wait",description:"wait",parameters:{type:"object"},execute(){return new Promise(resolve=>{waiters.push(resolve);if(waiters.length===4) for(const done of waiters) done("ok");});}}]};`})
+	if _, err := pool.ensure(context.Background(), pl); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 4)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = pool.Call(context.Background(), pl, "wait", json.RawMessage(`{"args":{}}`), 3*time.Second)
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunnerTimeoutStopsLateSideEffects(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "late")
+	pool, pl := poolFor(t, map[string]string{"index.ts": `import {writeFileSync} from "node:fs"; export default {tools:[{name:"late",description:"late",parameters:{type:"object"},async execute(a){await new Promise(r=>setTimeout(r,600));writeFileSync(a.path,"late");}}]};`})
+	raw, _ := json.Marshal(map[string]any{"args": map[string]string{"path": marker}})
+	if _, err := pool.Call(context.Background(), pl, "late", raw, 100*time.Millisecond); err == nil {
+		t.Fatal("expected a timeout")
+	}
+	time.Sleep(800 * time.Millisecond)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("timed out work ran later: %v", err)
+	}
+}
+
+func TestRunnerTimeoutStopsChildProcesses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process group termination is not available on Windows")
+	}
+	marker := filepath.Join(t.TempDir(), "child")
+	pool, pl := poolFor(t, map[string]string{"index.ts": `import {spawn} from "node:child_process"; export default {tools:[{name:"late",description:"late child",parameters:{type:"object"},async execute(a){spawn(process.execPath,["-e", "setTimeout(()=>require('fs').writeFileSync(process.argv[1], 'late'), 800)",a.path],{stdio:'ignore'});await new Promise(r=>setTimeout(r,5000));}}]};`})
+	raw, _ := json.Marshal(map[string]any{"args": map[string]string{"path": marker}})
+	if _, err := pool.Call(context.Background(), pl, "late", raw, 300*time.Millisecond); err == nil {
+		t.Fatal("expected a timeout")
+	}
+	time.Sleep(time.Second)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("child survived timed out runner: %v", err)
 	}
 }
 

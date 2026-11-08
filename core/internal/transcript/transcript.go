@@ -108,6 +108,8 @@ type Subagent struct {
 	// Type is the subagent template ("explore", "reviewer").
 	Type string `json:"type"`
 	Name string `json:"name"`
+	// Definition freezes the selected role and capabilities for this child.
+	Definition *SubagentDefinition `json:"definition,omitempty"`
 	// Task is the assignment the child was spawned with.
 	Task string `json:"task,omitempty"`
 	// ForkTurns is "none" (task only) or "all" (parent history copied).
@@ -124,6 +126,16 @@ type Subagent struct {
 	// which is how a restart tells a delivered result from a lost one.
 	CompletionID string    `json:"completionId,omitempty"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// SubagentDefinition is the policy captured when a child was spawned.
+type SubagentDefinition struct {
+	Description string              `json:"description,omitempty"`
+	Role        string              `json:"role"`
+	Tools       []string            `json:"tools"`
+	MCP         map[string][]string `json:"mcp,omitempty"`
+	ReadWrite   bool                `json:"readWrite,omitempty"`
+	FileBased   bool                `json:"fileBased,omitempty"`
 }
 
 // Worktree ties a session to a managed git worktree.
@@ -275,8 +287,9 @@ type turnLine struct {
 }
 
 type turnBody struct {
-	Messages []Message  `json:"messages"`
-	Stats    *TurnStats `json:"stats,omitempty"`
+	Messages  []Message  `json:"messages"`
+	Stats     *TurnStats `json:"stats,omitempty"`
+	JournalID string     `json:"journalId,omitempty"`
 }
 
 // AppendTurn appends a turn's messages as one line.
@@ -286,6 +299,12 @@ func (s *Session) AppendTurn(msgs []Message) error {
 
 // AppendTurnWithStats appends a turn and its cost as one line.
 func (s *Session) AppendTurnWithStats(msgs []Message, stats *TurnStats) error {
+	return s.AppendJournalTurn(msgs, stats, "")
+}
+
+// AppendJournalTurn records the journal ID so recovery can detect a turn
+// that was committed just before the process stopped.
+func (s *Session) AppendJournalTurn(msgs []Message, stats *TurnStats, journalID string) error {
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -293,7 +312,7 @@ func (s *Session) AppendTurnWithStats(msgs []Message, stats *TurnStats) error {
 	for i, m := range msgs {
 		stamped[i] = stampTime(m)
 	}
-	line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: stamped, Stats: stats}})
+	line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: stamped, Stats: stats, JournalID: journalID}})
 	if err != nil {
 		return fmt.Errorf("io: encode turn: %s", syserr.Str(err))
 	}
@@ -366,10 +385,11 @@ func (s *Session) SaveMeta() error {
 
 // Truncate keeps the first n transcript messages, atomically.
 func (s *Session) Truncate(n int) error {
-	msgs, err := s.History()
+	turns, err := s.HistoryTurns()
 	if err != nil {
 		return err
 	}
+	msgs, _ := Flatten(turns)
 	if n < 0 || n >= len(msgs) {
 		return nil
 	}
@@ -380,12 +400,25 @@ func (s *Session) Truncate(n int) error {
 	}
 	defer func() { _ = dropSummary(s.Dir) }()
 	var buf []byte
-	for _, m := range msgs[:n] {
-		line, err := jsonx.Marshal(m)
+	remaining := n
+	for _, turn := range turns {
+		if remaining == 0 {
+			break
+		}
+		keep := min(remaining, len(turn.Messages))
+		if keep == 0 {
+			continue
+		}
+		stats := turn.Stats
+		if keep < len(turn.Messages) {
+			stats = nil
+		}
+		line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: turn.Messages[:keep], Stats: stats}})
 		if err != nil {
-			return fmt.Errorf("io: encode message: %s", syserr.Str(err))
+			return fmt.Errorf("io: encode turn: %s", syserr.Str(err))
 		}
 		buf = append(append(buf, line...), '\n')
+		remaining -= keep
 	}
 	return atomicWrite(s.Dir, "messages.jsonl", buf)
 }

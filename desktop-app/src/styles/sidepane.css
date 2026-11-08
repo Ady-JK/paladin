@@ -1097,7 +1097,7 @@
 }
 .dark .job-row {
   border-color: var(--color-slate-700);
-  background: var(--color-slate-800/50);
+  background: color-mix(in srgb, var(--color-slate-800) 50%, transparent);
 }
 .job-main {
   display: flex;

@@ -134,5 +134,11 @@ func eventSize(e TurnEvent) int {
 	if e.Compaction != nil {
 		n += len(e.Compaction.Summary)
 	}
+	if e.Protection != nil {
+		n += len(e.Protection.Reason)
+		for _, path := range e.Protection.Excluded {
+			n += len(path)
+		}
+	}
 	return n
 }

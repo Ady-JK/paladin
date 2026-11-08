@@ -1,7 +1,7 @@
 // undo.ts is "Revert to here": a user message's undo button previews
 // the rewind, then restores the folder to the snapshot taken before that
 // message and drops the message and everything after it. The restore is
-// final — there is no redo. /undo reverts the last message.
+// recoverLatest restores the state saved immediately before the last undo.
 
 import * as api from "../core/api";
 import { inputEl, messagesEl } from "../core/dom";
@@ -14,6 +14,7 @@ import { clearLanded, isBusy } from "./live";
 import { loadHistory, refreshSessions } from "./sessions";
 
 let pop: HTMLElement | null = null;
+const recoveryBar = document.querySelector<HTMLElement>("#recoveryBar")!;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -26,6 +27,17 @@ async function reload(sessionId: string): Promise<void> {
   clearLanded(sessionId);
   if (state.sessionId === sessionId) await loadHistory(sessionId);
   void refreshSessions();
+}
+
+export async function refreshRecovery(sessionId: string): Promise<void> {
+  recoveryBar.hidden = true;
+  if (!sessionId) return;
+  try {
+    const available = await api.recoveryAvailable(sessionId);
+    if (state.sessionId === sessionId) recoveryBar.hidden = !available;
+  } catch {
+    // Older sidecars may not support recovery.
+  }
 }
 
 // resolveIndex finds a user row's transcript index. History rows carry
@@ -56,7 +68,8 @@ function previewHtml(pv: RevertPreview): string {
     `<ul class="${cls}">${files.map((f) => `<li title="${escapeHtml(f)}">${escapeHtml(f)}</li>`).join("")}</ul>`;
   let body = `<p class="revert-sub">Rewinds ${plural(pv.turns || 1, "turn")}: this message and everything after it.</p>`;
   if (!pv.snapshots) {
-    body += `<p class="revert-note">Files in this folder are not tracked, so only the conversation is rewound.</p>`;
+    const reason = pv.protection?.reason ? ` ${escapeHtml(pv.protection.reason)}` : "";
+    body += `<p class="revert-note">Only the conversation is rewound; no usable undo snapshot is available.${reason}</p>`;
   } else if (pv.files.length === 0 && pv.deleted.length === 0 && pv.skipped.length === 0) {
     body += `<p class="revert-note">No file changes to undo.</p>`;
   }
@@ -74,8 +87,18 @@ function previewHtml(pv: RevertPreview): string {
       `<div class="revert-label is-warn">Leaves ${plural(pv.skipped.length, "file")} alone (too large or binary)</div>` +
       list("revert-conflicts", pv.skipped);
   }
+  if (pv.protection?.excluded?.length) {
+    body +=
+      `<div class="revert-label is-warn">Excluded from snapshots; not restored</div>` +
+      list("revert-excluded", pv.protection.excluded);
+  }
+  if (pv.protection?.truncated) {
+    body += `<p class="revert-note">The exclusion list is incomplete; more paths may not be restored.</p>`;
+  }
   if (pv.snapshots) {
-    body += `<p class="revert-note is-warn">The folder is put back exactly as it was before this message. This cannot be undone.</p>`;
+    body += `<p class="revert-note">These files may include later changes by you or another chat. A recovery snapshot will be saved before undo. Ignored, large and binary files may not be captured.</p>`;
+  } else {
+    body += `<p class="revert-note">The conversation can be recovered after undo.</p>`;
   }
   return (
     `<div class="revert-head">${icon("tl-undo", "h-3.5 w-3.5")}<span>Revert to here?</span></div>` +
@@ -119,18 +142,19 @@ async function openPreview(btn: HTMLElement): Promise<void> {
     if (t.closest("#revertCancelBtn")) closePop();
     else if (t.closest("#revertConfirmBtn")) {
       closePop();
-      void revert(sessionId, index);
+      void revert(sessionId, index, pv.version);
     }
   });
   pop = el;
   el.querySelector<HTMLElement>("#revertConfirmBtn")?.focus();
 }
 
-async function revert(sessionId: string, index: number): Promise<void> {
+async function revert(sessionId: string, index: number, version?: string): Promise<void> {
   if (!guard(sessionId)) return;
   try {
-    const res = await api.revertSession(sessionId, null, index);
+    const res = await api.revertSession(sessionId, null, index, version);
     await reload(sessionId);
+    await refreshRecovery(sessionId);
     if (state.sessionId === sessionId) {
       const prefill = res.message || "";
       if (prefill && !inputEl.value.trim()) {
@@ -149,7 +173,63 @@ async function revert(sessionId: string, index: number): Promise<void> {
   }
 }
 
-// undoLast is /undo: revert the last user message without a preview.
+async function openRecovery(btn: HTMLElement): Promise<void> {
+  closePop();
+  const sessionId = state.sessionId;
+  if (!guard(sessionId)) return;
+  try {
+    const pv = await api.recoveryPreview(sessionId);
+    if (state.sessionId !== sessionId) return;
+    const list = (files: string[]) =>
+      `<ul class="revert-files">${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`;
+    const el = document.createElement("div");
+    el.id = "revertPop";
+    el.className = "revert-pop";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", "Recover before undo");
+    el.innerHTML =
+      `<div class="revert-head">Recover before undo?</div>` +
+      `<p class="revert-sub">Restores the conversation and folder to their state before the latest undo. Later messages will be removed and later file changes may be overwritten or deleted. Ignored, large and binary files may not be captured.</p>` +
+      (pv.files.length ? `<div class="revert-label">Files to restore</div>${list(pv.files)}` : "") +
+      (pv.deleted.length ? `<div class="revert-label is-warn">Files to delete</div>${list(pv.deleted)}` : "") +
+      (pv.skipped.length ? `<div class="revert-label is-warn">Files left unchanged</div>${list(pv.skipped)}` : "") +
+      `<div class="revert-actions"><button type="button" id="revertCancelBtn" class="revert-cancel">Cancel</button><button type="button" id="recoverConfirmBtn" class="revert-confirm">Recover</button></div>`;
+    document.body.append(el);
+    const r = btn.getBoundingClientRect();
+    el.style.left = `${Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, r.right - el.offsetWidth))}px`;
+    el.style.top = `${Math.min(window.innerHeight - el.offsetHeight - 8, r.bottom + 6)}px`;
+    el.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("#revertCancelBtn")) closePop();
+      if (target.closest("#recoverConfirmBtn")) {
+        closePop();
+        void recover(sessionId, pv.version);
+      }
+    });
+    pop = el;
+    el.querySelector<HTMLElement>("#recoverConfirmBtn")?.focus();
+  } catch (error) {
+    toast(`Cannot preview recovery: ${String(error)}`, "error");
+  }
+}
+
+async function recover(sessionId: string, version?: string): Promise<void> {
+  if (!guard(sessionId)) return;
+  try {
+    const result = await api.recoverLatest(sessionId, version);
+    await reload(sessionId);
+    await refreshRecovery(sessionId);
+    toast(
+      result.skipped.length
+        ? `Recovered; ${plural(result.skipped.length, "file")} left unchanged.`
+        : "Recovered the state before undo.",
+    );
+  } catch (error) {
+    toast(`Recovery failed: ${String(error)}`, "error");
+  }
+}
+
+// undoLast is /undo: show the same confirmation as the message control.
 export async function undoLast(): Promise<void> {
   const sessionId = state.sessionId;
   if (!sessionId) {
@@ -164,13 +244,21 @@ export async function undoLast(): Promise<void> {
       toast("Nothing to undo yet", "error");
       return;
     }
-    await revert(sessionId, last.index);
+    const buttons = Array.from(messagesEl.querySelectorAll<HTMLElement>("[data-revert]")).filter(
+      (btn) => !btn.closest(".turn-queued"),
+    );
+    const btn = buttons.at(-1);
+    if (!btn) throw new Error("the last message is not displayed");
+    await openPreview(btn);
   } catch (error) {
     toast(`Undo failed: ${String(error)}`, "error");
   }
 }
 
 export function initUndo(): void {
+  document.querySelector<HTMLElement>("#recoverLatestBtn")?.addEventListener("click", (event) => {
+    void openRecovery(event.currentTarget as HTMLElement);
+  });
   messagesEl.addEventListener("click", (event) => {
     const btn = (event.target as HTMLElement).closest<HTMLElement>("[data-revert]");
     if (btn) {

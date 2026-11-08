@@ -21,7 +21,7 @@ func TestTerminalRunUsesWorkspaceAndKeepsOutput(t *testing.T) {
 	}
 }
 
-func TestTerminalStdioProtocol(t *testing.T) {
+func TestStandaloneTerminalStdioProtocol(t *testing.T) {
 	h := startHost(t, buildHost(t), t.TempDir())
 	dir := t.TempDir()
 	if reply := h.call("run", "terminalRun", map[string]any{"cwd": dir, "command": "printf rpc-output"}); reply["ok"] != true {
@@ -29,12 +29,12 @@ func TestTerminalStdioProtocol(t *testing.T) {
 	} else if got := reply["result"].(map[string]any)["output"]; got != "rpc-output" {
 		t.Fatalf("terminalRun output = %v", got)
 	}
-	started := h.call("start", "terminalStart", map[string]any{"sessionId": "session-a", "cwd": dir, "cols": 80, "rows": 24})
+	started := h.call("start", "terminalStart", map[string]any{"sessionId": "__standalone_pane__", "cwd": dir, "cols": 80, "rows": 24})
 	if started["ok"] != true {
 		t.Fatalf("terminalStart: %v", started)
 	}
 	id := started["result"].(string)
-	line := fmt.Sprintf(`{"id":"write","method":"terminalWrite","params":{"sessionId":"session-a","terminalId":%q,"data":"printf 'rpc-pty\\n'\n"}}`+"\n", id)
+	line := fmt.Sprintf(`{"id":"write","method":"terminalWrite","params":{"sessionId":"__standalone_pane__","terminalId":%q,"data":"printf 'rpc-pty\\n'\n"}}`+"\n", id)
 	if _, err := h.stdin.Write([]byte(line)); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestTerminalStdioProtocol(t *testing.T) {
 		}
 	}
 	<-readerDone
-	if reply := h.call("close", "terminalClose", map[string]any{"sessionId": "session-a", "terminalId": id}); reply["ok"] != true {
+	if reply := h.call("close", "terminalClose", map[string]any{"sessionId": "__standalone_pane__", "terminalId": id}); reply["ok"] != true {
 		t.Fatalf("terminalClose: %v", reply)
 	}
 }

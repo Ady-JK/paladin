@@ -38,7 +38,12 @@ async function boot(page: Page, values: Record<string, unknown> = {}) {
 
 test("Revert to here previews, restores files and the conversation", async ({ page }) => {
   await boot(page, {
-    __e2ePreview: { turns: 2, files: ["src/a.ts", "src/b.ts"], deleted: ["old.ts"] },
+    __e2ePreview: {
+      turns: 2,
+      files: ["src/a.ts", "src/b.ts"],
+      deleted: ["old.ts"],
+      protection: { turn: 0, state: "partial", excluded: ["secret.env"] },
+    },
     __e2eRevertResult: { restored: ["src/a.ts", "src/b.ts"], deleted: ["old.ts"], skipped: [] },
   });
   await openDemo(page);
@@ -51,16 +56,30 @@ test("Revert to here previews, restores files and the conversation", async ({ pa
   await expect(pop).toContainText("2 turns");
   await expect(pop.locator(".revert-files li")).toHaveText(["src/a.ts", "src/b.ts"]);
   await expect(pop.locator(".revert-conflicts li")).toHaveText(["old.ts"]);
-  await expect(pop).toContainText("cannot be undone");
+  await expect(pop.locator(".revert-excluded li")).toHaveText(["secret.env"]);
+  await expect(pop).toContainText("another chat");
+  await expect(pop).toContainText("recovery snapshot");
   expect((await get(page, "__e2ePreviews"))[0]).toMatchObject({ sessionId: "sess-notify-1", index: 0 });
 
   await pop.locator("#revertConfirmBtn").click();
   await expect(pop).toBeHidden();
-  expect((await get(page, "__e2eReverts"))[0]).toMatchObject({ sessionId: "sess-notify-1", index: 0 });
+  expect((await get(page, "__e2eReverts"))[0]).toMatchObject({
+    sessionId: "sess-notify-1",
+    index: 0,
+    version: "undo-preview-version",
+  });
   await expect(page.locator("#toastText")).toContainText("2 files restored");
   await expect(page.locator("#toastText")).toContainText("1 file deleted");
   await expect(page.locator("#promptInput")).toHaveValue("run the slow job");
   await expect(page.locator("#messages .bubble-user")).toHaveCount(0);
+  await expect(page.locator("#recoverLatestBtn")).toBeVisible();
+  await page.locator("#recoverLatestBtn").click();
+  await expect(pop).toContainText("later file changes may be overwritten or deleted");
+  await expect(pop.locator(".revert-files li")).toHaveText(["src/a.ts"]);
+  await pop.locator("#recoverConfirmBtn").click();
+  await expect.poll(() => get(page, "__e2eRecoveries")).toHaveLength(1);
+  expect((await get(page, "__e2eRecoveries"))[0]).toMatchObject({ version: "recovery-preview-version" });
+  await expect(page.locator("#messages .bubble-user")).toHaveCount(1);
 });
 
 test("Cancel leaves everything alone; untracked folders note conversation-only", async ({ page }) => {
@@ -71,7 +90,7 @@ test("Cancel leaves everything alone; untracked folders note conversation-only",
   await row.hover();
   await row.locator("[data-revert]").click();
   const pop = page.locator("#revertPop");
-  await expect(pop.locator(".revert-note")).toContainText(/only the conversation/i);
+  await expect(pop.locator(".revert-note").first()).toContainText(/only the conversation/i);
   await page.keyboard.press("Escape");
   await expect(pop).toBeHidden();
   expect(await get(page, "__e2eReverts")).toBeUndefined();
@@ -82,9 +101,88 @@ test("/undo reverts the last message", async ({ page }) => {
   await openDemo(page);
   await page.fill("#promptInput", "/undo");
   await page.keyboard.press("Enter");
+  await expect(page.locator("#revertPop")).toBeVisible();
+  await page.locator("#revertConfirmBtn").click();
   await expect.poll(() => get(page, "__e2eReverts")).toHaveLength(1);
   expect((await get(page, "__e2eReverts"))[0].index).toBe(0);
   await expect(page.locator("#toastText")).toContainText(/rewound/i);
+});
+
+test("only snapshot failures are shown in history", async ({ page }) => {
+  await boot(page, {
+    __e2eHistory: [
+      { role: "user", content: "protected turn", createdAt: 1, index: 0, protection: { turn: 0, state: "protected" } },
+      {
+        role: "user",
+        content: "excluded turn",
+        createdAt: 2,
+        index: 1,
+        protection: {
+          turn: 1,
+          state: "partial",
+          reason: "Some paths are excluded from snapshots.",
+          excluded: ["ignored.env", "binary.dat"],
+          truncated: true,
+        },
+      },
+      {
+        role: "user",
+        content: "failed turn",
+        createdAt: 3,
+        index: 2,
+        protection: { turn: 2, state: "unavailable", reason: "Snapshot timed out." },
+      },
+      {
+        role: "user",
+        content: "expired turn",
+        createdAt: 4,
+        index: 3,
+        protection: { turn: 3, state: "expired", reason: "Only the last three turns can be undone." },
+      },
+    ],
+  });
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  const statuses = page.locator("#messages .snapshot-protection");
+  await expect(statuses).toHaveCount(1);
+  await expect(statuses.first()).toContainText("Undo snapshot unavailable: Snapshot timed out.");
+  await expect(statuses.first()).toHaveAttribute("data-state", "unavailable");
+});
+
+test("live turns show snapshot failure before the model finishes", async ({ page }) => {
+  await boot(page, {
+    __e2eHistory: [
+      {
+        role: "user",
+        content: "run the slow job",
+        createdAt: 1,
+        index: 0,
+        protection: { turn: 0, state: "protected" },
+      },
+    ],
+  });
+  await openDemo(page);
+  await page.evaluate(() => {
+    (window as any).__e2eRunTurn = () => new Promise(() => undefined);
+  });
+  await page.fill("#promptInput", "do work");
+  await page.click("#sendBtn");
+  await expect(page.locator("#messages .snapshot-protection")).toHaveCount(0);
+  await page.evaluate(() => {
+    const hub = (window as any).__e2eHub;
+    const turn = hub.list().find((t: any) => t.state === "running");
+    hub.emit({
+      event: "chat/protection",
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      protection: { turn: 6, floor: 1, state: "unavailable", reason: "Snapshot timed out." },
+    });
+  });
+  const status = page.locator("#messages .snapshot-protection").last();
+  await expect(status).toContainText("Undo snapshot unavailable");
+  await status.locator("summary").click();
+  await expect(status).toContainText("Snapshot timed out");
+  await expect(page.locator("#messages .snapshot-protection")).toHaveCount(1);
 });
 
 test("the worktree toggle starts a new session in its own worktree", async ({ page }) => {

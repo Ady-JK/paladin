@@ -563,6 +563,9 @@ func (r *runnerProc) running() bool {
 
 // value writes one request and waits for its reply, bounded by ctx.
 func (r *runnerProc) value(ctx context.Context, req request, call bool) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("extension timeout: %w", err)
+	}
 	id, ch, err := r.open(req, call)
 	if err != nil {
 		return nil, err
@@ -578,9 +581,14 @@ func (r *runnerProc) value(ctx context.Context, req request, call bool) (json.Ra
 		r.mu.Unlock()
 		return out.result, nil
 	case <-ctx.Done():
-		// The runner keeps running: a slow call fails, the plugin does
-		// not. Its reply, when it comes, finds no waiter and is dropped.
-		return nil, fmt.Errorf("extension timeout: %w", ctx.Err())
+		err := fmt.Errorf("extension timeout: %w", ctx.Err())
+		// JavaScript cannot safely cancel arbitrary plugin code. Kill the
+		// process so an abandoned call cannot perform later side effects.
+		// Other concurrent calls fail too and may be retried explicitly.
+		if call {
+			r.fail(err)
+		}
+		return nil, err
 	}
 }
 
@@ -701,7 +709,7 @@ func (r *runnerProc) fail(reason error) {
 	cmd := r.cmd
 	r.mu.Unlock()
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		killRunnerProcess(cmd.Process)
 	}
 	r.finishGone(reason)
 }
@@ -754,7 +762,7 @@ func (r *runnerProc) stop() {
 	case <-time.After(shutdownGrace):
 	}
 	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		killRunnerProcess(cmd.Process)
 	}
 	select {
 	case <-r.exited:

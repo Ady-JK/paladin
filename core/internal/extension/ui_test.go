@@ -76,6 +76,20 @@ func TestPluginUIDestructiveFlag(t *testing.T) {
 	}
 }
 
+func TestPluginUIOverlayMount(t *testing.T) {
+	dataDir := t.TempDir()
+	dir := writePlugin(t, dataDir, "canvas", map[string]string{
+		"index.ts":            "export default { tools: [] };",
+		"paladin-plugin.json": uiManifest(`[{"id":"canvas","title":"Canvas","entry":"ui/board.html","mount":"overlay"}]`),
+	})
+	writeUI(t, dir)
+	enable(t, dataDir, "canvas")
+	ui := NewRegistry(dataDir).UI()
+	if len(ui.Errors) != 0 || len(ui.Views) != 1 || ui.Views[0].Mount != "overlay" {
+		t.Fatalf("overlay not available: %+v", ui)
+	}
+}
+
 func TestPluginUIRejectsBadEntries(t *testing.T) {
 	cases := []struct {
 		name string
@@ -88,6 +102,7 @@ func TestPluginUIRejectsBadEntries(t *testing.T) {
 		{"short title", `[{"id":"a","title":" ","entry":"ui/board.html"}]`, "title must be 1 to 48", 0},
 		{"long title", `[{"id":"a","title":"` + strings.Repeat("x", 49) + `","entry":"ui/board.html"}]`, "title must be 1 to 48", 0},
 		{"bad mount", `[{"id":"a","title":"x","entry":"ui/board.html","mount":"dialog"}]`, "mount must be", 0},
+		{"replacement mount", `[{"id":"a","title":"x","entry":"ui/board.html","mount":"module:ide.explorer"}]`, "mount must be", 0},
 		{"bad perm", `[{"id":"a","title":"x","entry":"ui/board.html","permissions":["network"]}]`, `unknown permission "network"`, 0},
 		{"absolute", `[{"id":"a","title":"x","entry":"/tmp/x.html"}]`, "relative path", 0},
 		{"escape", `[{"id":"a","title":"x","entry":"../x.html"}]`, "inside the plugin folder", 0},

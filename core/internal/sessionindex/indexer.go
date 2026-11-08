@@ -3,18 +3,18 @@
 // Transcripts on disk stay authoritative; the index is a derived cache, so
 // this pass is deliberately forgiving: it reindexes sessions whose
 // transcript changed, drops rows for sessions that are gone, and gives up
-// quietly on any single damaged session rather than failing the whole run.
+// falls back to direct scanning if a refresh cannot complete.
 //
-// It runs on demand (the first session_search of a turn calls Refresh) and
-// never in the request path of a turn, so a slow filesystem costs latency
-// on recall only.
+// It runs on demand before each search.
 
 package sessionindex
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,40 +34,47 @@ type Source struct {
 // changed since it was last indexed, and drops rows for deleted sessions.
 // It returns how many sessions it wrote.
 func (i *Index) Refresh(ctx context.Context, source Source) (int, error) {
+	i.refreshMu.Lock()
+	defer i.refreshMu.Unlock()
 	if source.Store == nil || source.DataDir == "" {
 		return 0, nil
 	}
-	sessions, err := findSessions(source.DataDir)
+	sessions, err := findSessions(ctx, source.DataDir)
 	if err != nil {
 		return 0, err
 	}
-	wants := make(map[string]time.Time, len(sessions))
+	wants := make(map[string]string, len(sessions))
+	byID := make(map[string]sessionFile, len(sessions))
 	for _, s := range sessions {
-		wants[s.id] = s.mtime
+		wants[s.id] = s.fingerprint
+		byID[s.id] = s
 	}
 	refresh, drop, err := i.Stale(ctx, wants)
 	if err != nil {
 		return 0, err
 	}
 	for _, id := range drop {
-		_ = i.DeleteSession(ctx, id)
-		_ = i.ForgetStamp(ctx, id)
+		if err := i.DeleteSession(ctx, id); err != nil {
+			return 0, err
+		}
+		if err := i.ForgetStamp(ctx, id); err != nil {
+			return 0, err
+		}
 	}
 	wrote := 0
 	for _, id := range refresh {
 		if ctx.Err() != nil {
 			return wrote, ctx.Err()
 		}
-		s := sessions[indexOf(sessions, id)]
+		s := byID[id]
 		docs, err := i.docsFor(source.Store, s)
 		if err != nil {
-			// One unreadable transcript must not stop the pass.
-			continue
+			return wrote, err
 		}
 		if err := i.ReplaceSession(ctx, id, docs); err != nil {
 			return wrote, err
 		}
-		if err := i.SetStamp(ctx, id, s.mtime); err != nil {
+		if err := i.SetStamp(ctx, id, s.fingerprint); err != nil {
 			return wrote, err
 		}
 		wrote++
@@ -75,29 +82,21 @@ func (i *Index) Refresh(ctx context.Context, source Source) (int, error) {
 	return wrote, nil
 }
 
-func indexOf(all []sessionFile, id string) int {
-	for i, s := range all {
-		if s.id == id {
-			return i
-		}
-	}
-	return 0
-}
-
 // sessionFile is one transcript file found on disk.
 type sessionFile struct {
-	id    string
-	cwd   string
-	dir   string
-	mtime time.Time
+	id          string
+	cwd         string
+	dir         string
+	fingerprint string
 }
 
 // findSessions walks <data>/sessions for transcripts. Layout:
 // sessions/<key>/<sessionId>/transcript.jsonl, with the folder path beside
 // it — the same shape the transcript store writes.
-func findSessions(dataDir string) ([]sessionFile, error) {
+func findSessions(ctx context.Context, dataDir string) ([]sessionFile, error) {
 	root := filepath.Join(dataDir, "sessions")
 	var out []sessionFile
+	buffer := make([]byte, 32*1024)
 	projects, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -111,21 +110,66 @@ func findSessions(dataDir string) ([]sessionFile, error) {
 		}
 		sessions, err := os.ReadDir(filepath.Join(root, p.Name()))
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for _, s := range sessions {
 			if !s.IsDir() {
 				continue
 			}
 			dir := filepath.Join(root, p.Name(), s.Name())
-			info, err := os.Stat(filepath.Join(dir, "messages.jsonl"))
-			if err != nil {
+			// A crashed chat may not have been reopened yet. Recover its
+			// abandoned journal before fingerprinting; a live turn holds the
+			// journal lock and is left alone.
+			sess := transcript.Session{Dir: dir}
+			if _, err := sess.RecoverInterrupted(); err != nil {
+				return nil, err
+			}
+			fingerprint, err := fingerprintSession(ctx, dir, buffer)
+			if os.IsNotExist(err) {
 				continue
 			}
-			out = append(out, sessionFile{id: s.Name(), dir: dir, cwd: readCwd(dir), mtime: info.ModTime()})
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, sessionFile{id: s.Name(), dir: dir, cwd: readCwd(dir), fingerprint: fingerprint})
 		}
 	}
 	return out, nil
+}
+
+// Fingerprinting the actual bytes catches rewrites with unchanged timestamps
+// and metadata-only changes. It streams instead of retaining transcripts.
+func fingerprintSession(ctx context.Context, dir string, buffer []byte) (string, error) {
+	h := sha256.New()
+	for _, name := range []string{"messages.jsonl", "meta.json"} {
+		f, err := os.Open(filepath.Join(dir, name))
+		if err != nil {
+			return "", err
+		}
+		part := sha256.New()
+		_, err = io.CopyBuffer(part, contextReader{ctx: ctx, reader: f}, buffer)
+		closeErr := f.Close()
+		if err != nil {
+			return "", err
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		_, _ = h.Write(part.Sum(nil))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 // readCwd reads a session's folder from its meta.json. It is only used

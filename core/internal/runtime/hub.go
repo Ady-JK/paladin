@@ -14,6 +14,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/redact"
+	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -77,15 +78,16 @@ type TurnEvent struct {
 	Delta     string `json:"delta,omitempty"`
 	Reasoning string `json:"reasoning,omitempty"`
 	// ThinkingDropped names a thinking level the provider rejected.
-	ThinkingDropped string                  `json:"thinkingDropped,omitempty"`
-	Tool            *agent.ToolActivity     `json:"tool,omitempty"`
-	Retry           *agent.RetryStatus      `json:"retry,omitempty"`
-	Compaction      *agent.CompactionStatus `json:"compaction,omitempty"`
-	Approval        *permission.Approval    `json:"approval,omitempty"`
-	Steer           *agent.SteerMessage     `json:"steer,omitempty"`
-	Budget          *agent.BudgetNotice     `json:"budget,omitempty"`
-	Hook            *hooks.Note             `json:"hook,omitempty"`
-	Turn            *TurnInfo               `json:"turn,omitempty"`
+	ThinkingDropped string                      `json:"thinkingDropped,omitempty"`
+	Tool            *agent.ToolActivity         `json:"tool,omitempty"`
+	Protection      *session.SnapshotProtection `json:"protection,omitempty"`
+	Retry           *agent.RetryStatus          `json:"retry,omitempty"`
+	Compaction      *agent.CompactionStatus     `json:"compaction,omitempty"`
+	Approval        *permission.Approval        `json:"approval,omitempty"`
+	Steer           *agent.SteerMessage         `json:"steer,omitempty"`
+	Budget          *agent.BudgetNotice         `json:"budget,omitempty"`
+	Hook            *hooks.Note                 `json:"hook,omitempty"`
+	Turn            *TurnInfo                   `json:"turn,omitempty"`
 }
 
 // SubmitOpts carries client-side extras that never reach the agent.
@@ -443,6 +445,9 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	}
 	if chunk.Tool != nil {
 		h.publishLocked(t, TurnEvent{Event: "chat/tool", Tool: chunk.Tool})
+	}
+	if chunk.Protection != nil {
+		h.publishLocked(t, TurnEvent{Event: "chat/protection", Protection: chunk.Protection})
 	}
 	if chunk.Steer != nil {
 		h.publishLocked(t, TurnEvent{Event: "chat/steer", Steer: chunk.Steer})

@@ -56,8 +56,12 @@ func (r *AgentRuntime) maybeForkReview(sess transcript.Session, info TurnInfo) {
 		return
 	}
 	turn := memory.LoadReviewState(sess.Dir).Turn
+	kind, ok := r.findConfiguredSubagent("memory-review")
+	if !ok {
+		kind = reviewKind()
+	}
 	if _, err := r.subagents.spawn(sess.Meta.SessionID, spawnArgs{
-		Kind:      reviewKind(),
+		Kind:      kind,
 		Task:      memory.ReviewTask,
 		Name:      "memory-review",
 		ForkTurns: ForkAll,

@@ -136,6 +136,40 @@ test("children nest under their parent, not as sessions of their own", async ({ 
   await expect(kids).toBeVisible();
 });
 
+test("a tool card opens a child using its short agent ID", async ({ page }) => {
+  await page.evaluate(() => {
+    const w = window as any;
+    const full = "sess-child-1-long";
+    w.__e2eExtraSessions.find((s: any) => s.sessionId === "sess-child-1").sessionId = full;
+    w.__e2eHistories[full] = w.__e2eHistories["sess-child-1"];
+    w.__e2eOpenExtra[full] = w.__e2eOpenExtra["sess-child-1"];
+    w.__e2eHistories["sess-parent"][1].content = JSON.stringify({
+      agent_id: "sess-child-1",
+      name: "explore-1",
+      agent_type: "explore",
+      status: "running",
+    });
+    w.__e2eHub.emit({
+      event: "agents/changed",
+      parentSessionId: "sess-parent",
+      agent: {
+        agentId: full,
+        parentSessionId: "sess-parent",
+        name: "explore-1",
+        type: "explore",
+        status: "running",
+      },
+    });
+  });
+  await showSidebar(page);
+  await expect(page.locator('[data-child="sess-child-1-long"]')).toHaveCount(1);
+  await page.locator('[data-session="sess-parent"]').first().click();
+  await page.locator('[data-open-agent="sess-child-1"]').click();
+  const child = page.locator('.pane-agent[data-agent="sess-child-1-long"]');
+  await expect(child).toBeVisible();
+  await expect(child).toContainText("Child found login.go.");
+});
+
 test("a child opens in its own pane window, with a way into the main view", async ({ page }) => {
   await showSidebar(page);
   await page.locator('[data-child="sess-child-1"]').click();
@@ -178,6 +212,7 @@ test("every working child gets a pane window without a click", async ({ page }) 
 
   // Opening the pane any way at all shows the child's tab already there.
   await page.locator("#paneNewChatBtn").click();
+  await page.locator("[data-pane-new-chat]").click();
   await expect(page.locator("#sidePane")).toBeVisible();
   const tabs = page.locator("#paneTabs");
   await expect(tabs.locator('[data-agent="sess-child-1"]')).toHaveCount(1);

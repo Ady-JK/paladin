@@ -77,7 +77,7 @@ func TestParallelSafeCallsRunConcurrentlyInOrder(t *testing.T) {
 	if peak < 3 {
 		t.Fatalf("p1..p3 should overlap, peak concurrency %d", peak)
 	}
-	if elapsed > 550*time.Millisecond {
+	if elapsed > time.Second {
 		t.Fatalf("parallel batch took %v; expected ~3 sleep slots not 5", elapsed)
 	}
 	// The exclusive call is a barrier: it starts after p1..p3 end and

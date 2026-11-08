@@ -169,7 +169,12 @@ func TestRuntimeAttachMidTurn(t *testing.T) {
 	if len(hist) != 0 {
 		t.Fatalf("in-flight turn must not be in history yet: %+v", hist)
 	}
-	if att.Turn == nil || att.Turn.Display != "go!" || len(att.Events) != 1 || att.Events[0].Delta != "partial" {
+	foundDelta, foundProtection := false, false
+	for _, event := range att.Events {
+		foundDelta = foundDelta || event.Delta == "partial"
+		foundProtection = foundProtection || event.Protection != nil
+	}
+	if att.Turn == nil || att.Turn.Display != "go!" || !foundDelta || !foundProtection {
 		t.Fatalf("attach %+v", att)
 	}
 	model.releaseAll()

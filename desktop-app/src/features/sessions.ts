@@ -2,6 +2,7 @@
 // It renders the sidebar and loads history. No event stream in v1;
 
 import * as api from "../core/api";
+import { pluginCardsReady } from "./pluginCards";
 import {
   chatViewEl,
   confirmModalEl,
@@ -16,20 +17,16 @@ import {
   workspaceInputEl,
   workspaceLabelEl,
 } from "../core/dom";
-import { escapeAttr, escapeHtml, renderMarkdown, shortPath, splitModel } from "../core/format";
+import { escapeAttr, escapeHtml, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
-import type { AgentInfo, AgentStatus, HistoryPage, MessageInfo, SessionInfo, ToolInfo } from "../core/types";
+import type { AgentInfo, AgentStatus, HistoryPage, MessageInfo, SessionInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { setStatus } from "../ui/status";
 import { icon } from "../icons";
-import { createCompactionDivider, createTurn, mountLinkCards, renderGreeting, scrollToBottom } from "./chatView";
-import { createTurnStats } from "./turnStats";
-import { createThinkingBlock } from "./turnView";
-import { createFindingsCard } from "./findings";
-import { createVisualCard } from "./visuals";
-import { ToolRun } from "./toolRun";
+import { renderGreeting, scrollToBottom } from "./chatView";
+import { buildHistory } from "./sessions/history";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { persistModelChoice, syncModelSelects } from "./models";
@@ -42,15 +39,16 @@ import { syncTools } from "./toolSwitches";
 import { resetBudgetDraft, syncBudget } from "./budget";
 import { clearContextBox, reloadContextSources } from "./contextBox";
 import { loadJson, saveJson } from "../core/storage";
+import { refreshRecovery } from "./undo";
 import {
   autoOpenChildTabs,
   disposeSidePanes,
+  hasAgentBrowser,
   openAgentTab,
   paintAgentTabs,
   refreshChanges,
   syncSidePane,
 } from "./sidePane";
-import { mountImage, registerImage } from "./mediaGallery";
 
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
@@ -132,6 +130,7 @@ function childRow(child: SessionInfo): string {
       <span class="child-ico">${icon("rl-agent", "h-3 w-3")}</span>
       <span class="child-name truncate">${escapeHtml(sub.name || child.title)}</span>
       <span class="agent-type">${escapeHtml(sub.type)}</span>
+      ${hasAgentBrowser(child.sessionId) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
       ${agentStatusHtml(agentStatus(child))}
     </button>`;
 }
@@ -140,7 +139,7 @@ function childrenBlock(parent: SessionInfo, kids: SessionInfo[]): string {
   if (kids.length === 0) return "";
   const busy = kids.some((k) => ["running", "queued"].includes(agentStatus(k)));
   const near = parent.sessionId === state.sessionId || kids.some((k) => k.sessionId === state.sessionId);
-  const open = kidsOpen.get(parent.sessionId) ?? (busy || near);
+  const open = kidsOpen.get(parent.sessionId) ?? (busy || near || kids.some((kid) => hasAgentBrowser(kid.sessionId)));
   const id = escapeAttr(parent.sessionId);
   return `
     <button type="button" class="session-kids-toggle" data-kids-toggle="${id}" aria-expanded="${open}">
@@ -166,6 +165,7 @@ function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
       }
       ${session.worktree ? `<span class="session-branch" title="Worktree ${escapeAttr(session.worktree.path)}">${icon("code-branch", "h-2.5 w-2.5")}<span>${escapeHtml(session.worktree.branch.replace(/^paladin\//, ""))}</span></span>` : ""}
       ${session.damaged ? `<span class="session-damaged" title="Unreadable: ${escapeAttr(session.damaged)}">${icon("warning", "h-3 w-3")}</span>` : ""}
+      ${hasAgentBrowser(session.sessionId) || kids.some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
       ${liveIndicator(session.sessionId, live)}
       ${resBadge(session.sessionId)}
       <span class="session-count">${session.messageCount}</span>
@@ -185,6 +185,7 @@ function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
 let lastSessionListHtml = "";
 
 export function renderSessions(): void {
+  window.dispatchEvent(new Event("paladin:sessions-changed"));
   // The parent bar and pane heads show the same live agent status.
   paintParentBar();
   paintAgentTabs();
@@ -197,7 +198,9 @@ export function renderSessions(): void {
   for (const session of state.sessions) {
     const parentId = session.subagent?.parentId;
     if (parentId && known.has(parentId)) {
-      kidsOf.set(parentId, [...(kidsOf.get(parentId) ?? []), session]);
+      const children = kidsOf.get(parentId);
+      if (children) children.push(session);
+      else kidsOf.set(parentId, [session]);
     }
   }
   const tops = state.sessions.filter((s) => !s.subagent || !known.has(s.subagent.parentId));
@@ -250,6 +253,7 @@ export function renderSessions(): void {
           <button data-recent="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)} · ${escapeAttr(shortPath(session.cwd))}">
             <span class="truncate">${escapeHtml(title)}</span>
           </button>
+          ${hasAgentBrowser(session.sessionId) || (kidsOf.get(session.sessionId) ?? []).some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
           ${liveIndicator(session.sessionId, live)}
         </div>`;
     }
@@ -460,6 +464,8 @@ export async function openSession(id: string): Promise<void> {
     const session = await api.openSession(id, null);
 
     state.sessionId = session.sessionId;
+    window.dispatchEvent(new Event("paladin:session-selected"));
+    void refreshRecovery("");
     state.subagent = session.subagent ?? null;
     state.cwd = session.cwd;
     paintParentBar();
@@ -509,8 +515,14 @@ export async function openSession(id: string): Promise<void> {
       abortAttach(session.sessionId);
       return;
     }
+    await pluginCardsReady();
+    if (state.sessionId !== session.sessionId) {
+      abortAttach(session.sessionId);
+      return;
+    }
     renderHistory(snap.history);
     finishAttach(session.sessionId, snap);
+    void refreshRecovery(session.sessionId);
 
     renderSessions();
     // The ledger persists across restarts, so opening a session shows
@@ -565,6 +577,7 @@ let historyLoading = false;
 
 export async function loadHistory(id: string): Promise<void> {
   // Null cwd searches every workspace namespace, matching openSession.
+  await pluginCardsReady();
   renderHistory(await api.sessionHistoryPage(id, null, HISTORY_PAGE, 0));
 }
 
@@ -600,9 +613,9 @@ async function loadEarlierHistory(): Promise<void> {
     const anchor = messagesEl.querySelector(".history-earlier");
     const prevHeight = chatViewEl.scrollHeight;
     const prevTop = chatViewEl.scrollTop;
-    for (const node of Array.from(holder.children)) {
-      messagesEl.insertBefore(node, anchor);
-    }
+    const fragment = document.createDocumentFragment();
+    while (holder.firstChild) fragment.append(holder.firstChild);
+    messagesEl.insertBefore(fragment, anchor);
     anchor?.remove();
     historyStart = page.start;
     historyHasMore = page.hasMore;
@@ -640,126 +653,10 @@ function renderHistory(raw: HistoryPage | MessageInfo[]): void {
   scrollToBottom();
 }
 
-// buildHistory appends a persisted transcript's rows to container.
-// Rows of a session the user cannot rewind here get no revert button.
-export function buildHistory(
-  container: HTMLElement,
-  history: MessageInfo[],
-  revertable = true,
-  sessionId = state.sessionId,
-): void {
-  let agentBody: HTMLElement | null = null;
-  // run is the open group of consecutive calls; any text closes it.
-  let run: ToolRun | null = null;
-  // pendingStats closes the previous user turn: its summary row goes
-  // just before the next user row (or at the end of the last turn).
-  let pendingStats: HTMLElement | null = null;
-
-  const openAgent = (text: string): void => {
-    const { wrapper, textEl } = createTurn("agent", text);
-    container.append(wrapper);
-    agentBody = textEl.parentElement!;
-  };
-
-  const pushAgentText = (text: string): void => {
-    if (text.trim()) {
-      run = null;
-    }
-    if (!agentBody) {
-      openAgent(text);
-      return;
-    }
-    const el = document.createElement("div");
-    el.className = "md agent-text";
-    el.innerHTML = renderMarkdown(text);
-    agentBody.append(el);
-    mountLinkCards(agentBody, text);
-  };
-
-  const pushAgentTool = (tool: ToolInfo): void => {
-    if (!agentBody) {
-      openAgent("");
-    }
-    if (tool.name === "report_findings" || tool.name === "visual") {
-      agentBody!.append(tool.name === "visual" ? createVisualCard(tool) : createFindingsCard(sessionId, tool));
-      run = null;
-      return;
-    }
-    // Cap the live DOM copy: the full result stays in the transcript.
-    if (tool.result && tool.result.length > 8000) {
-      tool = {
-        ...tool,
-        result: `${tool.result.slice(0, 8000)}\n…(truncated, kept in history)`,
-      };
-    }
-    if (!run) {
-      run = new ToolRun();
-      agentBody!.append(run.el);
-    }
-    run.upsert(tool);
-  };
-
-  for (const [index, message] of history.entries()) {
-    // A turn's summary closes it, so a pending one is flushed as soon as
-    // the next turn begins: a user row starts one, and a row that
-    // carries its own stats is the last row of one (see the core's
-    // HistoryViewStats, which anchors the summary on the turn's end).
-    if (pendingStats && (message.role === "user" || message.stats)) {
-      container.append(pendingStats);
-      pendingStats = null;
-    }
-    if (message.role === "user") {
-      agentBody = null;
-      run = null;
-      const turn = createTurn("user", message.content, {
-        index: message.index,
-        revertable: revertable && message.index !== undefined,
-      });
-      if (message.index !== undefined) turn.wrapper.dataset.turnIndex = String(message.index);
-      for (const attachment of message.attachments ?? []) {
-        if (attachment.image) mountImage(turn.textEl, sessionId, attachment.image.path, attachment.name);
-        else {
-          const file = document.createElement("div");
-          file.className = "session-file-card";
-          file.textContent = `${attachment.name} · ${attachment.path}`;
-          turn.textEl.append(file);
-        }
-      }
-      container.append(turn.wrapper);
-    } else if (message.role === "assistant" && message.kind === "thinking") {
-      if (!agentBody) {
-        openAgent("");
-      }
-      run = null;
-      agentBody!.append(createThinkingBlock(message.content, false));
-    } else if (message.role === "assistant") {
-      pushAgentText(message.content);
-    } else if (message.role === "system" && message.kind === "compaction") {
-      // Divider where older context was summarized; later agent text
-      // and tools append below it.
-      if (!agentBody) {
-        openAgent("");
-      }
-      run = null;
-      agentBody!.append(createCompactionDivider("Context compacted", message.content));
-    } else if (message.role === "tool") {
-      if (message.image) registerImage(sessionId, message.image.path);
-      pushAgentTool({
-        id: `h${index}`,
-        name: message.name || "tool",
-        arguments: message.arguments || "{}",
-        result: message.content,
-        status: message.status === "failed" ? "failed" : "ok",
-      });
-      if (message.image && agentBody) mountImage(agentBody, sessionId, message.image.path, "Browser screenshot");
-    }
-    if (message.stats) pendingStats = createTurnStats(message.stats);
-  }
-  if (pendingStats) container.append(pendingStats);
-}
-
 export function newSession(): void {
   state.sessionId = "";
+  window.dispatchEvent(new Event("paladin:session-selected"));
+  void refreshRecovery("");
   state.subagent = null;
   paintParentBar();
   syncSidePane();

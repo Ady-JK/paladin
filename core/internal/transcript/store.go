@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"uuid"
+
+	"github.com/Ady-JK/paladin/core/internal/jsonx"
 )
 
 type Info struct {
@@ -93,6 +95,7 @@ func (s *Store) entries(cwd string) ([]sessionEntry, error) {
 	seen := map[string]bool{}
 	var out []sessionEntry
 	for _, dir := range dirs {
+		legacy := cwd != "" && dir != filepath.Join(s.Root, EncodeCwd(cwd))
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -105,9 +108,12 @@ func (s *Store) entries(cwd string) ([]sessionEntry, error) {
 			if !e.IsDir() || seen[name] {
 				continue
 			}
-			seen[name] = true
 			sessionDir := filepath.Join(dir, name)
 			meta, err := readMeta(sessionDir)
+			if legacy && (err != nil || !sameWorkspace(meta.Cwd, cwd)) {
+				continue
+			}
+			seen[name] = true
 			if err != nil {
 				if !ValidID(name) {
 					continue // not a session folder
@@ -172,6 +178,9 @@ func (s *Store) Load(cwd, sessionID string) (Session, error) {
 	if cwd != "" {
 		for _, ns := range sessionDirs(s.Root, cwd) {
 			if sess, err := s.loadDir(filepath.Join(ns, sessionID), sessionID); err == nil {
+				if ns != filepath.Join(s.Root, EncodeCwd(cwd)) && !sameWorkspace(sess.Meta.Cwd, cwd) {
+					continue
+				}
 				return sess, nil
 			}
 		}
@@ -236,9 +245,16 @@ func (s *Store) sessionDir(cwd, sessionID string) (string, error) {
 		for _, ns := range sessionDirs(s.Root, cwd) {
 			dir := filepath.Join(ns, sessionID)
 			if st, err := os.Stat(dir); err == nil && st.IsDir() {
+				if ns != filepath.Join(s.Root, EncodeCwd(cwd)) {
+					sess, err := s.loadDir(dir, sessionID)
+					if err != nil || !sameWorkspace(sess.Meta.Cwd, cwd) {
+						continue
+					}
+				}
 				return dir, nil
 			}
 		}
+		return "", fmt.Errorf("not found: session: %q not found", sessionID)
 	}
 	entries, err := os.ReadDir(s.Root)
 	if err != nil {
@@ -257,6 +273,17 @@ func (s *Store) sessionDir(cwd, sessionID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("not found: session: %q not found", sessionID)
+}
+
+func sameWorkspace(a, b string) bool {
+	return filepath.Clean(strings.ReplaceAll(a, "\\", "/")) == filepath.Clean(strings.ReplaceAll(b, "\\", "/"))
+}
+
+// CheckExists includes damaged sessions but never searches another workspace
+// when a workspace is specified.
+func (s *Store) CheckExists(cwd, sessionID string) error {
+	_, err := s.sessionDir(cwd, sessionID)
+	return err
 }
 
 func info(e sessionEntry) Info {
@@ -314,9 +341,35 @@ func (s *Store) ForkTo(cwd, sessionID, target string, wt *Worktree) (Session, er
 	if err != nil {
 		return Session{}, err
 	}
-	if err := fork.appendMessages(msgs); err != nil {
+	turns, err := src.HistoryTurns()
+	if err != nil {
 		_ = os.RemoveAll(fork.Dir)
 		return Session{}, err
+	}
+	remaining := len(msgs)
+	var copied []byte
+	for _, turn := range turns {
+		if remaining == 0 {
+			break
+		}
+		count := min(remaining, len(turn.Messages))
+		messages := make([]Message, count)
+		for i, msg := range turn.Messages[:count] {
+			messages[i] = stampTime(msg)
+		}
+		line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: messages}})
+		if err != nil {
+			_ = os.RemoveAll(fork.Dir)
+			return Session{}, err
+		}
+		copied = append(append(copied, line...), '\n')
+		remaining -= count
+	}
+	if len(copied) > 0 {
+		if err := fork.appendLines(copied); err != nil {
+			_ = os.RemoveAll(fork.Dir)
+			return Session{}, err
+		}
 	}
 	title := strings.TrimSpace(src.Meta.Title)
 	if title == "" {

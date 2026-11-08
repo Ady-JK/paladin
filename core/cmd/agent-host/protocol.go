@@ -51,11 +51,6 @@ func errResponse(id json.RawMessage, msg string) Response {
 	return Response{ID: id, OK: false, Error: &msg}
 }
 
-// runUnary answers one request through the method table.
-func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
-	return runHandler(rt, req, parseArgs(req.Params))
-}
-
 func runHandler(rt *runtime.AgentRuntime, req *Request, a args) Response {
 	handle, ok := methods[req.Method]
 	if !ok {

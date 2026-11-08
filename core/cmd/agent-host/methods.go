@@ -102,6 +102,78 @@ var methods = map[string]handler{
 	"fsList": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.FsList(a.str("path"))
 	},
+	"ideList": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.IDEList(a.str("cwd"), a.str("path"), runtime.IDEExplorerSettings{HideIgnored: a.flag("hideIgnored"), HideDotFolders: a.flag("hideDotFolders")})
+	},
+	"ideSearch": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return tools.IDESearch(a.str("cwd"), a.str("query"))
+	},
+	"ideDiagnose": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var params struct {
+			Cwd     string  `json:"cwd"`
+			Path    string  `json:"path"`
+			Content *string `json:"content"`
+		}
+		if err := a.decode(&params); err != nil {
+			return nil, err
+		}
+		if params.Content == nil {
+			return nil, tools.ArgsError("editor diagnostics require content")
+		}
+		return rt.IDEDiagnose(params.Cwd, params.Path, *params.Content)
+	},
+	"ideLayoutGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.IDELayoutGet(a.str("cwd"))
+	},
+	"ideLayoutSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var params struct {
+			Cwd    string          `json:"cwd"`
+			Layout json.RawMessage `json:"layout"`
+		}
+		if err := a.decode(&params); err != nil {
+			return nil, err
+		}
+		return true, rt.IDELayoutSet(params.Cwd, params.Layout)
+	},
+	"ideExplorerSettingsGet": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return runtime.IDEExplorerSettingsGet(a.str("cwd"))
+	},
+	"ideExplorerSettingsSet": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return true, runtime.IDEExplorerSettingsSet(a.str("cwd"), runtime.IDEExplorerSettings{HideIgnored: a.flag("hideIgnored"), HideDotFolders: a.flag("hideDotFolders")})
+	},
+	"ideReadFile": func(_ *runtime.AgentRuntime, a args) (any, error) {
+		return runtime.IDEReadFile(a.str("cwd"), a.str("path"))
+	},
+	"ideFileStatuses": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var params struct {
+			Cwd   string                 `json:"cwd"`
+			Files []runtime.IDEFileCheck `json:"files"`
+		}
+		if err := a.decode(&params); err != nil {
+			return nil, err
+		}
+		return rt.IDEFileStatuses(params.Cwd, params.Files)
+	},
+	"ideSaveFile": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var params struct {
+			Cwd     string  `json:"cwd"`
+			Path    string  `json:"path"`
+			Content *string `json:"content"`
+			Version string  `json:"version"`
+		}
+		if err := a.decode(&params); err != nil {
+			return nil, err
+		}
+		if params.Content == nil {
+			return nil, tools.ArgsError("IDE save requires text content")
+		}
+		return rt.CreatorSaveIDEFile(params.Cwd, params.Path, *params.Content, params.Version)
+	},
+	"creatorModeGet": func(rt *runtime.AgentRuntime, _ args) (any, error) { return rt.CreatorMode(), nil },
+	"creatorModeSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return true, rt.SetCreatorMode(a.flag("enabled"))
+	},
+	"creatorWorkspace": func(rt *runtime.AgentRuntime, _ args) (any, error) { return rt.CreatorWorkspace() },
 	"fileComplete": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.FileComplete(a.str("query"), a.str("cwd"), a.num("limit", 20))
 	},
@@ -239,7 +311,16 @@ var methods = map[string]handler{
 		return rt.FilePreview(a.str("cwd"), a.str("path"))
 	},
 	"revertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.RevertSession(a.str("sessionId"), a.str("cwd"), a.num("index", -1))
+		return rt.RevertSessionChecked(a.str("sessionId"), a.str("cwd"), a.num("index", -1), a.str("version"))
+	},
+	"recoveryAvailable": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.RecoveryAvailable(a.str("sessionId"), a.str("cwd"))
+	},
+	"recoveryPreview": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.RecoveryPreview(a.str("sessionId"), a.str("cwd"))
+	},
+	"recoverLatest": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.RecoverLatestChecked(a.str("sessionId"), a.str("cwd"), a.str("version"))
 	},
 	"worktreeStatus": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.WorktreeStatus(a.str("sessionId"), a.str("cwd"))

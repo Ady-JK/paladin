@@ -8,7 +8,7 @@ Review code changes in this workspace like a senior engineer doing a careful cod
 
 Scope: $ARGUMENTS
 - No scope: review uncommitted changes (`git status`, `git diff`, `git diff --staged`, plus untracked files).
-- `session`: review only the files this session changed, shown below.
+- `session`: review only the changes in this session's retained snapshots (at most the latest three turns), shown below.
 - A branch or commit: review `git diff <it>...HEAD`.
 - Anything else is a focus (a folder, file or concern) within the uncommitted changes.
 

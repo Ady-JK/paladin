@@ -193,7 +193,7 @@ function pluginsHtml(v: ToolsOverview): string {
         p.kind === "file"
           ? "single file (legacy)"
           : p.permissions?.length
-            ? p.permissions.map((x) => PERMISSION_LABEL[x] ?? x).join(", ")
+            ? `Declared: ${p.permissions.map((x) => PERMISSION_LABEL[x] ?? x).join(", ")}`
             : "folder plugin";
       const state = p.error
         ? `<span class="tsw-ext-state is-error" title="${escapeHtml(p.error)}">failed</span>`
@@ -223,6 +223,7 @@ function pluginsHtml(v: ToolsOverview): string {
     `<section class="tsw-group" data-group="plugins">` +
     `<div class="tsw-group-head"><span class="tsw-group-ico">${icon("sl-plug", "h-3.5 w-3.5")}</span>` +
     `<span class="tsw-group-name">Extensions</span></div>` +
+    `<p class="tsw-desc">Extension code can run when loaded and has your account’s filesystem, network, and process access. Declared permissions are informational.</p>` +
     `<ul class="tsw-list">${rows}${errorRows}</ul></section>`
   );
 }

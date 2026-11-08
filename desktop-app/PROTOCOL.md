@@ -26,7 +26,17 @@ separate setup command, not a JSONL method.
 |---|---|---|
 | `ping` | `{}` | `{"ok":true}` |
 | `browserReply` | `{id,ok,result?,imageBase64?,error?}` | `bool`: resolves a pending `browser` tool call. The host emits `browser/request` with the same id; Electron runs Playwright and returns the result. Screenshot bytes are bounded and saved in the session before the model sees them. `open` takes local apps and http(s) sites (the gate asks per site first); a result may carry `blocked_navigation` when the page tried to leave the session's sites |
-| `terminalStart` | `{sessionId,cwd,cols,rows}` | `terminalId`: starts an unsandboxed interactive PTY in the workspace; output arrives as `terminal/data` events with base64 `data` |
+| `ideReadFile` | `{cwd,path}` | `{path,content,version}`: reads a workspace text file up to 2 MiB |
+| `ideFileStatuses` | `{cwd,files:[{path,version}]}` | File change states for up to 128 open files, with bounded metadata caching |
+| `ideSaveFile` | `{cwd,path,content,version}` | `{path,content,version}`: checks the version read before atomically saving |
+| `ideList` | `{cwd,path,hideIgnored,hideDotFolders}` | `FsList`: lists one workspace folder with the requested Explorer filters |
+| `ideSearch` | `{cwd,query}` | `{hits,truncated}`: searches literal text in workspace files, bounded to 200 matches |
+| `ideDiagnose` | `{cwd,path,content}` | `{state,server?,diagnostics,errors}`: checks an editor buffer using an isolated language server, without saving it |
+| `ideLayoutGet` | `{cwd}` | Workspace IDE layout and recoverable drafts, or `null` |
+| `ideLayoutSet` | `{cwd,layout}` | Saves an owner-only workspace IDE layout, up to 8 MiB |
+| `ideExplorerSettingsGet` | `{cwd}` | `{hideIgnored,hideDotFolders}`: reads per-workspace Explorer settings |
+| `ideExplorerSettingsSet` | `{cwd,hideIgnored,hideDotFolders}` | `true`: saves per-workspace Explorer settings under `.config/paladin` |
+| `terminalStart` | `{sessionId,cwd,cols,rows}` | `terminalId`: starts an unsandboxed interactive PTY in the workspace; the UI uses an independent workspace owner for IDE terminals and when no chat exists, and output arrives as `terminal/data` events with base64 `data` |
 | `terminalWrite` | `{sessionId,terminalId,data}` | `bool`: sends UTF-8 or control characters to that PTY |
 | `terminalResize` | `{sessionId,terminalId,cols,rows}` | `bool`: resizes that PTY |
 | `terminalClose` | `{sessionId,terminalId}` | `bool`: stops that PTY |
@@ -72,12 +82,15 @@ separate setup command, not a JSONL method.
 | `memoryConfig` | `{}` | `{limits{user,global,project},disabled[],provider,reviewTurns}`: effective `<data>/config/memory.json` |
 | `contextSources` | `{cwd?}` | `ContextView` `{cwd,sections[],bytes,files,skills,mcp}`: everything a turn in `cwd` loads into its system prompt without user or agent action. Each `ContextEntry` is `{kind: instructions\|memory\|skills\|mcp, scope, title, path?, detail?, bytes, truncated?, content?}` — project instruction files in prompt order (global `AGENTS.md`, then the `.git` root → `cwd` chain of `AGENTS.override.md`/`AGENTS.md`/`CLAUDE.md`), each enabled memory scope with entries, the skill catalog and the MCP server notes; `content` is the text the prompt carries. `files`, `skills` and `mcp` are the counts the summary line uses |
 | `forkSession` | `{sessionId,cwd?,worktree?,name?}` | `SessionInfo` of the copy (title `… (fork)`); `worktree:true` forks into a new worktree, a plain fork stays in the source's folder (and worktree) |
-| `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],deleted[],skipped[],snapshots}`: what reverting to the user message at transcript `index` would restore, delete, or leave alone |
-| `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's saved file snapshots |
-| `sessionDiff` | `{sessionId,cwd?,turn?,path}` | `{path,patch,truncated}`: unified diff for one changed file; `turn` is a transcript index or omitted for the session |
+| `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],deleted[],skipped[],snapshots,version?}`: what reverting to the user message at transcript `index` would restore, delete, or leave alone |
+| `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's latest three saved turn snapshots |
+| `sessionDiff` | `{sessionId,cwd?,turn?,path}` | `{path,patch,truncated}`: unified diff for one changed file; `turn` is a transcript index or omitted for the retained session snapshots |
 | `fileExcerpt` | `{sessionId,cwd?,path,start,end}` | `{path,rel,startLine,lines,truncated}`: lines `start`..`end` plus 3 of context (at most 60) of a text file inside the session workspace; used by review findings |
 | `filePreview` | `{cwd?,path}` | `{path,rel,kind: text\|image\|binary\|dir\|outside\|missing,lines?,dataUrl?,truncated?}`: the first 4 non-empty lines of a workspace text file, or a small image as a data URL, for the composer's tag cards. A path outside the workspace or a folder yields its kind with no content |
-| `revertSession` | `{sessionId,cwd?,index}` | `{index,message,restored[],deleted[],skipped[],failed?[],snapshots}`: restores the folder to the snapshot taken before that user message and drops the message and everything after it. This is final and cannot be undone. `message` is its text for the composer. `deleted` lists files created since the snapshot; `failed` lists files whose restore errored (also in `skipped`). Fails while a turn runs |
+| `revertSession` | `{sessionId,cwd?,index,version?}` | `{index,message,restored[],deleted[],skipped[],failed?[],snapshots}`: saves a per-session recovery snapshot, then restores the folder and rewinds the conversation. `message` is its text for the composer. Fails while a turn runs or when the optional preview version is stale |
+| `recoveryAvailable` | `{sessionId,cwd?}` | `bool`: whether this chat has a recovery snapshot from its latest undo |
+| `recoveryPreview` | `{sessionId,cwd?}` | `RevertPreview`: files recovery would restore, delete, or skip |
+| `recoverLatest` | `{sessionId,cwd?,version?}` | `RevertResult`: restores the files and conversation saved before the latest undo. The snapshot remains until the next undo replaces it. Fails while a turn or job is running, or when the optional preview version is stale |
 | `gitInfo` | `{cwd}` | `{repo,root?,branch?,hasCommits}` |
 | `worktreeStatus` | `{sessionId,cwd?}` | `{exists,changed,ahead,branch,baseBranch?,into,path,repoRoot}`: `changed` files in the worktree, commits `ahead` of the repo's checkout (`into`) |
 | `worktreeMerge` | `{sessionId,cwd?,message?}` | `{merged,nothingToMerge,commit?,conflicts[],into?}`: commits the worktree's changes (message defaults to the session title) and merges its branch into the repo's current checkout with `--no-ff`; conflicts abort the merge and are listed. Fails if the checkout has uncommitted tracked changes |
@@ -115,7 +128,10 @@ separate setup command, not a JSONL method.
 | `skillEnabledSet` | `{name,enabled}` | `true`; turns a skill on or off by name (`settings.json` `disabledSkills`), whatever its source |
 | `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
 | `toolsReload` | `{cwd?,sessionId?}` | `ToolsOverview`; re-reads `extensions.json` and every enabled plugin, drops the warm plugin runners and returns the refreshed view. A running turn keeps the tools it started with: the new set applies from the next turn |
-| `pluginViews` | `{}` | `{views: [{plugin,view,title,mount,permissions,destructive?}], cards: [{plugin,tool,exposed}], errors?: string[]}`: the side-pane panels and inline tool-result cards enabled plugins ship. Reads manifests and checks files only; starts no plugin process |
+| `pluginViews` | `{}` | `{views: [{plugin,view,title,mount,permissions,destructive?}], cards: [{plugin,tool,exposed}], errors?: string[]}`: side-pane, overlay and card contributions. Reads manifests and checks files only; starts no plugin process |
+| `creatorModeGet` | `{}` | Whether Creator mode is enabled |
+| `creatorModeSet` | `{enabled}` | Enable or disable Creator mode |
+| `creatorWorkspace` | `{}` | Create and return the Creator workspace when Creator mode is enabled |
 | `pluginInvoke` | `{sessionId,cwd?,plugin,view,tool,args?,destructive?}` | `{content,isError}`: runs one tool for a plugin panel through the normal permission gate. An approval publishes `plugin/approval` and waits for `answerApproval`; the view's `invokeTool`/`invokeToolDestructive` check happens in Electron main |
 | `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only`, `auto` (default) or `full-access` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
@@ -271,6 +287,7 @@ Streaming (between `turn/start` and `turn/done`):
 ```json
 {"event": "chat/delta", "seq": 10, "sessionId": "...", "turnId": "t1-3", "delta": "..."}
 {"event": "chat/tool", "seq": 11, "sessionId": "...", "turnId": "t1-3", "tool": {...}}
+{"event": "chat/protection", "seq": 12, "sessionId": "...", "turnId": "t1-3", "protection": {"turn": 0, "state": "protected"}}
 ```
 
 A plugin panel's `invokeTool` may need approval. That request is not part
@@ -357,6 +374,11 @@ More streaming events:
   context-fill pill move after **every** call, not only at `turn/done`.
   The event is a signal with no payload and is droppable: a later call
   or `turn/done` refreshes the same reading.
+- `chat/protection` reports the turn's snapshot status before the model
+  starts. `state` is `protected`, `partial`, `unavailable`, or `unknown`;
+  `reason` explains an issue, `excluded` lists up to 100 uncaptured files or
+  folders, `truncated` says the list is incomplete, and `floor` identifies
+  turns outside the three-turn window.
 - Tool calls cut short by stop or a crash settle as `failed` `chat/tool`
   events with an `aborted` result, so no row is left spinning.
 
@@ -400,6 +422,9 @@ The turn blocks until `answerApproval`; `state` then becomes
 `folder` and `global` save `remember` in that scope; write and read
 cards (outside the workspace) also offer `global`. A denied call returns
 an error result telling the model not to retry.
+
+Pending shell approvals include `sandbox`: `workspace-write`, `read-only`,
+`unavailable`, or `none`, describing the policy that an approval will use.
 
 **Reads outside the workspace.** `read` inside the workspace never
 asks. A `read` whose path (after following symlinks) is outside it
@@ -656,11 +681,28 @@ both (`subagent` with a live `status`, `children`), so `listSessions`
 can nest children under their parent after a restart. A subagent is not
 a fork: `forkedFrom` stays empty.
 
-Two kinds exist, both read-only (no `write`/`edit`, plan-mode shell):
-`explore` (codebase investigation) and `reviewer` (code review). A
-child's tools are its kind's allowlist narrowed by the parent's and its
-own tool switches, never MCP or the agent tools, so children cannot
-spawn children and never gain a tool the parent lacks. They run on the
+Definitions are JSON files at `~/.config/paladin/agents/<name>/agent.json`
+(or `<PALADIN_DATA_DIR>/agents` when data is relocated; `PALADIN_AGENTS_DIR`
+overrides the directory). The shipped `explore` and `reviewer` files are
+created if absent and never overwrite existing files. `/create-agent` and
+the `create-agent` skill provide a compact live catalog of available tools
+and MCP servers to help create definitions. For example:
+
+```json
+{"name":"review-tests","description":"Review tests","permissions":"read-only","tools":{"read":true,"grep":true},"mcp":{"example":["lookup"]},"role":"Review the requested tests."}
+```
+
+`permissions` is `read-only` or `read-write`; `tools` selects exact builtin
+or extension names, and `mcp` maps server names to tool names (`*` selects
+the server's tools). Read-only agents do not get mutating builtins, the
+browser, memory writes or extensions, and receive MCP tools only when the server marks them read-only;
+MCP hints are not a guarantee. Child tools are further narrowed by the
+parent's accepted tools, switches, permission preset and plan mode. Agent
+management tools remain unavailable to children. Changes apply to newly
+spawned children on the next turn; each child retains its selected definition in its metadata
+for follow-ups and restarts. The internal memory reviewer keeps its restricted
+tool set. Existing Settings → Customize role overrides for shipped types take
+precedence over the corresponding file role. Children run on the
 parent's provider (a `model` override must be one the provider lists)
 with the parent's permission preset, through the same hub, approvals,
 hooks, sandbox and budget. Spend is shared: a child counts toward its
@@ -716,18 +758,13 @@ with `status` one of `queued`, `running`, `completed`, `failed`,
 
 ### Undo and worktrees
 
-Every `shell`, `write` and `edit` run is bracketed by snapshots of the
-session's folder in a shadow git repo (`snapshots/<folder>-<hash>/`,
-never the project's own `.git`); the step (`{turn, callId, tool,
-before, after, files}`) goes to the session's `steps.jsonl`. Snapshots
+Before each user turn, Paladin snapshots the session's folder in a shadow
+git repo (`snapshots/<folder>-<hash>/`, never the project's own `.git`). Snapshots
 skip the project's ignored files, dependency/cache folders, binaries
 and files over 10 MiB, and turn off for `/`, the home folder or folders
 with more than 50,000 files; `PALADIN_SNAPSHOTS=off` disables them.
 Without git, undo reverts only the conversation (`snapshots:false`).
-A foreground shell run the plan-mode read-only allowlist accepts is not
-bracketed at all, and `write`/`edit` snapshot only their target path
-(falling back to the whole folder when the path leaves the workspace),
-so a busy agent does not pay two full git scans per command.
+Individual tool calls are not bracketed by snapshots.
 
 The renderer paints transcripts in pages: `attach` and
 `sessionHistoryPage` return one `HistoryPage`, and `sessionHistoryPage`
@@ -739,15 +776,19 @@ screenshot without downloading the transcript.
 the row that ends a turn — its last row, which is what survives paging:
 a page of the newest rows begins mid-turn, so the turn's first row is
 often not in it. A user row also carries `index`, its transcript
-position. A reopened session therefore shows the same end-of-turn
+position and, for a turn start, `protection` with its snapshot status.
+Older turns beyond the retention boundary report `expired`. A reopened session therefore shows the same end-of-turn
 summary the live turn did.
 `revertSession` restores the folder to the snapshot taken before that
 user message, exactly: files changed since go back to their old content,
 and files created since are deleted. It then drops that message and
-everything after it from the transcript. The revert is final — there is
-no redo — and `openSession` / `listSessions` stop reporting a pending
-`revert`. Changes made by the user or another session after the turn are
-overwritten too.
+everything after it from the transcript. Before that, a recovery snapshot
+keeps the conversation and folder state so `recoverLatest` can restore them.
+Changes made by the user or another session after the turn can be overwritten;
+the preview lists affected files without claiming who changed them.
+Only the latest three user turns per session are eligible for revert,
+including after repeated reverts. The Changes and session-diff views use
+the same retained snapshot window.
 
 Shell commands belong to the session that started them: `status`, `wait` and
 `cancel` with another session's `job_id` (including a subagent's) fails as an
@@ -838,6 +879,17 @@ and is ignored (the next append removes it); any other line that does
 not decode is an error. Builds before this format show a turn line as
 an empty row.
 
+While a turn is running, `active-turn.json` stores a durable checkpoint
+of its input, completed model rounds, tool calls and results, and recent
+streamed text. An OS file lock prevents another live process from treating
+it as abandoned. On opening or reading a session after a crash, Paladin
+appends the checkpoint as an interrupted turn. Calls whose results were not
+saved receive an explicit unknown-outcome result; recovery never runs them.
+The user can continue with a new message. Each committed turn carries a
+`journalId` so a crash between transcript commit and journal cleanup does
+not duplicate it. Live text is checkpointed at most once per second, so the
+latest uncheckpointed fragment can be lost.
+
 `<session dir>/summary.json` caches what `listSessions` shows (message
 count, fallback title) and the byte offset it has read up to, so a
 listing reads only what was appended since. It is rebuilt from
@@ -889,8 +941,12 @@ skipped.
   `shell:openExternal` accept only `http(s)` URLs (plus `mailto:` for
   openExternal), and `views:setBounds` needs finite numbers.
 - WebContentsViews (`views:*` IPC) back the side pane's web tabs and the
-  agent's local browser. Web tabs use one shared persistent partition
-  (`persist:paladin-sites`) so Google SSO cookies carry over. Each open
+  agent browser. Personal web tabs can also open without a chat and use
+  one shared persistent partition (`persist:paladin-sites`) so persistent
+  sign-in cookies carry over. The agent browser uses a separate in-memory
+  partition per chat. Agent activity shows the browser tab, or a sidebar
+  indicator for a background chat; `browser/activity` accompanies tool actions.
+  Secure personal sign-in popups use the personal partition. Each open
   web tab owns a live guest: switching away detaches and throttles it,
   and closing the tab (or reloading the renderer) destroys it. The
   renderer sends `views:back`, `views:forward` and gets `views:state`
@@ -900,3 +956,10 @@ skipped.
   `window:*` for minimize/maximize/close. `views:setTheme` mirrors the
   shell theme onto each guest view's background so the native surface
   never flashes white before the page paints.
+
+### IDE end-to-end test
+
+The IDE renderer uses `listSessions`, `fsList`, `ideReadFile`, `ideSaveFile`, and terminal methods against the
+active core, including SSH cores. To run its opt-in renderer-to-sidecar test,
+build `agent-host` locally and set `PALADIN_IDE_REAL_HOST` to the binary path
+when running `pnpm exec playwright test e2e/ide-real.spec.ts`.

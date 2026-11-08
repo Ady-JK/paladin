@@ -20,6 +20,9 @@ func (*Tool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name: "memory",
 		Description: "Save durable facts to persistent memory that survives across sessions. " +
+			"For each user message, notice lasting preferences, corrections, and recurring constraints; save them without waiting for an explicit request to remember. " +
+			"A preference limited to this folder belongs in project; a preference about how to work with the user across folders belongs in user; environment facts applying across projects belong in global. " +
+			"Do not infer a lasting preference from a one-off task instruction or save temporary details. " +
 			"Memory is injected into the system prompt of every future session, so keep entries compact and high-signal. " +
 			"Targets: `user` — who the user is (role, preferences, communication style); " +
 			"`global` — your notes that apply everywhere (machine setup, tools, lessons learned); " +

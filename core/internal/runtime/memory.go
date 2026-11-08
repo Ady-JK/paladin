@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/instructions"
 	"github.com/Ady-JK/paladin/core/internal/memory"
@@ -24,10 +23,9 @@ const skillCatalogMax = 40
 // registerKnowledgeTools adds the tools that need the data dir or the
 // transcript store to the shared registry.
 func (r *AgentRuntime) registerKnowledgeTools() {
-	r.indexOnce = new(sync.Once)
 	r.memory = memory.NewBankWithConfig(r.dataDir, memory.LoadConfigOr(r.dataDir))
 	r.tools.Register(memory.NewTool(r.memory))
-	r.tools.Register(tools.NewSkillTool(r.dataDir))
+	r.tools.Register(tools.NewSkillTool(r.dataDir).WithSupplement(r.skillSupplement))
 	search := tools.NewSessionSearchTool(r.transcripts)
 	if idx, err := sessionindex.Open(sessionindex.Path(r.dataDir)); err == nil {
 		search.WithIndex(idx, r.refreshSessionIndex)
@@ -64,19 +62,14 @@ func (s runtimeSections) SystemSections(sess transcript.Session) []string {
 	return out
 }
 
-// refreshSessionIndex brings the FTS cache up to date at most once per
-// turn, and only when something in the corpus changed. It runs on the
-// search path, never on the turn path, so a slow disk costs recall
-// latency rather than turn latency.
-func (r *AgentRuntime) refreshSessionIndex(ctx context.Context) {
+// refreshSessionIndex serializes refreshes so concurrent searches cannot
+// overwrite newer index entries with an older scan.
+func (r *AgentRuntime) refreshSessionIndex(ctx context.Context) error {
 	if r.sessionIndex == nil {
-		return
+		return nil
 	}
-	r.indexOnce.Do(func() {
-		if _, err := r.sessionIndex.Refresh(ctx, sessionindex.Source{Store: r.transcripts, DataDir: r.dataDir}); err != nil {
-			fmt.Fprintf(os.Stderr, "session_search: index refresh: %v\n", err)
-		}
-	})
+	_, err := r.sessionIndex.Refresh(ctx, sessionindex.Source{Store: r.transcripts, DataDir: r.dataDir})
+	return err
 }
 
 // MemoryView is one memory store as the settings pane shows it.

@@ -1,12 +1,57 @@
 package runtime
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
+
+func TestFinishedBackgroundJobWakesIdleSession(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, `{"cmd":"while [ ! -f wake-gate ]; do sleep 0.05; done; echo job-done","background":true}`, "")
+	gate := filepath.Join(ws, "wake-gate")
+	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600); rt.ShutdownTurns(5 * time.Second) })
+	_, done, err := rt.SubmitTurn(agent.Request{SessionID: sid, Cwd: ws, Message: "start job", Permissions: "full-access"}, SubmitOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-done:
+		if result.Error != "" {
+			t.Fatal(result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("initial turn did not finish")
+	}
+	if rt.hub.Busy(sid) {
+		t.Fatal("session should be idle before the job completes")
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, rt, sid)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		sess, err := rt.transcripts.Load(ws, sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := sess.History()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, msg := range msgs {
+			if msg.IsNotify && msg.Name != nil && *msg.Name == "shell" {
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("finished job did not wake the session with a completion notice")
+}
 
 func sessionDirOf(t *testing.T, rt *AgentRuntime, sid string) string {
 	t.Helper()
@@ -48,24 +93,8 @@ func runningJob(t *testing.T, rt *AgentRuntime, sid string) JobRecord {
 	return JobRecord{}
 }
 
-// waitIdle blocks until no turn is running or queued for the session.
-// A finished background job wakes the agent with a notify turn that runs
-// through the hub after the driving call returned, and RevertSession
-// refuses while one is in flight.
-func waitIdle(t *testing.T, rt *AgentRuntime, sid string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if !rt.hub.Busy(sid) {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("session %s never went idle", sid)
-}
-
 func TestRevertRefusesWhileAJobIsRunning(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, `{"cmd":"sleep 30","background":true}`, "")
+	rt, ws, sid := undoRuntime(t, `{"cmd":"sleep 30","background":true,"notify":false}`, "")
 	turn(t, rt, sid, ws, "start job")
 	rec := runningJob(t, rt, sid)
 	if _, err := rt.RevertSession(sid, "", 0); err == nil {
@@ -84,14 +113,9 @@ func TestRevertRefusesWhileAJobIsRunning(t *testing.T) {
 }
 
 func TestRevertAfterAFinishedJob(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, `{"cmd":"echo job > j.txt","background":true}`, "")
+	rt, ws, sid := undoRuntime(t, `{"cmd":"echo job > j.txt","background":true,"notify":false}`, "")
 	turn(t, rt, sid, ws, "run it")
 	waitJob(t, rt, sid)
-	// A finished job wakes the agent with a notify turn through the hub,
-	// and that turn outlives the one `turn` driven synchronously above.
-	// RevertSession refuses while any turn runs, so wait for the session
-	// to go idle rather than racing the notify turn on a slow machine.
-	waitIdle(t, rt, sid)
 	res, err := rt.RevertSession(sid, "", 0)
 	if err != nil {
 		t.Fatal(err)

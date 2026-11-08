@@ -195,7 +195,15 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		if d.Skills == nil {
 			return nil, fmt.Errorf("skill %q is not available: the runtime has no skill source", name)
 		}
-		skill, err := d.Skills.LoadSkill(sess.Meta.Cwd, name)
+		var skill Skill
+		var err error
+		if contextual, ok := d.Skills.(interface {
+			LoadSkillForSession(cwd, sessionID, name string) (Skill, error)
+		}); ok {
+			skill, err = contextual.LoadSkillForSession(sess.Meta.Cwd, sess.Meta.SessionID, name)
+		} else {
+			skill, err = d.Skills.LoadSkill(sess.Meta.Cwd, name)
+		}
 		if err != nil {
 			return nil, err
 		}

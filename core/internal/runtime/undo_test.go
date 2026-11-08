@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,9 +15,273 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
+
+func BenchmarkUndoPreviewLongTranscript(b *testing.B) {
+	dataDir := b.TempDir()
+	rt := WithKeyStore(dataDir, config.NewConfig(dataDir), config.NewMemoryKeyStore())
+	b.Cleanup(func() { rt.ShutdownTurns(time.Second) })
+	rt.snaps = nil
+	sess, err := rt.transcripts.Create(b.TempDir(), "", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	const turns = 5000
+	var content strings.Builder
+	for i := 0; i < turns; i++ {
+		content.WriteString("{\"turn\":{\"messages\":[{\"role\":\"user\",\"content\":\"question\"},{\"role\":\"assistant\",\"content\":\"answer\"}]}}\n")
+	}
+	if err := os.WriteFile(filepath.Join(sess.Dir, "messages.jsonl"), []byte(content.String()), 0o600); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := rt.RevertPreview(sess.Meta.SessionID, sess.Meta.Cwd, (turns-1)*2); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestUndoCountsTurnsRatherThanSteeringMessages(t *testing.T) {
+	rt, ws, sid := undoRuntime(t)
+	rt.snaps = nil
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 3; n++ {
+		if err := sess.AppendTurn([]transcript.Message{transcript.UserMessage(fmt.Sprintf("turn-%d", n)), transcript.UserMessage("steer"), {Role: transcript.RoleAssistant, Content: "done"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := rt.RevertPreview(sid, ws, 0); err != nil {
+		t.Fatalf("three turns with steering should be undoable: %v", err)
+	}
+	fork, err := rt.ForkSession(sid, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkSession, err := rt.transcripts.Load(ws, fork.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := readUndoHistory(forkSession)
+	if err != nil || len(history.starts) != 3 {
+		t.Fatalf("fork turn boundaries = %v, %v", history.starts, err)
+	}
+	if preview, err := rt.RevertPreview(sid, ws, 4); err != nil || preview.Index != 3 {
+		t.Fatalf("steer preview = %+v, %v", preview, err)
+	}
+	if _, err := rt.RevertSession(sid, ws, 4); err != nil {
+		t.Fatalf("revert second turn: %v", err)
+	}
+	turns, err := sess.HistoryTurns()
+	if err != nil || len(turns) != 1 || len(turns[0].Messages) != 3 {
+		t.Fatalf("turn grouping after revert = %+v, %v", turns, err)
+	}
+}
+
+func TestUndoRetainsOnlyThreeTurnsPerSession(t *testing.T) {
+	rt, ws, sid := undoRuntime(t,
+		"echo one > a.txt", "", "echo two > a.txt", "", "echo three > a.txt", "", "echo four > a.txt", "")
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "first")
+	firstSession, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSnapshots, err := readTurnSnapshots(firstSession.Dir)
+	if err != nil || len(firstSnapshots) != 1 {
+		t.Fatalf("first snapshots = %v, %v", firstSnapshots, err)
+	}
+	oldTree := firstSnapshots[0].Tree
+	objects, err := filepath.Glob(filepath.Join(rt.dataDir, "snapshots", "*", "objects", oldTree[:2], oldTree[2:]))
+	if err != nil || len(objects) != 1 {
+		t.Fatalf("old tree objects = %v, %v", objects, err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(objects[0], old, old); err != nil {
+		t.Fatal(err)
+	}
+	other, err := rt.OpenSession("", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, other.SessionID, ws, "other chat")
+	otherSession, err := rt.transcripts.Load(ws, other.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSnapshots, err := readTurnSnapshots(otherSession.Dir)
+	if err != nil || len(otherSnapshots) != 1 {
+		t.Fatalf("other snapshots = %v, %v", otherSnapshots, err)
+	}
+	otherTree := otherSnapshots[0].Tree
+	otherObjects, err := filepath.Glob(filepath.Join(rt.dataDir, "snapshots", "*", "objects", otherTree[:2], otherTree[2:]))
+	if err != nil || len(otherObjects) != 1 {
+		t.Fatalf("other tree objects = %v, %v", otherObjects, err)
+	}
+	if err := os.Chtimes(otherObjects[0], old, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range []string{"second", "third", "fourth"} {
+		turn(t, rt, sid, ws, msg)
+	}
+	rows := userRows(t, rt, sid)
+	list, err := readTurnSnapshots(firstSession.Dir)
+	if err != nil || len(list) != 3 {
+		t.Fatalf("retained snapshots = %v, %v", list, err)
+	}
+	changes, err := rt.SessionChanges(sid, ws)
+	if err != nil {
+		t.Fatalf("session changes: %v", err)
+	}
+	for _, change := range changes.Turns {
+		if change.Turn == *rows[0].Index {
+			t.Fatal("changes included an expired turn")
+		}
+	}
+	if _, err := rt.SessionDiff(sid, ws, *rows[0].Index, "a.txt"); err == nil {
+		t.Fatal("expired turn diff remained available")
+	}
+	if _, err := rt.RevertPreview(sid, ws, *rows[0].Index); err == nil {
+		t.Fatal("old revert preview accepted")
+	}
+	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
+		t.Fatal("old revert accepted")
+	}
+	if _, err := rt.RevertPreview(other.SessionID, ws, 0); err != nil {
+		t.Fatalf("other chat lost its snapshot: %v", err)
+	}
+	repo := rt.snapRepo(ws)
+	if _, err := repo.Changed(context.Background(), oldTree, list[0].Tree); err == nil {
+		t.Fatal("expired snapshot tree still stored")
+	}
+	res, err := rt.RevertSession(sid, ws, *rows[1].Index)
+	if err != nil || !res.Snapshots {
+		t.Fatalf("three-turn revert = %+v, %v", res, err)
+	}
+	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
+		t.Fatal("sequential revert crossed the retention boundary")
+	}
+}
+
+func TestUndoLimitAppliesWithoutSnapshots(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "", "", "")
+	rt.snaps = nil
+	for _, msg := range []string{"one", "two", "three", "four"} {
+		turn(t, rt, sid, ws, msg)
+	}
+	rows := userRows(t, rt, sid)
+	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
+		t.Fatal("old conversation-only revert accepted")
+	}
+	if _, err := rt.RevertSession(sid, ws, *rows[1].Index); err != nil {
+		t.Fatalf("three-turn conversation revert: %v", err)
+	}
+	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
+		t.Fatal("sequential conversation revert crossed the retention boundary")
+	}
+}
+
+func TestTurnHistoryExplainsUnavailableSnapshot(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "")
+	rt.snaps = nil
+	turn(t, rt, sid, ws, "unprotected")
+	preview, err := rt.RevertPreview(sid, ws, 0)
+	if err != nil || preview.Snapshots || preview.Protection == nil || preview.Protection.Reason == "" {
+		t.Fatalf("missing preview reason: %+v %v", preview, err)
+	}
+	history, err := rt.SessionHistory(sid, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range history {
+		if row.Role == "user" {
+			if row.Protection == nil || row.Protection.State != "unavailable" || row.Protection.Reason == "" {
+				t.Fatalf("missing protection reason: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("missing user row")
+}
+
+func TestSnapshotFailureReportsReason(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "")
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := rt.recordTurnSnapshot(sess, home)
+	if status.State != "unavailable" || !strings.Contains(status.Reason, "too broad") {
+		t.Fatalf("missing failure reason: %+v", status)
+	}
+	entries, err := readProtection(sess.Dir)
+	if err != nil || len(entries) != 1 || entries[0].Reason != status.Reason {
+		t.Fatalf("failure not persisted: %+v %v", entries, err)
+	}
+}
+
+func TestTurnHistoryShowsExclusionsAndExpiresAfterThreeTurns(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "", "", "", "", "", "", "")
+	if err := os.WriteFile(filepath.Join(ws, ".gitignore"), []byte("private.txt\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "private.txt"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "binary.dat"), []byte{'a', 0, 'b'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "first")
+	rows := userRows(t, rt, sid)
+	p := rows[0].Protection
+	if p == nil || p.State != "partial" || !slices.Contains(p.Excluded, "private.txt") || !slices.Contains(p.Excluded, "binary.dat") {
+		t.Fatalf("missing exclusions: %+v", p)
+	}
+	turn(t, rt, sid, ws, "second")
+	turn(t, rt, sid, ws, "third")
+	turn(t, rt, sid, ws, "fourth")
+	rows = userRows(t, rt, sid)
+	if rows[0].Protection == nil || rows[0].Protection.State != "expired" {
+		t.Fatalf("old turn not expired: %+v", rows[0])
+	}
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := readProtection(sess.Dir)
+	if err != nil || len(status) != 3 {
+		t.Fatalf("protection retention = %+v %v", status, err)
+	}
+}
+
+func TestRevertPreviewShowsFilesExcludedAfterTurn(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "")
+	if err := os.WriteFile(filepath.Join(ws, ".gitignore"), []byte("later.env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "first")
+	if err := os.WriteFile(filepath.Join(ws, "later.env"), []byte("ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := rt.RevertPreview(sid, ws, 0)
+	if err != nil || preview.Protection == nil || !slices.Contains(preview.Protection.Excluded, "later.env") {
+		t.Fatalf("excluded path missing: %+v %v", preview, err)
+	}
+}
 
 // scriptModel answers each request with the next round: a shell
 // command becomes a tool call, "" a plain "finished" reply.
@@ -133,7 +399,7 @@ func TestTurnSnapshotRestoresFolderExactly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.Revert != nil {
-		t.Fatal("a revert is final and leaves no pending undo")
+		t.Fatal("revert left legacy pending metadata")
 	}
 }
 
@@ -157,6 +423,219 @@ func TestRevertOverwritesLaterChanges(t *testing.T) {
 	}
 	if readFile(t, filepath.Join(ws, "a.txt")) != "orig" || readFile(t, filepath.Join(ws, "b.txt")) != "<missing>" {
 		t.Fatal("the snapshot did not win over later changes")
+	}
+}
+
+func TestRecoverLatestUndoRestoresFilesAndConversation(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt; echo agent > b.txt", "")
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "edit")
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("later user work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, filepath.Join(ws, "a.txt")) != "original" {
+		t.Fatal("undo failed")
+	}
+	if ok, err := rt.RecoveryAvailable(sid, ws); err != nil || !ok {
+		t.Fatalf("recovery missing: %v %v", ok, err)
+	}
+	if _, err := rt.RecoverLatest(sid, ws); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, filepath.Join(ws, "a.txt")) != "later user work" || readFile(t, filepath.Join(ws, "b.txt")) != "agent" {
+		t.Fatal("files not recovered")
+	}
+	if rows := userRows(t, rt, sid); len(rows) != 1 {
+		t.Fatalf("conversation not recovered: %+v", rows)
+	} else if rows[0].Protection == nil || rows[0].Protection.State == "unknown" {
+		t.Fatalf("snapshot protection not recovered: %+v", rows[0])
+	}
+}
+
+func TestRecoveryIsPerSessionAndSurvivesSnapshotCollection(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt", "")
+	turn(t, rt, sid, ws, "edit")
+	other, err := rt.OpenSession("", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := rt.RecoveryAvailable(other.SessionID, ws); err != nil || ok {
+		t.Fatalf("recovery leaked to another chat: %v %v", ok, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
+	defer cancel()
+	if err := rt.collectSnapshots(ctx, rt.snapRepo(ws)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RecoverLatest(sid, ws); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(ws, "a.txt")); got != "agent" {
+		t.Fatalf("recovery after collection: %q", got)
+	}
+}
+
+func TestLatestUndoReplacesOnlyThatSessionsRecovery(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo first > a.txt", "", "echo second > a.txt", "")
+	turn(t, rt, sid, ws, "first")
+	turn(t, rt, sid, ws, "second")
+	rows := userRows(t, rt, sid)
+	if _, err := rt.RevertSession(sid, ws, *rows[1].Index); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RecoverLatest(sid, ws); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(ws, "a.txt")); got != "first" {
+		t.Fatalf("recovered wrong undo: %q", got)
+	}
+	if rows := userRows(t, rt, sid); len(rows) != 1 {
+		t.Fatalf("recovered wrong conversation: %+v", rows)
+	}
+}
+
+func TestRecoveryRestoresConversationWithoutFileSnapshots(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "")
+	rt.snaps = nil
+	turn(t, rt, sid, ws, "hello")
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RecoverLatest(sid, ws); err != nil {
+		t.Fatal(err)
+	}
+	if rows := userRows(t, rt, sid); len(rows) != 1 {
+		t.Fatalf("conversation not recovered: %+v", rows)
+	}
+}
+
+func TestRevertPreservesNewUncapturableFile(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "")
+	turn(t, rt, sid, ws, "hello")
+	path := filepath.Join(ws, "new.dat")
+	content := []byte{'a', 0, 'b'}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := rt.RevertPreview(sid, ws, 0)
+	if err != nil || !slices.Contains(preview.Skipped, "new.dat") {
+		t.Fatalf("unsafe preview: %+v %v", preview, err)
+	}
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !slices.Equal(got, content) {
+		t.Fatalf("uncapturable file lost: %v", err)
+	}
+}
+
+func TestRevertDoesNotProceedIfRecoveryCannotBeSaved(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt", "")
+	turn(t, rt, sid, ws, "edit")
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(sess.Dir, recoveryFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RevertSession(sid, ws, 0); err == nil {
+		t.Fatal("undo accepted without a recovery snapshot")
+	}
+	if got := readFile(t, filepath.Join(ws, "a.txt")); got != "agent" {
+		t.Fatalf("file changed: %q", got)
+	}
+	if rows := userRows(t, rt, sid); len(rows) != 1 {
+		t.Fatalf("conversation changed: %+v", rows)
+	}
+}
+
+func TestUndoAndRecoveryRejectStalePreviews(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt", "")
+	turn(t, rt, sid, ws, "edit")
+	preview, err := rt.RevertPreview(sid, ws, 0)
+	if err != nil || preview.Version == "" {
+		t.Fatalf("preview: %+v %v", preview, err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "later.txt"), []byte("later"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RevertSessionChecked(sid, ws, 0, preview.Version); err == nil {
+		t.Fatal("accepted stale undo preview")
+	}
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	recovery, err := rt.RecoveryPreview(sid, ws)
+	if err != nil || recovery.Version == "" {
+		t.Fatalf("recovery preview: %+v %v", recovery, err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "newer.txt"), []byte("newer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RecoverLatestChecked(sid, ws, recovery.Version); err == nil {
+		t.Fatal("accepted stale recovery preview")
+	}
+	if got := readFile(t, filepath.Join(ws, "newer.txt")); got != "newer" {
+		t.Fatalf("newer work lost: %q", got)
+	}
+}
+
+func TestUndoRejectsPreviewAfterAnotherMessage(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "", "", "")
+	turn(t, rt, sid, ws, "first")
+	preview, err := rt.RevertPreview(sid, ws, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "second")
+	if _, err := rt.RevertSessionChecked(sid, ws, 0, preview.Version); err == nil {
+		t.Fatal("accepted preview from before the second message")
+	}
+	if rows := userRows(t, rt, sid); len(rows) != 2 {
+		t.Fatalf("new message lost: %+v", rows)
+	}
+}
+
+func TestRecoveryRejectsCorruptConversationBeforeRestoringFiles(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt", "")
+	turn(t, rt, sid, ws, "edit")
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := readRecovery(sess.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Transcript = []byte("corrupt")
+	data, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sess.Dir, recoveryFile), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.RecoverLatest(sid, ws); err == nil {
+		t.Fatal("accepted corrupt recovery")
+	}
+	if got := readFile(t, filepath.Join(ws, "a.txt")); got != "<missing>" {
+		t.Fatalf("file changed before recovery failed: %q", got)
 	}
 }
 

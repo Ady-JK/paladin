@@ -37,7 +37,7 @@ test("the separate chat window is gone and the agent keeps one header", async ({
   await expect(page.locator("#agentView")).toBeVisible();
   await expect(page.locator("#headerTitle")).toHaveText("Agent Chat");
   await expect(page.locator("#paneWebBtn")).toBeVisible();
-  await expect(page.locator("#paneBrowserBtn")).toBeVisible();
+  await expect(page.locator("#paneBrowserBtn")).toHaveCount(0);
 });
 
 test("window buttons fill the top-right corner", async ({ page }) => {
@@ -59,6 +59,7 @@ test("the Web menu lists the saved sites and opens one beside the agent", async 
   for (const name of ["Gemini", "ChatGPT", "Claude", "DeepSeek"]) {
     await expect(page.locator(`[data-web-title="${name}"]`)).toBeVisible();
   }
+  await expect(page.locator("#webMenu")).toContainText("Personal browser");
   await expect(page.locator("#webMenu")).toContainText("gemini.google.com");
 
   await page.locator('[data-web-open="https://gemini.google.com/"]').click();
@@ -353,4 +354,18 @@ test("the tabs layout names the conversation tab Agent", async ({ page }) => {
   await startSession(page);
   await page.locator("#paneLayoutBtn").click();
   await expect(page.locator('[data-key="main"]')).toContainText("Agent");
+});
+
+test("the personal browser opens without starting a chat", async ({ page }) => {
+  await openMenu(page);
+  await page.locator("[data-web-address]").click();
+  const input = page.locator("#sidePane .web-url");
+  await expect(input).toBeVisible();
+  await input.fill("example.com");
+  await input.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e2eViewEnsures?.at(-1)?.partition))
+    .toBe("persist:paladin-sites");
+  await page.locator("#paneTabs .pane-tab[data-web] .pane-tab-close").click();
+  await expect(page.locator("#sidePane .pane-web")).toHaveCount(0);
 });

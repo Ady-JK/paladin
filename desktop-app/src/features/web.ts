@@ -11,7 +11,7 @@ import type { WebSite } from "../core/types";
 import { icon } from "../icons";
 import { closeMenu, closeModal, isMenuOpen, openModal, toggleMenu } from "../ui/anim";
 import { toast } from "../ui/toast";
-import { closeWebTabsForUrl, openWebTab } from "./sidePane";
+import { closeWebTabsForUrl, openWebTab, STANDALONE_PANE_SESSION } from "./sidePane";
 
 const SITES_KEY = "paladin.sites";
 // SEEDED_KEY records that the defaults were offered once. Without it,
@@ -105,16 +105,13 @@ function paintMenu(): void {
   listEl.innerHTML = rowsHtml();
 }
 
-function sessionOrToast(): string {
-  if (state.sessionId) return state.sessionId;
-  toast("Send a message first: the browser lives beside a conversation.", "error");
-  return "";
+function browserSession(): string {
+  return state.sessionId || STANDALONE_PANE_SESSION;
 }
 
 function openSite(url: string, title: string): void {
-  const sessionId = sessionOrToast();
+  const sessionId = browserSession();
   closeWebMenu();
-  if (!sessionId) return;
   openWebTab(sessionId, url, title);
 }
 
@@ -141,11 +138,11 @@ function buildMenu(): void {
   button.id = "paneWebBtn";
   button.type = "button";
   button.className = "pane-btn";
-  button.title = "Web: saved sites and any address";
-  button.setAttribute("aria-label", "Web browser");
+  button.title = "Browser: bookmarks and any address";
+  button.setAttribute("aria-label", "Browser");
   button.setAttribute("aria-haspopup", "menu");
   button.setAttribute("aria-expanded", "false");
-  button.innerHTML = icon("rl-chat", "h-4 w-4");
+  button.innerHTML = icon("globe", "h-4 w-4");
 
   menu = document.createElement("div");
   menu.id = "webMenu";
@@ -153,12 +150,12 @@ function buildMenu(): void {
   menu.setAttribute("role", "menu");
   menu.classList.add("hidden");
   menu.innerHTML =
-    `<div class="web-menu-head"><span>Web</span><span class="web-menu-hint">Gemini, ChatGPT and any site</span></div>` +
+    `<div class="web-menu-head"><span>Personal browser</span><span class="web-menu-hint">Bookmarks and websites</span></div>` +
     `<div class="web-menu-list"></div>` +
     `<button type="button" role="menuitem" class="web-menu-action" data-web-address>${icon("plus", "h-3.5 w-3.5")}<span>Open an address…</span></button>` +
     `<button type="button" role="menuitem" class="web-menu-action" data-web-new>${icon("plus", "h-3.5 w-3.5")}<span>New saved site…</span></button>`;
   listEl = menu.querySelector<HTMLElement>(".web-menu-list");
-  actions.insertBefore(button, actions.querySelector("#paneBrowserBtn") ?? null);
+  actions.insertBefore(button, actions.querySelector("#paneLayoutBtn") ?? null);
   actions.append(menu);
 
   button.addEventListener("click", (event) => {
@@ -184,9 +181,9 @@ function buildMenu(): void {
       return;
     }
     if (target.closest("[data-web-address]")) {
-      const sessionId = sessionOrToast();
+      const sessionId = browserSession();
       closeWebMenu();
-      if (sessionId) openWebTab(sessionId, "", "New tab");
+      openWebTab(sessionId, "", "New tab");
       return;
     }
     if (target.closest("[data-web-new]")) {
@@ -256,7 +253,7 @@ function addSite(): void {
   persistSites();
   closeNewSite();
   paintMenu();
-  if (state.sessionId) openWebTab(state.sessionId, normalized, name);
+  openWebTab(browserSession(), normalized, name);
   toast(`Added ${name}`);
 }
 

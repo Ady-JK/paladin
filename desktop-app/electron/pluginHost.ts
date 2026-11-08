@@ -27,6 +27,15 @@ export function paladinDataDir(
   return path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "paladin");
 }
 
+export function creatorDir(dataDir: string = paladinDataDir()): string {
+  const override = (process.env.PALADIN_CREATOR_DIR ?? "").trim();
+  if (override && path.isAbsolute(override)) return path.normalize(override);
+  if ((process.env.PALADIN_DATA_DIR ?? "").trim() || path.resolve(dataDir) !== path.resolve(paladinDataDir())) {
+    return path.join(dataDir, "creator");
+  }
+  return path.join(os.homedir(), ".config", "paladin", "creator");
+}
+
 const MAX_MANIFEST = 64 << 10;
 const MAX_VIEW = 2 << 20;
 const MAX_CARD = 512 << 10;
@@ -34,7 +43,7 @@ const MAX_ASSET = 8 << 20;
 const VIEW_ID = /^[a-z][a-z0-9_-]{0,31}$/;
 const PLUGIN_NAME = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 const TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
-const VIEW_PERMS = new Set(["invokeTool", "invokeToolDestructive", "events", "readFile", "openExternal"]);
+const VIEW_PERMS = new Set(["invokeTool", "invokeToolDestructive", "events", "readFile", "openExternal", "sendPrompt"]);
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -65,6 +74,7 @@ export type HostedView = {
   dir: string;
   permissions: string[];
   destructive: boolean;
+  mount: string;
 };
 
 export type HostedCard = {
@@ -100,26 +110,46 @@ export class PluginHost {
     this.errors = [];
     this.statCache.clear();
     const root = path.join(this.dataDir, "config", "extensions");
-    let enabled: unknown;
+    let enabled: unknown = [];
     try {
       const raw = fs.readFileSync(path.join(this.dataDir, "config", "extensions.json"));
       if (raw.length > MAX_MANIFEST) throw new Error("extensions.json is too large");
       enabled = (JSON.parse(raw.toString("utf8")) as { enabled?: unknown }).enabled;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.errors.push(String(error));
-      return;
     }
-    if (!Array.isArray(enabled)) return;
+    const enabledNames: unknown[] = Array.isArray(enabled) ? enabled : [];
     const seen = new Set<string>();
-    for (const name of enabled) {
+    for (const name of enabledNames) {
       if (typeof name !== "string" || seen.has(name)) continue;
       seen.add(name);
       // Legacy loose files have no manifest and no UI.
       if (!PLUGIN_NAME.test(name)) continue;
       try {
-        this.loadPlugin(root, name);
+        this.loadPlugin(root, name, name);
       } catch (error) {
         this.errors.push(`plugin ${name}: ${message(error)}`);
+      }
+    }
+    for (const kind of ["core", "ui"]) {
+      const dir = path.join(creatorDir(this.dataDir), kind);
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.errors.push(String(error));
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !PLUGIN_NAME.test(entry.name) || entry.name.length > 48) continue;
+        if (!fs.existsSync(path.join(dir, entry.name, "paladin-plugin.json"))) continue;
+        const name = `creator_${kind}_${entry.name}`;
+        try {
+          if (this.dirs.has(name)) throw new Error("plugin name already in use");
+          this.loadPlugin(dir, entry.name, name);
+        } catch (error) {
+          this.errors.push(`plugin ${name}: ${message(error)}`);
+        }
       }
     }
   }
@@ -190,6 +220,7 @@ export class PluginHost {
       headers: {
         "content-type": type,
         "content-security-policy": CSP,
+        "access-control-allow-origin": "null",
         "x-content-type-options": "nosniff",
         "cache-control": "no-store",
       },
@@ -312,8 +343,8 @@ export class PluginHost {
     return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
   }
 
-  private loadPlugin(root: string, name: string): void {
-    const dir = fs.realpathSync(path.join(root, name));
+  private loadPlugin(root: string, folder: string, name: string): void {
+    const dir = fs.realpathSync(path.join(root, folder));
     if (!this.within(fs.realpathSync(root), dir)) throw new Error("plugin links outside the extensions folder");
     this.dirs.set(name, dir);
     if (!fs.statSync(dir).isDirectory()) throw new Error("not a directory");
@@ -364,7 +395,7 @@ export class PluginHost {
     const title = typeof input.title === "string" ? input.title.trim() : "";
     if (!title || [...title].length > 48) throw new Error(`view ${id}: title must be 1 to 48 characters`);
     const mount = typeof input.mount === "string" && input.mount.trim() ? input.mount.trim() : "side-pane";
-    if (mount !== "side-pane") throw new Error(`view ${id}: only side-pane is supported`);
+    if (mount !== "side-pane" && mount !== "overlay") throw new Error(`view ${id}: invalid mount`);
     const entry = this.entry(dir, typeof input.entry === "string" ? input.entry : "", ".html", MAX_VIEW);
     const permissions: string[] = [];
     if (input.permissions !== undefined) {
@@ -384,6 +415,7 @@ export class PluginHost {
       dir,
       permissions,
       destructive: permissions.includes("invokeToolDestructive"),
+      mount,
     };
   }
 
@@ -456,13 +488,15 @@ window.addEventListener("message", (event) => {
   if (!data || data.type !== "paladin:card") return;
   const card = window.__paladin_card;
   try {
-    const out = card && typeof card.render === "function" ? card.render(data.result, data.ctx) : null;
+    if (data.status === "running") { root.textContent = "Running…"; height(); return; }
+    if (!card || typeof card.render !== "function") throw new Error("card renderer is unavailable");
+    const out = card.render(data.result, data.ctx);
     root.replaceChildren();
     if (typeof out === "string") root.innerHTML = out;
     else if (out instanceof Node) root.append(out);
     if (data.ctx && data.ctx.theme) document.documentElement.dataset.theme = data.ctx.theme;
   } catch (error) {
-    root.textContent = "This card could not render: " + String(error && error.message ? error.message : error);
+    send({ type: "paladin:card-error" });
   }
   height();
 });

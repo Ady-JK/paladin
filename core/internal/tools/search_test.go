@@ -1,14 +1,115 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGitFilesUsesOneProcess(t *testing.T) {
+	if os.Getenv("PALADIN_TEST_GIT_LISTER") == "1" {
+		f, err := os.OpenFile(os.Getenv("PALADIN_TEST_GIT_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			os.Exit(2)
+		}
+		_, _ = f.WriteString("called\n")
+		_ = f.Close()
+		if strings.Contains(strings.Join(os.Args, " "), "rev-parse") {
+			_, _ = fmt.Fprint(os.Stdout, "true\n")
+		} else {
+			_, _ = fmt.Fprint(os.Stdout, "a.txt\x00")
+		}
+		os.Exit(0)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a shell wrapper")
+	}
+	dir := t.TempDir()
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapper := "#!/bin/sh\nexec \"$PALADIN_TEST_GIT_BIN\" -test.run=^TestGitFilesUsesOneProcess$ -- \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("PALADIN_TEST_GIT_LISTER", "1")
+	t.Setenv("PALADIN_TEST_GIT_BIN", bin)
+	t.Setenv("PALADIN_TEST_GIT_LOG", logPath)
+	t.Setenv("PATH", dir)
+	paths, _, err := gitFiles(context.Background(), dir)
+	if err != nil || len(paths) != 1 || paths[0] != "a.txt" {
+		t.Fatalf("paths = %v, %v", paths, err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil || strings.Count(string(data), "called\n") != 1 {
+		t.Fatalf("git invocations = %q, %v", data, err)
+	}
+}
+
+func TestGitListerExitOneIsNotTreatedAsEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a shell wrapper")
+	}
+	for _, name := range []string{"git", "git.exe"} {
+		path := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := runLister(context.Background(), t.TempDir(), path); err == nil {
+			t.Fatalf("%s failure was reported as an empty listing", name)
+		}
+	}
+}
+
+func TestSearchListerRejectsOversizedRecord(t *testing.T) {
+	if os.Getenv("PALADIN_TEST_OVERSIZED_LISTER") == "1" {
+		_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 1<<20+1))
+		os.Exit(0)
+	}
+	t.Setenv("PALADIN_TEST_OVERSIZED_LISTER", "1")
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = runLister(context.Background(), t.TempDir(), bin, "-test.run=^TestSearchListerRejectsOversizedRecord$")
+	if err == nil {
+		t.Fatal("oversized output was accepted as a complete listing")
+	}
+}
+
+func TestGrepOverlappingContextMarksEveryMatch(t *testing.T) {
+	ctx, ws := testCtx(t)
+	writeTree(t, ws, map[string]string{"a.txt": "before\nmatch one\nmatch two\nafter\n"})
+	result := callSearch(t, GrepTool{}, ctx, map[string]any{"pattern": "match", "context": 2})
+	for _, want := range []string{"1- before", "2: match one", "3: match two", "4- after"} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("missing %q in %q", want, result.Output)
+		}
+	}
+}
+
+func BenchmarkGrepOverlappingContext(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "matches.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("match line\n", 1000)), 0o600); err != nil {
+		b.Fatal(err)
+	}
+	re := regexp.MustCompile("match")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		grepFileHits(path, re, 5, 1000)
+	}
+}
 
 // searchEngines runs a test once per engine: the built-in walk always,
 // ripgrep only when it is installed.

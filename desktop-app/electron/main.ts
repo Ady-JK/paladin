@@ -23,14 +23,15 @@ import {
 import { noteFor } from "./turnNotify";
 import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
 import { hostCommand, hostEnv, validateConnection, type CoreConnection } from "./remote";
-import { allowedChatPopup, guestPermissionAllowed } from "./guestPolicy";
+import { allowedPersonalPopup, guestPermissionAllowed } from "./guestPolicy";
 import { BrowserManager, type BrowserRequest, type BrowserState, type EgressSetup } from "./browser";
 import { remoteOpenRefusal } from "./browserPolicy";
 import { runBrowserSmoke } from "./browserSmoke";
 import { refuseAll } from "./browserEgress";
 import { appFrameNavigationAllowed, appNavigationAllowed, isMainWindowFrame } from "./mainWindowPolicy";
-import { PluginHost } from "./pluginHost";
+import { creatorDir, PluginHost } from "./pluginHost";
 import { storeKeyValid, toolAllowed } from "./pluginPolicy";
+import { readPluginStore, writePluginStore } from "./pluginStore";
 
 type ViewBounds = { x: number; y: number; width: number; height: number };
 
@@ -53,7 +54,7 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: false,
-      corsEnabled: false,
+      corsEnabled: true,
       allowServiceWorkers: false,
     },
   },
@@ -61,6 +62,40 @@ protocol.registerSchemesAsPrivileged([
 // The manifest allow-list is read at boot and refreshed when plugins
 // reload. Requests are checked again against the real path.
 const pluginHost = new PluginHost();
+let creatorWatcher: fs.FSWatcher | null = null;
+let creatorReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+function watchCreator(): void {
+  if (creatorWatcher || !fs.existsSync(creatorDir())) return;
+  try {
+    creatorWatcher = fs.watch(creatorDir(), { recursive: true }, (_event, filename) => {
+      const rel = String(filename ?? "").replace(/\\/g, "/");
+      if (
+        rel &&
+        (!/^(ui|core)\//.test(rel) || /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || rel.endsWith("/.store.json"))
+      )
+        return;
+      if (creatorReloadTimer) clearTimeout(creatorReloadTimer);
+      creatorReloadTimer = setTimeout(() => {
+        creatorReloadTimer = null;
+        void agent
+          .invoke("toolsReload", {})
+          .then(() => {
+            pluginHost.refresh();
+            liveWindow()?.webContents.send("agent:event", { event: "plugin/updated" });
+          })
+          .catch((error: unknown) => console.error("Creator reload failed:", error));
+      }, 350);
+    });
+    creatorWatcher.on("error", (error) => {
+      console.error("Creator watcher failed:", error);
+      creatorWatcher?.close();
+      creatorWatcher = null;
+    });
+  } catch (error) {
+    console.error("Could not watch Creator workspace:", error);
+  }
+}
 // Defaults for any web contents the app creates: no <webview> guests and
 // no new windows. The windows and views below set their own window-open
 // handlers after this, which replace the deny where they allow more.
@@ -248,15 +283,29 @@ type PanelGrant = {
   sessionId: string;
   workspace: string;
   permissions: Set<string>;
+  inflight: number;
+  reloading: boolean;
+  idleWaiters: Set<() => void>;
   frame: WebFrameMain | null;
   subs: Map<string, { events: Set<string> | null; dropped: number }>;
-  rates: Record<"tool" | "file" | "external" | "events", Rate>;
+  rates: Record<"tool" | "file" | "external" | "events" | "prompt", Rate>;
 };
 
 const panels = new Map<string, PanelGrant>();
 const PLUGIN_EVENTS = new Set([
   "chat/delta",
+  "chat/reasoning",
+  "chat/approval",
+  "chat/budget",
+  "chat/compact",
+  "chat/hook",
+  "chat/protection",
+  "chat/retry",
+  "chat/steer",
+  "chat/thinkingDropped",
+  "chat/usage",
   "chat/tool",
+  "turn/queued",
   "turn/start",
   "turn/done",
   "browser/navigated",
@@ -299,6 +348,9 @@ function newGrant(
     sessionId,
     workspace,
     permissions: new Set(permissions),
+    inflight: 0,
+    reloading: false,
+    idleWaiters: new Set(),
     frame: null,
     subs: new Map(),
     rates: {
@@ -306,6 +358,7 @@ function newGrant(
       file: { start: Date.now(), count: 0 },
       external: { start: Date.now(), count: 0 },
       events: { start: Date.now(), count: 0 },
+      prompt: { start: Date.now(), count: 0 },
     },
   };
 }
@@ -332,6 +385,7 @@ function panelGrant(event: IpcMainInvokeEvent): PanelGrant {
   if (url.hostname.toLowerCase() !== grant.plugin.toLowerCase() || view !== grant.view) {
     throw new Error("plugin frame does not match its panel");
   }
+  if (grant.frame && grant.frame !== frame) throw new Error("plugin panel belongs to another frame");
   grant.frame = frame;
   return grant;
 }
@@ -349,17 +403,6 @@ function storePath(grant: PanelGrant): string | null {
   return dir ? path.join(dir, ".store.json") : null;
 }
 
-function readStore(grant: PanelGrant): Record<string, unknown> {
-  const file = storePath(grant);
-  if (!file) return {};
-  try {
-    const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
-    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-
 function forwardToPlugins(msg: HostMessage): void {
   const event = typeof msg.event === "string" ? msg.event : "";
   if (!PLUGIN_EVENTS.has(event)) return;
@@ -368,7 +411,7 @@ function forwardToPlugins(msg: HostMessage): void {
     if (grant.sessionId !== sessionId || !grant.frame) continue;
     for (const [id, sub] of grant.subs) {
       if (sub.events && !sub.events.has(event)) continue;
-      if (!allowRate(grant, "events", 240)) {
+      if (!allowRate(grant, "events", 6000)) {
         sub.dropped++;
         continue;
       }
@@ -599,10 +642,10 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
   if (ua) {
     view.webContents.setUserAgent(ua);
   }
-  // Sign-in windows for the embedded chat providers need their shared
-  // cookie partition. Other destinations keep the existing deny policy.
+  // Personal sites use the same persistent profile for sign-in popups.
+  // Restrict them to secure web pages (or an initially blank OAuth window).
   view.webContents.setWindowOpenHandler(({ url }) =>
-    allowedChatPopup(view.webContents.getURL()) && allowedChatPopup(url)
+    allowedPersonalPopup(url)
       ? {
           action: "allow",
           overrideBrowserWindowOptions: {
@@ -615,9 +658,11 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
       : { action: "deny" },
   );
   view.webContents.on("did-create-window", (popup) => {
-    popup.webContents.on("will-navigate", (event, nextURL) => {
-      if (!allowedChatPopup(nextURL)) event.preventDefault();
-    });
+    const guard = (event: Electron.Event, nextURL: string): void => {
+      if (!allowedPersonalPopup(nextURL)) event.preventDefault();
+    };
+    popup.webContents.on("will-navigate", guard);
+    popup.webContents.on("will-redirect", guard);
     popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   });
   defuseGuestDrag(view);
@@ -769,6 +814,7 @@ function createWindow(): void {
       preload: path.join(HERE, "preload.js"),
       contextIsolation: true,
       sandbox: true,
+      nodeIntegrationInSubFrames: true,
     },
   });
 
@@ -857,6 +903,7 @@ app
     connection = loadConnection();
     agent = createAgent(connection);
     if (!process.argv.includes("--smoke-browser")) agent.start();
+    watchCreator();
     protocol.handle("plugin", (request) => pluginHost.handle(request));
 
     function handleTrusted<T extends unknown[], R>(
@@ -880,6 +927,12 @@ app
         pluginHost.refresh();
         liveWindow()?.webContents.send("agent:event", { event: "plugin/updated" });
       }
+      if (method === "creatorWorkspace") {
+        return agent.invoke(method, params).then((result) => {
+          watchCreator();
+          return result;
+        });
+      }
       return agent.invoke(method, params);
     });
 
@@ -902,7 +955,7 @@ app
       const viewId = typeof input.view === "string" ? input.view : "";
       const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
       const workspace = typeof input.workspace === "string" ? input.workspace : "";
-      if (!plugin || !viewId || !sessionId) throw new Error("plugins:open needs plugin, view and sessionId");
+      if (!plugin || !viewId) throw new Error("plugins:open needs plugin and view");
       if (!path.isAbsolute(workspace)) throw new Error("plugins:open needs an absolute workspace");
       pluginHost.refresh();
       const view = pluginHost.view(plugin, viewId);
@@ -919,7 +972,37 @@ app
 
     handleTrusted("plugins:close", (_e, id: unknown) => {
       if (typeof id !== "string") return false;
-      return panels.delete(id);
+      const grant = panels.get(id);
+      const removed = panels.delete(id);
+      for (const done of grant?.idleWaiters ?? []) done();
+      return removed;
+    });
+
+    handleTrusted("plugins:prepareReload", async (_e, id: unknown) => {
+      if (typeof id !== "string") return false;
+      const grant = panels.get(id);
+      if (!grant) return false;
+      grant.reloading = true;
+      if (grant.inflight) {
+        const waiters = grant.idleWaiters;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(done, 10 * 60_000 + 1000);
+          function done(): void {
+            clearTimeout(timer);
+            waiters.delete(done);
+            resolve();
+          }
+          waiters.add(done);
+        });
+      }
+      if (panels.get(id) !== grant || grant.inflight) {
+        grant.reloading = false;
+        return false;
+      }
+      // Let the frame receive and display the completed result before it
+      // is replaced with the refreshed view.
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      return panels.get(id) === grant;
     });
 
     handlePlugin("plugins:getContext", (grant) => ({
@@ -934,14 +1017,16 @@ app
       const input = (value ?? {}) as { tool?: unknown; args?: unknown };
       const tool = typeof input.tool === "string" ? input.tool : "";
       if (!tool) return { ok: false, error: "invokeTool needs a tool name" };
+      if (grant.reloading) return { ok: false, error: "this panel is reloading; please retry" };
       if (!toolAllowed([...grant.permissions], grant.plugin, tool)) {
         return { ok: false, error: `this panel may not call ${tool}` };
       }
       if (!allowRate(grant, "tool", 60)) return { ok: false, error: "this panel is calling tools too quickly" };
       console.error(`[plugin] ${grant.plugin}/${grant.view} invoked ${tool}`);
+      grant.inflight++;
       try {
         const result = (await agent.invoke("pluginInvoke", {
-          sessionId: grant.sessionId,
+          sessionId: grant.sessionId || "__paladin_plugin_ui__",
           cwd: grant.workspace,
           plugin: grant.plugin,
           view: grant.view,
@@ -954,6 +1039,9 @@ app
         return { ok: true, result: content };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      } finally {
+        grant.inflight--;
+        if (!grant.inflight) for (const done of grant.idleWaiters) done();
       }
     });
 
@@ -980,7 +1068,9 @@ app
     handlePlugin("plugins:readStore", async (grant, _e, value: unknown) => {
       const key = typeof (value as { key?: unknown } | null)?.key === "string" ? (value as { key: string }).key : "";
       if (!storeKeyValid(key)) return null;
-      const store = readStore(grant);
+      const file = storePath(grant);
+      if (!file) throw new Error("plugin folder is not available");
+      const store = readPluginStore(file);
       return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
     });
 
@@ -988,23 +1078,10 @@ app
       const input = (value ?? {}) as { key?: unknown; value?: unknown };
       const key = typeof input.key === "string" ? input.key : "";
       if (!storeKeyValid(key)) return { ok: false, error: "invalid store key" };
-      let encoded: string;
-      try {
-        encoded = JSON.stringify(input.value ?? null);
-      } catch {
-        return { ok: false, error: "value is not JSON" };
-      }
-      if (Buffer.byteLength(encoded) > 100 << 10) return { ok: false, error: "value is larger than 100 KiB" };
       const file = storePath(grant);
       if (!file) return { ok: false, error: "plugin folder is not available" };
-      const store = readStore(grant);
-      store[key] = input.value ?? null;
-      const data = JSON.stringify(store);
-      if (Buffer.byteLength(data) > 1 << 20) return { ok: false, error: "plugin store is larger than 1 MiB" };
       try {
-        const pending = `${file}.tmp`;
-        fs.writeFileSync(pending, data, { mode: 0o600 });
-        fs.renameSync(pending, file);
+        writePluginStore(file, key, input.value);
         return { ok: true };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -1025,6 +1102,32 @@ app
       console.error(`[plugin] ${grant.plugin}/${grant.view} opened ${url}`);
       await shell.openExternal(url);
       return { ok: true };
+    });
+
+    handlePlugin("plugins:sendPrompt", (grant, _e, value: unknown) => {
+      if (!grant.permissions.has("sendPrompt")) return { ok: false, error: "this view may not send chat messages" };
+      const text =
+        typeof (value as { text?: unknown } | null)?.text === "string" ? (value as { text: string }).text.trim() : "";
+      if (!text || text.length > 32000) return { ok: false, error: "message must be 1 to 32000 characters" };
+      if (!allowRate(grant, "prompt", 10)) return { ok: false, error: "this view is sending messages too quickly" };
+      liveWindow()?.webContents.send("plugin:prompt", { text, sessionId: grant.sessionId, workspace: grant.workspace });
+      return { ok: true };
+    });
+
+    handlePlugin("plugins:history", async (grant) => {
+      if (!grant.permissions.has("events")) return { ok: false, error: "this view may not read conversation history" };
+      if (!grant.sessionId) return { ok: true, history: { messages: [], hasMore: false } };
+      try {
+        const history = await agent.invoke("sessionHistoryPage", {
+          sessionId: grant.sessionId,
+          cwd: grant.workspace,
+          limit: 120,
+          before: 0,
+        });
+        return { ok: true, history };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
     });
 
     handlePlugin("plugins:subscribe", async (grant, _e, value: unknown) => {
@@ -1289,6 +1392,9 @@ app.on("window-all-closed", () => {
 // Quit closes the sidecar's stdin: it stops every turn, persists what
 // they did, and exits. A sidecar that hangs is killed after a grace.
 app.on("before-quit", (event) => {
+  creatorWatcher?.close();
+  creatorWatcher = null;
+  if (creatorReloadTimer) clearTimeout(creatorReloadTimer);
   void browsers.stop();
   if (quitting || !agent.running) return;
   quitting = true;

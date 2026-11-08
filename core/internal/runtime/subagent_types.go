@@ -21,7 +21,10 @@ type subagentKind struct {
 	Tools []string
 	// Role follows the shared preamble in the child's prompt; both are
 	// editable (subagent.preamble, subagent.<name>).
-	Role string
+	Role      string
+	ReadWrite bool
+	MCP       map[string][]string
+	FileBased bool
 }
 
 const subagentPreamble = `# SUBAGENT
@@ -155,12 +158,19 @@ func subagentKindNames() []string {
 // Tools stays nil: the runtime pre-filters the registry, because the
 // parent may have switched some of the allowlist off.
 func (k subagentKind) template() agent.Template {
-	return agent.Template{Name: "subagent:" + k.Name, ReadOnly: true, Prompt: k.prompt()}
+	return agent.Template{Name: "subagent:" + k.Name, ReadOnly: !k.ReadWrite, Prompt: k.prompt()}
 }
 
 // prompt is the preamble plus the kind's role, as the user has them, with
 // the shell rules only for kinds that can run commands.
 func (k subagentKind) prompt() string {
+	role := k.Role
+	if !k.FileBased {
+		role = custom.Text("subagent." + k.Name)
+	}
+	if k.FileBased && k.ReadWrite {
+		return "# SUBAGENT\nYou are a subagent working on a focused task for your parent. Report your findings and results to the parent. You cannot delegate to other subagents.\n\n" + strings.TrimSpace(role)
+	}
 	out := strings.TrimRight(custom.Text("subagent.preamble"), "\n")
 	if k.allows("shell") {
 		guide := strings.TrimSpace(custom.Text("subagent.shell"))
@@ -171,7 +181,7 @@ func (k subagentKind) prompt() string {
 			out += "\n" + guide
 		}
 	}
-	return out + "\n\n" + strings.TrimSpace(custom.Text("subagent."+k.Name))
+	return out + "\n\n" + strings.TrimSpace(role)
 }
 
 func (k subagentKind) allows(tool string) bool { return slices.Contains(k.Tools, tool) }

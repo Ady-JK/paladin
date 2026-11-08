@@ -99,15 +99,17 @@ async function handle(line) {
   }
 }
 
-// Calls run concurrently; the queue keeps their order of arrival.
+// Requests can overlap; the host bounds the number of in-flight calls.
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-let queued = Promise.resolve();
+const pending = new Set();
 lines.on('line', (line) => {
   if (!line.trim()) return;
-  queued = queued.then(() => handle(line));
+  const task = handle(line);
+  pending.add(task);
+  task.finally(() => pending.delete(task));
 });
 lines.on('close', () => {
-  queued.then(() => process.exit(0));
+  Promise.allSettled([...pending]).then(() => process.exit(0));
 });
 process.stdout.on('error', () => process.exit(0));
 `

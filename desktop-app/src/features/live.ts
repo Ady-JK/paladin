@@ -26,6 +26,7 @@ import { showContextBox } from "./contextBox";
 import { noteToolChange, refreshChanges } from "./sidePane";
 import { handlePluginApproval } from "./pluginApproval";
 import { createTurnStats } from "./turnStats";
+import { paintProtection } from "./snapshotProtection";
 import { PHASE_TEXT, formatElapsed, workingLabel, workingStatus, type WorkingPhase } from "./workingBar";
 
 export type LiveBadge = "" | "running" | "queued" | "done" | "error" | "input" | "approval";
@@ -175,6 +176,19 @@ export function liveBadge(sessionId: string): LiveBadge {
   if (e.running) return "running";
   if (e.queued.length > 0) return "queued";
   return e.badge;
+}
+
+// liveActivity provides a concise label for the IDE's session activity list.
+export function liveActivity(sessionId: string): string {
+  const e = entries.get(sessionId);
+  if (!e) return "";
+  if (e.running && (e.approvals.size > 0 || e.awaitingHint)) return "Waiting for approval";
+  if (e.asks.size) return "Waiting for your answer";
+  if (e.running) {
+    const labels = [...e.tools.values()];
+    return labels[labels.length - 1] ?? PHASE_TEXT[e.phase];
+  }
+  return e.queued.length ? "Queued" : "";
 }
 
 // liveRoot is a session's live rows, for a view other than the main
@@ -353,11 +367,32 @@ function apply(e: Entry, ev: TurnEvent): void {
       finishTurn(e, turn);
       return;
     }
+    case "chat/protection": {
+      const row = e.users.get(ev.turnId);
+      if (row && ev.protection) paintProtection(row, ev.protection);
+      if (ev.protection?.floor) {
+        const root = visible(e.sessionId) ? messagesEl : e.root;
+        for (const prior of Array.from(root.querySelectorAll<HTMLElement>("[data-turn-index]"))) {
+          const index = Number(prior.dataset.turnIndex);
+          if (Number.isFinite(index) && index < ev.protection.floor) {
+            paintProtection(prior, {
+              turn: index,
+              state: "expired",
+              reason: "Only the last three turns can be undone.",
+            });
+          }
+        }
+      }
+      const view = e.views.get(ev.turnId);
+      if (view) view.lastSeq = Math.max(view.lastSeq, ev.seq || 0);
+      return;
+    }
     default: {
       const view = e.views.get(ev.turnId);
       view?.apply(ev);
-      if (e.running?.turnId === ev.turnId && track(e, ev) && visible(e.sessionId)) {
-        paintWorking();
+      if (e.running?.turnId === ev.turnId && track(e, ev)) {
+        sidebar();
+        if (visible(e.sessionId)) paintWorking();
       }
     }
   }
@@ -370,6 +405,9 @@ function track(e: Entry, ev: TurnEvent): boolean {
     case "chat/tool": {
       const tool = ev.tool;
       if (!tool) return false;
+      if ((tool.name === "write" || tool.name === "edit") && tool.status !== "running") {
+        window.dispatchEvent(new Event("paladin:ide-disk-check"));
+      }
       if (tool.status === "running") e.tools.set(tool.id, workingLabel(tool));
       else e.tools.delete(tool.id);
       if (e.tools.size === 0) e.phase = "thinking";
@@ -720,6 +758,9 @@ export function finishAttach(sessionId: string, snap: AttachSnapshot): void {
       view.lastSeq = Math.max(view.lastSeq, snap.seq);
     }
     if (user) {
+      for (const ev of snap.events ?? []) {
+        if (ev.event === "chat/protection" && ev.protection) paintProtection(user, ev.protection);
+      }
       e.users.set(live.turnId, user);
       keep.push(user);
     }

@@ -27,6 +27,8 @@ type EgressOptions = {
   // trusted names skip the address check: the smoke's fixture sites,
   // which stand in for public sites on the loopback server.
   trusted?: ReadonlySet<string>;
+  // The agent browser must not reach Chromium's debugging endpoint.
+  protectedPort?: () => number;
 };
 
 const LOOKUP_TIMEOUT_MS = 10_000;
@@ -126,7 +128,7 @@ function forwardable(raw: string[]): Record<string, string | string[]> {
       for (const token of raw[i + 1].split(",")) named.add(token.trim().toLowerCase());
     }
   }
-  const out: Record<string, string | string[]> = {};
+  const out: Record<string, string | string[]> = Object.create(null) as Record<string, string | string[]>;
   for (let i = 0; i < raw.length; i += 2) {
     const key = raw[i];
     const lower = key.toLowerCase();
@@ -228,6 +230,13 @@ export class EgressGuard {
     if (this.refusals.length > MAX_REFUSALS) this.refusals.shift();
   }
 
+  private protectedTarget(port: number, addresses: Resolved[]): boolean {
+    return (
+      port === this.opts.protectedPort?.() &&
+      addresses.some((address) => loopback.check(address.address, address.family === 6 ? "ipv6" : "ipv4"))
+    );
+  }
+
   private async forward(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const reply = (status: number, text: string) => {
       if (res.headersSent) {
@@ -252,6 +261,12 @@ export class EgressGuard {
     if (!decision.ok) {
       this.refuse(url.hostname, decision.reason);
       reply(403, decision.reason);
+      return;
+    }
+    if (this.protectedTarget(Number(url.port || 80), decision.addresses)) {
+      const reason = "Paladin's debugging endpoint is not available to browser pages";
+      this.refuse(url.hostname, reason);
+      reply(403, reason);
       return;
     }
     const upstream = request({
@@ -290,6 +305,11 @@ export class EgressGuard {
     const decision = await this.check(target.host);
     if (!decision.ok) {
       this.refuse(target.host, decision.reason);
+      fail("403 Forbidden");
+      return;
+    }
+    if (this.protectedTarget(target.port, decision.addresses)) {
+      this.refuse(target.host, "Paladin's debugging endpoint is not available to browser pages");
       fail("403 Forbidden");
       return;
     }

@@ -29,6 +29,9 @@ func TestNudgeAppearsOnlyAfterReviewTurnsOfSilence(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.DueForNudge(dir)
+	if strings.Contains(got, "%d") {
+		t.Fatalf("unformatted review reminder: %q", got)
+	}
 	if got == "" {
 		t.Fatal("no nudge after the threshold")
 	}

@@ -8,5 +8,5 @@ import "syscall"
 // dies, the kernel kills the plugin process instead of leaving an
 // orphaned Node behind. Each runner also owns its output.
 func runnerSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	return &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 }

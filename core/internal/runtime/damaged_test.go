@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/agent"
 )
 
 func TestDamagedSessionIsListedAndDeletable(t *testing.T) {
@@ -35,5 +38,39 @@ func TestDamagedSessionIsListedAndDeletable(t *testing.T) {
 	}
 	if list, _ := rt.ListSessions(ws, 0); len(list) != 0 {
 		t.Fatalf("still listed after delete: %+v", list)
+	}
+}
+
+func TestDeleteWrongWorkspaceDoesNotStopSessionOrForgetChildren(t *testing.T) {
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	sess, err := rt.OpenSession("", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := newFakeRuns()
+	rt.hub = NewHub(runs.run, func() int { return 1 })
+	_, _, err = rt.hub.Submit(agent.Request{SessionID: sess.SessionID, Cwd: workspace, Message: "hold"}, SubmitOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs.waitStarted(t, "hold")
+	defer func() { runs.finish("hold"); rt.hub.WaitIdle(sess.SessionID, 3*time.Second) }()
+	rt.subagents.mu.Lock()
+	rt.subagents.pending[sess.SessionID] = []string{"child"}
+	rt.subagents.mu.Unlock()
+	if _, err := rt.DeleteSession(sess.SessionID, t.TempDir()); err == nil {
+		t.Fatal("wrong workspace delete succeeded")
+	}
+	if !rt.hub.Busy(sess.SessionID) {
+		t.Fatal("unrelated running session stopped")
+	}
+	rt.subagents.mu.Lock()
+	defer rt.subagents.mu.Unlock()
+	if len(rt.subagents.pending[sess.SessionID]) != 1 {
+		t.Fatal("unrelated child state was cleared")
 	}
 }

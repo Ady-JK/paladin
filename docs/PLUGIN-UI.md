@@ -1,12 +1,13 @@
 # Plugin UI
 
-Extension plugins can ship two kinds of UI:
+Extension plugins can ship several kinds of UI:
 
 - **Panel** — a full side-pane tab (`views`), for a board, a log, a form.
 - **Card** — an inline renderer for one tool result (`cards`), for a
   lookup result, a diff, a chart.
+- **Overlay** — a movable, resizable canvas above the workspace.
 
-Both live inside the plugin folder. Paladin never builds plugin UI: ship
+These live inside the plugin folder. Paladin never builds plugin UI: ship
 static HTML/CSS/JS in `ui/`.
 
 ## Layout
@@ -32,7 +33,7 @@ static HTML/CSS/JS in `ui/`.
       "id": "board",                    // ^[a-z][a-z0-9_-]{0,31}$, unique
       "title": "Ticket Board",          // 1..48 plain-text characters
       "entry": "ui/board.html",         // under ui/, .html, <= 2 MiB
-      "mount": "side-pane",             // only side-pane today
+      "mount": "side-pane",             // side-pane or overlay
       "permissions": ["invokeTool", "events", "readFile", "openExternal"]
     }
   ],
@@ -50,6 +51,22 @@ Limits: at most 4 views and 16 cards. View ids are unique; card tools are
 unique. An invalid entry is reported in Settings → Tools and skipped;
 the plugin's tools keep working.
 
+## Creator workspace
+
+Creator mode opens `~/.config/paladin/creator` with `ui/` and `core/`
+folders. Each direct child with a `paladin-plugin.json` is discovered as
+`creator_ui_<folder>` or `creator_core_<folder>`. A UI-only plugin can use
+`"tools": []` and omit its Node entry. Files are watched and changes are
+reloaded while the app runs; existing calls finish on their old runner.
+With an isolated `PALADIN_DATA_DIR`, the Creator folder lives inside that
+directory; `PALADIN_CREATOR_DIR` can override the location.
+
+Creator mode controls the in-app workspace and editor; it cannot prevent
+the user or external programs from editing files on disk. Existing
+Creator plugins keep running when the mode is off. A panel can call
+plugin tools without an open chat; the normal host-owned approval still
+applies. To call another plugin's tools, declare `invokeToolDestructive`.
+
 ## Panels
 
 Open a panel from the **Plugins** menu in the title bar. It asks main for
@@ -58,6 +75,13 @@ a panel grant and then loads:
 ```
 plugin://<plugin>/<view>/ui/board.html?panel=<unguessable-id>
 ```
+
+A view may set `"mount": "overlay"` to open in a movable, resizable
+Paladin-owned window above the workspace. Its contents remain a sandboxed
+plugin frame. Expand makes it a full-window canvas; Restore returns it to
+its previous size. The overlay closes when the user switches sessions or
+workspaces and is hidden while an approval is pending. `side-pane`
+remains the default. These surfaces do not replace Paladin's built-in UI.
 
 The iframe is `sandbox="allow-scripts"` with no same-origin, forms,
 popups, modals or top navigation. It cannot fetch anything (`connect-src
@@ -85,9 +109,11 @@ if (!answer.ok) showError(answer.error);
 else showResult(answer.result);
 
 const text = await paladin.readFile("README.md");     // {ok,text} | {ok,error}
+const history = await paladin.history();              // recent messages for this view's session
 const saved = await paladin.readStore("board.selected");
 await paladin.writeStore("board.selected", "PAL-1");
 await paladin.openExternal("https://example.com");
+await paladin.sendPrompt("Explain this workspace");
 
 const sub = await paladin.subscribe({ events: ["chat/tool", "turn/done"] });
 const off = paladin.onEvent((msg) => {
@@ -110,8 +136,9 @@ Panel permissions:
 | `invokeTool` | own tools, `read`, `grep`, `glob`, `list` |
 | `invokeToolDestructive` | the tools above plus changing tools |
 | `readFile` | `readFile` inside the session workspace |
-| `events` | `subscribe` / `onEvent` for the panel's own session |
+| `events` | `history`, `subscribe` and `onEvent` for the view's own session |
 | `openExternal` | `openExternal` with `https:` |
+| `sendPrompt` | Send a message in the active conversation; preserves an existing draft |
 
 Store calls need no permission: the file is the plugin's own
 `.store.json` (100 KiB per key, 1 MiB total).

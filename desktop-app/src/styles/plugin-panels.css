@@ -134,7 +134,7 @@
 
 .pane-plugin {
   position: relative;
-  height: 100%;
+  height: 48px;
   min-height: 0;
   background: var(--color-slate-50);
 }
@@ -231,4 +231,74 @@
   color: var(--color-slate-500);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10.5px;
+}
+
+/* The host owns this movable surface; plugin content remains sandboxed. */
+.plugin-overlay {
+  position: fixed;
+  z-index: 50;
+  top: 76px;
+  right: 24px;
+  display: flex;
+  width: min(520px, 80vw);
+  height: min(420px, 70vh);
+  min-width: 240px;
+  min-height: 160px;
+  max-width: 100vw;
+  max-height: 90vh;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+  border: 1px solid var(--color-slate-500);
+  border-radius: 12px;
+  background: var(--color-slate-100);
+  box-shadow: 0 14px 48px rgb(0 0 0 / 0.28);
+}
+.dark .plugin-overlay {
+  background: var(--color-slate-900);
+}
+.plugin-overlay.is-maximized {
+  inset: 8px !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none;
+  max-height: none;
+  resize: none;
+}
+.plugin-overlay-header {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  cursor: move;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+.plugin-overlay-header button {
+  padding: 2px 7px;
+  font-size: 20px;
+  cursor: pointer;
+}
+.plugin-overlay-frame {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 0;
+}
+body:has(.approval-card[data-state="pending"]) .plugin-overlay,
+body:has(.plugin-approval-layer) .plugin-overlay {
+  visibility: hidden;
+}
+
+.creator-mode-btn {
+  width: auto;
+  padding-inline: 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.creator-mode-btn[aria-pressed="true"] {
+  color: var(--color-accent-500);
+  background: rgb(128 128 128 / 0.12);
 }

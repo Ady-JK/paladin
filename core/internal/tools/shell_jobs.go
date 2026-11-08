@@ -116,16 +116,24 @@ func (s *ShellTool) startJob(cmd, dir, owner, callID string, notify, candidate b
 	if sessionDir == "" {
 		return nil, ArgsError("shell: no session to keep the background job in")
 	}
-	now := time.Now().Unix()
-	id := fmt.Sprintf("job-%d-%d", now, s.inner.counter.Add(1))
 	tmp := filepath.Join(sessionDir, "tmp")
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		return nil, ArgsError(fmt.Sprintf("shell: cannot keep the job log: %s", syserr.Str(err)))
 	}
-	logPath := filepath.Join(tmp, id+".log")
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return nil, ArgsError(fmt.Sprintf("shell: cannot write the job log: %s", syserr.Str(err)))
+	var id, logPath string
+	var logFile *os.File
+	for {
+		id = fmt.Sprintf("job-%d", s.inner.counter.Add(1))
+		logPath = filepath.Join(tmp, id+".log")
+		var err error
+		logFile, err = os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, ArgsError(fmt.Sprintf("shell: cannot write the job log: %s", syserr.Str(err)))
+		}
+		break
 	}
 	started := time.Now().UTC()
 	event := JobEvent{ID: id, SessionID: owner, SessionDir: sessionDir, Workspace: dir,

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,8 @@ import (
 )
 
 type Settings struct {
+	// CreatorMode enables Paladin's extension creation and editor workflow.
+	CreatorMode bool `json:"creatorMode,omitempty"`
 	// MaxConcurrentTurns caps turns running at once across sessions;
 	// extra turns wait in the hub queue. 0 means the default.
 	MaxConcurrentTurns uint32 `json:"maxConcurrentTurns,omitempty"`
@@ -84,10 +87,11 @@ type AgentRuntime struct {
 	dataDir       string
 	config        config.Config
 	settingsMu    sync.Mutex
+	ideCheckMu    sync.Mutex
+	ideCheckCache map[string]ideFileFingerprint
 	store         *config.Store
 	transcripts   *transcript.Store
 	sessionIndex  *sessionindex.Index
-	indexOnce     *sync.Once
 	catalog       *tools.Catalog
 	tools         *tools.Registry
 	shell         *tools.ShellTool
@@ -100,6 +104,7 @@ type AgentRuntime struct {
 	hub           *Hub
 	subagents     *subagentManager
 	lsp           *lsp.Manager
+	editorLsp     *lsp.Manager
 	snaps         *snapshot.Store
 	worktrees     *worktree.Manager
 	undoMu        sync.Mutex
@@ -189,6 +194,7 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	r.extensions = extension.NewRegistry(dataDir)
 	r.extensions.Start()
 	r.lsp = lsp.NewManager(dataDir)
+	r.editorLsp = lsp.NewManager(dataDir)
 	r.registerKnowledgeTools()
 	r.subagents = newSubagentManager(r)
 	r.registerAgentTools()
@@ -263,6 +269,9 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	var child *subagentKind
 	sess, lerr := r.transcripts.Load(req.Cwd, req.SessionID)
 	if lerr == nil {
+		if _, err := sess.RecoverInterrupted(); err != nil {
+			return agent.ChatOutcome{}, fmt.Errorf("recover interrupted turn: %w", err)
+		}
 		// A pending undo becomes permanent once the user moves on.
 		r.undoMu.Lock()
 		cerr := r.commitRevert(&sess)
@@ -283,10 +292,17 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			sessionStart = r.sessionStartSource(hookEngine, sess)
 		}
 		if !req.Resume && !req.Compact && sess.Meta.Subagent == nil {
-			r.recordTurnSnapshot(sess, workspace)
+			status := r.recordTurnSnapshot(sess, workspace)
+			select {
+			case tx <- agent.ChatChunk{SessionID: req.SessionID, Protection: &status}:
+			case <-ctx.Done():
+				return agent.ChatOutcome{}, ctx.Err()
+			case <-done:
+				return agent.ChatOutcome{}, context.Canceled
+			}
 		}
 		if sa := sess.Meta.Subagent; sa != nil {
-			kind, ok := findSubagentKind(sa.Type)
+			kind, ok := r.subagentDefinition(sa)
 			if !ok {
 				return agent.ChatOutcome{}, fmt.Errorf("unknown subagent type %q", sa.Type)
 			}
@@ -301,7 +317,19 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	}
 	var registry *tools.Registry
 	if child != nil {
-		registry = r.childTools(sess, *child)
+		var extra []tools.Tool
+		if len(child.MCP) > 0 {
+			extra = r.mcpTools(ctx, project)
+		}
+		wantsExtension := slices.ContainsFunc(child.Tools, func(name string) bool { return strings.HasPrefix(name, "extension__") })
+		if child.ReadWrite && wantsExtension && preset != permission.ReadOnly {
+			extensionTools, extensionErrors := r.extensions.Load(ctx)
+			for _, e := range extensionErrors {
+				fmt.Fprintf(os.Stderr, "extension: %v\n", e)
+			}
+			extra = append(extra, extensionTools...)
+		}
+		registry = r.childToolsFrom(sess, *child, r.tools.With(extra...))
 	} else {
 		extra := r.mcpTools(ctx, project)
 		extensionTools, extensionErrors := r.extensions.Load(ctx)

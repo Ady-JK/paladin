@@ -87,6 +87,7 @@ func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) {
 	r.hub.Shutdown(timeout)
 	r.mcp.Close()
 	r.lsp.Close()
+	r.editorLsp.Close()
 	// Plugins get a shutdown line and a short grace; nothing may keep the
 	// app from exiting.
 	r.extensions.Close()

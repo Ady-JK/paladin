@@ -74,6 +74,35 @@ test("a frame gets its HTML and relative assets with a strict CSP", async () => 
   expect(entry.status).toBe(200);
 });
 
+test("Creator workspace panels are discoverable without legacy configuration", () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), "paladin-creator-host-"));
+  const dir = path.join(data, "creator", "ui", "explorer");
+  fs.mkdirSync(path.join(dir, "ui"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "ui", "index.html"), "<p>explorer</p>");
+  fs.writeFileSync(
+    path.join(dir, "paladin-plugin.json"),
+    JSON.stringify({
+      views: [{ id: "explorer", title: "Explorer", entry: "ui/index.html", mount: "side-pane" }],
+    }),
+  );
+  const host = new PluginHost(data);
+  expect(host.view("creator_ui_explorer", "explorer")?.title).toBe("Explorer");
+  expect(host.listErrors()).toEqual([]);
+});
+
+test("a view cannot replace a built-in Paladin UI module", () => {
+  const { data } = pluginDir({
+    "ui/board.html": "<p>board</p>",
+    "paladin-plugin.json": JSON.stringify({
+      views: [{ id: "board", title: "Board", entry: "ui/board.html", mount: "module:ide.explorer" }],
+    }),
+  });
+  enable(data, "board");
+  const host = new PluginHost(data);
+  expect(host.listViews()).toEqual([]);
+  expect(host.listErrors().join(" ")).toContain("invalid mount");
+});
+
 test("requests cannot escape ui/, the plugin or the scheme", async () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "paladin-outside-"));
   fs.writeFileSync(path.join(outside, "secret.html"), "secret");

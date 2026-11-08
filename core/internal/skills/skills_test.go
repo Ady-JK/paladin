@@ -180,8 +180,7 @@ func TestBuiltinSkillsShipAndCanBeReplacedOrTurnedOff(t *testing.T) {
 		byName[s.Name] = s
 	}
 	for _, name := range []string{"debugging", "test-driven-development", "safe-refactoring", "code-review",
-		"security-review", "web-research", "diagrams-and-charts", "writing-docs", "writing-an-extension",
-		"writing-a-plugin-ui"} {
+		"security-review", "web-research", "diagrams-and-charts", "writing-docs"} {
 		s, ok := byName[name]
 		if !ok || s.Source != SourceBuiltin || s.Description == "" || strings.HasPrefix(s.Description, "---") {
 			t.Fatalf("built-in %s: %+v", name, s)
@@ -215,4 +214,45 @@ func TestBuiltinSkillsShipAndCanBeReplacedOrTurnedOff(t *testing.T) {
 	if !Disabled(dataDir)["web-research"] {
 		t.Fatal("Disabled is case-insensitive")
 	}
+}
+
+func TestCreatorSkillsAreOnlyAvailableInCreatorWorkspace(t *testing.T) {
+	dataDir, ws := t.TempDir(), t.TempDir()
+	root := filepath.Join(t.TempDir(), "creator")
+	t.Setenv("PALADIN_CREATOR_DIR", root)
+	if err := os.MkdirAll(filepath.Join(dataDir, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An override of a reserved Creator skill follows the same mode rule.
+	writeSkill(t, GlobalDir(dataDir), "writing-an-extension", "# Custom extension guidance")
+	names := []string{"writing-an-extension", "writing-a-plugin-ui", "creating-paladin-ui"}
+	check := func(cwd string, available bool) {
+		t.Helper()
+		listed := map[string]bool{}
+		for _, s := range List(dataDir, cwd) {
+			listed[strings.ToLower(s.Name)] = true
+		}
+		for _, name := range names {
+			if listed[name] != available {
+				t.Fatalf("%s listed in %s = %v, want %v", name, cwd, listed[name], available)
+			}
+			_, err := Load(dataDir, cwd, strings.ToUpper(name))
+			if (err == nil) != available {
+				t.Fatalf("load %s in %s: %v", name, cwd, err)
+			}
+		}
+		if _, err := Load(dataDir, cwd, "debugging"); err != nil {
+			t.Fatalf("normal skill unavailable: %v", err)
+		}
+	}
+	check(root, false)
+	if err := os.WriteFile(filepath.Join(dataDir, "config", "settings.json"), []byte(`{"creatorMode":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check(root, true)
+	check(ws, false)
+	if err := os.WriteFile(filepath.Join(dataDir, "config", "settings.json"), []byte(`{"creatorMode":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check(root, false)
 }

@@ -165,8 +165,7 @@ func (b *Bank) DueForNudge(sessionDir string) string {
 	if st.TurnsSinceWrite < threshold {
 		return ""
 	}
-	return fmt.Sprintf("%d turns have passed since anything was saved to memory.\n%s",
-		st.TurnsSinceWrite, reviewNudge)
+	return fmt.Sprintf(reviewNudge, st.TurnsSinceWrite)
 }
 
 // reviewNudge is the reminder text. It names the threshold so the model

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/tools"
@@ -74,6 +75,31 @@ func TestPluginInvokeAsksAndRuns(t *testing.T) {
 	res := <-done
 	if res.IsError || !strings.Contains(res.Content, `"ok":true`) {
 		t.Fatalf("result = %+v", res)
+	}
+	select {
+	case <-probe.ran:
+	default:
+		t.Fatal("tool did not run")
+	}
+}
+
+func TestPluginInvokeWithoutConversation(t *testing.T) {
+	rt, probe, _, ws, approvals := pluginInvokeFixture(t)
+	done := runInvoke(rt, "__paladin_plugin_ui__", ws)
+	var ev PluginEvent
+	select {
+	case ev = <-approvals:
+	case <-time.After(time.Second):
+		t.Fatal("no approval for standalone plugin")
+	}
+	if ev.Approval == nil || ev.SessionID != "__paladin_plugin_ui__" {
+		t.Fatalf("approval %+v", ev)
+	}
+	if _, err := rt.AnswerApproval(ev.SessionID, ev.Approval.ID, permission.ReplyOnce); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-done; res.IsError || !strings.Contains(res.Content, `"ok":true`) {
+		t.Fatalf("result %+v", res)
 	}
 	select {
 	case <-probe.ran:

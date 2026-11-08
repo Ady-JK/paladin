@@ -108,7 +108,7 @@ sequenceDiagram
         Agent->>Disk: usage.json (after every call)
         Agent-->>UI: chat/usage (pill refreshes)
     end
-    Agent->>Disk: save messages.jsonl, usage.json
+    Agent->>Disk: checkpoint active turn; save messages.jsonl, usage.json
     Hub-->>UI: turn/done
     UI->>You: spinner stops, final answer shown
 ```
@@ -570,7 +570,7 @@ flowchart LR
 
 ### Undo with snapshots
 
-Before a user turn starts, Paladin takes a **photo** of the folder. That is the only photo: nothing is captured per tool call, and commands never hold a folder lock.
+Before a user turn starts, Paladin takes a **photo** of the folder. Nothing is captured per tool call, and commands never hold a folder lock. Immediately before undo, it also keeps one recovery photo and a compressed copy of the conversation for that chat.
 It uses a hidden git repo under `<data>/snapshots/`, so your own `.git` is never touched.
 
 ```mermaid
@@ -579,9 +579,12 @@ flowchart LR
     T3 -. "/undo or 'Revert to here'" .-> Back["Files go back to photo C,<br/>messages from that point dropped"]
 ```
 
-- **Exact restore:** files changed since the photo go back to their old content, and files created since are deleted. The revert is final — there is no redo.
-- **Revert preview** lists what will be restored and what will be deleted, and says plainly that it cannot be undone.
+- **Restore:** captured files changed since the photo go back to their old content, and files created since are deleted. Files that could not be captured are left alone.
+- **Undo preview** lists what will be restored or deleted, including possible later work from other chats or the user. If the folder or conversation changes after preview, the user must preview again.
+- **Snapshot status:** each turn shows whether its snapshot was saved, has excluded paths, is unavailable, or has expired. The UI lists known excluded files and folders, with a limit for large projects, and explains snapshot failures.
+- **Recovery:** each chat can restore its folder and conversation to just before its latest undo. Recovery has its own preview; a later undo replaces the saved recovery point. Ignored and uncaptured files are not covered.
 - **One scan per turn:** a cold photo can take a moment on a huge folder; warm photos are a few milliseconds. The scan happens before the first model call, not around each command.
+- **Three-turn history:** each chat keeps at most its latest three turn snapshots. Undo and “Revert to here” cannot cross that boundary, even through repeated undos; the Changes view and `/review session` cover the same retained window. Chats sharing a folder retain their own snapshots. Expired Git objects are eligible for cleanup after a one-hour safety grace period, when a later snapshot cleanup runs.
 
 ### Worktrees
 
@@ -602,18 +605,26 @@ flowchart LR
 
 A cook can hand a focused job to a **helper cook**: "go read every file about login and tell me how it works". The helper is a **subagent**: its own session, with its own conversation, running in the background like any other session.
 
-There are two kinds, and both are **read-only** (they look, they never write):
+Paladin starts with two read-only kinds:
 
 | Kind | Job |
 |---|---|
 | `explore` | Search and read the codebase and report what it found |
 | `reviewer` | Review code or a diff and report problems |
 
+Agents are defined in `~/.config/paladin/agents/<name>/agent.json`. Each
+definition has a name, short description, `read-only` or `read-write`
+permissions, chosen tools, chosen MCP tools and a role prompt. Use
+`/create-agent` to design one with a short, live list of available tools.
+Files reload for new children; an existing child retains the definition it
+was spawned with. The data directory override also isolates agent files.
+
 The main cook controls helpers with six tools: `spawn_agent` (hire one with a task), `wait_agent` (wait for answers, for a limited time), `send_message` (tip a helper mid-job), `followup_task` (give a finished helper more work), `interrupt_agent` (stop one) and `list_agents`.
 
 - **Fresh or full memory.** `fork_turns: "none"` (the default) gives the helper only its task, so it stays small and cheap. `fork_turns: "all"` also gives it a copy of the conversation so far (finished turns only).
 - **Never more power than the boss.** A helper's tools are its kind's list, narrowed by the parent's tool switches. It goes through the same approvals, hooks, sandbox and budget, and it can't hire helpers of its own (one level only, for now). At most 5 helpers work at once per parent (`maxSubagents`), even when the cook hires several in parallel, and re-hiring a finished helper with `followup_task` needs a free spot too.
-- **Shared kitchen.** Helpers work in the parent's folder. They're read-only, so they can't step on each other's files. Background shell jobs are private to the session that started them, so a helper can't check on or cancel anyone else's job.
+- **Shared kitchen.** Helpers work in the parent's folder. Custom read-write helpers can change files if the parent permits it, so coordinate parallel work. Read-only helpers cannot use mutating built-in tools, browser, memory writes or extensions; MCP read-only hints come from the server. Background shell jobs are private to the session that started them.
+- **Short handles.** The model sees short, unique prefixes for helper IDs and can still use a helper's name or full ID. A prefix that later becomes ambiguous is rejected; `list_agents` supplies longer unique prefixes. Shell jobs use handles such as `job-1`, without overwriting earlier job logs.
 - **Money is shared.** A helper's spend counts toward its parent's budget limit.
 - **No deadlock.** With `maxConcurrentTurns: 1`, a parent waiting in `wait_agent` lends its slot to its helpers, so they still get to cook.
 - **Answers always arrive.** When a helper finishes, the parent hears about it: through `wait_agent`, as a note before its next model call, or, if the parent is idle, by starting a short parent turn to read the result. An answer is crossed off only once the parent's turn holding it is saved, so a crash or failed save means it's delivered again. Each answer carries an id that is saved with it, so after a restart Paladin checks the parent's conversation and skips answers it already has: exactly once, never zero, never twice. The full helper conversation stays in the helper's own session; the parent gets only the summary plus the helper's id.
@@ -657,7 +668,7 @@ flowchart TB
 - **`memory.json`** (`<data>/config/`) sets per-scope budgets, which scopes are off, the backend provider, the review nudge interval and `autoReview`. Absent means today's behaviour.
 - **Review loop:** after N turns without a memory write, one short nudge paragraph asks the model to save what it learned. With `autoReview` on, a finished turn forks a child session that may only write memory (never the workspace) and replays the conversation to decide what is worth keeping.
 - **Recall:** when your message clearly matches a stored entry (two or more content words, folded the same way), that one entry is repeated as a short reminder naming its scope — attention, not a second copy of the store.
-- **`session_search`** answers "like last time" from a SQLite FTS index over past transcripts.
+- **`session_search`** answers "like last time" from a SQLite FTS index over past transcripts. It checks transcript and metadata content before every search, updates changed sessions, and falls back to scanning if refresh fails.
 - You can view and edit everything in **Settings → Memory**, or with `/memories`.
 
 The backend is behind a small seam (`core/internal/memory/provider.go`): read entries, fingerprint them, and mutate under a lock. The write rules — guards, scan, masking, budget, matching — live once above it, so a second backend cannot drift from them. Only the file backend exists today, deliberately.
@@ -677,13 +688,13 @@ flowchart LR
     Menu --> Skills["Skills<br/>(SKILL.md folders): /skill name"]
 ```
 
-- **`/review [session | branch | commit | focus]`**: a read-only (plan mode) code review. With no argument it reviews uncommitted changes; `session` reviews only what this session changed (Paladin adds the diff from its snapshots; when the session has no snapshots or changed nothing, the command stops with that message before the model runs, instead of reviewing other changes); a branch or commit reviews `git diff <it>...HEAD`. The review ends with the **`report_findings`** tool, which only exists in `/review`'s turn (a command's `tools:` frontmatter switches such command-only tools on). The chat shows a **findings card**: the verdict, then each finding by priority (P0–P3) with its file and lines. Opening one shows the code around it with those lines marked, **View in changes** jumps to the session's diff with the same lines marked (when this session changed the file), and **Fix** puts the finding into the composer so you send it as a normal turn. Adding the tool changes the tool list for that one turn, so the review turn (and the next) re-reads the prompt cache once.
+- **`/review [session | branch | commit | focus]`**: a read-only (plan mode) code review. With no argument it reviews uncommitted changes; `session` reviews changes in the latest three turns (Paladin adds the diff from its snapshots; when the session has no snapshots or changed nothing, the command stops with that message before the model runs, instead of reviewing other changes); a branch or commit reviews `git diff <it>...HEAD`. The review ends with the **`report_findings`** tool, which only exists in `/review`'s turn (a command's `tools:` frontmatter switches such command-only tools on). The chat shows a **findings card**: the verdict, then each finding by priority (P0–P3) with its file and lines. Opening one shows the code around it with those lines marked, **View in changes** jumps to the session's diff with the same lines marked (when this session changed the file), and **Fix** puts the finding into the composer so you send it as a normal turn. Adding the tool changes the tool list for that one turn, so the review turn (and the next) re-reads the prompt cache once.
 - **Customize (Settings → Customize)**: every built-in text the agent gets is editable there: the system prompt, the tool guidance ("when to use which tool"), the shell rules, the tool examples, each tool's description, plan mode and the `/btw` wrapper, the reminders (check before finishing, budget, folder instructions, formatter and language server notes, untrusted web content, switched-off tools), the subagent preamble and roles, the compaction prompts, the built-in commands (`/review`, `/init`), the built-in skills (with an on/off switch), and `settings.json` / `lsp.json` (validated before saving). Each item says what it does, which `{{placeholders}}` it fills in and where its file is; **Reset to default** deletes the override. Text edits are plain files in `<data>/config/custom/<id>.md`, so they can be edited by hand too. Overrides are global only: a cloned repository cannot rewrite the agent's instructions. The tools themselves stay fixed; their descriptions and guidance are what you edit. An edit applies from the next turn (a changed prompt section re-reads the prompt cache once).
 - **Plan mode** (`/plan`): the agent only gets read-only tools. It looks around and proposes a plan.
 - **Build mode** (`/build`): back to normal.
 - **Skills**: packs of instructions the model can pull in when needed (with the `skill` tool), or that you attach to a turn. Paladin ships ten: `debugging`, `test-driven-development`, `safe-refactoring`, `code-review`, `security-review`, `web-research`, `diagrams-and-charts`, `writing-docs`, `writing-an-extension` and `writing-a-plugin-ui`. A skill of the same name in `config/skills/` (global) or `.paladin/skills/` (this folder) replaces a built-in, and `settings.json` `disabledSkills` turns any skill off; Settings → Customize does both.
 - **`/btw [question]`**: whisper a side question to the cook without interrupting. It works **while a turn is running**: Paladin copies the conversation so far (including tools still running), asks the model once with no tools, and shows the answer in a **side chat** tab in the right-hand pane (the speech-bubble button in the title bar opens it). A bare `/btw` just opens an empty side chat, ready to type in. You can keep asking in that tab, open more tabs, and reopen old side chats from the pane's history menu. Side chats are saved next to the session (see §12) but **never added to the main conversation**; their cost counts toward usage and the budget.
-- **Terminal tabs**: the side pane's terminal icon starts a real PTY in the session workspace, with your normal OS permissions. Each tab owns its shell and keeps it running while hidden. This is separate from the agent's sandboxed `shell` tool.
+- **Terminal tabs**: the new-tab menu starts a real Go-hosted PTY in the selected workspace, with your normal OS permissions, even before a chat is started. In IDE mode terminals appear in a resizable panel below the editor; multiple shells stay with their workspace and keep running while hidden or while chats change. Outside IDE mode they appear in the side pane. This is separate from the agent's sandboxed `shell` tool.
 - **`! command` and `!! command`**: both run a user command outside the agent sandbox and show its output in the terminal pane. One `!` starts an agent turn after the command finishes, giving the agent the command, exit code and output. Two `!` characters never start a turn or enter agent history.
 
 ---
@@ -749,7 +760,14 @@ flowchart LR
 ```
 
 Files are written **atomically**: a temp file first, then renamed into place.
-So a crash in the middle never leaves a half-written file.
+Active turns also checkpoint their input and tool progress into `active-turn.json`.
+After a crash, reopening the chat restores the checkpoint as an interrupted
+turn. A tool with no saved result is marked as possibly having run; it is
+never run again automatically. Streamed text is checkpointed at most once
+per second, so the most recent fragment may be missing. A file lock keeps a
+second live Paladin process from recovering an active turn. The final turn is
+still appended atomically to the transcript, and a journal ID prevents a
+duplicate if the process stops just after that append.
 
 ### error.log — the debugging trail
 
@@ -805,9 +823,11 @@ If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
 
 **The sidebar is a drawer.** The app starts with it closed. It floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The separate Chat view is gone: websites live in the side pane's web tabs, so the agent conversation and a Gemini/ChatGPT page can share the window in split view or swap full width in the tabs layout.
 
-**Web tabs are the integrated browser.** There is no separate Chat window. The title bar's **Web** menu opens Gemini, ChatGPT, Claude, DeepSeek or any `https` address as a tab in the side pane: split layout puts it beside the agent, tabs layout gives either one the full width (the conversation tab is labelled **Agent**). Saved sites share one persistent profile (`persist:paladin-sites`), so sign-ins and Google SSO carry across sites and survive restarts; each tab has back/forward, reload, an address bar and open-in-system-browser. A page keeps its renderer and state while its tab exists, even when hidden, so a chat can finish answering while you read the agent; closing the tab drops the view, and reloading the renderer drops every web view. `views:state` keeps the tab title and address bar truthful after link clicks and SPA route changes. Clicking an `https` link in the conversation opens a web tab.
+**IDE mode** opens from the header’s code button and shows the current workspace in an explorer and code editor beside the existing agent chat. Explorer filters for Git-ignored items and dot-prefixed folders are saved per workspace in `.config/paladin/explorer.json`; both filters default to off. In Git repositories the core uses Git's ignore rules; outside a repository it applies the built-in basic `.gitignore` matcher. Personal websites and the agent browser open as tabs in the editor area, using the same profiles as outside IDE mode. With no chat open, the chat pane lists sessions in that workspace; selecting one resumes it, and the folder picker can choose another workspace. Editor tabs retain unsaved text and undo history while switching views or workspaces. Text files up to 2 MiB can be saved; the sidecar compares the file's version with the version read before saving and refuses a stale edit. Files outside the workspace, symbolic-link files and binary files are not editable. The editor supports syntax highlighting for JavaScript, TypeScript, Python, Go, Markdown, JSON, HTML and CSS; it is not a full VS Code replacement.
 
-The **local browser** (globe button) stays separate: localhost and local apps, an empty in-memory per-session profile, element picking and pass-to-agent. It never shares cookies with the web tabs, and conversation `localhost` links open there. Plugin panels and tool-result cards are a third surface: sandboxed `plugin://` iframes, not native views (see `docs/PLUGIN-UI.md`).
+**The personal browser** uses the existing saved sites as bookmarks and works even without an open chat. There is no separate Chat window. The title bar's browser menu opens Gemini, ChatGPT, Claude, DeepSeek or any `https` address as a tab in the side pane: split layout puts it beside the agent, tabs layout gives either one the full width (the conversation tab is labelled **Agent**). Personal web tabs share the existing persistent profile (`persist:paladin-sites`), so persistent sign-in cookies and Google SSO carry across sites and survive restarts (subject to each site’s cookie policy); secure sign-in popups share that profile. Saved passwords and autofill are not provided; each tab has back/forward, reload, an address bar and open-in-system-browser. A page keeps its renderer and state while its tab exists, even when hidden, so a chat can finish answering while you read the agent; closing the tab drops the view, and reloading the renderer drops every web view. `views:state` keeps the tab title and address bar truthful after link clicks and SPA route changes. Clicking an `https` link in the conversation opens a web tab.
+
+The **agent browser** appears automatically in a tab when the agent uses it; background chats show a browser indicator in the sidebar. Its profile stays separate: localhost and local apps, an empty in-memory per-session profile, element picking and pass-to-agent. It never shares cookies with the web tabs, and conversation `localhost` links open there. Plugin panels and tool-result cards are a third surface: sandboxed `plugin://` iframes, not native views (see `docs/PLUGIN-UI.md`).
 
 ---
 

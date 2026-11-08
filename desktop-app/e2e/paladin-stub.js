@@ -4,6 +4,14 @@
 
 async function __paladinBaseInvoke(cmd, args) {
   switch (cmd) {
+    case "creatorModeGet":
+      return !!window.__e2eCreatorMode;
+    case "creatorModeSet":
+      window.__e2eCreatorMode = !!args.enabled;
+      return true;
+    case "creatorWorkspace":
+      if (!window.__e2eCreatorMode) throw new Error("enable Creator mode");
+      return "/home/creator";
     case "saveAttachment": {
       window.__e2eUploads = (window.__e2eUploads || []).concat([args]);
       const id = `file-${window.__e2eUploads.length}`;
@@ -23,6 +31,43 @@ async function __paladinBaseInvoke(cmd, args) {
     }
     case "sessionImage":
       return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=";
+    case "ideReadFile":
+      return {
+        path: args.path,
+        content: window.__e2eIDEContents?.[args.path] ?? "Hello from file\n",
+        version: window.__e2eIDEVersions?.[args.path] || "v1",
+      };
+    case "ideFileStatuses":
+      return args.files.map((file) => ({
+        path: file.path,
+        state: window.__e2eIDEFileStatuses?.[file.path] || "same",
+        version: window.__e2eIDEVersions?.[file.path] || "v1",
+      }));
+    case "ideLayoutGet":
+      return window.__e2eIDELayouts?.[args.cwd] || null;
+    case "ideLayoutSet":
+      window.__e2eIDELayouts = window.__e2eIDELayouts || {};
+      window.__e2eIDELayouts[args.cwd] = args.layout;
+      return true;
+    case "ideExplorerSettingsGet":
+      return window.__e2eExplorerSettings?.[args.cwd] || { hideIgnored: false, hideDotFolders: false };
+    case "ideExplorerSettingsSet":
+      window.__e2eExplorerSettings = window.__e2eExplorerSettings || {};
+      window.__e2eExplorerSettings[args.cwd] = { hideIgnored: args.hideIgnored, hideDotFolders: args.hideDotFolders };
+      return true;
+    case "ideList": {
+      const list = await __paladinBaseInvoke("fsList", { path: args.path });
+      if (args.hideDotFolders) list.directories = list.directories.filter((item) => !item.name.startsWith("."));
+      if (args.hideIgnored) {
+        list.directories = list.directories.filter((item) => item.name !== "project");
+        list.files = list.files.filter((item) => item.name !== "README.md");
+      }
+      return list;
+    }
+    case "ideSaveFile":
+      window.__e2eIDESaves = (window.__e2eIDESaves || []).concat([args]);
+      if (window.__e2eIDEConflict) throw new Error("file changed on disk; reopen it before saving");
+      return { path: args.path, content: args.content, version: "v2" };
     case "terminalStart":
       window.__e2eTerminalStarts = (window.__e2eTerminalStarts || []).concat([args]);
       return "terminal-" + window.__e2eTerminalStarts.length;
@@ -30,7 +75,9 @@ async function __paladinBaseInvoke(cmd, args) {
       window.__e2eTerminalWrites = (window.__e2eTerminalWrites || []).concat([args]);
       return true;
     case "terminalResize":
+      return true;
     case "terminalClose":
+      window.__e2eTerminalCloses = (window.__e2eTerminalCloses || []).concat([args]);
       return true;
     case "terminalRun":
       window.__e2eTerminalRuns = (window.__e2eTerminalRuns || []).concat([args]);
@@ -246,10 +293,15 @@ async function __paladinBaseInvoke(cmd, args) {
         deleted: [],
         skipped: [],
         snapshots: true,
+        version: "undo-preview-version",
         ...(window.__e2ePreview || {}),
       };
     case "sessionChanges":
       return window.__e2eChanges || { available: true, turns: [], files: [] };
+    case "ideSearch":
+      return window.__e2eIDESearch || { hits: [], truncated: false };
+    case "ideDiagnose":
+      return window.__e2eIDEDiagnostics || { state: "unavailable", diagnostics: [], errors: 0 };
     case "fileExcerpt": {
       window.__e2eExcerptCalls = (window.__e2eExcerptCalls || []).concat([args]);
       const from = Math.max(1, args.start - 3);
@@ -263,6 +315,7 @@ async function __paladinBaseInvoke(cmd, args) {
     case "revertSession": {
       window.__e2eReverts = (window.__e2eReverts || []).concat([args]);
       window.__e2eRevertedAt = args.index;
+      window.__e2eRecoveryAvailable = true;
       return {
         index: args.index,
         message: "run the slow job",
@@ -273,6 +326,22 @@ async function __paladinBaseInvoke(cmd, args) {
         ...(window.__e2eRevertResult || {}),
       };
     }
+    case "recoveryAvailable":
+      return !!window.__e2eRecoveryAvailable;
+    case "recoveryPreview":
+      return {
+        files: ["src/a.ts"],
+        deleted: [],
+        skipped: [],
+        snapshots: true,
+        index: 0,
+        turns: 1,
+        version: "recovery-preview-version",
+      };
+    case "recoverLatest":
+      window.__e2eRecoveries = (window.__e2eRecoveries || []).concat([args]);
+      delete window.__e2eRevertedAt;
+      return { restored: ["src/a.ts"], deleted: [], skipped: [], snapshots: true };
     case "worktreeStatus":
       return (
         window.__e2eWorktreeStatus || {
@@ -1407,6 +1476,14 @@ window.paladin = {
     setTheme: async () => true,
   },
   plugins: {
+    onPrompt: (cb) => {
+      window.__e2ePluginPrompt = cb;
+      return () => {
+        window.__e2ePluginPrompt = undefined;
+      };
+    },
+    sendPrompt: async () => ({ ok: true }),
+    history: async () => ({ ok: true, history: { messages: [], hasMore: false } }),
     open: async (plugin, view, sessionId, workspace) => {
       window.__e2ePluginOpens = (window.__e2ePluginOpens || []).concat([{ plugin, view, sessionId, workspace }]);
       window.__e2ePluginContext = { sessionId, workspace, plugin, view, theme: "dark" };
@@ -1421,6 +1498,7 @@ window.paladin = {
       window.__e2ePluginCloses = (window.__e2ePluginCloses || []).concat([id]);
       return true;
     },
+    prepareReload: async () => true,
     getContext: async () => window.__e2ePluginContext || null,
     invokeTool: async (tool, args) => {
       window.__e2ePluginInvokes = (window.__e2ePluginInvokes || []).concat([{ tool, args }]);

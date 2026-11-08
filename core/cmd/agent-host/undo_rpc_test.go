@@ -10,9 +10,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
-func TestStdioRevertIsFinal(t *testing.T) {
+func TestStdioRevertAndRecover(t *testing.T) {
 	var mu sync.Mutex
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,18 +29,26 @@ func TestStdioRevertIsFinal(t *testing.T) {
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer srv.Close()
-	h := startLiveHost(t, buildHost(t), t.TempDir())
+	bin, dataDir := buildHost(t), t.TempDir()
+	h := startLiveHost(t, bin, dataDir)
 	h.call("addProvider", map[string]string{"name": "mock", "apiUrl": srv.URL, "apiKey": "sk", "apiType": "openai"})
 	h.call("setDefaultProvider", map[string]string{"name": "mock"})
 	cwd := t.TempDir()
 	sid := h.call("openSession", map[string]string{"cwd": cwd})["result"].(map[string]any)["sessionId"].(string)
 	h.call("submitChat", map[string]any{"sessionId": sid, "message": "write it", "cwd": cwd, "permissions": "full-access"})
+	h.event("chat/protection", sid, func(m map[string]any) bool {
+		status, _ := m["protection"].(map[string]any)
+		return status["state"] == "protected"
+	})
 	h.event("turn/done", sid, nil)
 
 	hist := h.call("sessionHistory", map[string]any{"sessionId": sid})["result"].([]any)
 	first := hist[0].(map[string]any)
 	if first["role"] != "user" || first["index"] != float64(0) {
 		t.Fatalf("user row %v", first)
+	}
+	if protection, ok := first["protection"].(map[string]any); !ok || protection["state"] != "protected" {
+		t.Fatalf("history protection = %v", first["protection"])
 	}
 	pv := h.call("revertPreview", map[string]any{"sessionId": sid, "index": 0})["result"].(map[string]any)
 	deleted := pv["deleted"].([]any)
@@ -64,9 +73,32 @@ func TestStdioRevertIsFinal(t *testing.T) {
 	if hist := h.call("sessionHistory", map[string]any{"sessionId": sid})["result"].([]any); len(hist) != 0 {
 		t.Fatalf("history after revert %v", hist)
 	}
+	if err := h.stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-h.exited:
+	case <-time.After(10 * time.Second):
+		t.Fatal("sidecar did not exit")
+	}
+	h = startLiveHost(t, bin, dataDir)
+	if h.call("recoveryAvailable", map[string]any{"sessionId": sid})["result"] != true {
+		t.Fatal("missing recovery")
+	}
+	preview := h.call("recoveryPreview", map[string]any{"sessionId": sid})["result"].(map[string]any)
+	if files := preview["files"].([]any); len(files) != 1 || files[0] != "a.txt" {
+		t.Fatalf("recovery preview %v", preview)
+	}
+	h.call("recoverLatest", map[string]any{"sessionId": sid})
+	if b, err := os.ReadFile(filepath.Join(cwd, "a.txt")); err != nil || strings.TrimSpace(string(b)) != "agent" {
+		t.Fatalf("recovered file: %v", err)
+	}
+	if hist := h.call("sessionHistory", map[string]any{"sessionId": sid})["result"].([]any); len(hist) == 0 {
+		t.Fatal("conversation not recovered")
+	}
 	sess := h.call("openSession", map[string]any{"sessionId": sid})["result"].(map[string]any)
 	if rv, _ := sess["revert"].(map[string]any); rv != nil {
-		t.Fatalf("a final revert left a pending redo: %v", sess)
+		t.Fatalf("revert left legacy pending metadata: %v", sess)
 	}
 	id := h.send("revertSession", map[string]any{"sessionId": sid})
 	if bad := h.waitLine("revert without index", func(m map[string]any) bool { return m["id"] == id }); bad["ok"] == true {

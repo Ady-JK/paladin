@@ -203,7 +203,13 @@ func TestStdioConcurrentSessionsQueueAndAttach(t *testing.T) {
 	turn, _ := att["turn"].(map[string]any)
 	events, _ := att["events"].([]any)
 	queued, _ := att["queued"].([]any)
-	if turn["display"] != "one!" || len(events) != 1 || len(queued) != 1 || att["seq"].(float64) <= 0 {
+	foundDelta, foundProtection := false, false
+	for _, raw := range events {
+		event, _ := raw.(map[string]any)
+		foundDelta = foundDelta || event["event"] == "chat/delta"
+		foundProtection = foundProtection || event["event"] == "chat/protection"
+	}
+	if turn["display"] != "one!" || !foundDelta || !foundProtection || len(queued) != 1 || att["seq"].(float64) <= 0 {
 		t.Fatalf("attach %v", att)
 	}
 

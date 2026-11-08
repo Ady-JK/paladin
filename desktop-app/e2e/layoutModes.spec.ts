@@ -14,10 +14,11 @@ test.beforeEach(async ({ page }) => {
 
 test("split and tabs preserve the active side chat and make each view full width", async ({ page }) => {
   const layout = page.locator("#paneLayoutBtn");
-  await expect(page.locator("#paneHistoryBtn")).toBeVisible();
+  await expect(page.locator("#paneNewChatBtn")).toBeVisible();
   await expect(layout).toBeVisible();
   await expect(layout).toHaveAttribute("data-layout", "split");
   await page.locator("#paneNewChatBtn").click();
+  await page.locator("[data-pane-new-chat]").click();
   const splitWidth = (await page.locator("#sidePane").boundingBox())!.width;
   const fullWidth = (await page.locator("#agentSplit").boundingBox())!.width;
   expect(splitWidth).toBeLessThan(fullWidth * 0.7);
@@ -65,7 +66,14 @@ test("clicking a localhost chat link opens the session browser in either layout"
 
 test("browser tab expands to full width and the layout survives a reload", async ({ page }) => {
   await page.locator("#paneNewChatBtn").click();
-  await page.locator("#paneBrowserBtn").click();
+  await page.locator("[data-pane-new-chat]").click();
+  await page.evaluate(() =>
+    (window as any).__e2eHub.emit({
+      event: "browser/opened",
+      sessionId: (window as any).__e2eSubmits[0].sessionId,
+      url: "http://localhost:8080",
+    }),
+  );
   await page.locator("#sidePane .browser-url").fill("http://127.0.0.1:3000");
   await page.locator("#sidePane .browser-open").click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserBounds?.width ?? 0)).toBeGreaterThan(100);
@@ -86,7 +94,7 @@ test("browser tab expands to full width and the layout survives a reload", async
 
 test("saved side chat menu stays usable in the unified header", async ({ page }) => {
   await switchLayout(page);
-  await page.locator("#paneHistoryBtn").click();
+  await page.locator("#paneNewChatBtn").click();
   await expect(page.locator("#paneHistoryMenu")).toBeVisible();
   await expect(page.locator("#paneHistoryMenu")).toContainText("No saved side chats");
 });

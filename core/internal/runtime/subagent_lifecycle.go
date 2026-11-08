@@ -51,6 +51,7 @@ func (m *subagentManager) spawn(parentID string, a spawnArgs) (AgentInfo, error)
 	link := transcript.Subagent{
 		ParentTurnID: m.r.hub.RunningTurnID(parentID), SpawnCallID: a.CallID,
 		Type: a.Kind.Name, Name: name, Task: a.Task, ForkTurns: a.ForkTurns, Status: AgentQueued,
+		Definition: &transcript.SubagentDefinition{Description: a.Kind.Description, Role: a.Kind.Role, Tools: a.Kind.Tools, MCP: a.Kind.MCP, ReadWrite: a.Kind.ReadWrite, FileBased: a.Kind.FileBased},
 	}
 	// The child runs where the parent's current turn runs: the turn's
 	// provider and model are per request, not necessarily in its meta.
@@ -135,7 +136,7 @@ func (m *subagentManager) submit(child transcript.Session, settings turnSettings
 	_, _, err := m.r.hub.Submit(agent.Request{
 		SessionID: childID, Cwd: child.Meta.Cwd, Message: task,
 		Provider: child.Meta.Provider, Model: child.Meta.Model,
-		Permissions: settings.Permissions, Mode: agent.ModeBuild,
+		Permissions: settings.Permissions, Mode: settings.Mode,
 	}, SubmitOpts{Display: task, ParentSessionID: child.Meta.Subagent.ParentID})
 	if err != nil {
 		m.mu.Lock()

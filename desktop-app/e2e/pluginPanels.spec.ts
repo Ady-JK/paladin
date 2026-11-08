@@ -76,6 +76,34 @@ test("opening a view creates a sandboxed plugin tab", async ({ page }) => {
   expect(await page.evaluate(() => (window as any).__e2ePluginCloses || [])).toContain("panel-1");
 });
 
+test("an overlay opens without a chat and expands into a canvas", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2ePluginViews = {
+      views: [{ plugin: "canvas", view: "draw", title: "Canvas", mount: "overlay", permissions: [] }],
+      cards: [],
+      errors: [],
+    };
+  });
+  await openMenu(page);
+  await page.locator('#pluginsMenu .plugin-row[data-plugin="canvas"]').click();
+  const canvas = page.locator(".plugin-overlay");
+  await expect(canvas).toBeVisible();
+  await expect(canvas.locator("iframe")).toHaveAttribute("sandbox", "allow-scripts");
+  await canvas.getByRole("button", { name: "Expand draw canvas" }).click();
+  await expect(canvas).toHaveClass(/is-maximized/);
+  await canvas.getByRole("button", { name: "Restore draw canvas" }).click();
+  await expect(canvas).not.toHaveClass(/is-maximized/);
+  await canvas.getByRole("button", { name: "Close draw" }).click();
+  await expect(canvas).toHaveCount(0);
+});
+
+test("a plugin tab opens without a chat", async ({ page }) => {
+  await openMenu(page);
+  await page.locator('#pluginsMenu .plugin-row[data-plugin="board"]').click();
+  await expect(page.locator("#paneBody iframe.plugin-frame")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__e2ePluginOpens[0].sessionId)).toBe("");
+});
+
 test("a session keeps at most two plugin panels, closing the oldest", async ({ page }) => {
   await openSession(page);
   await openMenu(page);

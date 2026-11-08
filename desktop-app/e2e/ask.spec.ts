@@ -128,7 +128,14 @@ test("question wizard hides the native browser and restores it when dismissed", 
   await page.click("#sendBtn");
   await expect(page.locator("#messages")).toContainText("start");
   await page.locator("#paneNewChatBtn").click();
-  await page.locator("#paneBrowserBtn").click();
+  await page.locator("[data-pane-new-chat]").click();
+  await page.evaluate(() =>
+    (window as any).__e2eHub.emit({
+      event: "browser/opened",
+      sessionId: (window as any).__e2eSubmits[0].sessionId,
+      url: "http://localhost:8080",
+    }),
+  );
   await page.locator(".browser-url").fill("http://127.0.0.1:3000");
   await page.locator(".browser-open").click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBeTruthy();

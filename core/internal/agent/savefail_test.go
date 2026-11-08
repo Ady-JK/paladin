@@ -1,6 +1,5 @@
-// savefail_test.go covers the double-fault path: when a turn fails
-// AND its transcript cannot persist, the returned error must mention
-// both instead of silently dropping the whole turn.
+// savefail_test.go ensures a turn does not start when its journal cannot
+// be saved, so it cannot make unrecorded changes.
 
 package agent
 
@@ -11,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestFailedTurnWithBrokenPersistReportsBoth(t *testing.T) {
+func TestTurnDoesNotRunWithoutDurableJournal(t *testing.T) {
 	prov := &mockProvider{streamsErr: errors.New("provider exploded")}
 	sess := testSession(t, "00000000-0000-4000-8000-000000000041")
 	// Remove the session dir so the transcript append cannot succeed.
@@ -24,12 +23,9 @@ func TestFailedTurnWithBrokenPersistReportsBoth(t *testing.T) {
 	a.session = sess
 	_, err := a.Run()
 	if err == nil {
-		t.Fatal("want the provider failure")
+		t.Fatal("want the journal failure")
 	}
-	if !strings.Contains(err.Error(), "provider exploded") {
-		t.Fatalf("original error lost: %v", err)
-	}
-	if !strings.Contains(err.Error(), "could not be saved") {
-		t.Fatalf("persist failure swallowed: %v", err)
+	if !strings.Contains(err.Error(), "start turn journal") || prov.calls != 0 {
+		t.Fatalf("turn ran without a journal: calls=%d error=%v", prov.calls, err)
 	}
 }

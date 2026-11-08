@@ -1,6 +1,7 @@
 // chat.ts sends messages and streams the agent reply.
 
 import * as api from "../core/api";
+import { bridge, hasBridge } from "../core/bridge";
 import {
   attachBtnEl,
   inputEl,
@@ -31,7 +32,7 @@ import { syncMcp } from "./mcp";
 import { applyToolDraft, syncTools } from "./toolSwitches";
 import { applyBudgetDraft, syncBudget } from "./budget";
 import { reloadContextSources } from "./contextBox";
-import { showTerminalResult } from "./sidePane";
+import { showTerminalResult, STANDALONE_PANE_SESSION, syncSidePane } from "./sidePane";
 import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
 import { clearTags, hasTags, initTags, tagPaths, tagsLabel } from "./tags";
 
@@ -76,6 +77,8 @@ async function ensureSession(title: string): Promise<void> {
   }
   const opened = await api.openSession(null, state.cwd, takeWorktreeRequest(title));
   state.sessionId = opened.sessionId;
+  window.dispatchEvent(new Event("paladin:session-selected"));
+  syncSidePane();
   if (opened.worktree) {
     // The session works in its own checkout from the first turn.
     state.cwd = opened.cwd;
@@ -96,6 +99,7 @@ async function ensureSession(title: string): Promise<void> {
 }
 
 let bangBusy = false;
+let pluginPromptBusy = false;
 
 async function runBang(line: string): Promise<void> {
   if (bangBusy) return;
@@ -110,9 +114,9 @@ async function runBang(line: string): Promise<void> {
   autosizeComposer();
   let targetSession = state.sessionId;
   try {
-    await ensureSession(command);
-    const sessionId = state.sessionId;
-    targetSession = sessionId;
+    if (!localOnly) await ensureSession(command);
+    targetSession = state.sessionId;
+    const sessionId = state.sessionId || STANDALONE_PANE_SESSION;
     const cwd = state.cwd;
     const provider = state.selectedProvider || null;
     const model = state.selectedModel || null;
@@ -327,6 +331,33 @@ export function initChat(): void {
       }
     });
   });
+  if (hasBridge()) {
+    bridge().plugins?.onPrompt((request) => {
+      if (pluginPromptBusy) {
+        toast("A plugin message is already being sent", "error");
+        return;
+      }
+      if (request.workspace !== state.cwd || (request.sessionId && request.sessionId !== state.sessionId)) {
+        toast("The plugin's conversation is no longer active", "error");
+        return;
+      }
+      if (hasAttachments() || hasTags()) {
+        toast("Send or remove the current attachments before using this plugin", "error");
+        return;
+      }
+      const draft = inputEl.value;
+      pluginPromptBusy = true;
+      inputEl.value = request.text;
+      void send().finally(() => {
+        pluginPromptBusy = false;
+        if (draft) {
+          const current = inputEl.value;
+          inputEl.value = !current || current === request.text ? draft : `${draft}\n${current}`;
+          autosizeComposer();
+        }
+      });
+    });
+  }
   attachBtnEl.addEventListener("click", () => {
     openFilePicker();
   });

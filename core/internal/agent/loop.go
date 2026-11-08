@@ -5,6 +5,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -141,16 +142,20 @@ func (a *Agent) streamRound() roundResult {
 	a.publishLive()
 	prx := make(chan inference.Chunk, 64)
 	providerErr := make(chan error, 1)
+	streamCtx, stopStream := context.WithCancel(a.ctx)
+	defer stopStream()
 	go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
 		defer close(prx)
 		providerErr <- guardProvider(func() error {
 			return a.TimeGen(func() error {
-				return a.provider.StreamTools(a.ctx, a.system, msgs, defs, sid, prx, a.done)
+				return a.provider.StreamTools(streamCtx, a.system, msgs, defs, sid, prx, a.done)
 			})
 		})
 	}(append([]inference.LlmMessage(nil), a.messages...), append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
 	var res roundResult
 	var text strings.Builder
+	lastCheckpoint := time.Time{}
+	checkpointFailed := false
 loop:
 	for {
 		select {
@@ -186,6 +191,15 @@ loop:
 			if chunk.Text != "" {
 				text.WriteString(chunk.Text)
 				a.appendDelta(chunk.Text)
+				if time.Since(lastCheckpoint) >= time.Second {
+					if err := a.checkpoint(text.String()); err != nil {
+						res.streamErr = err
+						checkpointFailed = true
+						stopStream()
+						break loop
+					}
+					lastCheckpoint = time.Now()
+				}
 				if err := a.emit(ChatChunk{Delta: chunk.Text}); err != nil {
 					res.clientGone = true
 					break loop
@@ -205,6 +219,9 @@ loop:
 		}
 	}
 	res.providerErr = <-providerErr
+	if checkpointFailed {
+		res.providerErr = nil
+	}
 	res.text = text.String()
 	return res
 }
@@ -256,6 +273,9 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 			Role: transcript.RoleAssistant, Content: text,
 			CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
 		})
+		if err := a.checkpoint(""); err != nil {
+			return false, err
+		}
 	}
 	drained := len(a.records)
 	if err := a.drainNotifications(); err != nil {
@@ -334,6 +354,9 @@ func (a *Agent) drainNotifications() error {
 	}
 	for _, n := range notices {
 		a.appendNotify(n.Content, n.CallID, n.Name, n.IsError)
+		if err := a.checkpoint(""); err != nil {
+			return err
+		}
 		status := session.ToolOK
 		if n.IsError {
 			status = session.ToolFailed
@@ -366,6 +389,9 @@ func (a *Agent) drainSteering() error {
 			rec.Display = msg.Display
 		}
 		a.records = append(a.records, rec)
+		if err := a.checkpoint(""); err != nil {
+			return err
+		}
 		if err := a.emit(ChatChunk{Steer: &msg}); err != nil {
 			return turnStop{}
 		}
@@ -382,16 +408,19 @@ func (a *Agent) runPlain() error {
 	}
 	prx := make(chan inference.Chunk, 64)
 	providerErr := make(chan error, 1)
+	streamCtx, stopStream := context.WithCancel(a.ctx)
+	defer stopStream()
 	go func() {
 		defer close(prx)
 		msgs := append([]inference.LlmMessage(nil), a.messages...)
 		providerErr <- guardProvider(func() error {
 			return a.TimeGen(func() error {
-				return a.provider.StreamTools(a.ctx, a.system, msgs, nil, a.session.Meta.SessionID, prx, a.done)
+				return a.provider.StreamTools(streamCtx, a.system, msgs, nil, a.session.Meta.SessionID, prx, a.done)
 			})
 		})
 	}()
 	streamed := false
+	lastCheckpoint := time.Time{}
 loop:
 	for {
 		select {
@@ -414,6 +443,12 @@ loop:
 			if chunk.Text != "" {
 				streamed = true
 				a.appendDelta(chunk.Text)
+				if time.Since(lastCheckpoint) >= time.Second {
+					if err := a.checkpoint(a.reply.String()); err != nil {
+						return err
+					}
+					lastCheckpoint = time.Now()
+				}
 				if err := a.emit(ChatChunk{Delta: chunk.Text}); err != nil {
 					return turnStop{}
 				}

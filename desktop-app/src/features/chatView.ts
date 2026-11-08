@@ -7,7 +7,6 @@ import type { CompactionInfo, RetryInfo, Turn } from "../core/types";
 import * as api from "../core/api";
 import { toast } from "../ui/toast";
 import { openLocalBrowserURL, openWebTab } from "./sidePane";
-import { icon } from "../icons";
 
 export function scrollToBottom(): void {
   chatViewEl.scrollTop = chatViewEl.scrollHeight;
@@ -155,7 +154,7 @@ export function createTurn(
 
   const textEl = document.createElement("div");
   if (isUser) {
-    wrapper.classList.add("flex", "justify-end");
+    wrapper.classList.add("flex", "flex-col", "items-end");
     textEl.className = "bubble-user whitespace-pre-wrap break-words";
   } else if (isError) {
     wrapper.classList.add("justify-start");
@@ -184,9 +183,9 @@ export function createTurn(
     btn.type = "button";
     btn.className = "revert-btn";
     btn.dataset.revert = opts?.index === undefined ? "" : String(opts.index);
-    btn.title = "Revert to here";
-    btn.setAttribute("aria-label", "Revert to here");
-    btn.innerHTML = icon("tl-undo", "h-3.5 w-3.5");
+    btn.title = "Undo this message and later turns";
+    btn.setAttribute("aria-label", "Undo from this message");
+    btn.textContent = "Undo from here";
     wrapper.prepend(btn);
   }
   return { wrapper, textEl };

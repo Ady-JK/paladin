@@ -293,7 +293,9 @@ func (m *subagentManager) deliverNotices(parentID, cwd, turnID string) []agent.N
 			// Recorded before completion ids existed.
 			callID = fmt.Sprintf("%s#done-%d", id, info.UpdatedAt)
 		}
-		args, _ := jsonx.Marshal(map[string]string{"action": "notify", "agent_id": id, "name": info.Name})
+		modelID := m.modelID(parentID, id)
+		args, _ := jsonx.Marshal(map[string]string{"action": "notify", "agent_id": modelID, "name": info.Name})
+		info.ID = modelID
 		out = append(out, agent.Notice{
 			CallID:    callID,
 			Name:      "agent",

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,41 @@ func TestSkillToolLoadsAndListsOnMiss(t *testing.T) {
 	os.WriteFile(filepath.Join(empty, "config", "settings.json"), []byte(`{"disabledSkills":[`+strings.Join(names, ",")+`]}`), 0o644)
 	if SkillCatalog(empty, "", 10) != "" {
 		t.Fatal("empty catalog must be blank")
+	}
+}
+
+func TestSessionSearchFallsBackWhenRefreshFails(t *testing.T) {
+	data := t.TempDir()
+	store := transcript.NewStore(filepath.Join(data, "sessions"))
+	sess, err := store.Create("/w", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Append(transcript.RoleUser, "newlysavedword"); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := sessionindex.Open(sessionindex.Path(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = idx.Close() }()
+	attempts := 0
+	tool := NewSessionSearchTool(store).WithIndex(idx, func(ctx context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("refresh unavailable")
+		}
+		_, err := idx.Refresh(ctx, sessionindex.Source{Store: store, DataDir: data})
+		return err
+	})
+	for _, source := range []string{"scan", "fts"} {
+		out, err := tool.Call(json.RawMessage(`{"query":"newlysavedword"}`), &ToolCtx{Workspace: "/w"})
+		if err != nil || !strings.Contains(out, sess.Meta.SessionID) || !strings.Contains(out, `"source":"`+source+`"`) {
+			t.Fatalf("fallback: %s %v", out, err)
+		}
+	}
+	if attempts != 2 {
+		t.Fatalf("refresh attempts = %d", attempts)
 	}
 }
 
@@ -119,11 +155,12 @@ func TestSessionSearchPrefersTheIndex(t *testing.T) {
 	}
 	defer func() { _ = idx.Close() }()
 	refreshed := 0
-	tool := NewSessionSearchTool(store).WithIndex(idx, func(context.Context) {
+	tool := NewSessionSearchTool(store).WithIndex(idx, func(context.Context) error {
 		refreshed++
 		if _, err := idx.Refresh(context.Background(), sessionindex.Source{Store: store, DataDir: data}); err != nil {
 			t.Errorf("refresh: %v", err)
 		}
+		return nil
 	})
 	out, err := tool.Call(json.RawMessage(`{"query":"litellm port"}`), &ToolCtx{Workspace: "/w"})
 	if err != nil {

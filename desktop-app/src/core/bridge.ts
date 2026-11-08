@@ -24,6 +24,7 @@ export interface PaladinBridge {
       workspace: string,
     ) => Promise<{ id: string; url: string; title: string }>;
     close: (id: string) => Promise<boolean>;
+    prepareReload: (id: string) => Promise<boolean>;
     getContext: () => Promise<{
       sessionId: string;
       workspace: string;
@@ -36,6 +37,9 @@ export interface PaladinBridge {
     readStore: (key: string) => Promise<unknown>;
     writeStore: (key: string, value: unknown) => Promise<{ ok: true } | { ok: false; error: string }>;
     openExternal: (url: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    sendPrompt: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    history: () => Promise<{ ok: true; history: unknown } | { ok: false; error: string }>;
+    onPrompt: (cb: (msg: { text: string; sessionId: string; workspace: string }) => void) => () => void;
     subscribe: (filter: { sessionId?: string; events?: string[] }) => Promise<string>;
     unsubscribe: (id: string) => Promise<boolean>;
     onEvent: (cb: (msg: { sub: string; event: string; data: unknown; dropped?: number }) => void) => () => void;

@@ -144,6 +144,8 @@ func turnStates(ctx context.Context, repo *snapshot.Repo, from, to string) (map[
 // turn is compared with the next turn's snapshot, and the last turn
 // with the folder now, so no separate "after" snapshot is needed.
 func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView, error) {
+	r.undoMu.Lock()
+	defer r.undoMu.Unlock()
 	view := SessionChangesView{Turns: []ChangeTurn{}, Files: []ChangedFile{}}
 	repo, turns, msgs, err := r.visibleTurns(sessionID, cwd)
 	if err != nil || repo == nil {
@@ -182,8 +184,10 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 }
 
 // SessionDiff shows the patch for one file in one turn, or across the
-// whole session when turn is negative.
+// retained session snapshots when turn is negative.
 func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string) (SessionDiffView, error) {
+	r.undoMu.Lock()
+	defer r.undoMu.Unlock()
 	if err := snapshot.CheckPath(path); err != nil {
 		return SessionDiffView{}, err
 	}

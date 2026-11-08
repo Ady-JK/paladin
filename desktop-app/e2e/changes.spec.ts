@@ -1,6 +1,112 @@
 import { expect, test } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
+test("overlapping change refreshes share the same in-flight diff request", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "modified" }] }],
+      files: [{ path: "index.html", status: "modified" }],
+    };
+    const invoke = w.paladin.invoke;
+    w.__heldDiffCalls = 0;
+    w.paladin.invoke = (cmd: string, args: unknown) => {
+      if (cmd !== "sessionDiff") return invoke(cmd, args);
+      w.__heldDiffCalls++;
+      return new Promise((resolve) => {
+        (w.__releaseDiffs ??= []).push(() =>
+          resolve({ path: "index.html", patch: "@@ -1 +1 @@\n-old\n+new", truncated: false }),
+        );
+      });
+    };
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await page.waitForFunction(() => (window as any).__heldDiffCalls > 0);
+  await page.evaluate(async () => {
+    const modulePath = "/src/features/sidePane.ts";
+    const pane = await import(modulePath);
+    void pane.refreshChanges("sess-notify-1");
+    void pane.refreshChanges("sess-notify-1");
+  });
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as any).__heldDiffCalls)).toBe(1);
+  await page.evaluate(() => (window as any).__releaseDiffs.forEach((release: () => void) => release()));
+  await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toContainText("+1");
+});
+
+test("refreshing unchanged file changes preserves keyboard focus", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    (window as any).__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "modified" }] }],
+      files: [{ path: "index.html", status: "modified" }],
+    };
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await expect(page.locator("#sessionChangesBtn")).toContainText("1");
+  await page.locator("#sessionChangesBtn").click();
+  const file = page.locator('#sidePane [data-change-file="index.html"]');
+  await expect(file).toBeVisible();
+  await file.focus();
+  await page.evaluate(async () => {
+    const modulePath = "/src/features/sidePane.ts";
+    const pane = await import(modulePath);
+    await pane.refreshChanges("sess-notify-1");
+  });
+  await expect(file).toBeFocused();
+});
+
+test("a later edit to the same file updates the live change counts", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "modified" }] }],
+      files: [{ path: "index.html", status: "modified" }],
+    };
+    w.__e2ePatch = "@@ -1 +1 @@\n-old\n+first";
+    w.__e2eRunTurn = (_params: any, handlers: any) =>
+      new Promise(() => {
+        w.__changeHandlers = handlers;
+      });
+  });
+  await page.goto("/");
+  await page.fill("#promptInput", "edit a file");
+  await page.click("#sendBtn");
+  await page.waitForFunction(() => Boolean((window as any).__changeHandlers));
+  await page.evaluate(() => {
+    (window as any).__changeHandlers.onTool({
+      id: "one",
+      name: "edit",
+      arguments: '{"path":"index.html"}',
+      result: "{}",
+      status: "ok",
+    });
+  });
+  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
+  await expect(card).toContainText("+1");
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__e2ePatch = "@@ -1 +1,2 @@\n-old\n+first\n+second";
+    w.__changeHandlers.onTool({
+      id: "two",
+      name: "edit",
+      arguments: '{"path":"index.html"}',
+      result: "{}",
+      status: "ok",
+    });
+  });
+  await expect(card).toContainText("+2");
+});
+
 test("a turn's files open a snapshot diff and the header opens session changes", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {

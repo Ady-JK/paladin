@@ -43,12 +43,23 @@ func (r *AgentRuntime) SessionDir(sessionID, cwd string) string {
 }
 
 func (s runtimeSessions) LoadSession(cwd, sessionID string) (transcript.Session, error) {
-	return s.r.transcripts.Load(cwd, sessionID)
+	return s.r.loadSessionWithRecovery(cwd, sessionID)
+}
+
+func (r *AgentRuntime) loadSessionWithRecovery(cwd, sessionID string) (transcript.Session, error) {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return sess, err
+	}
+	if _, err := sess.RecoverInterrupted(); err != nil {
+		return sess, fmt.Errorf("recover interrupted turn: %w", err)
+	}
+	return sess, nil
 }
 
 func (r *AgentRuntime) OpenSession(sessionID, cwd string) (Session, error) {
 	if strings.TrimSpace(sessionID) != "" {
-		sess, err := r.transcripts.Load(cwd, sessionID)
+		sess, err := r.loadSessionWithRecovery(cwd, sessionID)
 		if err != nil {
 			return Session{}, err
 		}
@@ -106,7 +117,7 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	sess, err := r.transcripts.Load(cwd, sessionID)
+	sess, err := r.loadSessionWithRecovery(cwd, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,17 +126,33 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 		return nil, err
 	}
 	msgs, statsAt := transcript.Flatten(turns)
-	return session.HistoryViewStats(visibleMessages(sess.Meta, msgs), statsAt), nil
+	rows := session.HistoryViewStats(visibleMessages(sess.Meta, msgs), statsAt)
+	if err := annotateProtection(sess, rows, turns); err != nil {
+		markProtectionUnknown(rows)
+	}
+	return rows, nil
 }
 
 // SessionHistoryPage is SessionHistory limited to one window of rows:
 // the newest limit rows, or the window ending just before before.
 func (r *AgentRuntime) SessionHistoryPage(sessionID, cwd string, limit, before int) (session.HistoryPage, error) {
-	rows, err := r.SessionHistory(sessionID, cwd)
+	if strings.TrimSpace(sessionID) == "" {
+		return session.HistoryPage{}, fmt.Errorf("session id is required")
+	}
+	sess, err := r.loadSessionWithRecovery(cwd, sessionID)
 	if err != nil {
 		return session.HistoryPage{}, err
 	}
-	return session.PageHistory(rows, limit, before), nil
+	turns, err := sess.HistoryTurns()
+	if err != nil {
+		return session.HistoryPage{}, err
+	}
+	msgs, statsAt := transcript.Flatten(turns)
+	page := session.HistoryPageStats(visibleMessages(sess.Meta, msgs), statsAt, limit, before)
+	if err := annotateProtection(sess, page.Messages, turns); err != nil {
+		markProtectionUnknown(page.Messages)
+	}
+	return page, nil
 }
 
 // SessionImages reports just the image references in a transcript.
@@ -207,10 +234,18 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("session id is required")
 	}
+	sess, loadErr := r.transcripts.Load(cwd, sessionID)
+	if loadErr != nil {
+		if err := r.transcripts.CheckExists(cwd, sessionID); err != nil {
+			return false, err
+		}
+		if r.hub.Busy(sessionID) {
+			return false, fmt.Errorf("cannot stop session %q: %w", sessionID, loadErr)
+		}
+	}
 	// Forget it first so a finishing child cannot wake it again, then
 	// delete its children before stopping it.
 	r.subagents.forget(sessionID)
-	sess, loadErr := r.transcripts.Load(cwd, sessionID)
 	if loadErr == nil {
 		if err := r.subagents.deleteChildren(sess); err != nil {
 			return false, err

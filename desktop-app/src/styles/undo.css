@@ -1,47 +1,99 @@
 /* ============ Undo: revert to here ============ */
 .turn-row .revert-btn {
-  align-self: center;
-  margin-right: 6px;
-  display: inline-flex;
+  align-self: stretch;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  border-radius: 9999px;
-  border: 1px solid transparent;
+  gap: 8px;
+  margin: 12px 0;
   color: var(--color-slate-400);
-  opacity: 0;
-  transform: translateX(4px);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    background-color 120ms ease,
-    color 120ms ease;
+  font-size: 11px;
+  font-weight: 400;
+  transition: color 120ms ease;
 }
-.turn-row:hover .revert-btn,
-.turn-row .revert-btn:focus-visible {
-  opacity: 1;
-  transform: none;
+.turn-row .revert-btn::before,
+.turn-row .revert-btn::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--color-slate-200);
+  opacity: 0.55;
 }
 .turn-row .revert-btn:hover {
-  border-color: var(--color-slate-200);
-  background: var(--color-slate-100);
-  color: var(--color-slate-700);
+  color: #196ecf;
+}
+.dark .turn-row .revert-btn {
+  color: var(--color-slate-400);
 }
 .dark .turn-row .revert-btn:hover {
-  border-color: rgb(255 255 255 / 0.08);
-  background: rgb(255 255 255 / 0.06);
   color: var(--color-slate-200);
+}
+.dark .turn-row .revert-btn::before,
+.dark .turn-row .revert-btn::after {
+  background: var(--color-slate-400);
+  opacity: 0.35;
+}
+.recovery-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 24px;
+  font-size: 12px;
+  color: var(--color-slate-600);
+}
+.recovery-bar[hidden] {
+  display: none;
+}
+.recovery-bar button {
+  color: #196ecf;
+  text-decoration: underline;
+}
+.dark .recovery-bar {
+  color: var(--color-slate-200);
+}
+.dark .recovery-bar button {
+  color: #99e5ee;
 }
 .turn-queued .revert-btn {
   display: none;
+}
+.snapshot-protection {
+  align-self: flex-end;
+  max-width: min(100%, 420px);
+  margin: 4px 0;
+  color: var(--color-slate-600);
+  font-size: 12px;
+}
+.dark .snapshot-protection {
+  color: var(--color-slate-300);
+}
+.snapshot-protection summary {
+  cursor: pointer;
+}
+.snapshot-protection summary {
+  color: #b91c1c;
+}
+.dark .snapshot-protection summary {
+  color: #f87171;
+}
+.snapshot-protection-details {
+  padding: 8px;
+  line-height: 1.5;
+}
+.snapshot-protection-details ul {
+  max-height: 120px;
+  overflow: auto;
+  font-family: var(--font-mono);
+}
+.snapshot-protection-details li {
+  overflow-wrap: anywhere;
 }
 .revert-pop {
   position: fixed;
   z-index: 70;
   width: 320px;
   max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 12px;
   border-radius: 14px;
   border: 1px solid var(--color-slate-200);
@@ -89,7 +141,8 @@
   color: #b7791f;
 }
 .revert-files,
-.revert-conflicts {
+.revert-conflicts,
+.revert-excluded {
   margin-top: 4px;
   max-height: 120px;
   overflow-y: auto;
@@ -97,7 +150,8 @@
   font-size: 11px;
 }
 .revert-files li,
-.revert-conflicts li {
+.revert-conflicts li,
+.revert-excluded li {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

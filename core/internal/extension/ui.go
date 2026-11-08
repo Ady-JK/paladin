@@ -35,6 +35,7 @@ const (
 	ViewEvents            = "events"
 	ViewReadFile          = "readFile"
 	ViewOpenExternal      = "openExternal"
+	ViewSendPrompt        = "sendPrompt"
 )
 
 var viewPerms = map[string]bool{
@@ -43,6 +44,7 @@ var viewPerms = map[string]bool{
 	ViewEvents:            true,
 	ViewReadFile:          true,
 	ViewOpenExternal:      true,
+	ViewSendPrompt:        true,
 }
 
 // viewID is a panel id: lower-case, short, unique per plugin.
@@ -147,8 +149,8 @@ func (p *plugin) checkView(v View, seen map[string]bool) error {
 	if mount == "" {
 		mount = "side-pane"
 	}
-	if mount != "side-pane" {
-		return fmt.Errorf("mount must be %q; other mounts are not supported yet", "side-pane")
+	if mount != "side-pane" && mount != "overlay" {
+		return fmt.Errorf("mount must be side-pane or overlay")
 	}
 	if err := p.checkUIEntry(v.Entry, ".html", maxViewBytes); err != nil {
 		return err
@@ -243,36 +245,23 @@ func (p *plugin) staticToolNames() map[string]bool {
 // menu costs no plugin process. A broken plugin is reported and skipped.
 func (r *Registry) UI() PluginUI {
 	out := PluginUI{Views: []PluginView{}, Cards: []PluginCard{}}
-	root := filepath.Join(r.dataDir, "config", "extensions")
-	configPath := filepath.Join(r.dataDir, "config", "extensions.json")
-	data, err := os.ReadFile(configPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return out
-	}
-	if err != nil {
+	sources, failures := r.sources()
+	for _, err := range failures {
 		out.Errors = append(out.Errors, err.Error())
-		return out
-	}
-	if len(data) > 64<<10 {
-		out.Errors = append(out.Errors, "extensions.json is too large")
-		return out
-	}
-	var cfg configFile
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		out.Errors = append(out.Errors, err.Error())
-		return out
 	}
 	seen := map[string]bool{}
-	for _, name := range cfg.Enabled {
+	for _, source := range sources {
+		name := source.exposed
 		if seen[name] {
+			out.Errors = append(out.Errors, fmt.Sprintf("duplicate plugin name %q", name))
 			continue
 		}
 		seen[name] = true
-		if !pluginName.MatchString(name) {
+		if source.legacy || !pluginName.MatchString(source.name) {
 			// A loose legacy file has no manifest and no UI.
 			continue
 		}
-		pl, err := loadManifest(root, name)
+		pl, err := loadManifest(source.root, source.name)
 		if err != nil {
 			out.Errors = append(out.Errors, err.Error())
 			continue

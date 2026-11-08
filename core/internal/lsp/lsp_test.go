@@ -61,6 +61,8 @@ func fakeServer() {
 			write(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": nil})
 		case "exit":
 			os.Exit(0)
+		case "textDocument/didSave":
+			logf("save")
 		case "textDocument/didOpen", "textDocument/didChange":
 			var p struct {
 				TextDocument struct {
@@ -163,6 +165,30 @@ func TestDiagnoseReportsErrorsAndFollowsChanges(t *testing.T) {
 	st := m.Status()
 	if len(st) != 1 || st[0].ID != "fake" || st[0].State != "ready" || st[0].PID == 0 {
 		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestDiagnoseEditorTextDoesNotChangeTheFile(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "server.log")
+	m, ws := fakeManager(t, "FAKE_LOG="+logPath)
+	path := filepath.Join(ws, "a.fk")
+	writeFile(t, path, "clean disk\n")
+	result := m.DiagnoseText(context.Background(), ws, path, "clean\n  ERROR draft\n", nil)
+	if result.Server != "fake" || result.Timedout || len(result.Diagnostics) != 1 || result.Diagnostics[0].Line != 2 {
+		t.Fatalf("draft diagnosis: %+v", result)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "clean disk\n" {
+		t.Fatalf("disk changed: %q, %v", data, err)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil || strings.Contains(string(log), "save\n") {
+		t.Fatalf("editor sent didSave: %q, %v", log, err)
+	}
+	agent := NewManager(m.dataDir)
+	defer agent.Close()
+	if got := agent.Diagnose(context.Background(), ws, path, nil); got.Server != "fake" || got.Timedout || got.Errors != 0 {
+		t.Fatalf("agent observed unsaved editor state: %+v", got)
 	}
 }
 

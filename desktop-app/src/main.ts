@@ -28,6 +28,7 @@ import { closeConfirm, initSessions, openSession, refreshSessions } from "./feat
 import { initSidePane } from "./features/sidePane";
 import { initPluginPanels } from "./features/pluginPanels";
 import { initPluginCards } from "./features/pluginCards";
+import { initCreatorMode } from "./features/creatorMode";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
 import { closeNewSite, initWeb } from "./features/web";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
@@ -65,6 +66,7 @@ async function connect(): Promise<void> {
       state.cwd = await api.resolveWorkspace(state.cwd);
     }
     workspaceLabelEl.textContent = shortPath(state.cwd);
+    window.dispatchEvent(new Event("paladin:workspace-changed"));
 
     state.sessionId = "";
     syncPermChip();
@@ -119,7 +121,25 @@ window.addEventListener("DOMContentLoaded", () => {
   initMemory();
   initSessions();
   initSidePane();
+  const ideButton = $("#ideModeBtn");
+  const loadIDE = (): void => {
+    if (ideButton.hasAttribute("aria-busy")) return;
+    ideButton.setAttribute("aria-busy", "true");
+    void import("./features/ide")
+      .then(({ initIDE }) => {
+        ideButton.removeEventListener("click", loadIDE);
+        ideButton.removeAttribute("aria-busy");
+        initIDE();
+        ideButton.click();
+      })
+      .catch((error: unknown) => {
+        ideButton.removeAttribute("aria-busy");
+        setStatus(`Could not open IDE: ${String(error)}`, "error");
+      });
+  };
+  ideButton.addEventListener("click", loadIDE);
   initPluginPanels();
+  initCreatorMode();
   void initPluginCards();
   initUndo();
   initLive((id) => void openSession(id));

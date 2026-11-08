@@ -63,6 +63,15 @@ func TestSystemPromptContent(t *testing.T) {
 	}
 }
 
+func TestMemoryGuidanceDistinguishesDurablePreferences(t *testing.T) {
+	g := ToolGuidance()
+	for _, want := range []string{"each user message", "without waiting", "project for preferences", "temporary requests", "If nothing"} {
+		if !strings.Contains(g, want) {
+			t.Errorf("memory guidance missing %q", want)
+		}
+	}
+}
+
 func TestBrowserAndServerGuidanceMatchesAvailableTools(t *testing.T) {
 	if strings.Contains(SystemPrompt, "Never issue the same tool call twice") {
 		t.Fatal("base prompt forbids repeated browser actions")

@@ -252,6 +252,57 @@ func TestRefreshPicksUpAnEditedSession(t *testing.T) {
 	}
 }
 
+func TestRefreshDetectsSameTimestampReplacementAndRename(t *testing.T) {
+	data := t.TempDir()
+	store := transcript.NewStore(filepath.Join(data, "sessions"))
+	sess, err := store.Create("/work/a", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Append(transcript.RoleUser, "firstword"); err != nil {
+		t.Fatal(err)
+	}
+	idx := openIndex(t)
+	ctx := context.Background()
+	source := Source{Store: store, DataDir: data}
+	if _, err := idx.Refresh(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sess.Dir, "messages.jsonl")
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "firstword", "otherword", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, st.ModTime(), st.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Refresh(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := idx.Search(ctx, "otherword", "", "", 5); len(hits) != 1 {
+		t.Fatalf("replacement missing: %+v", hits)
+	}
+	if hits, _ := idx.Search(ctx, "firstword", "", "", 5); len(hits) != 0 {
+		t.Fatalf("stale text remains: %+v", hits)
+	}
+	if err := store.Rename("/work/a", sess.Meta.SessionID, "Renamed session"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.Refresh(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := idx.Search(ctx, "otherword", "", "", 5); len(hits) != 1 || hits[0].Title != "Renamed session" {
+		t.Fatalf("stale title: %+v", hits)
+	}
+}
+
 func TestRefreshSkipsReplayedMessages(t *testing.T) {
 	dataDir := t.TempDir()
 	store := transcript.NewStore(filepath.Join(dataDir, "sessions"))
@@ -275,5 +326,55 @@ func TestRefreshSkipsReplayedMessages(t *testing.T) {
 	}
 	if hits, _ := idx.Search(ctx, "live", "", "", 5); len(hits) != 1 {
 		t.Fatalf("live message missing: %+v", hits)
+	}
+}
+
+func TestRefreshRecoversInterruptedSessionBeforeSearching(t *testing.T) {
+	data := t.TempDir()
+	store := transcript.NewStore(filepath.Join(data, "sessions"))
+	sess, err := store.Create("/work/a", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := sess.BeginJournal([]transcript.Message{transcript.UserMessage("interruptedsearchword")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Release()
+	idx := openIndex(t)
+	if _, err := idx.Refresh(context.Background(), Source{Store: store, DataDir: data}); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := idx.Search(context.Background(), "interruptedsearchword", "", "", 5); len(hits) != 1 {
+		t.Fatalf("interrupted chat not indexed: %+v", hits)
+	}
+}
+
+func BenchmarkRefreshUnchangedSessions(b *testing.B) {
+	data := b.TempDir()
+	store := transcript.NewStore(filepath.Join(data, "sessions"))
+	for range 100 {
+		sess, err := store.Create("/work/a", "", "")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := sess.Append(transcript.RoleUser, strings.Repeat("abcdefghij", 1000)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	idx, err := Open(filepath.Join(b.TempDir(), "sessions.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() { _ = idx.Close() }()
+	ctx, source := context.Background(), Source{Store: store, DataDir: data}
+	if _, err := idx.Refresh(ctx, source); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := idx.Refresh(ctx, source); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

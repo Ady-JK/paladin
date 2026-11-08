@@ -75,6 +75,14 @@ test("an approval card shows the command and allows it for the folder", async ({
   await expect(page.locator('.session-row[data-live="approval"]')).toHaveCount(0);
 });
 
+test("shell approval describes the actual sandbox scope", async ({ page }) => {
+  await script(page, [{ event: "chat/approval", approval: pending({ sandbox: "workspace-write" }) }]);
+  await send(page);
+  const card = page.locator('.approval-card[data-approval="c1"]');
+  await expect(card).toContainText("workspace, temporary folders and development caches");
+  await expect(card).toContainText("Network access remains available");
+});
+
 test("Escape denies, and a destructive call only offers once or deny", async ({ page }) => {
   await script(page, [
     {

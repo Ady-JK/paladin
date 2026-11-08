@@ -12,7 +12,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' file:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' file: plugin:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>paladin</title>
     <style>
@@ -124,20 +124,42 @@
           class="flex select-none items-center justify-between border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-900"
         >
           <div id="paneActions" class="pane-actions" aria-label="Agent pane actions">
-            <button id="paneNewChatBtn" type="button" class="pane-btn" title="New side chat" aria-label="New side chat">
-              <span data-icon="plus"></span>
-            </button>
             <button
-              id="paneBrowserBtn"
+              id="paneNewChatBtn"
               type="button"
               class="pane-btn"
-              title="Open local browser"
-              aria-label="Open local browser"
+              title="New tab and saved side chats"
+              aria-label="New tab and saved side chats"
+              aria-haspopup="menu"
+              aria-expanded="false"
             >
-              <span data-icon="globe"></span>
+              <span data-icon="plus"></span>
             </button>
-            <button id="paneTerminalBtn" type="button" class="pane-btn" title="New terminal" aria-label="New terminal">
-              <span data-icon="terminal"></span>
+            <div id="paneHistoryMenu" class="pane-menu" role="menu" hidden>
+              <button type="button" role="menuitem" class="pane-menu-layout" data-pane-new-chat>New side chat</button>
+              <button type="button" role="menuitem" class="pane-menu-layout" data-pane-new-terminal>
+                New terminal
+              </button>
+              <div id="paneHistoryItems"></div>
+            </div>
+            <button
+              id="ideModeBtn"
+              type="button"
+              class="pane-btn"
+              title="Toggle IDE mode"
+              aria-label="Toggle IDE mode"
+              aria-pressed="false"
+            >
+              <span data-icon="code"></span>
+            </button>
+            <button
+              id="creatorModeBtn"
+              type="button"
+              class="pane-btn creator-mode-btn"
+              aria-pressed="false"
+              title="Open Creator mode"
+            >
+              Creator
             </button>
             <button
               id="paneLayoutBtn"
@@ -148,20 +170,6 @@
             >
               <span data-icon="layout-split"></span>
             </button>
-            <button
-              id="paneHistoryBtn"
-              type="button"
-              class="pane-btn"
-              title="Saved side chats"
-              aria-label="Saved side chats"
-              aria-haspopup="menu"
-              aria-expanded="false"
-            >
-              <span data-icon="rotate-ccw"></span>
-            </button>
-            <div id="paneHistoryMenu" class="pane-menu" role="menu" hidden>
-              <div id="paneHistoryItems"></div>
-            </div>
           </div>
           <div id="headerIdentity" class="flex items-center gap-3">
             <span class="relative flex h-2 w-2">
@@ -262,6 +270,10 @@
                 <span class="parent-sep" aria-hidden="true">/</span>
                 <span id="parentBarAgent" class="parent-agent"></span>
                 <span class="parent-note">Driven by its parent agent</span>
+              </div>
+              <div id="recoveryBar" class="recovery-bar" hidden>
+                <span>Undo recovery available</span>
+                <button id="recoverLatestBtn" type="button">Recover before undo</button>
               </div>
               <!-- The conversation -->
               <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
@@ -986,7 +998,7 @@
         >
           <h3 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
             <span data-icon="plus" class="text-accent-500"></span>
-            New Session
+            <span id="sessionDialogTitle">New Session</span>
           </h3>
           <button id="sessionCloseBtn" class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100">
             <span data-icon="xmark"></span>

@@ -4,127 +4,53 @@
 // hidden tab keeps its DOM, so switching back loses nothing.
 
 import * as api from "../core/api";
-import type { Terminal } from "@xterm/xterm";
-import type { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { $, inputEl, sidePaneEl } from "../core/dom";
+import { $, sidePaneEl } from "../core/dom";
 import { bridge, hasBridge } from "../core/bridge";
-import { escapeAttr, escapeHtml, renderMarkdown } from "../core/format";
+import { escapeAttr, escapeHtml } from "../core/format";
 import { state } from "../core/state";
 import { loadText, saveText } from "../core/storage";
-import type { ChangedFile, RunningJob, SessionChanges, SideChatMessage } from "../core/types";
+import type { RunningJob, SessionChanges, SideChatMessage } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { registerChangesLink } from "./findings";
-import { abortAttach, beginAttach, finishAttach, liveBadge, liveRoot, onResync, repaintLive } from "./live";
-import { agentStatus, agentStatusHtml, buildHistory, openSession, refreshSessions } from "./sessions";
+import { abortAttach, liveBadge, liveRoot, onResync } from "./live";
+import { agentStatus, openSession, refreshSessions, renderSessions } from "./sessions";
 import { formatElapsed } from "./workingBar";
+import { createAgentTab, loadAgent, paintHead } from "./sidePane/agentTab";
+import { clip, errorText } from "./sidePane/utils";
+import { createChatTab, isBlankChat, sendChat } from "./sidePane/sideChat";
+import { activateTerminal, newTerminalTab, terminalEvent } from "./sidePane/terminal";
+import { TerminalDock } from "./ide/terminalDock";
+import { newWebTab, normalizeWebUrl, setWebStatus, webHost } from "./sidePane/webTab";
+import { navigateBrowser, newBrowserTab, stopBrowserPick, updateBrowserToolbar } from "./sidePane/browserTab";
+import { loadChangeDiff, newChangesTab, paintChangesTab } from "./sidePane/changesTab";
+import {
+  clearChangeTotals,
+  paintTurnMarker,
+  retainChangeTotals,
+  runningTurn,
+  turnTotal,
+} from "./sidePane/changeMarkers";
 
-type ChatTab = {
-  kind: "chat";
-  key: string;
-  chatId: string | null;
-  title: string;
-  body: HTMLElement;
-  busy: boolean;
-};
-
-type AgentTab = {
-  kind: "agent";
-  key: string;
-  agentId: string;
-  title: string;
-  body: HTMLElement;
-  // loading is the attach in flight, so two paints never race.
-  loading: Promise<void> | null;
-  // head is the last painted head, so unchanged repaints are skipped.
-  head: string;
-};
-
-type BrowserTab = {
-  kind: "browser";
-  key: string;
-  sessionId: string;
-  title: string;
-  body: HTMLElement;
-  url: string;
-  picking: boolean;
-  pickToken: number;
-  noteCount: number;
-  passing: boolean;
-};
-
-// WebTab is one site in the integrated browser: Gemini, ChatGPT or any
-// https page. It uses the shared persistent profile, so a sign-in done
-// in one site carries to the next and survives restarts.
-export type WebTab = {
-  kind: "web";
-  key: string;
-  sessionId: string;
-  viewName: string;
-  title: string;
-  url: string;
-  body: HTMLElement;
-};
-
-type TerminalTab = {
-  kind: "terminal";
-  key: string;
-  sessionId: string;
-  cwd: string;
-  title: string;
-  body: HTMLElement;
-  term: Terminal | null;
-  fit: FitAddon | null;
-  pendingText: string[];
-  terminalId: string;
-  starting: Promise<void> | null;
-  closed: boolean;
-};
-
-type ChangesTab = {
-  kind: "changes";
-  key: string;
-  sessionId: string;
-  title: string;
-  body: HTMLElement;
-  turn: number | null;
-  selected: string | null;
-  request: number;
-  // mark highlights new-side lines of one file (a review finding).
-  mark: { path: string; start: number; end: number } | null;
-};
-
-type JobsTab = {
-  kind: "jobs";
-  key: string;
-  sessionId: string;
-  title: string;
-  body: HTMLElement;
-};
-
-export type PluginTab = {
-  kind: "plugin";
-  key: string;
-  sessionId: string;
-  panelId: string;
-  plugin: string;
-  view: string;
-  title: string;
-  workspace: string;
-  body: HTMLElement;
-  iframe: HTMLIFrameElement;
-  openedAt: number;
-  stale: boolean;
-};
-
-type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | JobsTab | PluginTab | TerminalTab | WebTab;
-type TabSet = { tabs: Tab[]; active: string };
+export type { PluginTab, WebTab } from "./sidePane/types";
+import type {
+  AgentTab,
+  BrowserTab,
+  ChangesTab,
+  ChatTab,
+  JobsTab,
+  PluginTab,
+  Tab,
+  TabSet,
+  TerminalTab,
+  WebTab,
+} from "./sidePane/types";
 
 const tabsEl = $("#paneTabs");
 const stripEl = tabsEl.parentElement!;
 const bodyEl = $("#paneBody");
-const historyBtn = $<HTMLButtonElement>("#paneHistoryBtn");
+const historyBtn = $<HTMLButtonElement>("#paneNewChatBtn");
 const menuEl = $("#paneHistoryMenu");
 const menuItemsEl = $("#paneHistoryItems");
 const layoutBtn = $<HTMLButtonElement>("#paneLayoutBtn");
@@ -135,136 +61,172 @@ const titleBar = $("#titleBar");
 const agentView = $("#agentView");
 const layoutKey = "paladin.paneLayout";
 
+export const STANDALONE_PANE_SESSION = "__standalone_pane__";
 const sets = new Map<string, TabSet>();
+const pendingBrowserSessions = new Set<string>();
+
+function visibleSessionId(): string {
+  return state.sessionId || STANDALONE_PANE_SESSION;
+}
 const changesCache = new Map<string, SessionChanges>();
 let paneOpen = false;
 let layoutMode: "split" | "tabs" = loadText(layoutKey) === "tabs" ? "tabs" : "split";
 let nextKey = 0;
-const pendingTerminalData = new Map<string, string[]>();
+let ideTerminalMode = false;
+let ideBrowserKey = "";
+let terminalDock: TerminalDock | null = null;
+const isBrowserPage = (tab: Tab): tab is BrowserTab | WebTab => tab.kind === "browser" || tab.kind === "web";
 
-function terminalEvent(raw: unknown): void {
-  if (!raw || typeof raw !== "object") return;
-  const e = raw as { event?: string; sessionId?: string; terminalId?: string; data?: string; exitCode?: number };
-  if (!e.event?.startsWith("terminal/") || !e.terminalId || !e.sessionId) return;
-  const tab = sets
-    .get(e.sessionId)
-    ?.tabs.find((t): t is TerminalTab => t.kind === "terminal" && t.terminalId === e.terminalId);
-  if (e.event === "terminal/data" && e.data) {
-    if (!tab) {
-      const queued = pendingTerminalData.get(e.terminalId) ?? [];
-      if (queued.length < 128) queued.push(e.data);
-      pendingTerminalData.set(e.terminalId, queued);
-      return;
-    }
-    tab.term?.write(Uint8Array.from(atob(e.data), (char) => char.charCodeAt(0)));
-  } else if (e.event === "terminal/exit" && tab) {
-    tab.term?.write(`\r\n[terminal exited${e.exitCode ? `: ${e.exitCode}` : ""}]\r\n`);
-    tab.terminalId = "";
-    tab.closed = true;
-  } else if (e.event === "terminal/exit") {
-    pendingTerminalData.delete(e.terminalId);
+export function activateIDEFile(): void {
+  if (!ideBrowserKey) return;
+  ideBrowserKey = "";
+  window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: false }));
+  render();
+}
+
+function activateIDEPage(key: string): void {
+  ideBrowserKey = key;
+  window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: true }));
+  render();
+}
+
+function renderIDEPages(set: TabSet | null): void {
+  const tabs = document.getElementById("ideBrowserTabs");
+  const area = document.getElementById("ideBrowserArea");
+  if (!tabs || !area) return;
+  const pages = ideTerminalMode ? (set?.tabs.filter(isBrowserPage) ?? []) : [];
+  if (!pages.some((tab) => tab.key === ideBrowserKey)) {
+    if (ideBrowserKey) window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: false }));
+    ideBrowserKey = "";
+  }
+  tabs.innerHTML = pages
+    .map(
+      (tab) =>
+        `<div class="ide-tab${tab.key === ideBrowserKey ? " is-active" : ""}"><button type="button" class="ide-tab-select" data-ide-page="${escapeAttr(tab.key)}" title="${escapeAttr(tab.title)}">${escapeHtml(tab.title)}</button><button type="button" class="ide-tab-close" data-ide-page-close="${escapeAttr(tab.key)}" aria-label="Close ${escapeAttr(tab.title)}">×</button></div>`,
+    )
+    .join("");
+  if (area.childElementCount !== pages.length || pages.some((tab, index) => area.children[index] !== tab.body)) {
+    area.replaceChildren(...pages.map((tab) => tab.body));
+  }
+  for (const page of pages) {
+    page.body.hidden = page.key !== ideBrowserKey;
+    if (page.kind === "browser" && page.body.hidden) stopBrowserPick(page);
+  }
+  area.hidden = !ideBrowserKey;
+}
+function openTerminalTab(sessionId: string, cwd = state.cwd): TerminalTab {
+  const set = browserSet(sessionId);
+  const visible = visibleSessionId() === sessionId && state.cwd === cwd;
+  const owner = ideTerminalMode && visible ? STANDALONE_PANE_SESSION : sessionId;
+  const tab = newTerminalTab(owner, cwd, `t${++nextKey}`);
+  set.tabs.push(tab);
+  if (ideTerminalMode && visible) {
+    terminalDock?.show(tab.key);
+  } else if (visible || visibleSessionId() !== sessionId) {
+    set.active = tab.key;
+    if (visible) showPane();
+  }
+  return tab;
+}
+
+export function setIDETerminalMode(on: boolean): void {
+  if (!terminalDock) {
+    const area = $("#ideBrowserArea");
+    new ResizeObserver(syncNativeSurfaces).observe(area);
+    $("#ideBrowserTabs").addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      const close = target.closest<HTMLElement>("[data-ide-page-close]")?.dataset.idePageClose;
+      const select = target.closest<HTMLElement>("[data-ide-page]")?.dataset.idePage;
+      if (close) closeTab(close);
+      else if (select) activateIDEPage(select);
+    });
+    terminalDock = new TerminalDock({
+      workspace: () => state.cwd,
+      terminals: () =>
+        sets
+          .get(visibleSessionId())
+          ?.tabs.filter((tab): tab is TerminalTab => tab.kind === "terminal" && tab.cwd === state.cwd) ?? [],
+      create: () => openTerminalTab(visibleSessionId()),
+      close: (key) => closeTab(key),
+    });
+    $("#ideTerminalToggle").addEventListener("click", () => terminalDock?.toggle());
+  }
+  const set = sets.get(visibleSessionId());
+  const selected = set && activeTab(set);
+  if (on && selected && isBrowserPage(selected) && paneOpen) {
+    paneOpen = false;
+    ideBrowserKey = selected.key;
+    window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: true }));
+  }
+  if (on && selected?.kind === "terminal" && paneOpen) {
+    paneOpen = false;
+    terminalDock.show(selected.key);
+  } else if (!on && terminalDock.isOpen() && terminalDock.active() && !paneOpen && set) {
+    set.active = terminalDock.active()!.key;
+    paneOpen = true;
+  }
+  if (!on && ideBrowserKey && set) {
+    set.active = ideBrowserKey;
+    paneOpen = true;
+  }
+  ideTerminalMode = on;
+  terminalDock.setEnabled(on);
+  render();
+}
+
+// Standalone terminals keep their PTY owner while following the visible chat.
+function attachStandaloneTerminals(sessionId: string): void {
+  const targetId = sessionId || STANDALONE_PANE_SESSION;
+  for (const [sourceId, source] of [...sets]) {
+    if (sourceId === targetId) continue;
+    const terminals = source.tabs.filter(
+      (tab): tab is TerminalTab =>
+        tab.kind === "terminal" && tab.sessionId === STANDALONE_PANE_SESSION && tab.cwd === state.cwd,
+    );
+    if (!terminals.length) continue;
+    const target = browserSet(targetId);
+    target.tabs.push(...terminals);
+    if (terminals.some((tab) => tab.key === source.active)) target.active = source.active;
+    else if (!target.active) target.active = terminals[0].key;
+    const moving = new Set(terminals.map((tab) => tab.key));
+    source.tabs = source.tabs.filter((tab) => !moving.has(tab.key));
+    if (!source.tabs.length) sets.delete(sourceId);
+    else if (!source.tabs.some((tab) => tab.key === source.active)) source.active = source.tabs[0].key;
   }
 }
 
-function newTerminalTab(sessionId: string, cwd: string): TerminalTab {
-  const body = document.createElement("div");
-  body.className = "pane-terminal";
-  body.innerHTML = `<div class="terminal-heading"><span>${icon("terminal", "h-3.5 w-3.5")} Terminal</span><small>${escapeHtml(cwd)}</small></div><div class="terminal-surface" aria-label="Interactive terminal"></div>`;
-  const tab: TerminalTab = {
-    kind: "terminal",
-    key: `t${++nextKey}`,
-    sessionId,
-    cwd,
-    title: "Terminal",
-    body,
-    term: null,
-    fit: null,
-    pendingText: [],
-    terminalId: "",
-    starting: null,
-    closed: false,
-  };
-  void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
-    ([{ Terminal }, { FitAddon }]) => {
-      if (tab.closed) return;
-      const term = new Terminal({
-        cursorBlink: true,
-        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-        fontSize: 12,
-        scrollback: 5000,
-        theme: { background: "#17171a", foreground: "#e9e9ed", cursor: "#8faafa" },
-      });
-      const fit = new FitAddon();
-      term.loadAddon(fit);
-      tab.term = term;
-      tab.fit = fit;
-      term.onData((data) => {
-        if (tab.terminalId) void api.terminalWrite(tab.sessionId, tab.terminalId, data).catch(() => undefined);
-      });
-      term.onResize(({ cols, rows }) => {
-        if (tab.terminalId) void api.terminalResize(tab.sessionId, tab.terminalId, cols, rows).catch(() => undefined);
-      });
-      for (const text of tab.pendingText) term.write(text);
-      tab.pendingText = [];
-      if (!tab.body.hidden) activateTerminal(tab);
-    },
-    (error) => {
-      body.querySelector<HTMLElement>(".terminal-surface")!.textContent =
-        `Terminal could not load: ${errorText(error)}`;
-    },
-  );
-  return tab;
-}
-
-function activateTerminal(tab: TerminalTab): void {
-  if (!tab.term || !tab.fit) return;
-  const term = tab.term;
-  const fit = tab.fit;
-  const surface = tab.body.querySelector<HTMLElement>(".terminal-surface")!;
-  if (!surface.querySelector(".xterm")) term.open(surface);
-  if (!tab.body.hidden) fit.fit();
-  if (tab.starting || tab.terminalId || tab.closed) return;
-  tab.starting = api
-    .terminalStart(tab.sessionId, tab.cwd, Math.max(term.cols, 20), Math.max(term.rows, 5))
-    .then((id) => {
-      if (tab.closed) {
-        void api.terminalClose(tab.sessionId, id);
-        return;
-      }
-      tab.terminalId = id;
-      for (const chunk of pendingTerminalData.get(id) ?? []) {
-        term.write(Uint8Array.from(atob(chunk), (char) => char.charCodeAt(0)));
-      }
-      pendingTerminalData.delete(id);
-      term.focus();
-    })
-    .catch((error) => term.write(`\r\nTerminal could not start: ${errorText(error)}\r\n`))
-    .finally(() => {
-      tab.starting = null;
-    });
-}
-
-function openTerminalTab(sessionId: string, cwd = state.cwd): TerminalTab {
-  const set = browserSet(sessionId);
-  const tab = newTerminalTab(sessionId, cwd);
-  set.tabs.push(tab);
-  set.active = tab.key;
-  if (state.sessionId === sessionId) showPane();
-  return tab;
-}
-
 export function showTerminalResult(sessionId: string, cwd: string, command: string, result: api.TerminalResult): void {
-  const set = browserSet(sessionId);
-  const tab = set.tabs.find((t): t is TerminalTab => t.kind === "terminal") ?? openTerminalTab(sessionId, cwd);
-  set.active = tab.key;
-  if (state.sessionId === sessionId) showPane();
+  let paneSession = sessionId;
+  if (sessionId === STANDALONE_PANE_SESSION) {
+    if (state.cwd === cwd) paneSession = visibleSessionId();
+    else {
+      for (const [id, set] of sets) {
+        if (set.tabs.some((tab) => tab.kind === "terminal" && tab.sessionId === sessionId && tab.cwd === cwd)) {
+          paneSession = id;
+          break;
+        }
+      }
+    }
+  }
+  const set = browserSet(paneSession);
+  const visible = visibleSessionId() === paneSession && state.cwd === cwd;
+  const selected = ideTerminalMode && visible ? terminalDock?.active() : undefined;
+  const tab =
+    (selected?.cwd === cwd ? selected : undefined) ??
+    set.tabs.find((t): t is TerminalTab => t.kind === "terminal" && t.cwd === cwd) ??
+    openTerminalTab(paneSession, cwd);
+  if (ideTerminalMode && visible) terminalDock?.show(tab.key);
+  else if (visible || visibleSessionId() !== paneSession) {
+    set.active = tab.key;
+    if (visible) showPane();
+  }
   const text = `\r\n$ ${command}\r\n${result.output.replace(/\n/g, "\r\n")}${result.truncated ? "\r\n[output truncated]" : ""}\r\n[exit ${result.exitCode}]\r\n`;
   if (tab.term) tab.term.write(text);
   else tab.pendingText.push(text);
 }
 
 function currentSet(): TabSet | null {
-  if (!state.sessionId) return null;
+  if (!state.sessionId) return sets.get(STANDALONE_PANE_SESSION) ?? null;
   let set = sets.get(state.sessionId);
   if (!set) {
     set = { tabs: [], active: "" };
@@ -282,139 +244,13 @@ function browserSet(sessionId: string): TabSet {
   return set;
 }
 
-function newBrowserTab(sessionId: string): BrowserTab {
-  const body = document.createElement("div");
-  body.className = "pane-browser";
-  body.innerHTML = `<form class="browser-toolbar"><input class="browser-url" type="url" inputmode="url" spellcheck="false" placeholder="http://localhost:8080 or https://…" aria-label="Browser URL" /><button class="browser-open" type="submit">Open</button><button class="browser-annotate" type="button" aria-label="Comment on elements" aria-pressed="false" title="Comment on elements">${icon("comments", "h-4 w-4")}<span>Comment</span></button><button class="browser-pass" type="button" disabled>Pass to agent</button></form><p class="browser-status" role="status">Open a local app or a web site. Web pages use their own empty profile.</p><div class="browser-surface" aria-label="Browser page"></div>`;
-  const tab: BrowserTab = {
-    kind: "browser",
-    key: `t${++nextKey}`,
-    sessionId,
-    title: "Browser",
-    body,
-    url: "",
-    picking: false,
-    pickToken: 0,
-    noteCount: 0,
-    passing: false,
-  };
-  body.querySelector<HTMLFormElement>("form")!.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const url = body.querySelector<HTMLInputElement>(".browser-url")!.value.trim();
-    navigateBrowser(tab, url);
-  });
-  body.querySelector<HTMLButtonElement>(".browser-annotate")!.addEventListener("click", () => {
-    if (tab.picking) stopBrowserPick(tab);
-    else void startBrowserPick(tab);
-  });
-  body
-    .querySelector<HTMLButtonElement>(".browser-pass")!
-    .addEventListener("click", () => void passBrowserComments(tab));
-  return tab;
-}
-
-function stopBrowserPick(tab: BrowserTab): void {
-  if (!tab.picking) return;
-  tab.picking = false;
-  tab.pickToken++;
-  void bridge().browser?.cancelPick(tab.sessionId);
-  updateBrowserToolbar(tab);
-}
-
-async function startBrowserPick(tab: BrowserTab): Promise<void> {
-  if (!hasBridge() || !bridge().browser?.pick) {
-    tab.body.querySelector<HTMLElement>(".browser-status")!.textContent =
-      "Element selection needs the desktop browser.";
-    return;
-  }
-  tab.picking = true;
-  const token = ++tab.pickToken;
-  updateBrowserToolbar(tab);
-  await bridge().browser!.cancelPick(tab.sessionId);
-  if (!tab.picking || token !== tab.pickToken) return;
-  while (tab.picking && token === tab.pickToken) {
-    try {
-      const element = await bridge().browser!.pick(tab.sessionId);
-      if (!tab.picking || token !== tab.pickToken || !element) break;
-    } catch (error) {
-      if (token === tab.pickToken)
-        tab.body.querySelector<HTMLElement>(".browser-status")!.textContent = errorText(error);
-      break;
-    }
-  }
-  if (token === tab.pickToken) {
-    tab.picking = false;
-    updateBrowserToolbar(tab);
-  }
-}
-
-function updateBrowserToolbar(tab: BrowserTab): void {
-  const toggle = tab.body.querySelector<HTMLButtonElement>(".browser-annotate")!;
-  toggle.setAttribute("aria-pressed", String(tab.picking));
-  toggle.title = tab.picking ? "Stop selecting elements" : "Comment on elements";
-  const pass = tab.body.querySelector<HTMLButtonElement>(".browser-pass")!;
-  pass.disabled = tab.passing || tab.noteCount === 0;
-  pass.textContent = tab.noteCount ? `Pass to agent (${tab.noteCount})` : "Pass to agent";
-}
-
-async function passBrowserComments(tab: BrowserTab): Promise<void> {
-  if (tab.passing || !hasBridge() || !bridge().browser?.getNotes) return;
-  tab.passing = true;
-  updateBrowserToolbar(tab);
-  stopBrowserPick(tab);
-  try {
-    const notes = await bridge().browser!.getNotes(tab.sessionId);
-    if (!notes.length || state.sessionId !== tab.sessionId) return;
-    const lines = notes.map(
-      (note, index) =>
-        `${index + 1}. URL: ${note.url}\n   Element: <${note.tag}>${note.label || note.text ? ` ${JSON.stringify(note.label || note.text)}` : ""}\n   CSS selector: ${note.selector}\n   Change: ${note.comment}`,
-    );
-    const feedback = `Browser UI feedback:\n${lines.join("\n")}`;
-    inputEl.value = `${inputEl.value.trimEnd()}${inputEl.value.trim() ? "\n\n" : ""}${feedback}`;
-    inputEl.dispatchEvent(new Event("input", { bubbles: true }));
-    await bridge().browser!.clearNotes(tab.sessionId);
-    if (layoutMode === "tabs") closePane();
-    inputEl.focus();
-  } catch (error) {
-    tab.body.querySelector<HTMLElement>(".browser-status")!.textContent = errorText(error);
-  } finally {
-    tab.passing = false;
-    updateBrowserToolbar(tab);
-  }
-}
-
-function navigateBrowser(tab: BrowserTab, url: string): void {
-  stopBrowserPick(tab);
-  const status = tab.body.querySelector<HTMLElement>(".browser-status")!;
-  if (!url) {
-    status.textContent = "Enter a URL.";
-    return;
-  }
-  tab.body.querySelector<HTMLInputElement>(".browser-url")!.value = url;
-  if (!hasBridge() || !bridge().browser) {
-    status.textContent = "The desktop browser is unavailable.";
-    return;
-  }
-  status.textContent = "Opening…";
-  void bridge()
-    .browser!.open(tab.sessionId, url)
-    .then(
-      () => {
-        tab.url = url;
-        status.textContent = url;
-        syncNativeSurfaces();
-      },
-      (error: unknown) => {
-        status.textContent = errorText(error);
-      },
-    );
-}
-
 function openBrowserTab(sessionId: string, url = ""): void {
   const set = browserSet(sessionId);
   let tab = set.tabs.find((t): t is BrowserTab => t.kind === "browser");
   if (!tab) {
-    tab = newBrowserTab(sessionId);
+    tab = newBrowserTab(sessionId, `t${++nextKey}`, syncNativeSurfaces, () => {
+      if (layoutMode === "tabs") closePane();
+    });
     set.tabs.push(tab);
     if (hasBridge() && bridge().browser?.getNotes) {
       const created = tab;
@@ -428,8 +264,22 @@ function openBrowserTab(sessionId: string, url = ""): void {
     }
   }
   if (url) tab.body.querySelector<HTMLInputElement>(".browser-url")!.value = url;
-  set.active = tab.key;
-  if (state.sessionId === sessionId) showPane();
+  if (state.sessionId === sessionId) {
+    pendingBrowserSessions.delete(sessionId);
+    if (ideTerminalMode) activateIDEPage(tab.key);
+    else {
+      set.active = tab.key;
+      showPane();
+    }
+  } else {
+    set.active = tab.key;
+    pendingBrowserSessions.add(sessionId);
+  }
+  renderSessions();
+}
+
+export function hasAgentBrowser(sessionId: string): boolean {
+  return sets.get(sessionId)?.tabs.some((tab) => tab.kind === "browser") ?? false;
 }
 
 // Chat links use the same one-browser-per-session view as the agent tool.
@@ -441,14 +291,14 @@ export function openLocalBrowserURL(url: string): void {
   const set = browserSet(state.sessionId);
   openBrowserTab(state.sessionId, url);
   const tab = set.tabs.find((t): t is BrowserTab => t.kind === "browser")!;
-  navigateBrowser(tab, url);
+  navigateBrowser(tab, url, syncNativeSurfaces);
 }
 
 function browserEvent(raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const e = raw as { event?: string; sessionId?: string; url?: string; count?: number };
   if (!e.sessionId) return;
-  if (e.event === "browser/opened") {
+  if (e.event === "browser/opened" || e.event === "browser/activity") {
     openBrowserTab(e.sessionId, e.url ?? "");
     return;
   }
@@ -460,6 +310,7 @@ function browserEvent(raw: unknown): void {
     return;
   }
   if (e.event === "browser/closed") {
+    pendingBrowserSessions.delete(e.sessionId);
     stopBrowserPick(tab);
     if (state.sessionId === e.sessionId) closeTab(tab.key, false);
     else {
@@ -467,6 +318,7 @@ function browserEvent(raw: unknown): void {
       set.tabs = set.tabs.filter((t) => t !== tab);
       tab.body.remove();
     }
+    renderSessions();
   } else if (e.event === "browser/navigated" && e.url) {
     if (tab.url && tab.url !== e.url) stopBrowserPick(tab);
     tab.url = e.url;
@@ -483,122 +335,7 @@ function paintChangesHeader(data: SessionChanges | undefined): void {
   changesBtn.title = `View ${count} ${count === 1 ? "file" : "files"} changed in this session`;
 }
 
-type ChangeTotal = { added: number; removed: number; files?: Record<string, { added: number; removed: number }> };
-
-function countPatch(patch: string): ChangeTotal {
-  let added = 0;
-  let removed = 0;
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added++;
-    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
-  }
-  return { added, removed };
-}
-
-const changeTotals = new Map<string, { signature: string; total: ChangeTotal | null }>();
-
-async function turnTotal(sessionId: string, turn: SessionChanges["turns"][number]): Promise<ChangeTotal | null> {
-  const key = `${sessionId}:${turn.turn}`;
-  const signature = JSON.stringify([turn.files, turn.callIds]);
-  const cached = changeTotals.get(key);
-  if (cached?.signature === signature) return cached.total;
-  try {
-    const patches = await Promise.all(turn.files.map((file) => api.sessionDiff(sessionId, null, turn.turn, file.path)));
-    if (patches.some((patch) => patch.truncated)) return null;
-    const total: ChangeTotal = { added: 0, removed: 0, files: {} };
-    for (const patch of patches) {
-      const count = countPatch(patch.patch);
-      total.added += count.added;
-      total.removed += count.removed;
-      total.files![patch.path] = count;
-    }
-    changeTotals.set(key, { signature, total });
-    return total;
-  } catch {
-    return null;
-  }
-}
-
-// paintedMarker remembers what a card currently shows. A refresh that
-// changed nothing then writes nothing: rebuilding the whole card on every
-// settling tool restarted layout and re-created one node per file, which
-// is what made the collapsed card flicker while a turn ran.
-const paintedMarker = new WeakMap<HTMLElement, { heading: string; files: string }>();
-
-function paintTurnMarker(row: HTMLElement, turn: number, files: ChangedFile[], total?: ChangeTotal | null): void {
-  let button = row.parentElement?.querySelector<HTMLElement>(`.turn-changes[data-change-turn="${turn}"]`);
-  if (!files.length) {
-    button?.remove();
-    return;
-  }
-  const fresh = !button;
-  if (!button) {
-    button = document.createElement("div");
-    button.className = "turn-changes turn-change-card turn-change-collapsed";
-    button.innerHTML = `<span class="turn-change-heading"></span><span class="turn-change-files"></span>`;
-    // One delegated listener, so a repaint of the heading cannot leak the
-    // undo button's handler or lose it.
-    button.addEventListener("click", (event) => {
-      if (!(event.target as HTMLElement).closest(".turn-change-undo")) return;
-      event.stopPropagation();
-      row.querySelector<HTMLElement>("[data-revert]")?.click();
-    });
-  }
-  // Keep the card at the end of its turn. Rows arrive after an earlier
-  // paint, and a live turn's first card lands while the turn is still
-  // growing, so a create-once insertion would leave it mid-turn.
-  let anchor = row;
-  while (anchor.nextElementSibling && !anchor.nextElementSibling.hasAttribute("data-turn-index")) {
-    anchor = anchor.nextElementSibling as HTMLElement;
-  }
-  if (anchor !== button && anchor.nextElementSibling !== button) anchor.after(button);
-  button.dataset.changeTurn = String(turn);
-  button.setAttribute("role", "button");
-  button.tabIndex = 0;
-  button.setAttribute("aria-expanded", String(!button.classList.contains("turn-change-collapsed")));
-
-  const heading =
-    `${icon("rl-chevron", "h-3.5 w-3.5 turn-change-caret")}${icon("tl-file", "h-4 w-4")}` +
-    `<span>Edited ${files.length} ${files.length === 1 ? "file" : "files"}</span>` +
-    (total ? `<span class="tool-add">+${total.added}</span><span class="tool-del">-${total.removed}</span>` : "") +
-    `<button type="button" class="turn-change-undo">Undo ${icon("tl-undo", "h-3.5 w-3.5")}</button>` +
-    `<button type="button" class="turn-change-view">View changes</button>`;
-  const list = files
-    .map((file) => {
-      const count = total?.files?.[file.path];
-      return `<span class="turn-change-file"><span>${escapeHtml(file.path)}</span><span>${count ? `<b class="tool-add">+${count.added}</b> <b class="tool-del">-${count.removed}</b>` : escapeHtml(file.status)}</span></span>`;
-    })
-    .join("");
-
-  const shown = paintedMarker.get(button);
-  if (fresh || !shown) {
-    button.querySelector<HTMLElement>(".turn-change-heading")!.innerHTML = heading;
-    button.querySelector<HTMLElement>(".turn-change-files")!.innerHTML = list;
-  } else {
-    // Only the part that changed is rewritten: a second settling tool
-    // that touched nothing visible leaves the card untouched.
-    if (shown.heading !== heading) button.querySelector<HTMLElement>(".turn-change-heading")!.innerHTML = heading;
-    if (shown.files !== list) button.querySelector<HTMLElement>(".turn-change-files")!.innerHTML = list;
-  }
-  paintedMarker.set(button, { heading, files: list });
-}
-
 let changeRequest = 0;
-
-// runningTurn is the change turn a live row belongs to. While a turn
-// runs its tool calls are not in the transcript yet, so callIds cannot
-// match; the newest change turn is the running one as long as its index
-// is past every persisted user row. That also avoids attaching the
-// previous turn's card to a turn that has not changed anything yet.
-function runningTurn(turns: SessionChanges["turns"]): SessionChanges["turns"][number] | null {
-  const last = turns[turns.length - 1];
-  if (!last) return null;
-  let persisted = -1;
-  for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
-    persisted = Math.max(persisted, Number(row.dataset.turnIndex));
-  }
-  return last.turn > persisted ? last : null;
-}
 
 // Refresh after a tool settles or a session is opened. Persisted user
 // rows carry transcript indices; the current live row is passed in.
@@ -609,6 +346,7 @@ function runningTurn(turns: SessionChanges["turns"]): SessionChanges["turns"][nu
 let toolChangeTimer = 0;
 let toolChangePending: { sessionId: string; liveRow: HTMLElement | null; callId?: string } | null = null;
 export function noteToolChange(sessionId: string, liveRow: HTMLElement | null | undefined, callId?: string): void {
+  clearChangeTotals([sessionId]);
   toolChangePending = { sessionId, liveRow: liveRow ?? null, callId };
   if (toolChangeTimer) return;
   toolChangeTimer = window.setTimeout(() => {
@@ -633,7 +371,9 @@ export async function refreshChanges(
     const data = await api.sessionChanges(sessionId, null);
     changesCache.set(sessionId, data);
     if (sessionId !== state.sessionId || request !== changeRequest) return;
+    retainChangeTotals(sessionId, data.turns);
     paintChangesHeader(data);
+    window.dispatchEvent(new CustomEvent("paladin:changes-updated", { detail: { sessionId, data } }));
     const byTurn = new Map(data.turns.map((turn) => [turn.turn, turn.files]));
     const totals = new Map(
       await Promise.all(data.turns.map(async (turn) => [turn.turn, await turnTotal(sessionId, turn)] as const)),
@@ -651,116 +391,6 @@ export async function refreshChanges(
     if (tab) paintChangesTab(tab, data);
   } catch {
     if (sessionId === state.sessionId && request === changeRequest) paintChangesHeader(undefined);
-  }
-}
-
-function newChangesTab(sessionId: string): ChangesTab {
-  const body = document.createElement("div");
-  body.className = "pane-changes";
-  body.innerHTML = `<div class="change-scope"></div><div class="change-files"></div><div class="change-diff" role="region" aria-label="File diff">Select a file to view its changes.</div>`;
-  const tab: ChangesTab = {
-    kind: "changes",
-    key: `t${++nextKey}`,
-    sessionId,
-    title: "Changes",
-    body,
-    turn: null,
-    selected: null,
-    request: 0,
-    mark: null,
-  };
-  body.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    if (target.closest("[data-change-all]")) {
-      tab.turn = null;
-      tab.selected = null;
-      paintChangesTab(tab, changesCache.get(sessionId));
-      return;
-    }
-    const file = target.closest<HTMLElement>("[data-change-file]")?.dataset.changeFile;
-    if (file) {
-      tab.selected = file;
-      if (tab.mark?.path !== file) tab.mark = null;
-      paintChangesTab(tab, changesCache.get(sessionId));
-      void loadChangeDiff(tab, file);
-    }
-  });
-  return tab;
-}
-
-function paintChangesTab(tab: ChangesTab, data: SessionChanges | undefined): void {
-  const files = tab.turn === null ? data?.files : data?.turns.find((t) => t.turn === tab.turn)?.files;
-  tab.body.querySelector<HTMLElement>(".change-scope")!.innerHTML =
-    `<span>${tab.turn === null ? "Session changes" : "Turn changes"}</span>` +
-    (tab.turn === null ? "" : `<button type="button" data-change-all>All session changes</button>`);
-  const list = tab.body.querySelector<HTMLElement>(".change-files")!;
-  if (!data) {
-    list.textContent = "Loading file changes…";
-  } else if (!data.available) {
-    list.textContent = "File snapshots are unavailable for this session.";
-  } else if (!files?.length) {
-    list.textContent = "No file changes recorded.";
-  } else {
-    list.innerHTML = files
-      .map(
-        (f) =>
-          `<button type="button" class="change-file${tab.selected === f.path ? " is-active" : ""}" data-change-file="${escapeAttr(f.path)}" title="${escapeAttr(f.path)}">` +
-          `${icon("tl-file", "h-3.5 w-3.5")}<span>${escapeHtml(f.path)}</span><small>${f.status}</small></button>`,
-      )
-      .join("");
-  }
-  if (tab.selected && !files?.some((f) => f.path === tab.selected)) tab.selected = null;
-  if (!tab.selected)
-    tab.body.querySelector<HTMLElement>(".change-diff")!.textContent = "Select a file to view its changes.";
-}
-
-async function loadChangeDiff(tab: ChangesTab, path: string): Promise<void> {
-  const request = ++tab.request;
-  const preview = tab.body.querySelector<HTMLElement>(".change-diff")!;
-  preview.textContent = "Loading diff…";
-  try {
-    const diff = await api.sessionDiff(tab.sessionId, null, tab.turn, path);
-    if (request !== tab.request || tab.selected !== path) return;
-    preview.replaceChildren();
-    if (!diff.patch) {
-      preview.textContent = "No text diff available for this file.";
-      return;
-    }
-    const lines = diff.patch.split("\n");
-    const fragment = document.createDocumentFragment();
-    const mark = tab.mark?.path === path ? tab.mark : null;
-    let newLine = 0;
-    let firstMark: HTMLElement | null = null;
-    for (const line of lines.slice(0, 5000)) {
-      const el = document.createElement("div");
-      el.className =
-        line.startsWith("+") && !line.startsWith("+++")
-          ? "change-add"
-          : line.startsWith("-") && !line.startsWith("---")
-            ? "change-remove"
-            : line.startsWith("@@")
-              ? "change-hunk"
-              : "";
-      // Track the new file's line numbers from each hunk header so a
-      // finding's lines can be marked.
-      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line);
-      if (hunk) {
-        newLine = Number(hunk[1]);
-      } else if (newLine && !line.startsWith("-")) {
-        if (mark && newLine >= mark.start && newLine <= mark.end && !line.startsWith("\\")) {
-          el.classList.add("change-mark");
-          firstMark ??= el;
-        }
-        if (!line.startsWith("\\")) newLine++;
-      }
-      el.textContent = line || " ";
-      fragment.append(el);
-    }
-    preview.append(fragment);
-    firstMark?.scrollIntoView({ block: "center" });
-    if (diff.truncated || lines.length > 5000) preview.append("\nDiff preview truncated.");
-  } catch (error) {
-    if (request === tab.request) preview.textContent = `Could not load diff: ${errorText(error)}`;
   }
 }
 
@@ -789,7 +419,7 @@ function openChangesTab(turn: number | null): void {
   const set = currentSet()!;
   let tab = set.tabs.find((t): t is ChangesTab => t.kind === "changes");
   if (!tab) {
-    tab = newChangesTab(sessionId);
+    tab = newChangesTab(sessionId, `t${++nextKey}`, () => changesCache.get(sessionId));
     set.tabs.push(tab);
   }
   tab.turn = turn;
@@ -893,88 +523,6 @@ function openJobsTab(): void {
 // move its bounds instead of telling main to show it again.
 let visibleWeb = "";
 
-function webHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-function normalizeWebUrl(raw: string): string | null {
-  let text = raw.trim();
-  if (!text) return null;
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = `https://${text}`;
-  try {
-    const url = new URL(text);
-    return url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-function setWebStatus(tab: WebTab, text: string): void {
-  const status = tab.body.querySelector<HTMLElement>(".web-status");
-  if (status) status.textContent = text;
-}
-
-function newWebTab(sessionId: string, url: string, title: string): WebTab {
-  const body = document.createElement("div");
-  body.className = "pane-web";
-  body.innerHTML = `<form class="web-toolbar">
-    <button class="web-back" type="button" title="Back" aria-label="Back" disabled>${icon("chevron-left", "h-3.5 w-3.5")}</button>
-    <button class="web-forward" type="button" title="Forward" aria-label="Forward" disabled>${icon("chevron-right", "h-3.5 w-3.5")}</button>
-    <button class="web-reload" type="button" title="Reload" aria-label="Reload">${icon("repeat", "h-3.5 w-3.5")}</button>
-    <input class="web-url" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="https://…" aria-label="Website address" />
-    <button class="web-open" type="submit">Open</button>
-    <button class="web-external" type="button" title="Open in the system browser" aria-label="Open in the system browser">${icon("external", "h-3.5 w-3.5")}</button>
-  </form>
-  <p class="web-status" role="status"></p>
-  <div class="web-surface" aria-label="Website"></div>`;
-  const tab: WebTab = {
-    kind: "web",
-    key: `t${++nextKey}`,
-    sessionId,
-    viewName: "",
-    title: title || (url ? webHost(url) : "New tab"),
-    url,
-    body,
-  };
-  tab.viewName = `web:${tab.key}`;
-  const input = body.querySelector<HTMLInputElement>(".web-url")!;
-  input.value = url;
-  if (url) setWebStatus(tab, url);
-  else setWebStatus(tab, "Type an https address.");
-  body.querySelector<HTMLFormElement>(".web-toolbar")!.addEventListener("submit", (event) => {
-    event.preventDefault();
-    navigateWeb(tab, input.value);
-  });
-  body.querySelector<HTMLButtonElement>(".web-back")!.addEventListener("click", () => {
-    if (!tab.url) return;
-    void bridge()
-      .views?.back(tab.viewName)
-      .catch(() => undefined);
-  });
-  body.querySelector<HTMLButtonElement>(".web-forward")!.addEventListener("click", () => {
-    if (!tab.url) return;
-    void bridge()
-      .views?.forward(tab.viewName)
-      .catch(() => undefined);
-  });
-  body.querySelector<HTMLButtonElement>(".web-reload")!.addEventListener("click", () => {
-    if (!tab.url) {
-      input.focus();
-      return;
-    }
-    void api.reloadExternalPage(tab.viewName).catch((error) => setWebStatus(tab, errorText(error)));
-  });
-  body.querySelector<HTMLButtonElement>(".web-external")!.addEventListener("click", () => {
-    if (!tab.url) return;
-    void api.openExternalPage(tab.url).catch((error) => setWebStatus(tab, errorText(error)));
-  });
-  return tab;
-}
-
 // webState follows a web tab's real URL, page title and history. Main
 // reports it after a link click or SPA route change, so showing the tab
 // again never navigates it back to the address it was opened with.
@@ -1003,6 +551,7 @@ function webState(raw: unknown): void {
     if (back) back.disabled = stateEvent.canGoBack !== true;
     if (forward) forward.disabled = stateEvent.canGoForward !== true;
     paintTabs();
+    if (ideTerminalMode) renderIDEPages(currentSet());
     return;
   }
 }
@@ -1020,6 +569,7 @@ function navigateWeb(tab: WebTab, raw: string): void {
   input.value = url;
   setWebStatus(tab, "Loading…");
   paintTabs();
+  if (ideTerminalMode) renderIDEPages(currentSet());
   // Force the next sync through ensure so an already-visible tab actually
   // navigates instead of only moving its bounds.
   visibleWeb = "";
@@ -1035,15 +585,21 @@ export function openWebTab(sessionId: string, url: string, title = ""): WebTab |
   if (url) {
     const existing = set.tabs.find((t): t is WebTab => t.kind === "web" && t.url === url);
     if (existing) {
-      set.active = existing.key;
-      if (state.sessionId === sessionId) showPane();
+      if (ideTerminalMode && visibleSessionId() === sessionId) activateIDEPage(existing.key);
+      else {
+        set.active = existing.key;
+        if (visibleSessionId() === sessionId) showPane();
+      }
       return existing;
     }
   }
-  const tab = newWebTab(sessionId, url, title);
+  const tab = newWebTab(sessionId, url, title, `t${++nextKey}`, navigateWeb);
   set.tabs.push(tab);
-  set.active = tab.key;
-  if (state.sessionId === sessionId) showPane();
+  if (ideTerminalMode && visibleSessionId() === sessionId) activateIDEPage(tab.key);
+  else {
+    set.active = tab.key;
+    if (visibleSessionId() === sessionId) showPane();
+  }
   if (!url) requestAnimationFrame(() => tab.body.querySelector<HTMLInputElement>(".web-url")?.focus());
   return tab;
 }
@@ -1060,6 +616,7 @@ export function closeWebTabsForUrl(url: string): void {
 }
 
 function modalCoveringPage(): boolean {
+  if (document.querySelector(".plugin-overlay")) return true;
   return ["settingsModal", "sessionModal", "confirmModal", "siteModal", "askModal"].some((id) => {
     const el = document.getElementById(id);
     return el && !el.classList.contains("hidden");
@@ -1076,11 +633,13 @@ function hideWebSurface(): void {
 // the agent's local browser or the active web tab. Everything else is
 // detached but kept alive, so switching back does not reload a chat.
 function syncNativeSurfaces(): void {
-  const set = state.sessionId ? sets.get(state.sessionId) : undefined;
-  const tab = set && activeTab(set);
+  const set = sets.get(visibleSessionId());
+  const idePage = ideTerminalMode && set?.tabs.find((item) => item.key === ideBrowserKey && isBrowserPage(item));
+  const tab = idePage || (set && activeTab(set));
   const covered = modalCoveringPage();
-  const web = paneOpen && !covered && tab?.kind === "web" && tab.url !== "" ? tab : null;
-  const browser = paneOpen && !covered && tab?.kind === "browser" ? tab : null;
+  const pageVisible = !!idePage || (paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
+  const web = pageVisible && !covered && tab?.kind === "web" && tab.url !== "" ? tab : null;
+  const browser = pageVisible && !covered && tab?.kind === "browser" ? tab : null;
   const browserBridge = hasBridge() ? bridge().browser : undefined;
 
   if (!web) hideWebSurface();
@@ -1173,7 +732,7 @@ export function openPluginTab(spec: PluginTabSpec): PluginTab {
   const existing = set.tabs.find((t): t is PluginTab => t.kind === "plugin" && t.panelId === spec.panelId);
   if (existing) {
     set.active = existing.key;
-    if (state.sessionId === spec.sessionId) showPane();
+    if (visibleSessionId() === spec.sessionId) showPane();
     return existing;
   }
   const body = document.createElement("div");
@@ -1211,7 +770,7 @@ export function openPluginTab(spec: PluginTabSpec): PluginTab {
   });
   set.tabs.push(tab);
   set.active = tab.key;
-  if (state.sessionId === spec.sessionId) showPane();
+  if (visibleSessionId() === spec.sessionId) showPane();
   return tab;
 }
 
@@ -1245,123 +804,10 @@ function activeTab(set: TabSet): Tab | undefined {
   return set.tabs.find((t) => t.key === set.active);
 }
 
-function errorText(error: unknown): string {
-  return String(error instanceof Error ? error.message : error).replace(/^Error:\s*/, "");
-}
-
-function clip(text: string, max = 40): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
 // ---- side chats ----
 
-function chatMessage(msg: Pick<SideChatMessage, "role" | "content" | "model">): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "side-msg";
-  el.dataset.role = msg.role;
-  el.dataset.state = "done";
-  if (msg.role === "user") {
-    el.textContent = msg.content;
-  } else {
-    el.innerHTML =
-      `<div class="md">${renderMarkdown(msg.content)}</div>` +
-      (msg.model ? `<div class="side-model">${escapeHtml(msg.model)}</div>` : "");
-  }
-  return el;
-}
-
 function newChatTab(chatId: string | null = null, title = "Side chat", messages: SideChatMessage[] = []): ChatTab {
-  const body = document.createElement("div");
-  body.className = "side-chat";
-  body.innerHTML =
-    `<div class="side-msgs" role="log" aria-live="polite">` +
-    `<div class="side-empty"${messages.length ? " hidden" : ""}>` +
-    `<span class="side-empty-ico">${icon("comments", "h-5 w-5")}</span>` +
-    `<p class="side-empty-title">Side chat</p>` +
-    `<p class="side-empty-text">Ask about this conversation without adding to it. Answers use no tools.</p>` +
-    `</div></div>` +
-    `<form class="side-composer">` +
-    `<textarea class="side-input" rows="1" placeholder="Ask a side question…" aria-label="Side question"></textarea>` +
-    `<button type="submit" class="side-send" title="Send" aria-label="Send">${icon("arrow-up", "h-3.5 w-3.5")}</button>` +
-    `</form>`;
-  const list = body.querySelector<HTMLElement>(".side-msgs")!;
-  for (const msg of messages) list.append(chatMessage(msg));
-  const tab: ChatTab = { kind: "chat", key: `t${++nextKey}`, chatId, title, body, busy: false };
-  if (chatId) body.dataset.chat = chatId;
-
-  const input = body.querySelector<HTMLTextAreaElement>(".side-input")!;
-  const send = () => {
-    const question = input.value.trim();
-    if (!question || tab.busy) return;
-    input.value = "";
-    void sendChat(tab, question);
-  };
-  body.querySelector("form")!.addEventListener("submit", (event) => {
-    event.preventDefault();
-    send();
-  });
-  input.addEventListener("keydown", (event) => {
-    event.stopPropagation();
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      send();
-    }
-  });
-  return tab;
-}
-
-function isBlankChat(tab: Tab | undefined): tab is ChatTab {
-  return tab?.kind === "chat" && !tab.chatId && !tab.busy && !tab.body.querySelector(".side-msg");
-}
-
-// sendChat asks one side question in tab's chat. The chat belongs to
-// the session it was asked in, even if the user moves on meanwhile.
-async function sendChat(tab: ChatTab, question: string): Promise<void> {
-  const sessionId = state.sessionId;
-  const cwd = state.cwd || null;
-  const list = tab.body.querySelector<HTMLElement>(".side-msgs")!;
-  const sendBtn = tab.body.querySelector<HTMLButtonElement>(".side-send")!;
-  list.querySelector(".side-empty")?.setAttribute("hidden", "");
-  list.querySelector(".side-error")?.remove();
-  list.append(chatMessage({ role: "user", content: question }));
-  const pending = document.createElement("div");
-  pending.className = "side-msg";
-  pending.dataset.role = "assistant";
-  pending.dataset.state = "pending";
-  pending.innerHTML = `<span class="btw-spinner" aria-hidden="true"></span><span class="side-wait">Thinking…</span>`;
-  list.append(pending);
-  list.scrollTop = list.scrollHeight;
-  if (!tab.chatId && tab.title === "Side chat") {
-    tab.title = clip(question);
-    paintTabs();
-  }
-  tab.busy = true;
-  sendBtn.disabled = true;
-  try {
-    const res = await api.sideQuestion(
-      sessionId,
-      cwd,
-      question,
-      state.selectedProvider || null,
-      state.selectedModel || null,
-      tab.chatId,
-    );
-    tab.chatId = res.chatId || tab.chatId;
-    if (tab.chatId) tab.body.dataset.chat = tab.chatId;
-    pending.replaceWith(chatMessage({ role: "assistant", content: res.answer, model: res.model }));
-  } catch (error) {
-    const err = document.createElement("div");
-    err.className = "side-error";
-    err.setAttribute("role", "alert");
-    err.textContent = errorText(error);
-    pending.replaceWith(err);
-  } finally {
-    tab.busy = false;
-    sendBtn.disabled = false;
-    list.scrollTop = list.scrollHeight;
-    paintTabs();
-  }
+  return createChatTab(`t${++nextKey}`, paintTabs, chatId, title, messages);
 }
 
 // blankChatTab shows the pane on an empty side chat: the one on
@@ -1378,7 +824,18 @@ function blankChatTab(set: TabSet): ChatTab {
 }
 
 // openSideChat runs a bare `/btw`: an empty side chat, ready to type in.
+function hasMainMessage(): boolean {
+  return !!state.sessionId && !!document.querySelector("#messages .bubble-user");
+}
+
+function canOpenSideChat(): boolean {
+  if (hasMainMessage()) return true;
+  toast("Send a message in the main chat before starting a side chat.", "error");
+  return false;
+}
+
 export function openSideChat(): void {
+  if (!canOpenSideChat()) return;
   const set = currentSet();
   if (!set) return;
   blankChatTab(set).body.querySelector<HTMLTextAreaElement>(".side-input")!.focus();
@@ -1386,133 +843,16 @@ export function openSideChat(): void {
 
 // askSideQuestion runs `/btw <question>` in a side chat tab.
 export function askSideQuestion(question: string): void {
+  if (!canOpenSideChat()) return;
   const set = currentSet();
   if (!set) return;
-  void sendChat(blankChatTab(set), question);
+  void sendChat(blankChatTab(set), question, paintTabs);
 }
 
 // ---- subagent tabs ----
 
-function agentHead(tab: AgentTab): string {
-  const child = state.sessions.find((s) => s.sessionId === tab.agentId);
-  const sub = child?.subagent;
-  const status = child && sub ? agentStatus(child) : liveBadge(tab.agentId) === "running" ? "running" : "completed";
-  const stoppable = status === "running" || status === "queued";
-  return (
-    `<div class="pane-agent-title">` +
-    `<span class="child-ico">${icon("rl-agent", "h-3.5 w-3.5")}</span>` +
-    `<span class="pane-agent-name">${escapeHtml(sub?.name || tab.title)}</span>` +
-    (sub ? `<span class="agent-type">${escapeHtml(sub.type)}</span>` : "") +
-    agentStatusHtml(status) +
-    `<span class="pane-agent-gap"></span>` +
-    `<button type="button" class="pane-agent-stop"${stoppable ? "" : " hidden"} title="Stop this subagent">${icon("pause", "h-3 w-3")}<span>Stop</span></button>` +
-    `<button type="button" class="pane-agent-open" title="Open in the main view">${icon("external", "h-3 w-3")}<span>Open</span></button>` +
-    `</div>` +
-    (sub?.task ? `<div class="pane-agent-task" title="${escapeAttr(sub.task)}">${escapeHtml(sub.task)}</div>` : "") +
-    (sub?.error ? `<div class="pane-agent-error">${escapeHtml(sub.error)}</div>` : "")
-  );
-}
-
 function newAgentTab(agentId: string): AgentTab {
-  const child = state.sessions.find((s) => s.sessionId === agentId);
-  const body = document.createElement("div");
-  body.className = "pane-agent";
-  body.dataset.agent = agentId;
-  body.innerHTML =
-    `<div class="pane-agent-head"></div>` +
-    `<div class="pane-agent-body"><div class="pane-agent-history"></div></div>` +
-    `<form class="pane-agent-ask" hidden>` +
-    `<textarea class="pane-agent-input" rows="1" aria-label="Message this subagent" placeholder="Message this subagent while it runs…"></textarea>` +
-    `<button type="submit" class="pane-agent-send" title="Send into the running turn" aria-label="Send into the running turn">${icon("arrow-up", "h-3.5 w-3.5")}</button>` +
-    `</form>` +
-    `<div class="pane-agent-foot">Driven by its parent agent · shares the parent's workspace</div>`;
-  const tab: AgentTab = {
-    kind: "agent",
-    key: `t${++nextKey}`,
-    agentId,
-    title: child?.subagent?.name || child?.title || agentId.slice(0, 8),
-    body,
-    loading: null,
-    head: "",
-  };
-  const parentId = child?.subagent?.parentId || state.sessionId;
-  body.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    if (target.closest(".pane-agent-open")) {
-      // Full view and back: the pane would otherwise reopen a blank
-      // side chat for the child's own session.
-      closePane();
-      void openSession(agentId);
-    } else if (target.closest(".pane-agent-stop")) {
-      api
-        .interruptAgent(parentId, agentId)
-        .catch((error: unknown) => toast(`Could not stop: ${errorText(error)}`, "error"));
-    }
-  });
-  const ask = body.querySelector<HTMLFormElement>(".pane-agent-ask")!;
-  const input = body.querySelector<HTMLTextAreaElement>(".pane-agent-input")!;
-  ask.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void sendAgentMessage(agentId, input, ask);
-  });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      ask.requestSubmit();
-    }
-  });
-  return tab;
-}
-
-// sendAgentMessage steers the child's running turn, the same path the
-// parent's send_message takes. It is only offered while the child runs:
-// a finished child is read-only from here.
-async function sendAgentMessage(agentId: string, input: HTMLTextAreaElement, form: HTMLFormElement): Promise<void> {
-  const text = input.value.trim();
-  if (!text) return;
-  const send = form.querySelector<HTMLButtonElement>(".pane-agent-send")!;
-  send.disabled = true;
-  try {
-    await api.steerChat(agentId, text, text);
-    input.value = "";
-    input.focus();
-  } catch (error) {
-    toast(`Could not reach the subagent: ${errorText(error)}`, "error");
-    void refreshSessions();
-  } finally {
-    send.disabled = false;
-  }
-}
-
-// loadAgent shows the child's history and then its live rows, which
-// keep streaming. The main view can borrow the live rows; the tab takes
-// them back (re-attaching) when it is shown again.
-function loadAgent(tab: AgentTab): Promise<void> {
-  const root = liveRoot(tab.agentId);
-  const view = tab.body.querySelector<HTMLElement>(".pane-agent-body")!;
-  if (root.parentElement === view || tab.loading) return tab.loading ?? Promise.resolve();
-  tab.loading = (async () => {
-    beginAttach(tab.agentId);
-    try {
-      const snap = await api.attachSession(tab.agentId, 1000);
-      const history = view.querySelector<HTMLElement>(".pane-agent-history")!;
-      history.replaceChildren();
-      const rows = Array.isArray(snap.history) ? snap.history : (snap.history?.messages ?? []);
-      buildHistory(history, rows, false, tab.agentId);
-      finishAttach(tab.agentId, snap);
-      if (state.sessionId !== tab.agentId) view.append(root);
-      view.scrollTop = view.scrollHeight;
-      repaintLive(tab.agentId);
-      paintHead(tab);
-    } catch (error) {
-      abortAttach(tab.agentId);
-      view.querySelector(".pane-agent-history")!.innerHTML =
-        `<div class="side-error" role="alert">${escapeHtml(errorText(error))}</div>`;
-    } finally {
-      tab.loading = null;
-    }
-  })();
-  return tab.loading;
+  return createAgentTab(agentId, `t${++nextKey}`, closePane);
 }
 
 // openAgentTab shows a subagent in the pane beside its parent. With no
@@ -1521,6 +861,16 @@ function loadAgent(tab: AgentTab): Promise<void> {
 export async function openAgentTab(agentId: string): Promise<void> {
   if (!state.sessions.some((s) => s.sessionId === agentId)) {
     await refreshSessions();
+  }
+  if (!state.sessions.some((s) => s.sessionId === agentId)) {
+    const parentId = state.sessions.find((s) => s.sessionId === state.sessionId)?.subagent?.parentId ?? state.sessionId;
+    const matches = state.sessions.filter((s) => s.subagent?.parentId === parentId && s.sessionId.startsWith(agentId));
+    const fullId = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(agentId);
+    if (matches.length === 1) agentId = matches[0].sessionId;
+    else if (matches.length || !fullId) {
+      toast(matches.length ? "Subagent ID is ambiguous" : "Subagent not found", "error");
+      return;
+    }
   }
   if (agentId === state.sessionId) return;
   const parentId = state.sessions.find((s) => s.sessionId === agentId)?.subagent?.parentId;
@@ -1570,33 +920,6 @@ export function paintAgentTabs(): void {
     if (tab.kind === "agent") paintHead(tab);
   }
   if (paneOpen) paintTabs();
-}
-
-// paintHead repaints only on change: live events repaint often, and a
-// replaced button would swallow a click in progress.
-function paintHead(tab: AgentTab): void {
-  const child = state.sessions.find((s) => s.sessionId === tab.agentId);
-  const status =
-    child && child.subagent ? agentStatus(child) : liveBadge(tab.agentId) === "running" ? "running" : "completed";
-  const html = agentHead(tab);
-  if (html !== tab.head) {
-    tab.head = html;
-    tab.body.querySelector(".pane-agent-head")!.innerHTML = html;
-  }
-  // The composer is the user's line into the running turn, so it exists
-  // only while the child runs; a finished child reads as history.
-  const ask = tab.body.querySelector<HTMLFormElement>(".pane-agent-ask");
-  if (!ask) return;
-  const running = status === "running";
-  ask.hidden = !running;
-  const input = ask.querySelector<HTMLTextAreaElement>(".pane-agent-input")!;
-  input.disabled = !running;
-  const foot = tab.body.querySelector<HTMLElement>(".pane-agent-foot");
-  if (foot) {
-    foot.textContent = running
-      ? "You can guide this subagent while it runs · shares the parent's workspace"
-      : "Finished · read-only · shares the parent's workspace";
-  }
 }
 
 // ---- the pane ----
@@ -1650,7 +973,12 @@ function paintTabs(): void {
   const set = currentSet();
   const html =
     (layoutMode === "tabs" ? mainTabHtml() : "") +
-    (set ? set.tabs.map((t) => tabHtml(t, paneOpen && t.key === set.active)).join("") : "");
+    (set
+      ? set.tabs
+          .filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)))
+          .map((t) => tabHtml(t, paneOpen && t.key === set.active))
+          .join("")
+      : "");
   if (html === tabsHtml && tabsEl.innerHTML !== "") return;
   tabsHtml = html;
   tabsEl.innerHTML = html;
@@ -1658,6 +986,8 @@ function paintTabs(): void {
 
 // render paints the open session's tabs, keeping each tab's DOM.
 function render(): void {
+  if (ideTerminalMode) terminalDock?.sync();
+  renderIDEPages(currentSet());
   if (layoutMode === "tabs") {
     titleBar.insertBefore(stripEl, titleBar.lastElementChild);
   } else {
@@ -1683,15 +1013,18 @@ function render(): void {
     syncNativeSurfaces();
     return;
   }
-  if (paneOpen && set.tabs.length === 0) {
+  if (paneOpen && set.tabs.length === 0 && hasMainMessage()) {
     const tab = newChatTab();
     set.tabs.push(tab);
     set.active = tab.key;
   }
   if (set.tabs.length && !activeTab(set)) set.active = set.tabs[0].key;
   paintTabs();
-  bodyEl.replaceChildren(...set.tabs.map((t) => t.body));
+  bodyEl.replaceChildren(
+    ...set.tabs.filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t))).map((t) => t.body),
+  );
   for (const tab of set.tabs) {
+    if (ideTerminalMode && (tab.kind === "terminal" || isBrowserPage(tab))) continue;
     tab.body.hidden = !paneOpen || tab.key !== set.active;
     if (tab.kind === "browser" && tab.body.hidden) stopBrowserPick(tab);
     if (tab.kind === "terminal" && !tab.body.hidden) activateTerminal(tab);
@@ -1733,13 +1066,17 @@ function toggleLayout(): void {
   render();
 }
 
-function closeTab(key: string, dropBrowser = true, sessionId = state.sessionId): void {
+function closeTab(key: string, dropBrowser = true, sessionId = visibleSessionId()): void {
   const set = sessionId ? sets.get(sessionId) : undefined;
   if (!set) return;
   const at = set.tabs.findIndex((t) => t.key === key);
   if (at < 0) return;
   const [removed] = set.tabs.splice(at, 1);
-  if (removed.kind === "browser") stopBrowserPick(removed);
+  if (removed.kind === "browser") {
+    pendingBrowserSessions.delete(removed.sessionId);
+    stopBrowserPick(removed);
+    renderSessions();
+  }
   if (removed.kind === "agent") {
     if (removed.loading) abortAttach(removed.agentId);
     liveRoot(removed.agentId).remove();
@@ -1762,7 +1099,8 @@ function closeTab(key: string, dropBrowser = true, sessionId = state.sessionId):
     if (hasBridge()) void bridge().plugins?.close(removed.panelId);
   }
   if (set.tabs.length === 0) {
-    if (sessionId === state.sessionId) {
+    if (sessionId === STANDALONE_PANE_SESSION) sets.delete(sessionId);
+    if (sessionId === visibleSessionId()) {
       closePane();
     } else {
       sets.delete(sessionId);
@@ -1770,13 +1108,18 @@ function closeTab(key: string, dropBrowser = true, sessionId = state.sessionId):
     return;
   }
   if (set.active === key) set.active = set.tabs[Math.min(at, set.tabs.length - 1)].key;
-  if (sessionId === state.sessionId) render();
+  if (sessionId === visibleSessionId()) render();
 }
 
 // disposeSidePanes drops the tab sets of deleted sessions, and any
 // tab, in any set, showing one of them: their DOM and live rows go too.
 export function disposeSidePanes(ids: string[]): void {
   const gone = new Set(ids);
+  clearChangeTotals(ids);
+  for (const id of ids) {
+    changesCache.delete(id);
+    pendingBrowserSessions.delete(id);
+  }
   const drop = (tab: Tab): void => {
     if (tab.kind === "agent") {
       if (tab.loading) abortAttach(tab.agentId);
@@ -1802,9 +1145,14 @@ export function disposeSidePanes(ids: string[]): void {
   };
   for (const [id, set] of sets) {
     if (gone.has(id)) {
-      set.tabs.forEach(drop);
+      for (const tab of set.tabs) {
+        if (tab.kind === "terminal" && tab.sessionId === STANDALONE_PANE_SESSION) {
+          const standalone = browserSet(STANDALONE_PANE_SESSION);
+          standalone.tabs.push(tab);
+          if (!standalone.active) standalone.active = tab.key;
+        } else drop(tab);
+      }
       sets.delete(id);
-      changesCache.delete(id);
       continue;
     }
     const keep = set.tabs.filter((t) => t.kind !== "agent" || !gone.has(t.agentId));
@@ -1826,7 +1174,16 @@ export function paneSessionIds(): string[] {
 
 // syncSidePane follows the main view to another session.
 export function syncSidePane(): void {
+  window.dispatchEvent(new Event("paladin:workspace-changed"));
   closeMenu();
+  attachStandaloneTerminals(state.sessionId);
+  if (pendingBrowserSessions.delete(state.sessionId)) {
+    const tab = sets.get(state.sessionId)?.tabs.find((item) => item.kind === "browser");
+    if (ideTerminalMode && tab) {
+      ideBrowserKey = tab.key;
+      window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: true }));
+    } else paneOpen = true;
+  }
   paintChangesHeader(changesCache.get(state.sessionId));
   render();
   autoOpenChildTabs();
@@ -1885,7 +1242,7 @@ async function reopenChat(chatId: string): Promise<void> {
   const open = set.tabs.find((t) => t.kind === "chat" && t.chatId === chatId);
   if (open) {
     set.active = open.key;
-    render();
+    showPane();
     return;
   }
   try {
@@ -1924,7 +1281,7 @@ export function initSidePane(): void {
   registerChangesLink({ has: hasSessionChange, open: openChangeAt });
   if (hasBridge()) {
     bridge().onEvent?.(browserEvent);
-    bridge().onEvent?.(terminalEvent);
+    bridge().onEvent?.((event) => terminalEvent(event, sets));
     bridge().views?.onState?.(webState);
   }
   const observer = new ResizeObserver(() => {
@@ -1936,6 +1293,7 @@ export function initSidePane(): void {
   observer.observe(sidePaneEl);
   observer.observe(bodyEl);
   window.addEventListener("resize", syncNativeSurfaces);
+  window.addEventListener("paladin:plugin-overlay-changed", syncNativeSurfaces);
   for (const id of ["settingsModal", "sessionModal", "confirmModal", "siteModal"]) {
     const el = document.getElementById(id);
     if (el) new MutationObserver(syncNativeSurfaces).observe(el, { attributes: true, attributeFilter: ["class"] });
@@ -1983,37 +1341,31 @@ export function initSidePane(): void {
   layoutBtn.addEventListener("click", () => {
     toggleLayout();
   });
-  $("#paneBrowserBtn").addEventListener("click", () => {
-    if (!state.sessionId) return showPane();
-    openBrowserTab(state.sessionId);
-    currentSet()
-      ?.tabs.find((t) => t.kind === "browser")
-      ?.body.querySelector<HTMLInputElement>(".browser-url")
-      ?.focus();
-  });
-  $("#paneTerminalBtn").addEventListener("click", () => {
-    if (!state.sessionId) return showPane();
-    openTerminalTab(state.sessionId);
-  });
   $("#paneCloseBtn").addEventListener("click", closePane);
-  $("#paneNewChatBtn").addEventListener("click", () => {
-    const set = currentSet();
-    if (!set) return showPane();
-    const tab = newChatTab();
-    set.tabs.push(tab);
-    set.active = tab.key;
-    showPane();
-    tab.body.querySelector<HTMLTextAreaElement>(".side-input")!.focus();
-  });
   historyBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (menuEl.hidden) {
-      showPane();
-      void openMenu();
-    } else closeMenu();
+    if (menuEl.hidden) void openMenu();
+    else closeMenu();
   });
   menuEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest("[data-pane-new-chat]")) {
+      closeMenu();
+      if (!canOpenSideChat()) return;
+      const set = currentSet();
+      if (!set) return;
+      const tab = newChatTab();
+      set.tabs.push(tab);
+      set.active = tab.key;
+      showPane();
+      tab.body.querySelector<HTMLTextAreaElement>(".side-input")!.focus();
+      return;
+    }
+    if (target.closest("[data-pane-new-terminal]")) {
+      closeMenu();
+      openTerminalTab(visibleSessionId());
+      return;
+    }
     const row = target.closest<HTMLElement>(".pane-hist-item");
     const chatId = row?.dataset.chat;
     if (!row || !chatId) return;

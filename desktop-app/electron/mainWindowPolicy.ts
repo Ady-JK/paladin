@@ -26,13 +26,15 @@ export function isMainWindowFrame(
   return mainContents != null && mainFrame != null && sender === mainContents && senderFrame === mainFrame;
 }
 
-// Frames inside the app window are visuals, each in the app's own
-// visual-frame.html. They may never navigate anywhere else: a meta
-// refresh or a link inside one would otherwise reach the network, which
-// their CSP cannot stop.
+// Frames may navigate only to the local visual page or the validated
+// plugin protocol. The protocol host checks every path before serving it.
 export function appFrameNavigationAllowed(appURL: string, requestedURL: string): boolean {
   if (requestedURL === "about:blank") return true;
   try {
+    const requested = new URL(requestedURL);
+    if (requested.protocol === "plugin:" && requested.hostname && !requested.username && !requested.password) {
+      return true;
+    }
     return requestedURL === new URL("visual-frame.html", appURL).href;
   } catch {
     return false;

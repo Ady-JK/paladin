@@ -15,6 +15,7 @@ const MAX_HEIGHT = 1200;
 const cards = new Map<string, PluginCard>();
 const live = new Set<HTMLElement>();
 const records = new WeakMap<HTMLElement, CardRecord>();
+let ready: Promise<void> = Promise.resolve();
 
 type CardRecord = {
   plugin: string;
@@ -73,7 +74,6 @@ function fallback(wrapper: HTMLElement, record: CardRecord, tool: ToolInfo): voi
   window.clearTimeout(record.timer);
   const body = wrapper.querySelector<HTMLElement>(".plugin-card-body");
   if (body && record.fallback.parentElement !== body) body.append(record.fallback);
-  wrapper.style.height = "";
   const text = document.createElement("pre");
   text.textContent = tool.status === "running" ? "Running…" : tool.result || "No result";
   record.fallback.replaceChildren(text);
@@ -111,11 +111,22 @@ export function createPluginCard(sessionId: string, tool: ToolInfo): HTMLElement
   records.set(wrapper, record);
   track();
 
+  mountCard(wrapper, record, tool);
+  return wrapper;
+}
+
+function mountCard(wrapper: HTMLElement, record: CardRecord, tool: ToolInfo): void {
+  window.clearTimeout(record.timer);
+  record.iframe?.remove();
+  record.iframe = null;
+  record.ready = false;
+  const body = wrapper.querySelector<HTMLElement>(".plugin-card-body");
+  if (!body) return;
   const card = cards.get(tool.name);
   const plugins = hasBridge() ? bridge().plugins : undefined;
-  if (!card || !plugins || live.size >= MAX_CARDS) {
+  if (!card || !plugins || (!live.has(wrapper) && live.size >= MAX_CARDS)) {
     fallback(wrapper, record, tool);
-    return wrapper;
+    return;
   }
   record.plugin = card.plugin;
   record.tool = card.tool;
@@ -127,15 +138,10 @@ export function createPluginCard(sessionId: string, tool: ToolInfo): HTMLElement
   iframe.setAttribute("title", `${card.plugin} / ${card.tool} result`);
   iframe.src = `plugin://${encodeURIComponent(card.plugin)}/__card__/${encodeURIComponent(card.tool)}/index.html`;
   record.iframe = iframe;
-  fallbackEl.replaceWith(iframe);
-  iframe.addEventListener("load", () => {
-    record.ready = true;
-    window.clearTimeout(record.timer);
-    if (record.latest) paintPluginCard(wrapper, record.latest);
-  });
+  wrapper.classList.remove("is-fallback");
+  body.replaceChildren(iframe);
   record.timer = window.setTimeout(() => fallback(wrapper, record, record.latest ?? tool), CARD_TIMEOUT_MS);
   if (record.latest) paintPluginCard(wrapper, record.latest);
-  return wrapper;
 }
 
 // paintPluginCard pushes the newest result into the card frame. It is
@@ -153,6 +159,7 @@ export function paintPluginCard(wrapper: HTMLElement, tool: ToolInfo): void {
     {
       type: "paladin:card",
       result: resultOf(tool),
+      status: tool.status,
       ctx: { tool: tool.name, sessionId: record.sessionId, theme: theme() },
     },
     "*",
@@ -161,16 +168,36 @@ export function paintPluginCard(wrapper: HTMLElement, tool: ToolInfo): void {
 
 window.addEventListener("message", (event) => {
   const data = event.data as { type?: string; height?: unknown } | null;
-  if (!data || data.type !== "paladin:card-height" || typeof data.height !== "number") return;
+  if (!data || !["paladin:card-height", "paladin:card-ready", "paladin:card-error"].includes(data.type ?? "")) return;
   for (const wrapper of live) {
-    if (records.get(wrapper)?.iframe?.contentWindow !== event.source) continue;
-    wrapper.style.height = `${Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(data.height)))}px`;
+    const record = records.get(wrapper);
+    if (record?.iframe?.contentWindow !== event.source) continue;
+    if (data.type === "paladin:card-ready") {
+      record.ready = true;
+      window.clearTimeout(record.timer);
+      if (record.latest) paintPluginCard(wrapper, record.latest);
+    } else if (data.type === "paladin:card-error") {
+      if (record.latest) fallback(wrapper, record, record.latest);
+    } else if (typeof data.height === "number" && Number.isFinite(data.height)) {
+      record.iframe.style.height = `${Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(data.height)))}px`;
+    }
   }
 });
 
 export async function initPluginCards(): Promise<void> {
-  await refresh();
+  ready = refresh();
+  await ready;
   api.onAgentEvent((event) => {
-    if (event.event === "plugin/updated") void refresh();
+    if (event.event !== "plugin/updated") return;
+    void refresh().then(() => {
+      for (const wrapper of [...live]) {
+        const record = records.get(wrapper);
+        if (record?.plugin.startsWith("creator_") && record.latest) mountCard(wrapper, record, record.latest);
+      }
+    });
   });
+}
+
+export function pluginCardsReady(): Promise<void> {
+  return ready;
 }

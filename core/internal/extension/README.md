@@ -23,9 +23,9 @@ Nothing runs until its name is in `extensions.json`:
 {"enabled": ["my-plugin", "legacy.ts"]}
 ```
 
-Find the data directory with `PALADIN_DATA_DIR`, or look at the path the
-sidecar logs at start (`agent-host ready dir=…`); the default is the OS
-config directory plus `/paladin`.
+Find the data directory with `PALADIN_DATA_DIR`; the default is the OS
+config directory plus `/paladin`. The `agent-host ready dir=…` log is the
+current workspace, not the data directory.
 
 ## The module
 
@@ -77,6 +77,9 @@ other.
 * A cold start misses the call deadline (20 s) and the call fails; the
   process stays up for the next one.
 * A call that throws fails that call only. The plugin keeps running.
+* A call that times out or is cancelled terminates its runner. All other
+  in-flight calls on that runner fail too; the next call starts a fresh
+  process. Work already completed cannot be undone automatically.
 * A process that crashes fails the calls waiting on it; the next call
   starts a new one (ids are fenced by a generation counter, so a late
   reply from the dead process cannot resolve a live call).
@@ -110,7 +113,7 @@ are an error, to catch typos.
 | `env` | Extra environment variables for the process. `PATH` is refused; the user's own environment is inherited. |
 | `node` | Absolute path to a Node binary for this plugin only. A broken path fails the plugin; it does not fall through. |
 | `permissions` | What the plugin says it needs: `network`, `spawn`, `fs-outside-workspace`. |
-| `views` | Side-pane panels: at most 4. Each is `{id,title,entry,mount,permissions}`; `entry` is under `ui/` and ends in `.html` (≤ 2 MiB), `mount` is `side-pane`, and `permissions` are `invokeTool`, `invokeToolDestructive`, `events`, `readFile`, `openExternal`. |
+| `views` | Views: at most 4. Each is `{id,title,entry,mount,permissions}`; `entry` is under `ui/` and ends in `.html` (≤ 2 MiB), `mount` is `side-pane` or `overlay`, and `permissions` are `invokeTool`, `invokeToolDestructive`, `events`, `readFile`, `openExternal`, `sendPrompt`. |
 | `cards` | Inline result renderers: at most 16. Each is `{tool,entry,inline}`; `entry` is under `ui/`, ends in `.js` (≤ 512 KiB), and `inline` may only be true. |
 
 `permissions` is **advisory**. Paladin shows the list in Settings → Tools;
@@ -150,6 +153,11 @@ never copies or snapshots that folder.
 
 ## Panels and cards
 
+Creator mode uses `~/.config/paladin/creator/{ui,core}`. Plugins placed
+there are discovered automatically as `creator_ui_<name>` and
+`creator_core_<name>` and reload as their files change. Existing enabled
+plugins below `config/extensions` keep working independently.
+
 A plugin can ship UI inside its folder:
 
 ```jsonc
@@ -164,7 +172,7 @@ A plugin can ship UI inside its folder:
 }
 ```
 
-Panels open as sandboxed side-pane tabs served over `plugin://<plugin>/<view>/ui/…`;
+Panels and overlays open as sandboxed views served over `plugin://<plugin>/<view>/ui/…`;
 cards render one tool result in a separate sandbox. Both are local-only.
 The full authoring guide, bridge API, permissions, limits and security
 model live in [`docs/PLUGIN-UI.md`](../../../docs/PLUGIN-UI.md).

@@ -47,6 +47,30 @@ test("the palette filters fuzzily across names and labels", async ({ page }) => 
   await expect(popup).toContainText("No matching commands");
 });
 
+test("create-agent appears once and routes to its prompt command", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = (window as any).paladin.invoke;
+    (window as any).paladin.invoke = async (method: string, args: unknown) => {
+      const result = await original(method, args);
+      if (method === "listCommands")
+        return [...result, { name: "create-agent", description: "Create an agent", source: "builtin" }];
+      if (method === "listSkills")
+        return [
+          ...result,
+          { name: "create-agent", description: "Create an agent", source: "builtin", path: "builtin:create-agent" },
+        ];
+      return result;
+    };
+  });
+  await page.reload();
+  await page.fill("#promptInput", "/create-agent");
+  await expect(page.locator('#slashPopup .slash-row[data-name="create-agent"]')).toHaveCount(1);
+  await page.fill("#promptInput", "/create-agent a code reviewer");
+  await page.click("#sendBtn");
+  await expect.poll(async () => (await lastSubmit(page))?.command).toBe("create-agent");
+  expect((await lastSubmit(page)).message).toBe("a code reviewer");
+});
+
 test("Tab completes a command and Enter runs it", async ({ page }) => {
   await page.fill("#promptInput", "/he");
   await page.keyboard.press("Tab");

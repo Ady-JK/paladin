@@ -33,6 +33,7 @@ let currentList: FsList | null = null;
 let selection: PickerSelection | null = null;
 let query = "";
 let showHidden = false;
+let browseGeneration = 0;
 
 // modelHint mirrors the composer label so the dialog states which model
 // the new session will use before it starts.
@@ -64,7 +65,7 @@ function paintFolder(): void {
   });
   paintIcons(sessionModalEl);
 
-  newSessionListEl.querySelectorAll<HTMLButtonElement>("button[data-fb-crumb]").forEach((button) => {
+  newSessionCrumbsEl.querySelectorAll<HTMLButtonElement>("button[data-fb-crumb]").forEach((button) => {
     button.addEventListener("click", () => {
       void browseNewSession(button.dataset.fbCrumb ?? "");
     });
@@ -94,23 +95,36 @@ function paintFolder(): void {
 async function browseNewSession(path?: string): Promise<void> {
   const target = path ?? state.pendingWorkspace ?? state.cwd ?? null;
 
+  const request = ++browseGeneration;
+  const startButton = $<HTMLButtonElement>("#sessionStartBtn");
+  startButton.disabled = true;
   try {
     const list = await api.fsList(target);
+    if (request !== browseGeneration) return;
     currentList = list;
-    if (selection && selection.path !== list.currentPath && !selection.path.startsWith(`${list.currentPath}/`)) {
+    // Browsing to a parent must not leave a previously selected child armed.
+    if (selection && selection.path !== list.currentPath) {
       selection = null;
     }
     paintFolder();
   } catch (error) {
-    toast(String(error), "error");
+    if (request === browseGeneration) toast(String(error), "error");
+  } finally {
+    if (request === browseGeneration) startButton.disabled = false;
   }
 }
 
-export async function openNewSession(): Promise<void> {
+export async function openNewSession(options?: { chooseFolder?: boolean }): Promise<void> {
+  $("#sessionDialogTitle").textContent = options?.chooseFolder ? "Open folder" : "New Session";
+  $("#sessionStartBtn").textContent = options?.chooseFolder ? "Open folder" : "Start";
+  newSessionModelHintEl.hidden = !!options?.chooseFolder;
   state.pendingWorkspace = state.cwd;
   selection = null;
   query = "";
   currentList = null;
+  newSessionCrumbsEl.replaceChildren();
+  newSessionListEl.textContent = "Loading…";
+  newSessionPathEl.textContent = state.cwd;
   showHidden = getShowHidden();
   newSessionFolderSearchEl.value = "";
   newSessionShowHiddenEl.checked = showHidden;
@@ -120,6 +134,7 @@ export async function openNewSession(): Promise<void> {
 }
 
 export function closeNewSession(): void {
+  browseGeneration++;
   closeModal(sessionModalEl);
 }
 

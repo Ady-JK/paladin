@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -20,9 +21,18 @@ import (
 // SkillTool lets the model load a skill from the catalog in its system
 // prompt (progressive disclosure: names and descriptions up front,
 // bodies only when relevant).
-type SkillTool struct{ dataDir string }
+type SkillTool struct {
+	dataDir    string
+	supplement func(cwd, sessionID, name string) string
+}
 
 func NewSkillTool(dataDir string) *SkillTool { return &SkillTool{dataDir: dataDir} }
+
+// WithSupplement adds runtime-specific context to selected skills.
+func (t *SkillTool) WithSupplement(fn func(cwd, sessionID, name string) string) *SkillTool {
+	t.supplement = fn
+	return t
+}
 
 func (*SkillTool) Name() string       { return "skill" }
 func (*SkillTool) ParallelSafe() bool { return true }
@@ -62,6 +72,13 @@ func (t *SkillTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		return "", ArgsError(fmt.Sprintf("skill: %v; available: %s", err, strings.Join(names, ", ")))
 	}
+	if t.supplement != nil {
+		sessionID := ""
+		if ctx != nil {
+			sessionID = ctx.SessionID
+		}
+		s.Content += t.supplement(cwd, sessionID, s.Name)
+	}
 	data, _ := jsonx.Marshal(map[string]any{"name": s.Name, "source": s.Source, "path": s.Path, "content": s.Content})
 	return string(data), nil
 }
@@ -72,6 +89,16 @@ func SkillCatalog(dataDir, cwd string, max int) string {
 	if len(list) == 0 {
 		return ""
 	}
+	// Keep Creator guidance visible even when a large skill catalog is capped.
+	slices.SortStableFunc(list, func(a, b skills.Skill) int {
+		if skills.IsCreatorSkill(a.Name) && !skills.IsCreatorSkill(b.Name) {
+			return -1
+		}
+		if !skills.IsCreatorSkill(a.Name) && skills.IsCreatorSkill(b.Name) {
+			return 1
+		}
+		return 0
+	})
 	var b strings.Builder
 	b.WriteString("Skills (load one with the skill tool when the task matches its description):\n")
 	for i, s := range list {
@@ -89,16 +116,15 @@ func SkillCatalog(dataDir, cwd string, max int) string {
 }
 
 // SessionSearchTool searches past session transcripts. It prefers the
-// SQLite FTS index when one is attached (ranked, and it does not read the
-// corpus) and falls back to substring matching over the transcripts when
+// SQLite FTS index when one is attached (ranked, after a freshness scan)
+// and falls back to substring matching over the transcripts when
 // the index is missing or fails, so recall never disappears entirely.
 type SessionSearchTool struct {
 	store *transcript.Store
 	index *sessionindex.Index
-	// beforeSearch, when set, brings the index up to date. It runs at
-	// most once per turn (the runtime guards it), so recall pays the
-	// refresh cost only when it is actually used.
-	beforeSearch func(context.Context)
+	// beforeSearch brings the index up to date on each search, so recall
+	// never trusts a failed refresh.
+	beforeSearch func(context.Context) error
 }
 
 func NewSessionSearchTool(store *transcript.Store) *SessionSearchTool {
@@ -107,7 +133,7 @@ func NewSessionSearchTool(store *transcript.Store) *SessionSearchTool {
 
 // WithIndex attaches the FTS index and the hook that keeps it current. A
 // nil index keeps the substring path.
-func (t *SessionSearchTool) WithIndex(idx *sessionindex.Index, beforeSearch func(context.Context)) *SessionSearchTool {
+func (t *SessionSearchTool) WithIndex(idx *sessionindex.Index, beforeSearch func(context.Context) error) *SessionSearchTool {
 	t.index = idx
 	t.beforeSearch = beforeSearch
 	return t
@@ -150,8 +176,7 @@ type searchHit struct {
 }
 
 const (
-	searchMaxSessions = 400
-	searchSnippetLen  = 160
+	searchSnippetLen = 160
 )
 
 func (t *SessionSearchTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
@@ -185,7 +210,7 @@ func (t *SessionSearchTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, err
 		data, _ := jsonx.Marshal(map[string]any{"query": args.Query, "matches": len(hits), "results": hits, "source": "fts"})
 		return string(data), nil
 	}
-	infos, err := t.store.List(cwd, searchMaxSessions)
+	infos, err := t.store.List(cwd, 0)
 	if err != nil {
 		return "", ArgsError("session_search: " + err.Error())
 	}
@@ -238,7 +263,9 @@ func (t *SessionSearchTool) searchIndex(ctx *ToolCtx, query, cwd, self string, l
 		ctxv = ctx.Cancel
 	}
 	if t.beforeSearch != nil {
-		t.beforeSearch(ctxv)
+		if err := t.beforeSearch(ctxv); err != nil {
+			return nil, err
+		}
 	}
 	hits, err := t.index.Search(ctxv, query, cwd, self, limit)
 	if err != nil {

@@ -112,6 +112,20 @@ function grantHtml(ap: Approval): string {
   );
 }
 
+function sandboxHtml(ap: Approval): string {
+  if (ap.kind !== "shell" || !ap.sandbox) return "";
+  const scope: Record<NonNullable<Approval["sandbox"]>, string> = {
+    "workspace-write":
+      "Writes are allowed in the workspace, temporary folders and development caches, plus previously granted folders. Network access remains available.",
+    "read-only":
+      "Writes are limited to temporary folders and previously granted folders. Network access remains available.",
+    unavailable: "No OS sandbox is available. This command will run without OS sandbox restrictions.",
+    none: "This command will run without OS sandbox restrictions.",
+  };
+  const text = scope[ap.sandbox];
+  return text ? `<div class="approval-scope">${escapeHtml(text)}</div>` : "";
+}
+
 function pendingHtml(ap: Approval): string {
   const choices = ap.choices?.length ? ap.choices : (["once", "deny"] as ApprovalDecision[]);
   const reasons = (ap.reasons ?? []).map((r) => `<span class="approval-reason">${escapeHtml(r)}</span>`).join("");
@@ -157,6 +171,7 @@ function pendingHtml(ap: Approval): string {
     `<span class="approval-reasons">${reasons}</span>` +
     `</div>` +
     body +
+    sandboxHtml(ap) +
     `<div class="approval-actions">${buttons}</div>`
   );
 }

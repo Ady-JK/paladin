@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -33,6 +32,16 @@ func NotifyCallID(callID string) string {
 func NotifyArgs(jobID string) string {
 	out, _ := json.Marshal(map[string]string{"action": "notify", "job_id": jobID})
 	return string(out)
+}
+
+func notifyHistoryArgs(content string) string {
+	var wire struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal([]byte(content), &wire); err != nil || wire.JobID == "" {
+		return ""
+	}
+	return NotifyArgs(wire.JobID)
 }
 
 func IsNotifyMessage(msg transcript.Message) bool {
@@ -152,159 +161,6 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 	}
 }
 
-// HistoryMessage is the client-facing history row: tool rows link back
-// to their call; reminders keep their job link instead.
-type HistoryMessage struct {
-	Arguments   *string            `json:"arguments,omitempty"`
-	Image       *media.Image       `json:"image,omitempty"`
-	Attachments []media.Attachment `json:"attachments,omitempty"`
-	Content     string             `json:"content"`
-	CreatedAt   int64              `json:"createdAt"`
-	// Index is a user row's transcript position, the handle for undo.
-	Index *int `json:"index,omitempty"`
-	// Kind tags special rows; "compaction" is a context-compaction
-	// divider whose Content is the summary.
-	Kind       *string `json:"kind,omitempty"`
-	Name       *string `json:"name,omitempty"`
-	Role       string  `json:"role"`
-	Status     *string `json:"status,omitempty"`
-	ToolCallID *string `json:"toolCallId,omitempty"`
-	// Stats is a user row's turn cost, so a reopened session can show
-	// the same summary the live turn did.
-	Stats *transcript.TurnStats `json:"stats,omitempty"`
-}
-
-// HistoryView renders messages as history rows.
-func HistoryView(msgs []transcript.Message) []HistoryMessage {
-	return HistoryViewStats(msgs, nil)
-}
-
-// HistoryViewStats is HistoryView with per-turn costs: statsAt maps the
-// transcript index of a turn's last message to that turn's cost, and the
-// row built from that message carries the summary.
-//
-// The end of a turn is the reliable anchor. Its start is not: a resumed
-// turn (a steer, or a parent driving a subagent) begins with an
-// assistant or tool message rather than a user row, and the newest page
-// of a long session begins mid-turn, so the turn's first message need
-// not be in msgs at all. Every page that holds any part of a turn holds
-// its end, so the summary survives paging and a restart.
-func HistoryViewStats(msgs []transcript.Message, statsAt map[int]*transcript.TurnStats) []HistoryMessage {
-	calls := map[string]transcript.ToolCall{}
-	for _, msg := range msgs {
-		if msg.Role != transcript.RoleAssistant {
-			continue
-		}
-		if msg.ToolCalls == nil {
-			continue
-		}
-		for _, call := range *msg.ToolCalls {
-			if call.ID == "" {
-				continue
-			}
-			if _, ok := calls[call.ID]; !ok {
-				calls[call.ID] = call
-			}
-		}
-	}
-	var out []HistoryMessage
-	for i, msg := range msgs {
-		if msg.Replay {
-			continue
-		}
-		// Stats land on the row built from the turn's last message; see
-		// the function comment. The lookup is by index, so nothing has
-		// to be consumed from statsAt (and this stays safe for callers
-		// that hand the same map to two views).
-		turnStats := statsAt[i]
-		if msg.IsCompaction() {
-			kind := "compaction"
-			out = append(out, HistoryMessage{
-				Role: "system", Content: msg.Content,
-				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: turnStats,
-			})
-			continue
-		}
-		if msg.Role == transcript.RoleTool {
-			args := ""
-			if msg.ToolCallID != nil {
-				if c, ok := calls[*msg.ToolCallID]; ok {
-					args = c.Arguments
-				}
-			}
-			if args == "" && IsNotifyMessage(msg) {
-				args = notifyHistoryArgs(msg.Content)
-			}
-			var argsPtr *string
-			if args != "" {
-				argsPtr = &args
-			}
-			status := ToolOK
-			if msg.IsError {
-				status = ToolFailed
-			}
-			out = append(out, HistoryMessage{
-				Role:       "tool",
-				Image:      msg.Image,
-				Content:    msg.Content,
-				CreatedAt:  msg.CreatedAt.Unix(),
-				ToolCallID: msg.ToolCallID,
-				Name:       msg.Name,
-				Arguments:  argsPtr,
-				Status:     &status,
-				Stats:      turnStats,
-			})
-			continue
-		}
-		if msg.Role == transcript.RoleAssistant && strings.TrimSpace(msg.Reasoning) != "" {
-			kind := "thinking"
-			out = append(out, HistoryMessage{
-				Role: "assistant", Content: msg.Reasoning,
-				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: turnStats,
-			})
-			// The thinking row took the summary; the reply starts a
-			// second row for the same message.
-			turnStats = nil
-		}
-		if !msg.Visible() {
-			continue
-		}
-		var role string
-		switch msg.Role {
-		case transcript.RoleUser:
-			role = "user"
-		case transcript.RoleAssistant:
-			role = "assistant"
-		case transcript.RoleSystem:
-			role = "system"
-		default:
-			role = "tool"
-		}
-		content := msg.Content
-		if msg.Role == transcript.RoleUser && msg.Display != "" {
-			content = msg.Display
-		}
-		row := HistoryMessage{
-			Role:        role,
-			Content:     content,
-			CreatedAt:   msg.CreatedAt.Unix(),
-			Attachments: msg.Attachments,
-			Stats:       turnStats,
-		}
-		if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
-			idx := i
-			row.Index = &idx
-		}
-		out = append(out, row)
-	}
-	// A page can start in the middle of a turn, so the turn's first
-	// message may not be in msgs at all.
-	if out == nil {
-		out = []HistoryMessage{}
-	}
-	return out
-}
-
 // TodoFileName is the on-disk activity list; kept here so the runtime
 // can serve it without importing the tools package.
 const TodoFileName = "todos.json"
@@ -348,90 +204,4 @@ func TodosFinished(data []byte) bool {
 		}
 	}
 	return true
-}
-
-func notifyHistoryArgs(content string) string {
-	var wire struct {
-		JobID string `json:"job_id"`
-	}
-	if err := json.Unmarshal([]byte(content), &wire); err != nil || wire.JobID == "" {
-		return ""
-	}
-	return NotifyArgs(wire.JobID)
-}
-
-// HistoryPage is one window of the transcript. Start is the row
-// ordinal of Messages[0]; rows are numbered from the start of the
-// session, so appending a turn never shifts an older page.
-type HistoryPage struct {
-	Messages []HistoryMessage `json:"messages"`
-	Start    int              `json:"start"`
-	HasMore  bool             `json:"hasMore"`
-	Total    int              `json:"total"`
-}
-
-// PageHistory slices rows into the window ending just before before
-// (0 means the newest rows) and at most limit long.
-func PageHistory(rows []HistoryMessage, limit, before int) HistoryPage {
-	if limit <= 0 {
-		limit = 120
-	}
-	total := len(rows)
-	if before <= 0 || before > total {
-		before = total
-	}
-	start := before - limit
-	if start < 0 {
-		start = 0
-	}
-	if rows == nil {
-		rows = []HistoryMessage{}
-	}
-	return HistoryPage{
-		Messages: rows[start:before],
-		Start:    start,
-		HasMore:  start > 0,
-		Total:    total,
-	}
-}
-
-// ImageRef points at one image a transcript row carries. Index is the
-// row's position in the visible transcript (the same numbering user
-// rows use for undo).
-type ImageRef struct {
-	Index int    `json:"index"`
-	Role  string `json:"role"`
-	Path  string `json:"path"`
-	Name  string `json:"name,omitempty"`
-}
-
-// ImagesView is what the renderer needs to mount and register images
-// without downloading the whole transcript after every turn.
-type ImagesView struct {
-	LatestUser int        `json:"latestUser"`
-	Images     []ImageRef `json:"images"`
-}
-
-// ImagesViewOf collects image references from a visible transcript.
-// LatestUser is the index of the last user row (-1 when there is none),
-// so a finished turn can mount just that row's attachments.
-func ImagesViewOf(msgs []transcript.Message) ImagesView {
-	out := ImagesView{LatestUser: -1, Images: []ImageRef{}}
-	for i, m := range msgs {
-		if m.Replay || !m.Visible() {
-			continue
-		}
-		if m.Role == transcript.RoleUser {
-			out.LatestUser = i
-		}
-		if m.Image != nil {
-			out.Images = append(out.Images, ImageRef{Index: i, Role: string(m.Role), Path: m.Image.Path})
-		}
-		for _, a := range m.Attachments {
-			if a.Image != nil {
-				out.Images = append(out.Images, ImageRef{Index: i, Role: string(m.Role), Path: a.Image.Path, Name: a.Name})
-			}
-		}
-	}
-	return out
 }

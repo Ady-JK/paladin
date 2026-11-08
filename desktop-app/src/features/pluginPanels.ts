@@ -11,12 +11,14 @@ import type { PluginView, TurnEvent } from "../core/types";
 import { icon } from "../icons";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
 import { toast } from "../ui/toast";
+import { openPluginOverlay } from "./pluginOverlay";
 import {
   closePluginTab,
   markPluginUpdated,
   openPluginTab,
   pluginTabList,
   preparePluginPanel,
+  STANDALONE_PANE_SESSION,
   type PluginTab,
 } from "./sidePane";
 
@@ -26,6 +28,7 @@ let local = true;
 let button: HTMLButtonElement | null = null;
 let menu: HTMLElement | null = null;
 let listEl: HTMLElement | null = null;
+const reloadAgain = new Set<PluginTab>();
 
 const BADGE: Record<string, string> = {
   invokeTool: "runs tools",
@@ -33,6 +36,7 @@ const BADGE: Record<string, string> = {
   readFile: "reads files",
   events: "watches chat",
   openExternal: "opens links",
+  sendPrompt: "sends chat",
 };
 
 function badges(view: PluginView): string {
@@ -67,7 +71,7 @@ function viewsHtml(): string {
         `<span class="plugin-row-ico">${icon("sl-plug", "h-3.5 w-3.5")}</span>` +
         `<span class="plugin-row-text"><span class="plugin-row-title">${escapeHtml(view.title)}</span>` +
         `<span class="plugin-row-plugin">${escapeHtml(view.plugin)}</span></span>` +
-        `<span class="plugin-row-badges">${badges(view)}</span></button>`,
+        `<span class="plugin-row-badges">${view.mount === "overlay" ? '<span class="plugin-badge">overlay</span>' : ""}${badges(view)}</span></button>`,
     )
     .join("");
   const errorRows = errors.length
@@ -111,19 +115,25 @@ async function openFor(plugin: string, view: string, sessionId: string, workspac
     toast("Plugin panels need the desktop app", "error");
     return;
   }
-  if (!sessionId) {
-    toast("Send a message first: plugin panels belong to a conversation", "error");
-    return;
-  }
   if (!workspace) {
     toast("Pick a workspace first", "error");
     return;
   }
-  preparePluginPanel(sessionId);
+  const mount = views.find((item) => item.plugin === plugin && item.view === view)?.mount;
+  const paneSession = sessionId || STANDALONE_PANE_SESSION;
+  if (mount !== "overlay") preparePluginPanel(paneSession);
   try {
     const opened = await plugins.open(plugin, view, sessionId, workspace);
+    if (state.sessionId !== sessionId || state.cwd !== workspace) {
+      await plugins.close(opened.id);
+      return;
+    }
+    if (mount === "overlay") {
+      openPluginOverlay(opened, sessionId, plugin, view, workspace);
+      return;
+    }
     openPluginTab({
-      sessionId,
+      sessionId: paneSession,
       panelId: opened.id,
       plugin,
       view,
@@ -143,7 +153,34 @@ async function openFromMenu(plugin: string, view: string): Promise<void> {
 
 function reopen(tab: PluginTab): void {
   closePluginPanel(tab);
-  void openFor(tab.plugin, tab.view, tab.sessionId, tab.workspace);
+  void openFor(tab.plugin, tab.view, tab.sessionId === STANDALONE_PANE_SESSION ? "" : tab.sessionId, tab.workspace);
+}
+
+async function reloadCreatorTab(tab: PluginTab): Promise<void> {
+  const plugins = hasBridge() ? bridge().plugins : undefined;
+  if (!plugins) return;
+  if (tab.stale) {
+    reloadAgain.add(tab);
+    return;
+  }
+  tab.stale = true;
+  try {
+    if (!(await plugins.prepareReload(tab.panelId)) || !pluginTabList().includes(tab)) return;
+    await plugins.close(tab.panelId);
+    const sessionId = tab.sessionId === STANDALONE_PANE_SESSION ? "" : tab.sessionId;
+    const opened = await plugins.open(tab.plugin, tab.view, sessionId, tab.workspace);
+    if (!pluginTabList().includes(tab)) {
+      await plugins.close(opened.id);
+      return;
+    }
+    tab.panelId = opened.id;
+    tab.iframe.src = opened.url;
+  } catch (error) {
+    toast(`Could not reload ${tab.title}: ${String(error)}`, "error");
+  } finally {
+    tab.stale = false;
+    if (reloadAgain.delete(tab) && pluginTabList().includes(tab)) void reloadCreatorTab(tab);
+  }
 }
 
 function closePluginPanel(tab: PluginTab): void {
@@ -221,7 +258,8 @@ export function initPluginPanels(): void {
     if (event.event !== "plugin/updated") return;
     void refresh();
     for (const tab of pluginTabList()) {
-      markPluginUpdated(tab, () => reopen(tab));
+      if (tab.plugin.startsWith("creator_")) void reloadCreatorTab(tab);
+      else markPluginUpdated(tab, () => reopen(tab));
     }
   });
 }

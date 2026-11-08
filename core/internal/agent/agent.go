@@ -125,13 +125,14 @@ type ToolActivity struct {
 // ChatChunk is one streamed piece of a turn: text, a tool update, or the
 // final done marker.
 type ChatChunk struct {
-	Delta     string        `json:"delta"`
-	Done      bool          `json:"done"`
-	Error     *ApiError     `json:"error,omitempty"`
-	SessionID string        `json:"sessionId"`
-	Stopped   bool          `json:"stopped"`
-	Tool      *ToolActivity `json:"tool,omitempty"`
-	Retry     *RetryStatus  `json:"retry,omitempty"`
+	Delta      string                      `json:"delta"`
+	Done       bool                        `json:"done"`
+	Error      *ApiError                   `json:"error,omitempty"`
+	SessionID  string                      `json:"sessionId"`
+	Stopped    bool                        `json:"stopped"`
+	Tool       *ToolActivity               `json:"tool,omitempty"`
+	Protection *session.SnapshotProtection `json:"protection,omitempty"`
+	Retry      *RetryStatus                `json:"retry,omitempty"`
 	// Compaction reports context compaction progress.
 	Compaction *CompactionStatus `json:"compaction,omitempty"`
 	// Approval reports a permission prompt and its resolution.
@@ -311,6 +312,8 @@ type Agent struct {
 	sentLen      int
 	messages     []inference.LlmMessage
 	records      []transcript.Message
+	journal      *transcript.TurnJournal
+	journalInput []transcript.Message
 	reply        strings.Builder
 	// thinking is the current round's visible reasoning, saved with
 	// its assistant record.
@@ -431,8 +434,34 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	a.phase = phaseRunning
 	a.emptyRounds = 0
 	a.retries, a.timeoutRetries = 0, 0
+	if !a.compactOnly {
+		if !a.currentResume {
+			msg := transcript.UserMessage(a.currentMessage)
+			if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(a.currentMessage) {
+				msg.Display = d
+			}
+			msg.Attachments = a.currentAttachments
+			a.journalInput = []transcript.Message{msg}
+		}
+		j, err := a.session.BeginJournal(a.journalInput)
+		if err != nil {
+			return ChatOutcome{}, fmt.Errorf("start turn journal: %w", err)
+		}
+		a.journal = j
+		defer j.Release()
+	}
 	if !a.compactOnly && !a.currentResume {
 		if err := a.runPromptHooks(); err != nil {
+			if perr := a.journal.Finish(); perr != nil {
+				return ChatOutcome{}, fmt.Errorf("%w (and clearing turn journal failed: %w)", err, perr)
+			}
+			return ChatOutcome{}, err
+		}
+		a.journalInput[0].Content = a.currentMessage
+		if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(a.currentMessage) {
+			a.journalInput[0].Display = d
+		}
+		if err := a.checkpoint(""); err != nil {
 			return ChatOutcome{}, err
 		}
 	}
@@ -521,6 +550,24 @@ func (a *Agent) save() error {
 	return err
 }
 
+func (a *Agent) checkpoint(partial string) error {
+	return a.checkpointWithResults(partial, nil)
+}
+
+func (a *Agent) checkpointWithResults(partial string, extra []transcript.Message) error {
+	if a.journal == nil {
+		return nil
+	}
+	messages := make([]transcript.Message, 0, len(a.journalInput)+len(a.records)+len(extra))
+	messages = append(messages, a.journalInput...)
+	messages = append(messages, a.records...)
+	messages = append(messages, extra...)
+	if err := a.journal.Checkpoint(messages, partial); err != nil {
+		return fmt.Errorf("save turn progress: %w", err)
+	}
+	return nil
+}
+
 // persist appends the whole turn (the user message unless resuming,
 // the model and tool records, then the reply) as one transcript line,
 // so a failed or interrupted write never leaves half a turn.
@@ -541,8 +588,17 @@ func (a *Agent) persist(message string, resume bool) error {
 	// A resume turn has no user row to hang a summary on, and a failed
 	// write leaves nothing to describe.
 	stats := a.turnStats(resume)
-	if err := a.session.AppendTurnWithStats(turn, stats); err != nil {
+	journalID := ""
+	if a.journal != nil {
+		journalID = a.journal.ID
+	}
+	if err := a.session.AppendJournalTurn(turn, stats, journalID); err != nil {
 		return turnFailed{"persist turn: " + err.Error()}
+	}
+	if a.journal != nil {
+		if err := a.journal.Finish(); err != nil {
+			return turnFailed{"clear turn journal: " + err.Error()}
+		}
 	}
 	a.savedStats = stats
 	if !resume {

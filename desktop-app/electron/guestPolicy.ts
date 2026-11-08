@@ -1,12 +1,10 @@
-// Only the embedded chat providers' own HTTPS pages may open a guest
-// sign-in window in their persistent cookie partition.
-export function allowedChatPopup(url: string): boolean {
+// Personal browsing supports common OAuth flows, including a blank popup
+// which the site subsequently navigates. Never allow local files or URL credentials.
+export function allowedPersonalPopup(url: string): boolean {
+  if (url === "about:blank") return true;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:") return false;
-    return ["chatgpt.com", "openai.com", "claude.ai", "anthropic.com"].some(
-      (domain) => parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`),
-    );
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password;
   } catch {
     return false;
   }

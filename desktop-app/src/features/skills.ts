@@ -18,6 +18,8 @@ import type { SkillEntry } from "../core/types";
 let popup: HTMLElement | null = null;
 let items: SkillEntry[] = [];
 let all: SkillEntry[] | null = null;
+let cacheCwd = "";
+let cacheVersion = 0;
 let activeIdx = 0;
 let open = false;
 let debounce = 0;
@@ -93,18 +95,12 @@ function paintSkill(): void {
 }
 
 async function refreshSkill(filter: string, mySeq: number): Promise<void> {
-  try {
-    if (!all) {
-      all = await api.listSkills(state.cwd || null);
-    }
-  } catch {
-    all = [];
-  }
+  const available = await loadSkills();
   if (!open || mySeq !== seq) {
     return;
   }
   const q = filter.toLowerCase();
-  items = (all || []).filter((s) => s.name.toLowerCase().startsWith(q));
+  items = available.filter((s) => s.name.toLowerCase().startsWith(q));
   activeIdx = 0;
   paintSkill();
 }
@@ -114,7 +110,7 @@ function scheduleRefresh(filter: string): void {
   window.clearTimeout(debounce);
   debounce = window.setTimeout(() => void refreshSkill(filter, mySeq), 120);
   // Paint from cache immediately so the popup opens without waiting.
-  if (all) {
+  if (all && cacheCwd === state.cwd) {
     const q = filter.toLowerCase();
     items = (all || []).filter((s) => s.name.toLowerCase().startsWith(q));
     activeIdx = 0;
@@ -235,9 +231,14 @@ export function takeAttached(): string | null {
 
 // loadSkills returns the cached skill listing, fetching it once.
 export async function loadSkills(): Promise<SkillEntry[]> {
-  if (!all) {
+  const cwd = state.cwd;
+  if (!all || cacheCwd !== cwd) {
+    const version = cacheVersion;
     try {
-      all = await api.listSkills(state.cwd || null);
+      const result = await api.listSkills(cwd || null);
+      if (version !== cacheVersion || cwd !== state.cwd) return [];
+      all = result;
+      cacheCwd = cwd;
     } catch {
       return [];
     }
@@ -247,13 +248,14 @@ export async function loadSkills(): Promise<SkillEntry[]> {
 
 // skillsSnapshot is the cached listing without fetching.
 export function skillsSnapshot(): SkillEntry[] {
-  return all ?? [];
+  return cacheCwd === state.cwd ? (all ?? []) : [];
 }
 
 // refreshSkillsCache drops the cached listing so the next open
 // re-fetches (new SKILL.md files show up).
 export function refreshSkillsCache(): void {
   all = null;
+  cacheVersion++;
 }
 
 function onInput(): void {

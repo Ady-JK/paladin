@@ -7,6 +7,7 @@
 package snapshot
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -357,95 +358,68 @@ func (r *Repo) Snapshot(ctx context.Context) (string, error) {
 	return r.commit(ctx, add, skip)
 }
 
-// SnapshotPaths is Snapshot narrowed to paths already relative to the
-// workspace. Tools that know what they write (write/edit) use it so a
-// large folder is not scanned twice per call. An empty list falls back
-// to the full snapshot.
-func (r *Repo) SnapshotPaths(ctx context.Context, paths []string) (string, error) {
-	if len(paths) == 0 {
-		return r.Snapshot(ctx)
-	}
+// Collect retains referenced trees and reclaims expired unreachable objects.
+// Roots may include snapshots belonging to other workspace repositories.
+// The grace period gives other processes time to finish with newly created
+// objects; cleanup runs again on later turns.
+func (r *Repo) Collect(ctx context.Context, roots []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.disabled != nil {
-		return "", r.disabled
-	}
 	if err := r.init(ctx); err != nil {
-		return "", err
+		return err
 	}
-	// Split present paths from deletions first: a path that does not
-	// exist yet (a write creating a file) has nothing to stage, while a
-	// tracked one that vanished must be staged as a deletion.
-	var present, missing []string
-	for _, p := range paths {
-		if _, err := os.Lstat(filepath.Join(r.work, filepath.FromSlash(p))); err == nil {
-			present = append(present, p)
-		} else {
-			missing = append(missing, p)
+	roots = append(roots, r.marker)
+	seen := map[string]bool{}
+	var input strings.Builder
+	for _, id := range roots {
+		if len(id) != 40 && len(id) != 64 {
+			return fmt.Errorf("snapshot: invalid retained object id")
 		}
-	}
-	if len(missing) > 0 {
-		out, err := r.git(ctx, nil, append([]string{"ls-files", "-z", "--"}, missing...)...)
-		if err != nil {
-			return "", err
+		if _, err := hex.DecodeString(id); err != nil {
+			return fmt.Errorf("snapshot: invalid retained object id: %w", err)
 		}
-		tracked := map[string]bool{}
-		for _, p := range splitNul(out) {
-			tracked[p] = true
-		}
-		for _, p := range missing {
-			if tracked[p] {
-				present = append(present, p)
-			}
+		if !seen[id] {
+			seen[id] = true
+			input.WriteString(id + "\n")
 		}
 	}
-	// git add refuses ignored paths, and the full scan never reaches
-	// them because ls-files --exclude-standard hides them. Keep that
-	// rule for scoped snapshots too, or editing a generated/ignored
-	// file would fail every snapshot.
-	if len(present) > 0 {
-		out, err := r.git(ctx, nil, append([]string{"ls-files", "-z", "--"}, present...)...)
-		if err != nil {
-			return "", err
+	objects, err := r.git(ctx, []byte(input.String()), "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	if err != nil {
+		return err
+	}
+	var transaction strings.Builder
+	transaction.WriteString("start\n")
+	keep := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(objects)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			return fmt.Errorf("snapshot: unexpected object check result")
 		}
-		tracked := map[string]bool{}
-		for _, p := range splitNul(out) {
-			tracked[p] = true
+		if fields[1] == "missing" {
+			continue
 		}
-		var untracked []string
-		for _, p := range present {
-			if !tracked[p] {
-				untracked = append(untracked, p)
-			}
+		if fields[1] != "tree" && fields[1] != "blob" {
+			return fmt.Errorf("snapshot: unexpected retained object type %s", fields[1])
 		}
-		if len(untracked) > 0 {
-			out, err := r.git(ctx, nil,
-				append([]string{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--"}, untracked...)...)
-			if err != nil {
-				return "", err
-			}
-			ignored := map[string]bool{}
-			for _, p := range splitNul(out) {
-				ignored[p] = true
-			}
-			kept := make([]string, 0, len(present))
-			for _, p := range present {
-				if !ignored[p] {
-					kept = append(kept, p)
-				}
-			}
-			present = kept
+		ref := "refs/paladin/retained/" + fields[0]
+		keep[ref] = true
+		fmt.Fprintf(&transaction, "update %s %s\n", ref, fields[0])
+	}
+	refs, err := r.git(ctx, nil, "for-each-ref", "--format=%(refname)", "refs/paladin/retained/")
+	if err != nil {
+		return err
+	}
+	for _, ref := range strings.Fields(string(refs)) {
+		if !keep[ref] {
+			fmt.Fprintf(&transaction, "delete %s\n", ref)
 		}
 	}
-	var add, skip []string
-	for _, p := range present {
-		if r.skippable(p) {
-			skip = append(skip, p)
-		} else {
-			add = append(add, p)
-		}
+	transaction.WriteString("prepare\ncommit\n")
+	if _, err := r.git(ctx, []byte(transaction.String()), "update-ref", "--stdin"); err != nil {
+		return err
 	}
-	return r.commit(ctx, add, skip)
+	_, err = r.git(ctx, nil, "-c", "gc.cruftPacks=false", "gc", "--prune=1.hour.ago")
+	return err
 }
 
 // commit stages the given paths and writes the tree. The caller holds
@@ -474,31 +448,6 @@ func (r *Repo) commit(ctx context.Context, add, skip []string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(tree)), nil
-}
-
-// RelPaths maps absolute or workspace-relative paths to clean paths
-// under the folder. It returns nil when any path escapes the workspace
-// or is empty, so callers fall back to a full snapshot.
-func (r *Repo) RelPaths(paths []string) []string {
-	if len(paths) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(paths))
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			return nil
-		}
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(r.work, p)
-		}
-		rel, err := filepath.Rel(r.work, filepath.Clean(p))
-		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil
-		}
-		out = append(out, filepath.ToSlash(rel))
-	}
-	return out
 }
 
 // skippable reports files snapshots leave out: too large or binary.
@@ -571,6 +520,78 @@ func (r *Repo) Files(ctx context.Context, tree string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// Excluded lists uncaptured files and ignored paths, bounded so huge
+// dependency trees do not flood the interface or consume unbounded memory.
+func (r *Repo) Excluded(ctx context.Context, tree string, limit int) ([]string, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.init(ctx); err != nil {
+		return nil, false, err
+	}
+	if limit <= 0 {
+		return nil, false, nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) bool {
+		if seen[p] {
+			return false
+		}
+		seen[p] = true
+		if len(out) >= limit {
+			return true
+		}
+		out = append(out, p)
+		return false
+	}
+	entries, err := r.git(ctx, nil, "ls-tree", "-r", "-z", tree)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, line := range splitNul(entries) {
+		meta, path, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		if ok && len(fields) == 3 && fields[2] == r.marker && add(path) {
+			return out, true, nil
+		}
+	}
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=false", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory")
+	cmd.Dir, cmd.Env = r.work, r.env()
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, false, err
+	}
+	reader := bufio.NewReader(pipe)
+	truncated := false
+	for {
+		entry, readErr := reader.ReadString(0)
+		if len(entry) > 0 && entry[len(entry)-1] == 0 && add(strings.TrimSuffix(entry, "\x00")) {
+			truncated = true
+			_ = cmd.Process.Kill()
+			break
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return nil, false, readErr
+		}
+	}
+	if err := cmd.Wait(); err != nil && !truncated {
+		return nil, false, fmt.Errorf("snapshot: list exclusions: %w", err)
+	}
+	if ctx.Err() != nil {
+		return nil, false, ctx.Err()
+	}
+	sort.Strings(out)
+	return out, truncated, nil
 }
 
 // Untracked reports an Entries value that is a placeholder for a file

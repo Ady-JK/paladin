@@ -24,6 +24,7 @@ test("frames in the app window may only load the visual frame page", () => {
     const frame = new URL("visual-frame.html", app).href;
     expect(appFrameNavigationAllowed(app, frame)).toBe(true);
     expect(appFrameNavigationAllowed(app, "about:blank")).toBe(true);
+    expect(appFrameNavigationAllowed(app, "plugin://inspector/dashboard/ui/index.html?panel=abc")).toBe(true);
     for (const url of [
       `${frame}?x=1`,
       new URL("other.html", app).href,
@@ -45,6 +46,7 @@ test("the app page has a strict content security policy", async ({ page }) => {
   expect(csp).toContain("script-src 'self'");
   expect(csp).not.toContain("unsafe-eval");
   expect(csp).toMatch(/object-src 'none'/);
+  expect(csp).toMatch(/frame-src [^;]*plugin:/);
   // An injected handler does not run, even if markup gets through.
   await page.evaluate(() => {
     const div = document.createElement("div");

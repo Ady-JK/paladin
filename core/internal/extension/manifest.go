@@ -161,7 +161,11 @@ func loadManifest(root, name string) (plugin, error) {
 	}
 	entry, err := p.resolveEntry()
 	if err != nil {
-		return plugin{}, err
+		// A UI-only plugin declares an empty static tool list and needs no
+		// Node entry or process. Other invalid entries still fail normally.
+		if strings.TrimSpace(string(p.Tools)) != "[]" || len(p.Views) == 0 || p.Entry != "" {
+			return plugin{}, err
+		}
 	}
 	p.entry = entry
 	p.validateUI()

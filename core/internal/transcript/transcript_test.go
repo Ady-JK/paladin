@@ -378,6 +378,58 @@ func TestStoreDeleteCleansNamespace(t *testing.T) {
 	}
 }
 
+func TestDeleteCannotCrossWorkspaceBoundary(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "sessions"))
+	sess, err := store.Create("/workspace/one", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete("/workspace/two", sess.Meta.SessionID); err == nil {
+		t.Fatal("delete accepted a session from another workspace")
+	}
+	if _, err := store.Load("/workspace/one", sess.Meta.SessionID); err != nil {
+		t.Fatalf("session was lost: %v", err)
+	}
+	if err := store.Delete("", sess.Meta.SessionID); err != nil {
+		t.Fatalf("unscoped delete failed: %v", err)
+	}
+}
+
+func TestLegacyNamespaceCollisionCannotCrossWorkspace(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "sessions"))
+	first, second := "/workspace/a-b", "/workspace/a:b"
+	if legacyEncodeCwd(first) != legacyEncodeCwd(second) {
+		t.Fatal("test paths must collide in legacy encoding")
+	}
+	sess, err := store.Create(first, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(store.Root, legacyEncodeCwd(first), sess.Meta.SessionID)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(sess.Dir, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(second, sess.Meta.SessionID); err == nil {
+		t.Fatal("legacy session loaded in another workspace")
+	}
+	list, err := store.List(second, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("legacy session listed in another workspace: %+v", list)
+	}
+	if err := store.Delete(second, sess.Meta.SessionID); err == nil {
+		t.Fatal("legacy session deleted from another workspace")
+	}
+	if _, err := store.Load(first, sess.Meta.SessionID); err != nil {
+		t.Fatalf("original session lost: %v", err)
+	}
+}
+
 func TestInfoCountsVisibleOnly(t *testing.T) {
 	dir := t.TempDir()
 	sessDir := filepath.Join(dir, "s")

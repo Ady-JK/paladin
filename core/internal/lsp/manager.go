@@ -62,6 +62,8 @@ type Result struct {
 	Errors int
 	// Timedout is true when the server did not answer in time.
 	Timedout bool
+	// Unavailable marks a server that could not be started.
+	Unavailable bool
 }
 
 // ServerStatus describes one server for the UI.
@@ -196,6 +198,19 @@ func (m *Manager) Diagnose(ctx context.Context, workspace, path string, trust fu
 	if workspace == "" || !tools.Within(path, workspace) || !fitsDoc(path) {
 		return Result{}
 	}
+	return m.diagnose(ctx, workspace, path, nil, trust)
+}
+
+// DiagnoseText checks an unsaved editor buffer without sending didSave.
+// Use a separate manager from agent tools so their document state stays isolated.
+func (m *Manager) DiagnoseText(ctx context.Context, workspace, path, text string, trust func(string) bool) Result {
+	if workspace == "" || !tools.Within(path, workspace) || !fitsDoc(path) || len(text) > maxDocBytes {
+		return Result{}
+	}
+	return m.diagnose(ctx, workspace, path, &text, trust)
+}
+
+func (m *Manager) diagnose(ctx context.Context, workspace, path string, text *string, trust func(string) bool) Result {
 	spec, root, bin, ok := m.pick(workspace, path, trust)
 	if !ok {
 		return Result{}
@@ -203,6 +218,7 @@ func (m *Manager) Diagnose(ctx context.Context, workspace, path string, trust fu
 	res := Result{Server: spec.ID}
 	s, err := m.get(spec, root, bin)
 	if err != nil {
+		res.Unavailable = true
 		return res
 	}
 	rctx, cancel := context.WithTimeout(ctx, readyWait)
@@ -215,7 +231,12 @@ func (m *Manager) Diagnose(ctx context.Context, workspace, path string, trust fu
 		res.Timedout = true
 		return res
 	}
-	diags, ok := s.diagnose(ctx, path, m.timeout())
+	var diags []lspDiagnostic
+	if text == nil {
+		diags, ok = s.diagnose(ctx, path, m.timeout())
+	} else {
+		diags, ok = s.diagnoseText(ctx, path, *text, m.timeout())
+	}
 	if !ok {
 		res.Timedout = true
 		return res

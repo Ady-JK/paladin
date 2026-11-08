@@ -144,6 +144,8 @@ export type RevertPreview = {
   deleted: string[];
   skipped: string[];
   snapshots: boolean;
+  version?: string;
+  protection?: SnapshotProtection;
 };
 
 export type ChangedFile = { path: string; status: "created" | "modified" | "deleted" };
@@ -365,6 +367,16 @@ export type MessageInfo = {
   // stats is a user row's turn cost, so a reopened session shows the
   // same summary the live turn did.
   stats?: TurnStats;
+  protection?: SnapshotProtection;
+};
+
+export type SnapshotProtection = {
+  turn: number;
+  floor?: number;
+  state: "pending" | "protected" | "partial" | "unavailable" | "unknown" | "expired";
+  reason?: string;
+  excluded?: string[];
+  truncated?: boolean;
 };
 
 // RetryInfo is a chat/retry event: a failed round runs again after
@@ -451,6 +463,8 @@ export type FsList = {
   directories: FsDirectory[];
   files: FsFile[];
 };
+
+export type IDEExplorerSettings = { hideIgnored: boolean; hideDotFolders: boolean };
 
 export type GroupedLab = {
   display: string;
@@ -564,6 +578,7 @@ export type TurnEvent = {
   // chat/thinkingDropped: the thinking level the provider rejected.
   thinkingDropped?: string;
   tool?: ToolInfo;
+  protection?: SnapshotProtection;
   retry?: RetryInfo;
   compaction?: CompactionInfo;
   approval?: Approval;
@@ -672,6 +687,7 @@ export type Approval = {
   // Web requests (web_fetch, browser open): the site and full URL.
   host?: string;
   url?: string;
+  sandbox?: "workspace-write" | "read-only" | "unavailable" | "none";
   reasons?: string[];
   destructive?: boolean;
   choices?: ApprovalDecision[];
@@ -865,7 +881,7 @@ export type PluginView = {
   plugin: string;
   view: string;
   title: string;
-  mount: "side-pane";
+  mount: "side-pane" | "overlay";
   permissions: string[];
   destructive?: boolean;
 };

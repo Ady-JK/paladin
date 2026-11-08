@@ -2,6 +2,7 @@
 // host serves it as a sandboxed plugin:// document, and a tool without a
 // card keeps the normal tool row.
 import { expect, test, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 const VIEWS = {
   views: [],
@@ -78,4 +79,22 @@ test("a listed card with no desktop bridge falls back to the result text", async
   await expect(card).toBeVisible();
   await expect(card.locator(".plugin-card-fallback")).toContainText('{"x":7}');
   await expect(card.locator("iframe")).toHaveCount(0);
+});
+
+test("a card that cannot load falls back to its result", async ({ page }) => {
+  await startTurn(page);
+  await emitTool(page);
+  await expect(page.locator(".plugin-card-fallback")).toContainText('{"x":7}', { timeout: 6000 });
+});
+
+test("saved extension results restore their cards", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eHistory = [
+      { role: "user", content: "Look it up" },
+      { role: "tool", name: "extension__board__lookup", arguments: "{}", content: '{"x":7}', status: "ok" },
+    ];
+  });
+  await showSidebar(page);
+  await page.locator('button.session-pick[data-session="sess-notify-1"]').click();
+  await expect(page.locator("#messages .plugin-card")).toBeVisible();
 });

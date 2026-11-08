@@ -56,3 +56,31 @@ func assertNoTempFiles(t *testing.T, dir string) {
 		}
 	}
 }
+
+func TestWriteModeKeepsRequestedPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "script")
+	if err := WriteMode(path, []byte("hello"), 0o751); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o751 {
+		t.Fatalf("permission = %o", info.Mode().Perm())
+	}
+}
+
+func TestCreateNeverReplacesExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.json")
+	if err := Create(path, []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Create(path, []byte("second")); !os.IsExist(err) {
+		t.Fatalf("expected exists, got %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "first" {
+		t.Fatalf("existing file changed: %q %v", data, err)
+	}
+}

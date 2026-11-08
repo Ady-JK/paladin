@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -133,42 +132,29 @@ func (r *Registry) PluginList() []PluginInfo {
 // so a steady state spawns no subprocess at all. A broken extension is
 // reported and skipped; it never blocks the built-in tools.
 func (r *Registry) Load(ctx context.Context) ([]tools.Tool, []error) {
-	root := filepath.Join(r.dataDir, "config", "extensions")
-	configPath := filepath.Join(r.dataDir, "config", "extensions.json")
-	data, err := os.ReadFile(configPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, []error{err}
-	}
-	if len(data) > 64<<10 {
-		return nil, []error{fmt.Errorf("extensions.json is too large")}
-	}
-	var cfg configFile
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, []error{err}
-	}
+	sources, failures := r.sources()
 	var result []tools.Tool
-	var failures []error
 	var infos []PluginInfo
 	seen := map[string]bool{}
 	seenTools := map[string]bool{}
-	for _, name := range cfg.Enabled {
+	for _, source := range sources {
+		name := source.exposed
 		if seen[name] {
+			failures = append(failures, fmt.Errorf("duplicate plugin name %q", name))
 			continue
 		}
 		seen[name] = true
 		var added []tools.Tool
 		var info PluginInfo
+		var err error
 		switch {
-		case moduleName.MatchString(name):
-			added, info, err = r.loadFile(ctx, name)
+		case source.legacy:
+			added, info, err = r.loadFile(ctx, source.name)
 			if err != nil {
 				failures = append(failures, err)
 			}
-		case pluginName.MatchString(name):
-			added, info, err = r.loadPlugin(ctx, root, name)
+		case pluginName.MatchString(source.name):
+			added, info, err = r.loadPlugin(ctx, source.root, source.name, name)
 			if err != nil {
 				failures = append(failures, err)
 			}
@@ -194,11 +180,12 @@ func (r *Registry) Load(ctx context.Context) ([]tools.Tool, []error) {
 }
 
 // loadPlugin loads one plugin directory, from cache when nothing changed.
-func (r *Registry) loadPlugin(ctx context.Context, root, name string) ([]tools.Tool, PluginInfo, error) {
-	pl, err := loadManifest(root, name)
+func (r *Registry) loadPlugin(ctx context.Context, root, folder, name string) ([]tools.Tool, PluginInfo, error) {
+	pl, err := loadManifest(root, folder)
 	if err != nil {
 		return nil, PluginInfo{Name: name, Kind: "plugin", Error: err.Error()}, err
 	}
+	pl.name = name
 	info := PluginInfo{Name: name, Kind: "plugin", Path: pl.dir, Permissions: pl.Permissions}
 	stamp := pluginStamp(pl)
 	decls, cached := r.lookup(name, stamp)

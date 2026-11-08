@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
@@ -111,6 +110,14 @@ func (r *AgentRuntime) FsHome() string {
 }
 
 func (r *AgentRuntime) FsList(path string) (FsList, error) {
+	abs, entries, err := r.readFsDirectory(path)
+	if err != nil {
+		return FsList{}, err
+	}
+	return formatFsList(abs, entries, nil), nil
+}
+
+func (r *AgentRuntime) readFsDirectory(path string) (string, []os.DirEntry, error) {
 	path = strings.TrimSpace(path)
 	target := path
 	if target == "" {
@@ -122,7 +129,7 @@ func (r *AgentRuntime) FsList(path string) (FsList, error) {
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return FsList{}, fmt.Errorf("path %q is not valid: %w", target, err)
+			return "", nil, fmt.Errorf("path %q is not valid: %w", target, err)
 		}
 		abs = filepath.Join(cwd, target)
 	}
@@ -130,16 +137,24 @@ func (r *AgentRuntime) FsList(path string) (FsList, error) {
 	entries, err := os.ReadDir(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return FsList{}, fmt.Errorf("path %q does not exist", abs)
+			return "", nil, fmt.Errorf("path %q does not exist", abs)
 		}
 		if os.IsPermission(err) {
-			return FsList{}, fmt.Errorf("path %q cannot be read: permission denied", abs)
+			return "", nil, fmt.Errorf("path %q cannot be read: permission denied", abs)
 		}
-		return FsList{}, fmt.Errorf("path %q cannot be listed: %s", abs, syserr.Str(err))
+		return "", nil, fmt.Errorf("path %q cannot be listed: %s", abs, syserr.Str(err))
 	}
+	return abs, entries, nil
+}
+
+// os.ReadDir already sorts by name, and filtering preserves that order.
+func formatFsList(abs string, entries []os.DirEntry, include func(os.DirEntry) bool) FsList {
 	directories := []FsDirectory{}
 	files := []FsFile{}
 	for _, e := range entries {
+		if include != nil && !include(e) {
+			continue
+		}
 		name := e.Name()
 		if e.IsDir() {
 			switch strings.ToLower(name) {
@@ -151,14 +166,12 @@ func (r *AgentRuntime) FsList(path string) (FsList, error) {
 		}
 		files = append(files, FsFile{Name: name, Path: filepath.Join(abs, name)})
 	}
-	sort.Slice(directories, func(i, j int) bool { return directories[i].Name < directories[j].Name })
-	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	parent := filepath.Dir(abs)
 	if parent == abs {
 		// The root has no parent.
 		parent = ""
 	}
-	return FsList{CurrentPath: abs, ParentPath: parent, Directories: directories, Files: files}, nil
+	return FsList{CurrentPath: abs, ParentPath: parent, Directories: directories, Files: files}
 }
 
 // FileEntry is one `@` completion row: Path is the Linux-style chat

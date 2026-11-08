@@ -17,11 +17,15 @@ import (
 type runtimeSkills struct{ r *AgentRuntime }
 
 func (s runtimeSkills) LoadSkill(cwd, name string) (agent.Skill, error) {
+	return s.LoadSkillForSession(cwd, "", name)
+}
+
+func (s runtimeSkills) LoadSkillForSession(cwd, sessionID, name string) (agent.Skill, error) {
 	loaded, err := skills.Load(s.r.dataDir, cwd, name)
 	if err != nil {
 		return agent.Skill{}, err
 	}
-	return agent.Skill{Name: loaded.Name, Content: loaded.Content}, nil
+	return agent.Skill{Name: loaded.Name, Content: loaded.Content + s.r.skillSupplement(cwd, sessionID, loaded.Name)}, nil
 }
 
 // SkillEntry is one listed skill: name, description, source
@@ -56,6 +60,13 @@ func (c runtimeCommands) LoadCommand(cwd, sessionID, name, args string) (agent.C
 	}
 	// The diff goes in after expansion so a "$1" inside it stays as is.
 	prompt := commands.Expand(cmd.Body, args)
+	if strings.EqualFold(cmd.Name, "create-agent") {
+		guide, err := skills.Load(c.r.dataDir, cwd, "create-agent")
+		if err != nil {
+			return agent.Command{}, err
+		}
+		prompt += "\n\n" + guide.Content + c.r.agentCapabilityContext(cwd, sessionID)
+	}
 	if strings.Contains(cmd.Body, sessionChangesSlot) {
 		changes, err := c.r.sessionChangesFor(sessionID, cwd, args)
 		if err != nil {

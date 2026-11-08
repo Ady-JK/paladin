@@ -22,6 +22,41 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
+func TestModelAgentIDUsesUniquePrefix(t *testing.T) {
+	ids := []string{"12345678-1111-1111-1111-111111111111", "12345678-2222-2222-2222-222222222222", "abcdef12-3333-3333-3333-333333333333"}
+	if got := modelAgentID(ids[0], ids); got != "12345678-1" {
+		t.Fatalf("colliding id = %q", got)
+	}
+	if got := modelAgentID(ids[2], ids); got != "abcdef12" {
+		t.Fatalf("id = %q", got)
+	}
+}
+
+func TestAgentWaitsUsingReturnedShortID(t *testing.T) {
+	rt, ws, parentID, _ := agentRuntime(t, func(c modelCall) modelReply {
+		if c.Child {
+			return modelReply{Text: "child finished"}
+		}
+		if result, ok := c.Results["wait_agent"]; ok {
+			return modelReply{Text: result}
+		}
+		if result, ok := c.Results["spawn_agent"]; ok {
+			var spawned struct {
+				ID string `json:"agent_id"`
+			}
+			if json.Unmarshal([]byte(result), &spawned) != nil || len(spawned.ID) != 8 {
+				return modelReply{Text: "bad spawn result: " + result}
+			}
+			return modelReply{Calls: []mockToolCall{call("wait_agent", map[string]any{"targets": []string{spawned.ID}, "timeout_ms": 10000})}}
+		}
+		return modelReply{Calls: []mockToolCall{call("spawn_agent", map[string]any{"agent_type": "explore", "task": "look"})}}
+	})
+	result := runParent(t, rt, parentID, ws, "delegate")
+	if result.Error != "" || !strings.Contains(result.Reply, "child finished") {
+		t.Fatalf("parent result = %+v", result)
+	}
+}
+
 // modelCall is one chat request as the routing mock sees it.
 type modelCall struct {
 	Ctx     context.Context
@@ -383,6 +418,60 @@ func TestOnlyTheParentControlsItsChildren(t *testing.T) {
 	}
 	if list, err := rt.subagents.list(other.SessionID); err != nil || len(list) != 0 {
 		t.Fatalf("stranger list = %+v, %v", list, err)
+	}
+}
+
+func TestShortAgentIDResolvesForParentAndFullIDStillWorks(t *testing.T) {
+	rt, ws, parentID, _ := agentRuntime(t, func(modelCall) modelReply { return modelReply{Text: "done"} })
+	runParent(t, rt, parentID, ws, "hi")
+	info, err := rt.subagents.spawn(parentID, spawnArgs{Kind: subagentKinds[0], Task: "look", ForkTurns: ForkNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := rt.transcripts.Load(ws, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short := rt.subagents.modelID(parentID, info.ID)
+	if len(short) != 8 {
+		t.Fatalf("short id = %q", short)
+	}
+	for _, target := range []string{short, info.ID, info.Name} {
+		child, err := rt.subagents.resolve(parent, target)
+		if err != nil || child.Meta.SessionID != info.ID {
+			t.Fatalf("resolve %q: %v", target, err)
+		}
+	}
+	// A later child can choose a name that was previously an ID prefix.
+	// Reject that old handle instead of addressing the wrong child.
+	second, err := rt.subagents.spawn(parentID, spawnArgs{Kind: subagentKinds[0], Task: "look too", Name: short, ForkTurns: ForkNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err = rt.transcripts.Load(ws, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.subagents.resolve(parent, short); err == nil {
+		t.Fatal("ambiguous name and prefix accepted")
+	}
+	for _, id := range []string{info.ID, second.ID} {
+		handle := rt.subagents.modelID(parentID, id)
+		child, err := rt.subagents.resolve(parent, handle)
+		if err != nil || child.Meta.SessionID != id {
+			t.Fatalf("resolve handle %q: %v", handle, err)
+		}
+	}
+	other, err := rt.OpenSession("", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSession, err := rt.transcripts.Load(ws, other.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.subagents.resolve(otherSession, short); err == nil {
+		t.Fatal("another parent resolved the short id")
 	}
 }
 

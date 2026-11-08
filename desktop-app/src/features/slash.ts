@@ -57,9 +57,10 @@ function items(): Item[] {
     chevron: !!c.chevron,
     tag: c.hint,
   }));
-  const local = new Set(out.map((i) => i.name));
+  const local = new Set(out.map((i) => i.name.toLowerCase()));
   for (const c of cachedPrompts()) {
-    if (local.has(c.name)) continue;
+    if (local.has(c.name.toLowerCase())) continue;
+    local.add(c.name.toLowerCase());
     out.push({
       kind: "prompt",
       name: c.name,
@@ -72,6 +73,7 @@ function items(): Item[] {
     });
   }
   for (const s of skillsSnapshot()) {
+    if (local.has(s.name.toLowerCase())) continue;
     out.push({
       kind: "skill",
       name: s.name,

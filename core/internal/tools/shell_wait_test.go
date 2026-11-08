@@ -26,6 +26,30 @@ func startBackground(t *testing.T, tool *ShellTool, ctx *ToolCtx, args string) s
 	return *resp.JobID
 }
 
+func TestShellJobIDsAreShortAndDoNotOverwriteOldLogs(t *testing.T) {
+	ctx, _ := testCtx(t)
+	tmp := filepath.Join(ctx.SessionDir, "tmp")
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(tmp, "job-1.log")
+	if err := os.WriteFile(old, []byte("old output"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewShellTool()
+	id := startBackground(t, tool, ctx, `{"command":"echo done","background":true}`)
+	if id != "job-2" {
+		t.Fatalf("job id = %q, want job-2", id)
+	}
+	if _, err := tool.Call(json.RawMessage(`{"action":"wait","job_id":"`+id+`","seconds":5}`), ctx); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(old)
+	if err != nil || string(data) != "old output" {
+		t.Fatalf("old log = %q, %v", data, err)
+	}
+}
+
 // A wait on a job that ends during the call returns its result like a
 // foreground run would, and does not leave a completion notice behind.
 func TestShellWaitReturnsFinishedResult(t *testing.T) {

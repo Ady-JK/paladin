@@ -366,19 +366,38 @@ func cleanNames(names []string) []string {
 
 // childTools is a subagent turn's registry: the kind's allowlist,
 // narrowed to tools both the parent and the child have switched on. A
-// child never sees MCP or delegation tools, and never a tool its
+// child may use selected MCP tools but never delegation tools or a tool its
 // parent cannot use.
 func (r *AgentRuntime) childTools(child transcript.Session, kind subagentKind) *tools.Registry {
+	return r.childToolsFrom(child, kind, r.tools)
+}
+
+func (r *AgentRuntime) childToolsFrom(child transcript.Session, kind subagentKind, all *tools.Registry) *tools.Registry {
+	if child.Meta.Subagent == nil {
+		return tools.NewRegistry()
+	}
 	global := r.globalToolSwitches()
-	var parentOverrides, childOverrides map[string]bool
+	var childOverrides map[string]bool
 	if child.Meta.Tools != nil {
 		childOverrides = child.Meta.Tools.Overrides
 	}
-	if parent, err := r.subagents.load(child.Meta.Cwd, child.Meta.Subagent.ParentID); err == nil && parent.Meta.Tools != nil {
-		parentOverrides = parent.Meta.Tools.Overrides
+	parent, err := r.subagents.load(child.Meta.Cwd, child.Meta.Subagent.ParentID)
+	if err != nil {
+		return tools.NewRegistry()
 	}
-	return r.tools.Filter(func(name string) bool {
-		return kind.allows(name) && !slices.Contains(agentToolNames, name) &&
-			toolset.Enabled(name, global, parentOverrides) && toolset.Enabled(name, global, childOverrides)
+	// Resolve returns Enabled sorted, so each lookup stays logarithmic even
+	// when a workspace has many MCP or extension tools.
+	parentEnabled := toolset.Resolve(all.Names(), global, parent.Meta.Tools).Enabled
+	return all.Filter(func(name string) bool {
+		allowed := kind.allows(name)
+		if info, ok := all.MCPInfo(name); ok {
+			selected := kind.MCP[info.Server]
+			allowed = (slices.Contains(selected, info.Tool) || slices.Contains(selected, "*")) && (kind.ReadWrite || info.ReadOnly)
+		}
+		if !kind.ReadWrite && (all.IsExtension(name) || name == "browser" || (name == "memory" && kind.Name != "memory-review") || (name != "shell" && all.Mutates(name))) {
+			return false
+		}
+		_, parentAllows := slices.BinarySearch(parentEnabled, name)
+		return allowed && !slices.Contains(agentToolNames, name) && parentAllows && toolset.Enabled(name, global, childOverrides)
 	})
 }

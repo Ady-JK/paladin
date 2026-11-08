@@ -2,8 +2,7 @@
 // tool.
 //
 // The original recall path loaded every transcript in a folder and
-// substring-matched them in Go: correct, but it reads the whole corpus on
-// every call and cannot rank. This package keeps a SQLite FTS5 index
+// substring-matched them in Go without ranking. This package keeps a SQLite FTS5 index
 // under the data dir instead — modernc.org/sqlite is pure Go, so
 // CGO_ENABLED=0 still holds — and answers a query with BM25 ranking and
 // snippets.
@@ -22,7 +21,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	_ "modernc.org/sqlite" // registers the pure-Go "sqlite" driver
 )
@@ -60,8 +58,9 @@ type Hit struct {
 type Index struct {
 	path string
 
-	mu sync.Mutex
-	db *sql.DB
+	mu        sync.Mutex
+	refreshMu sync.Mutex
+	db        *sql.DB
 }
 
 // Path is the index file for one data dir.
@@ -318,23 +317,24 @@ func matchExpr(query string) string {
 	return strings.Join(parts, " AND ")
 }
 
-// Stale reports the sessions in have that the index has not seen at the
-// recorded modification time, plus indexed sessions that are gone.
-func (i *Index) Stale(ctx context.Context, wants map[string]time.Time) ([]string, []string, error) {
+// Stale compares content fingerprints and identifies deleted sessions.
+func (i *Index) Stale(ctx context.Context, wants map[string]string) ([]string, []string, error) {
 	indexed, err := i.Sessions(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
+	stamps, err := i.stamps(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	var refresh, drop []string
-	for id, mod := range wants {
-		if !indexed[id] {
-			refresh = append(refresh, id)
-			continue
-		}
-		at, ok := i.stamp(ctx, id)
-		if !ok || at.Before(mod) {
+	for id, fingerprint := range wants {
+		if stamps[id] != fingerprint {
 			refresh = append(refresh, id)
 		}
+	}
+	for id := range stamps {
+		indexed[id] = true
 	}
 	for id := range indexed {
 		if _, ok := wants[id]; !ok {
@@ -344,33 +344,37 @@ func (i *Index) Stale(ctx context.Context, wants map[string]time.Time) ([]string
 	return refresh, drop, nil
 }
 
-// stamp is when the index last wrote a session.
-func (i *Index) stamp(ctx context.Context, sessionID string) (time.Time, bool) {
+func (i *Index) stamps(ctx context.Context) (map[string]string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.db == nil {
-		return time.Time{}, false
+		return nil, fmt.Errorf("io: session index is closed")
 	}
-	var raw string
-	if err := i.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, "mtime:"+sessionID).Scan(&raw); err != nil {
-		return time.Time{}, false
-	}
-	at, err := time.Parse(time.RFC3339Nano, raw)
+	rows, err := i.db.QueryContext(ctx, `SELECT key, value FROM meta WHERE key LIKE 'fingerprint:%'`)
 	if err != nil {
-		return time.Time{}, false
+		return nil, err
 	}
-	return at, true
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		out[strings.TrimPrefix(key, "fingerprint:")] = value
+	}
+	return out, rows.Err()
 }
 
-// SetStamp records when a session was indexed.
-func (i *Index) SetStamp(ctx context.Context, sessionID string, at time.Time) error {
+// SetStamp records the content indexed for a session.
+func (i *Index) SetStamp(ctx context.Context, sessionID, fingerprint string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.db == nil {
 		return fmt.Errorf("io: session index is closed")
 	}
 	_, err := i.db.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, "mtime:"+sessionID, at.Format(time.RFC3339Nano))
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, "fingerprint:"+sessionID, fingerprint)
 	if err != nil {
 		return fmt.Errorf("io: session index stamp: %w", err)
 	}
@@ -384,7 +388,7 @@ func (i *Index) ForgetStamp(ctx context.Context, sessionID string) error {
 	if i.db == nil {
 		return fmt.Errorf("io: session index is closed")
 	}
-	if _, err := i.db.ExecContext(ctx, `DELETE FROM meta WHERE key = ?`, "mtime:"+sessionID); err != nil {
+	if _, err := i.db.ExecContext(ctx, `DELETE FROM meta WHERE key IN (?, ?)`, "fingerprint:"+sessionID, "mtime:"+sessionID); err != nil {
 		return fmt.Errorf("io: session index stamp: %w", err)
 	}
 	return nil

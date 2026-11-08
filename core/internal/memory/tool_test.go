@@ -25,6 +25,15 @@ func TestToolAddAndView(t *testing.T) {
 	}
 }
 
+func TestMemoryToolGuidesProactivePreferenceCapture(t *testing.T) {
+	desc := NewTool(NewBank(t.TempDir())).Definition().Description
+	for _, want := range []string{"each user message", "without waiting", "temporary", "project", "global"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("memory tool guidance missing %q", want)
+		}
+	}
+}
+
 func TestToolErrors(t *testing.T) {
 	tool := NewTool(NewBank(t.TempDir()))
 	for _, raw := range []string{`{"target":"nope"}`, `{"target":"global","operations":[{"action":"zap"}]}`, `not json`} {

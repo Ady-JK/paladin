@@ -37,8 +37,9 @@ var methodClass = map[string]runClass{
 	"turns": runInline, "resources": runInline, "runningJobs": runInline, "killJob": runInline, "getWorkspace": runInline,
 	"fsHome": runInline, "resolveWorkspace": runInline,
 
-	"listProviders": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
+	"listProviders": runRead, "ideReadFile": runRead, "ideFileStatuses": runRead, "ideList": runRead, "ideSearch": runRead, "ideLayoutGet": runRead, "ideExplorerSettingsGet": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
 	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead, "memoryConfig": runRead,
+	"creatorModeGet": runRead,
 	"contextSources": runRead,
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
 	"sessionHistoryPage": runRead, "sessionImages": runRead,
@@ -54,13 +55,14 @@ var methodClass = map[string]runClass{
 	"saveAttachment": runSession,
 	"terminalStart":  runSession,
 	"renameSession":  runSession, "forkSession": runSession, "deleteSession": runSession,
-	"revertSession": runSession, "worktreeMerge": runSession,
+	"revertSession": runSession, "recoveryAvailable": runSession, "recoveryPreview": runSession, "recoverLatest": runSession, "worktreeMerge": runSession,
 	"budgetSet": runSession, "thinkingSet": runSession, "memoryRefreshSnapshot": runSession,
 	"memorySnapshotStatus": runSession,
 	"deleteSideChat":       runSession,
 
 	"setDefaultProvider": runGlobal, "addProvider": runGlobal, "updateProvider": runGlobal,
-	"setWorkspace": runGlobal, "setPrompt": runGlobal, "resetPrompt": runGlobal,
+	"creatorModeSet": runGlobal, "creatorWorkspace": runGlobal,
+	"ideSaveFile": runGlobal, "ideLayoutSet": runGlobal, "ideExplorerSettingsSet": runGlobal, "setWorkspace": runGlobal, "setPrompt": runGlobal, "resetPrompt": runGlobal,
 	"memorySet": runGlobal, "permissionsSet": runGlobal, "hooksSetConfig": runGlobal,
 	"hooksTrust": runGlobal, "hooksToggle": runGlobal, "mcpSetConfig": runGlobal,
 	"mcpSetEnabled": runGlobal, "mcpRestart": runGlobal, "mcpTrust": runGlobal,
@@ -69,7 +71,7 @@ var methodClass = map[string]runClass{
 	"toolsReload": runGlobal,
 	"customSet":   runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
 
-	"refreshProviders": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong,
+	"refreshProviders": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
 }
 
 // startsTurn marks the requests a later stopChat for the same session

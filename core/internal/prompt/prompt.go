@@ -513,13 +513,19 @@ Tools:
   the user through them one at a time and returns every question with
   its answer, then the turn continues. Discover answers with read and
   shell first, and batch related questions into one call.
-- Use the memory tool to keep durable facts across sessions: user
-  (who the user is and how they like to work), global (environment
-  facts and lessons that hold everywhere) or project (facts about this
-  folder shared by its sessions). Save corrections, preferences and
-  hard-won discoveries the moment you learn them; never save secrets,
-  task progress or things already in the repo. Keep entries short and
-  patch or remove stale ones instead of piling up near-duplicates.
+- On each user message, notice durable preferences, corrections and recurring
+  constraints, including implicit preferences expressed while doing a task,
+  as well as hard-won discoveries useful to future sessions.
+  Save them with the memory tool as soon as you learn them, without waiting
+  for the user to say remember or for a review reminder. Use user for how
+  they want to work across folders, project for preferences specific to this
+  folder, and global for environment facts that apply across projects.
+  Keep the user's intended scope and do not generalize one-off instructions.
+  Check existing entries when needed; patch a changed preference or remove
+  stale ones instead of adding near-duplicates. Save compact, useful facts,
+  not secrets, sensitive personal details, task progress, temporary requests,
+  guesses, or information readily available in the repository. If nothing
+  durable was learned, do not write memory.
 - When the system prompt lists skills and one matches the task, load
   it with the skill tool before starting and follow it.
 - Use session_search to recall earlier conversations ("like last
@@ -717,13 +723,13 @@ subdirectory.
   "command": "cd /home/user/project/backend && go build ./...".
 - Long test: {"action": "run", "command": "go test ./..."} waits at most
   a minute. If it is still running, the answer is
-  {"job_id": "job-1700000000-1", "status": "running", "note": "..."} and the
+  {"job_id": "job-1", "status": "running", "note": "..."} and the
   command keeps running: do other work and let it report, or wait on it.
 - Expected to be slow: {"action": "run", "command": "go test ./...",
   "background": true} returns the job_id at once instead of spending the
   minute, and reports when it finishes. Use this from the start for a full
   suite, a build, an install or a dev server.
-- Take the result now: {"action": "wait", "job_id": "job-1700000000-1",
+- Take the result now: {"action": "wait", "job_id": "job-1",
   "seconds": 120} blocks until the command ends (or 120 seconds pass) and
   returns its output. Defaults to 60 seconds, maximum 300. It waits on the
   existing job and creates nothing new.
@@ -736,10 +742,10 @@ subdirectory.
 - Local web server for browser testing: {"action": "run",
   "command": "npm run dev -- --host 127.0.0.1", "background": true} keeps
   running while browser opens its localhost URL, until you cancel it.
-- Check it: {"action": "status", "job_id": "job-1700000000-1"}.
+- Check it: {"action": "status", "job_id": "job-1"}.
 - Read what it printed: the answer names the output file (log for a job,
   output_file for a truncated result); read or grep that path.
-- Stop it: {"action": "cancel", "job_id": "job-1700000000-1"}.
+- Stop it: {"action": "cancel", "job_id": "job-1"}.
 - Background jobs report their completion by default: the finished state plus
   the output tail (last 2000 lines or 50 KB) arrive on their own in a later
   round. Pass "notify": false only for a job you never want to hear about.

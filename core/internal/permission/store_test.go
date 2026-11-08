@@ -154,6 +154,19 @@ func TestGateNoSandboxWhenUnavailable(t *testing.T) {
 	}
 }
 
+func TestApprovalReportsActualShellSandbox(t *testing.T) {
+	for _, tc := range []struct{ kind, want string }{{"seatbelt", "workspace-write"}, {"", "unavailable"}} {
+		g := newGate(t, Auto)
+		g.SandboxKind = tc.kind
+		rec := &recorder{}
+		answer(t, g.Broker, "s1", "c1", ReplyDeny)
+		g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm test"}), rec.notify)
+		if got := rec.evs[0].Sandbox; got != tc.want {
+			t.Fatalf("sandbox kind %q: got %q, want %q", tc.kind, got, tc.want)
+		}
+	}
+}
+
 func TestGateAskApproveRemembersForSession(t *testing.T) {
 	g := newGate(t, Auto)
 	rec := &recorder{}

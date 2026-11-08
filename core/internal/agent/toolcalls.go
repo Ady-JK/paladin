@@ -12,6 +12,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 // canonicalizeCalls rewrites each call's name to the tool that will
@@ -30,6 +31,12 @@ func canonicalizeCalls(reg *tools.Registry, calls []inference.ToolCall) {
 }
 
 func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
+	// Record all requested calls before executing any of them. If the
+	// process dies, recovery treats calls without results as uncertain.
+	if err := a.checkpoint(""); err != nil {
+		a.settleAborted(calls)
+		return err
+	}
 	if a.noteReadOnlyRound(calls) {
 		// Refuse the whole round: many consecutive rounds only searched
 		// or read without acting. History still needs a result for every
@@ -39,6 +46,10 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			result := tools.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, IsError: true,
 				Content: readOnlyRefusal(a.readOnlyRounds)}
 			a.appendToolResult(&calls[i], &result)
+			if err := a.checkpoint(""); err != nil {
+				a.settleAborted(calls[i+1:])
+				return err
+			}
 			if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
 				return turnStop{}
 			}
@@ -61,7 +72,7 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			return turnStop{}
 		}
 		j := a.batchEnd(calls, i)
-		results := a.execBatch(calls[i:j])
+		results, journalErr := a.execBatch(calls[i:j])
 		for k := i; k < j; k++ {
 			call := calls[k]
 			a.noteEditResult(&call, &results[k-i])
@@ -70,12 +81,23 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 				a.logErrorf("tool:"+result.Name, "%s %s\n%s", call.ID, call.Arguments, result.Content)
 			}
 			a.appendToolResult(&call, &result)
+		}
+		if journalErr != nil {
+			a.settleAborted(calls[j:])
+			return journalErr
+		}
+		if err := a.checkpoint(""); err != nil {
+			a.settleAborted(calls[j:])
+			return err
+		}
+		for k := i; k < j; k++ {
+			call, result := calls[k], results[k-i]
 			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
-				a.settleAborted(calls[k+1:])
+				a.settleAborted(calls[j:])
 				return turnStop{}
 			}
 			if a.noteDenial(&result) {
-				a.settleAborted(calls[k+1:])
+				a.settleAborted(calls[j:])
 				return turnFailed{msg: "stopped after 3 consecutive denied tool calls — the approach needs approval that is not coming; change approach or ask the user what they want instead"}
 			}
 		}
@@ -101,7 +123,7 @@ func (a *Agent) batchEnd(calls []inference.ToolCall, i int) int {
 
 // execBatch runs one batch and returns results in call order. Doom
 // checks stay sequential so their counting matches the call order.
-func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
+func (a *Agent) execBatch(batch []inference.ToolCall) ([]tools.ToolResult, error) {
 	results := make([]tools.ToolResult, len(batch))
 	run := make([]bool, len(batch))
 	for i, call := range batch {
@@ -120,20 +142,39 @@ func (a *Agent) execBatch(batch []inference.ToolCall) []tools.ToolResult {
 		if run[0] {
 			exec(0)
 		}
-		return results
+		return results, nil
 	}
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	completed := make([]bool, len(batch))
+	var journalErr error
 	for i := range batch {
 		if run[i] {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
 				exec(i)
+				mu.Lock()
+				defer mu.Unlock()
+				completed[i] = true
+				if journalErr != nil {
+					return
+				}
+				var extra []transcript.Message
+				for n, done := range completed {
+					if !done {
+						continue
+					}
+					result := results[n]
+					id, name := result.CallID, result.Name
+					extra = append(extra, transcript.Message{Role: transcript.RoleTool, Content: result.Content, Image: result.Image, ToolCallID: &id, Name: &name, IsError: result.IsError})
+				}
+				journalErr = a.checkpointWithResults("", extra)
 			}(i)
 		}
 	}
 	wg.Wait()
-	return results
+	return results, journalErr
 }
 
 // callGated runs one call through the permission gate (after a hold for

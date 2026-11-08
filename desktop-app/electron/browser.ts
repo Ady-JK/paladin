@@ -30,7 +30,7 @@ export type BrowserRequest = {
 
 export type BrowserReply = { id: string; ok: boolean; result?: unknown; imageBase64?: string; error?: string };
 export type BrowserState = {
-  event: "browser/opened" | "browser/closed" | "browser/navigated" | "browser/annotations";
+  event: "browser/opened" | "browser/closed" | "browser/navigated" | "browser/annotations" | "browser/activity";
   sessionId: string;
   url?: string;
   count?: number;
@@ -81,6 +81,7 @@ export class BrowserManager {
   private bounds: BrowserBounds | null = null;
   private browser: Browser | null = null;
   private connecting: Promise<Browser> | null = null;
+  private debuggingPort = 0;
   private readonly picks = new Map<
     string,
     { page: Page; cancelEvent: string; done?: Promise<BrowserElement | null> }
@@ -505,6 +506,7 @@ export class BrowserManager {
     }
     const entry = this.entries.get(req.sessionId);
     if (!entry?.page) throw new Error("browser has no page; use open first");
+    this.state({ event: "browser/activity", sessionId: req.sessionId, url: entry.url });
     const page = entry.page;
     switch (req.action) {
       case "snapshot": {
@@ -665,6 +667,7 @@ export class BrowserManager {
       allowPrivate: () => this.privateNetwork,
       lookup: this.egress.lookup,
       trusted: this.egress.trusted,
+      protectedPort: () => this.debuggingPort,
     });
     const network = egress.listen().then((port) =>
       jar.setProxy({
@@ -801,7 +804,9 @@ export class BrowserManager {
       if (Number.isInteger(port) && port > 0 && port <= 65535) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    if (!port) throw new Error("Chromium debugging endpoint is unavailable");
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+      throw new Error("Chromium debugging endpoint is unavailable");
+    this.debuggingPort = port;
     const client = createRequire(__filename)(path.join(__dirname, "vendor", "playwright-core")) as PlaywrightCore;
     return client.chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   }

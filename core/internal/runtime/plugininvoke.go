@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -56,17 +57,34 @@ func (r *AgentRuntime) PluginInvoke(sessionID, cwd, plugin, view, name string, a
 	if sessionID == "" || plugin == "" || view == "" || name == "" {
 		return PluginToolResult{}, fmt.Errorf("pluginInvoke needs sessionId, plugin, view and tool")
 	}
-	sess, err := r.transcripts.Load(cwd, sessionID)
-	if err != nil {
-		return PluginToolResult{}, err
-	}
-	workspace := resolveCwd(r, cwd)
-	if sess.Meta.Cwd != "" {
-		workspace = sess.Meta.Cwd
-	}
-	project := workspace
-	if p := sess.Meta.ProjectCwd(); p != "" {
-		project = p
+	var workspace, project, sessionDir string
+	if sessionID == "__paladin_plugin_ui__" {
+		if !filepath.IsAbs(cwd) {
+			return PluginToolResult{}, fmt.Errorf("standalone plugin needs an absolute workspace")
+		}
+		info, err := os.Stat(cwd)
+		if err != nil || !info.IsDir() {
+			return PluginToolResult{}, fmt.Errorf("standalone plugin workspace is unavailable")
+		}
+		workspace, project = filepath.Clean(cwd), filepath.Clean(cwd)
+		sessionDir = filepath.Join(r.dataDir, "plugin-ui")
+		if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+			return PluginToolResult{}, err
+		}
+	} else {
+		sess, err := r.transcripts.Load(cwd, sessionID)
+		if err != nil {
+			return PluginToolResult{}, err
+		}
+		workspace = resolveCwd(r, cwd)
+		if sess.Meta.Cwd != "" {
+			workspace = sess.Meta.Cwd
+		}
+		project = workspace
+		if p := sess.Meta.ProjectCwd(); p != "" {
+			project = p
+		}
+		sessionDir = sess.Dir
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -110,7 +128,7 @@ func (r *AgentRuntime) PluginInvoke(sessionID, cwd, plugin, view, name string, a
 	result := registry.Call(call, &tools.ToolCtx{
 		Workspace:  workspace,
 		Project:    project,
-		SessionDir: sess.Dir,
+		SessionDir: sessionDir,
 		SessionID:  sessionID,
 		Cancel:     ctx,
 		Sandbox:    auth.Sandbox,

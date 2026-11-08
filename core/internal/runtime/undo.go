@@ -1,159 +1,33 @@
 // undo.go records one workspace snapshot at the start of each user turn
-// and restores it on revert. There is no per-call bracket and no folder
-// lock around commands, and a revert is final: it puts the folder back
-// exactly as it was before the message, so it cannot be undone.
+// and restores it on revert. A separate per-session recovery snapshot
+// preserves the state immediately before the most recent revert.
 
 package runtime
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/Ady-JK/paladin/core/internal/atomicfile"
-	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
-const (
-	turnsFile = "turns.jsonl"
-	// snapTimeout bounds one snapshot so a huge folder can't wedge a
-	// turn; undo is best-effort, the turn itself always runs.
-	snapTimeout = 60 * time.Second
-)
-
-// TurnSnapshot is the folder state captured just before a user turn.
-type TurnSnapshot struct {
-	Turn int       `json:"turn"`
-	Tree string    `json:"tree"`
-	At   time.Time `json:"at"`
-}
-
-// recordTurnSnapshot captures the folder before a user message starts
-// its work. One snapshot per turn is the whole undo model.
-func (r *AgentRuntime) recordTurnSnapshot(sess transcript.Session, workspace string) {
-	repo := r.snapRepo(workspace)
-	if repo == nil {
-		return
-	}
-	msgs, err := sess.History()
-	if err != nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
-	defer cancel()
-	tree, err := repo.Snapshot(ctx)
-	if err != nil {
-		log.Printf("undo: snapshot turn %d: %v", len(msgs), err)
-		return
-	}
-	entry := TurnSnapshot{Turn: len(msgs), Tree: tree, At: time.Now().UTC()}
-	if err := appendTurnSnapshot(sess.Dir, entry); err != nil {
-		log.Printf("undo: record turn %d: %v", entry.Turn, err)
-	}
-}
-
-func appendTurnSnapshot(dir string, e TurnSnapshot) error {
-	line, err := jsonx.Marshal(e)
-	if err != nil {
-		return err
-	}
-	f, err := os.OpenFile(filepath.Join(dir, turnsFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return err
-	}
-	return f.Sync()
-}
-
-func readTurnSnapshots(dir string) ([]TurnSnapshot, error) {
-	f, err := os.Open(filepath.Join(dir, turnsFile))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-	var out []TurnSnapshot
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1<<20)
-	for sc.Scan() {
-		var e TurnSnapshot
-		// A torn last line (crash mid-append) is skipped, not fatal.
-		if json.Unmarshal(sc.Bytes(), &e) == nil && e.Tree != "" {
-			out = append(out, e)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Turn < out[j].Turn })
-	return out, sc.Err()
-}
-
-func writeTurnSnapshots(dir string, list []TurnSnapshot) error {
-	var buf []byte
-	for _, e := range list {
-		line, err := jsonx.Marshal(e)
-		if err != nil {
-			return err
-		}
-		buf = append(append(buf, line...), '\n')
-	}
-	return atomicfile.Write(filepath.Join(dir, turnsFile), buf)
-}
-
-// pruneTurnSnapshots drops the snapshots of turns a revert removed.
-func pruneTurnSnapshots(dir string, keepBefore int) {
-	list, err := readTurnSnapshots(dir)
-	if err != nil || len(list) == 0 {
-		return
-	}
-	kept := list[:0]
-	for _, e := range list {
-		if e.Turn < keepBefore {
-			kept = append(kept, e)
-		}
-	}
-	if len(kept) == len(list) {
-		return
-	}
-	if err := writeTurnSnapshots(dir, kept); err != nil {
-		log.Printf("undo: prune turn snapshots: %v", err)
-	}
-}
-
-// snapRepo returns the snapshot repo for a workspace, or nil when undo
-// snapshots are unavailable there (no git, refused folder, too large).
-func (r *AgentRuntime) snapRepo(workspace string) *snapshot.Repo {
-	if r.snaps == nil || workspace == "" {
-		return nil
-	}
-	repo, err := r.snaps.Repo(workspace)
-	if err != nil {
-		return nil
-	}
-	return repo
-}
-
 // RevertPreview describes what reverting to a user message would do.
 type RevertPreview struct {
-	Index     int      `json:"index"`
-	Turns     int      `json:"turns"`
-	Files     []string `json:"files"`
-	Deleted   []string `json:"deleted"`
-	Skipped   []string `json:"skipped"`
-	Snapshots bool     `json:"snapshots"`
+	Index      int                         `json:"index"`
+	Turns      int                         `json:"turns"`
+	Files      []string                    `json:"files"`
+	Deleted    []string                    `json:"deleted"`
+	Skipped    []string                    `json:"skipped"`
+	Snapshots  bool                        `json:"snapshots"`
+	Version    string                      `json:"version,omitempty"`
+	Protection *session.SnapshotProtection `json:"protection,omitempty"`
 }
 
 // RevertResult reports a revert.
@@ -174,24 +48,51 @@ type RevertResult struct {
 type revertPlan struct {
 	repo    *snapshot.Repo
 	target  string
+	current string
 	restore []string
 	deleted []string
 	skipped []string
 }
 
-func (r *AgentRuntime) checkRevertTarget(sess transcript.Session, index int) ([]transcript.Message, error) {
-	msgs, err := sess.History()
+func checkRevertTarget(sess transcript.Session, history undoHistory, index int) (transcript.Message, error) {
+	if index < 0 || index >= history.length {
+		return transcript.Message{}, fmt.Errorf("no message at index %d", index)
+	}
+	floor, err := undoFloor(sess.Dir)
 	if err != nil {
-		return nil, err
+		return transcript.Message{}, fmt.Errorf("read undo retention boundary: %w", err)
 	}
-	if index < 0 || index >= len(msgs) {
-		return nil, fmt.Errorf("no message at index %d", index)
+	if index < floor {
+		return transcript.Message{}, fmt.Errorf("only the last %d turns can be reverted", maxUndoTurns)
 	}
-	m := msgs[index]
+	var m transcript.Message
+	start := 0
+	for _, turn := range history.turns {
+		if index < start+len(turn.Messages) {
+			m = turn.Messages[index-start]
+			break
+		}
+		start += len(turn.Messages)
+	}
 	if m.Role != transcript.RoleUser || m.Replay || session.IsNotifyMessage(m) {
-		return nil, fmt.Errorf("message %d is not a user message", index)
+		return transcript.Message{}, fmt.Errorf("message %d is not a user message", index)
 	}
-	return msgs, nil
+	count, found := 0, false
+	for _, start := range history.starts {
+		if start == index {
+			found = true
+		}
+		if start >= index {
+			count++
+		}
+	}
+	if !found {
+		return transcript.Message{}, fmt.Errorf("message %d is not the start of a turn", index)
+	}
+	if count > maxUndoTurns {
+		return transcript.Message{}, fmt.Errorf("only the last %d turns can be reverted", maxUndoTurns)
+	}
+	return m, nil
 }
 
 // planRevert compares the turn's snapshot with the folder now. Every
@@ -232,14 +133,18 @@ func (r *AgentRuntime) planRevert(ctx context.Context, sess transcript.Session, 
 	if err != nil {
 		return nil, count, err
 	}
-	plan := &revertPlan{repo: repo, target: target.Tree}
+	currentEntries, err := repo.Entries(ctx, current, changed)
+	if err != nil {
+		return nil, count, err
+	}
+	plan := &revertPlan{repo: repo, target: target.Tree, current: current}
 	for _, p := range changed {
 		switch {
-		case entries[p] == "":
-			plan.deleted = append(plan.deleted, p)
-		case repo.Untracked(entries[p]):
+		case repo.Untracked(entries[p]) || repo.Untracked(currentEntries[p]):
 			// Too large or binary to capture: leave the current file.
 			plan.skipped = append(plan.skipped, p)
+		case entries[p] == "":
+			plan.deleted = append(plan.deleted, p)
 		default:
 			plan.restore = append(plan.restore, p)
 		}
@@ -251,11 +156,18 @@ func (r *AgentRuntime) planRevert(ctx context.Context, sess transcript.Session, 
 }
 
 func (r *AgentRuntime) RevertPreview(sessionID, cwd string, index int) (RevertPreview, error) {
+	r.undoMu.Lock()
+	defer r.undoMu.Unlock()
 	sess, err := r.transcripts.Load(cwd, sessionID)
 	if err != nil {
 		return RevertPreview{}, err
 	}
-	if _, err := r.checkRevertTarget(sess, index); err != nil {
+	history, err := readUndoHistory(sess)
+	if err != nil {
+		return RevertPreview{}, err
+	}
+	index = history.revertTargetIndex(index)
+	if _, err := checkRevertTarget(sess, history, index); err != nil {
 		return RevertPreview{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
@@ -265,19 +177,63 @@ func (r *AgentRuntime) RevertPreview(sessionID, cwd string, index int) (RevertPr
 		return RevertPreview{}, err
 	}
 	out := RevertPreview{Index: index, Turns: count, Files: []string{}, Deleted: []string{}, Skipped: []string{}}
+	entries, statusErr := readProtection(sess.Dir)
+	if statusErr == nil {
+		for _, p := range entries {
+			if p.Turn == index {
+				copy := p
+				out.Protection = &copy
+				break
+			}
+		}
+	}
+	current := ""
 	if plan != nil {
 		out.Snapshots = true
+		current = plan.current
 		out.Files = nonNil(plan.restore)
 		out.Deleted = nonNil(plan.deleted)
 		out.Skipped = nonNil(plan.skipped)
+		if out.Protection == nil {
+			out.Protection = &session.SnapshotProtection{Turn: index, State: "unknown", Reason: "Snapshot coverage details were not recorded for this turn."}
+		}
+		paths, truncated, err := plan.repo.Excluded(ctx, current, 100)
+		if err != nil {
+			out.Protection.Truncated = true
+		} else {
+			seen := make(map[string]bool, len(out.Protection.Excluded)+len(paths))
+			var combined []string
+			for _, p := range append(out.Protection.Excluded, paths...) {
+				if seen[p] {
+					continue
+				}
+				seen[p] = true
+				if len(combined) == 100 {
+					truncated = true
+					continue
+				}
+				combined = append(combined, p)
+			}
+			sort.Strings(combined)
+			out.Protection.Excluded = combined
+			out.Protection.Truncated = out.Protection.Truncated || truncated
+		}
+	}
+	out.Version, err = previewVersion(sess.Dir, current)
+	if err != nil {
+		return RevertPreview{}, err
 	}
 	return out, nil
 }
 
-// RevertSession rolls the folder back to the snapshot taken before the
-// user message at index, then drops that message and everything after
-// it. The restore is final: there is no redo.
+// RevertSession saves a recovery snapshot, rolls the folder back to the
+// snapshot taken before the message, then truncates the conversation.
 func (r *AgentRuntime) RevertSession(sessionID, cwd string, index int) (RevertResult, error) {
+	return r.RevertSessionChecked(sessionID, cwd, index, "")
+}
+
+// RevertSessionChecked rejects an out-of-date preview before changing files.
+func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, version string) (RevertResult, error) {
 	r.undoMu.Lock()
 	defer r.undoMu.Unlock()
 	if r.hub.Busy(sessionID) {
@@ -290,13 +246,18 @@ func (r *AgentRuntime) RevertSession(sessionID, cwd string, index int) (RevertRe
 	if err := r.jobs.checkIdle(sessionID, sess.Dir); err != nil {
 		return RevertResult{}, err
 	}
-	msgs, err := r.checkRevertTarget(sess, index)
+	history, err := readUndoHistory(sess)
 	if err != nil {
 		return RevertResult{}, err
 	}
-	text := msgs[index].Display
+	index = history.revertTargetIndex(index)
+	msg, err := checkRevertTarget(sess, history, index)
+	if err != nil {
+		return RevertResult{}, err
+	}
+	text := msg.Display
 	if text == "" {
-		text = msgs[index].Content
+		text = msg.Content
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
 	defer cancel()
@@ -308,6 +269,25 @@ func (r *AgentRuntime) RevertSession(sessionID, cwd string, index int) (RevertRe
 	plan, _, err := r.planRevert(ctx, sess, index)
 	if err != nil {
 		return RevertResult{}, err
+	}
+	current := ""
+	if plan != nil {
+		current = plan.current
+	}
+	if version != "" {
+		actual, err := previewVersion(sess.Dir, current)
+		if err != nil {
+			return RevertResult{}, err
+		}
+		if version != actual {
+			return RevertResult{}, fmt.Errorf("folder or conversation changed since the undo preview; review it again")
+		}
+	}
+	if err := saveRecovery(sess, current); err != nil {
+		return RevertResult{}, fmt.Errorf("save recovery snapshot: %w", err)
+	}
+	if err := advanceUndoFloor(sess.Dir, history.starts, false); err != nil {
+		return RevertResult{}, fmt.Errorf("save undo retention boundary: %w", err)
 	}
 	out := RevertResult{Index: index, Message: text, Restored: []string{}, Deleted: []string{}, Skipped: []string{}}
 	if plan != nil {
@@ -333,6 +313,9 @@ func (r *AgentRuntime) RevertSession(sessionID, cwd string, index int) (RevertRe
 		return RevertResult{}, err
 	}
 	pruneTurnSnapshots(sess.Dir, index)
+	if err := pruneProtection(sess.Dir, index); err != nil {
+		log.Printf("undo: prune protection status: %v", err)
+	}
 	sess.Meta.Revert = nil
 	if err := sess.SaveMeta(); err != nil {
 		return RevertResult{}, err

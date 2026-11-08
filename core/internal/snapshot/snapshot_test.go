@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -78,50 +79,12 @@ func changed(t *testing.T, r *Repo, a, b string) []string {
 	return got
 }
 
-func TestSnapshotPathsStagesOnlyTheNamedPath(t *testing.T) {
-	r, work := setup(t)
-	write(t, work, "a.txt", "one\n")
-	write(t, work, "b.txt", "bee\n")
-	write(t, work, "gone.txt", "bye\n")
-	before := snap(t, r)
-
-	write(t, work, "a.txt", "two\n")
-	write(t, work, "b.txt", "buzz\n")
-	os.Remove(filepath.Join(work, "gone.txt"))
-	scoped, err := r.SnapshotPaths(context.Background(), []string{"a.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := changed(t, r, before, scoped); strings.Join(got, "|") != "a.txt" {
-		t.Fatalf("scoped changed = %q, want only a.txt", got)
-	}
-
-	// A tracked deletion is still staged by its path.
-	os.Remove(filepath.Join(work, "a.txt"))
-	deleted, err := r.SnapshotPaths(context.Background(), []string{"a.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := changed(t, r, scoped, deleted); strings.Join(got, "|") != "a.txt" {
-		t.Fatalf("deleted changed = %q, want a.txt", got)
-	}
-
-	// A path that never existed has nothing to stage and must not fail.
-	empty, err := r.SnapshotPaths(context.Background(), []string{"new.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if empty != deleted {
-		t.Fatalf("a missing new path changed the tree: %s vs %s", empty, deleted)
-	}
-}
-
-func TestSnapshotPathsSkipsIgnoredFiles(t *testing.T) {
+func TestSnapshotSkipsIgnoredFiles(t *testing.T) {
 	r, work := setup(t)
 	write(t, work, ".gitignore", "dist/\n")
 	before := snap(t, r)
 	write(t, work, "dist/generated.js", "built\n")
-	after, err := r.SnapshotPaths(context.Background(), []string{"dist/generated.js"})
+	after, err := r.Snapshot(context.Background())
 	if err != nil {
 		t.Fatalf("ignored path must not fail the snapshot: %v", err)
 	}
@@ -130,17 +93,28 @@ func TestSnapshotPathsSkipsIgnoredFiles(t *testing.T) {
 	}
 }
 
-func TestRelPathsRejectsOutsidePaths(t *testing.T) {
-	r, work := setup(t)
-	got := r.RelPaths([]string{filepath.Join(work, "src", "a.go"), "b.txt"})
-	if strings.Join(got, "|") != "src/a.go|b.txt" {
-		t.Fatalf("rel paths = %q", got)
+func TestSnapshotListsExcludedPaths(t *testing.T) {
+	needGit(t)
+	work := t.TempDir()
+	write(t, work, ".gitignore", "ignored.txt\n")
+	write(t, work, "ignored.txt", "ignored")
+	if err := os.WriteFile(filepath.Join(work, "binary.dat"), []byte{'a', 0, 'b'}, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got := r.RelPaths([]string{filepath.Join(work, "..", "outside.txt")}); got != nil {
-		t.Fatalf("outside path accepted: %q", got)
+	repo, err := NewStore(t.TempDir()).Repo(work)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := r.RelPaths([]string{""}); got != nil {
-		t.Fatalf("empty path accepted: %q", got)
+	tree, err := repo.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	excluded, truncated, err := repo.Excluded(context.Background(), tree, 100)
+	if err != nil || truncated || !slices.Contains(excluded, "ignored.txt") || !slices.Contains(excluded, "binary.dat") {
+		t.Fatalf("excluded = %v truncated=%v err=%v", excluded, truncated, err)
+	}
+	if paths, cut, err := repo.Excluded(context.Background(), tree, 1); err != nil || !cut || len(paths) != 1 {
+		t.Fatalf("bounded exclusions = %v truncated=%v err=%v", paths, cut, err)
 	}
 }
 

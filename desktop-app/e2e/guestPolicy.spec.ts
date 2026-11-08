@@ -1,13 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { allowedChatPopup, guestPermissionAllowed } from "../electron/guestPolicy";
-
-test("chat auth popup policy is restricted to provider HTTPS origins", () => {
-  expect(allowedChatPopup("https://auth.openai.com/login")).toBe(true);
-  expect(allowedChatPopup("https://claude.ai/login")).toBe(true);
-  expect(allowedChatPopup("https://chatgpt.com.evil.test/steal")).toBe(false);
-  expect(allowedChatPopup("http://chatgpt.com/login")).toBe(false);
-  expect(allowedChatPopup("file:///etc/passwd")).toBe(false);
-});
+import { allowedPersonalPopup, guestPermissionAllowed } from "../electron/guestPolicy";
 
 test("chat-site panes get only clipboard write and fullscreen", () => {
   for (const p of ["clipboard-sanitized-write", "fullscreen"]) expect(guestPermissionAllowed(p)).toBe(true);
@@ -27,5 +19,14 @@ test("chat-site panes get only clipboard write and fullscreen", () => {
     "unknown-new-permission",
   ]) {
     expect(guestPermissionAllowed(p)).toBe(false);
+  }
+});
+
+test("personal browser allows secure sign-in popups but refuses unsafe URLs", () => {
+  for (const url of ["about:blank", "https://login.example.com/authorize", "https://accounts.example.org/"]) {
+    expect(allowedPersonalPopup(url)).toBe(true);
+  }
+  for (const url of ["http://example.com/", "file:///etc/passwd", "javascript:alert(1)", "https://u:p@example.com/"]) {
+    expect(allowedPersonalPopup(url)).toBe(false);
   }
 });

@@ -20,6 +20,11 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 )
 
+// runUnary exercises one request through the production method table.
+func runUnary(rt *runtime.AgentRuntime, req *Request) Response {
+	return runHandler(rt, req, parseArgs(req.Params))
+}
+
 func testRuntime(t *testing.T) *runtime.AgentRuntime {
 	t.Helper()
 	dir := t.TempDir()

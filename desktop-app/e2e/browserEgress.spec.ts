@@ -34,11 +34,17 @@ type Fixture = { origin: Server; originPort: number; hits: string[]; guard: Egre
 
 async function fixture(
   answers: Record<string, string[] | (() => string[])>,
-  opts: { allowPrivate?: () => boolean; trusted?: string[] } = {},
+  opts: {
+    allowPrivate?: () => boolean;
+    trusted?: string[];
+    protectedPort?: () => number;
+    unusualHeader?: boolean;
+  } = {},
 ): Promise<Fixture> {
   const hits: string[] = [];
   const origin = createServer((req, res) => {
     hits.push(`${req.headers.host} ${req.url}`);
+    if (opts.unusualHeader) res.setHeader("constructor", "from-origin");
     res.writeHead(200, { "Content-Type": "text/plain", "X-Origin": "yes" });
     res.end(`origin saw ${req.headers.host}`);
   });
@@ -55,10 +61,66 @@ async function fixture(
     allowPrivate: opts.allowPrivate ?? (() => false),
     lookup,
     trusted: new Set(opts.trusted ?? []),
+    protectedPort: opts.protectedPort,
   });
   const port = await guard.listen();
   return { origin, originPort: (origin.address() as AddressInfo).port, hits, guard, port };
 }
+
+test("the browser cannot connect to Paladin's local debugging port", async () => {
+  let protectedPort = 0;
+  const f = await fixture(
+    { localhost: ["127.0.0.1"], "alias.test": ["127.0.0.1"] },
+    {
+      allowPrivate: () => true,
+      protectedPort: () => protectedPort,
+    },
+  );
+  try {
+    protectedPort = f.originPort;
+    expect((await get(f, `http://localhost:${f.originPort}/json/version`)).status).toBe(403);
+    expect((await get(f, `http://alias.test:${f.originPort}/json/list`)).status).toBe(403);
+    expect((await tunnel(f, `127.0.0.1:${f.originPort}`)).status).toBe("HTTP/1.1 403 Forbidden");
+    expect(f.hits).toEqual([]);
+    protectedPort = 0;
+    expect((await get(f, `http://localhost:${f.originPort}/`)).status).toBe(200);
+  } finally {
+    await done(f);
+  }
+});
+
+test("proxy handles HTTP headers that match object prototype properties", async () => {
+  const f = await fixture({ localhost: ["127.0.0.1"] }, { unusualHeader: true });
+  try {
+    const response = await new Promise<{ status: number; value: string | undefined; header: unknown }>(
+      (resolve, reject) => {
+        const req = request(
+          {
+            host: "127.0.0.1",
+            port: f.port,
+            path: `http://localhost:${f.originPort}/`,
+            headers: { constructor: "safe" },
+          },
+          (res) => {
+            res.resume();
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                value: res.headers["x-origin"] as string | undefined,
+                header: res.headers["constructor"],
+              }),
+            );
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      },
+    );
+    expect(response).toEqual({ status: 200, value: "yes", header: "from-origin" });
+  } finally {
+    await done(f);
+  }
+});
 
 async function done(f: Fixture): Promise<void> {
   await f.guard.close();

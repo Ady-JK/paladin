@@ -27,13 +27,13 @@ const (
 	waitMax     = 10 * time.Minute
 )
 
-// workspaceNote is told to the model with every spawn: children share
-// the parent's folder but cannot change it, so they never conflict.
-const workspaceNote = "shared, read-only: the child reads the same files as you but cannot write, edit or run mutating commands, so parallel children never conflict over files. Make any changes yourself after reading its result."
+// workspaceNote describes the restrictions on a read-only child.
+const workspaceNote = "shared, read-only: file writers, extensions and mutating shell commands are unavailable. Selected MCP tools must be marked read-only by their server; those markings are not guarantees."
 
 func (r *AgentRuntime) registerAgentTools() {
 	m := r.subagents
-	r.tools.Register(&agentTool{name: "spawn_agent", parallel: true, def: spawnDef(), call: m.spawnCall})
+	r.initAgentDefinitions()
+	r.tools.Register(&agentTool{name: "spawn_agent", parallel: true, dynamicDef: func() tools.ToolDefinition { return spawnDefFor(r.configuredSubagents()) }, call: m.spawnCall})
 	r.tools.Register(&agentTool{name: "send_message", parallel: true, def: sendDef(), call: m.sendCall})
 	r.tools.Register(&agentTool{name: "followup_task", parallel: true, def: followupDef(), call: m.followupCall})
 	r.tools.Register(&agentTool{name: "wait_agent", def: waitDef(), call: m.waitCall})
@@ -42,15 +42,21 @@ func (r *AgentRuntime) registerAgentTools() {
 }
 
 type agentTool struct {
-	name     string
-	parallel bool
-	def      tools.ToolDefinition
-	call     func(raw json.RawMessage, ctx *tools.ToolCtx) (any, error)
+	name       string
+	parallel   bool
+	def        tools.ToolDefinition
+	dynamicDef func() tools.ToolDefinition
+	call       func(raw json.RawMessage, ctx *tools.ToolCtx) (any, error)
 }
 
-func (t *agentTool) Name() string                     { return t.name }
-func (t *agentTool) Definition() tools.ToolDefinition { return t.def }
-func (t *agentTool) ParallelSafe() bool               { return t.parallel }
+func (t *agentTool) Name() string { return t.name }
+func (t *agentTool) Definition() tools.ToolDefinition {
+	if t.dynamicDef != nil {
+		return t.dynamicDef()
+	}
+	return t.def
+}
+func (t *agentTool) ParallelSafe() bool { return t.parallel }
 
 func (t *agentTool) Call(raw json.RawMessage, ctx *tools.ToolCtx) (string, error) {
 	if ctx == nil {
@@ -94,22 +100,31 @@ func objectSchema(props map[string]any, required ...string) map[string]any {
 
 var targetProp = map[string]any{"type": "string", "description": "The agent_id (or unique name) returned by spawn_agent."}
 
-func spawnDef() tools.ToolDefinition {
+func spawnDefFor(available []subagentKind) tools.ToolDefinition {
 	var kinds []string
 	var lines []string
-	for _, k := range subagentKinds {
+	for _, k := range available {
+		if !subagentKindVisible(k.Name) {
+			continue
+		}
 		kinds = append(kinds, k.Name)
 		lines = append(lines, "- "+k.Name+": "+k.Description)
+	}
+	agentType := map[string]any{"type": "string", "description": "Which kind of subagent to start."}
+	if len(kinds) > 0 {
+		agentType["enum"] = kinds
+	} else {
+		lines = append(lines, "- No agent definitions are currently available.")
 	}
 	return tools.ToolDefinition{
 		Name: "spawn_agent",
 		Description: "Start a subagent on a focused task in the background and return its agent_id at once. " +
-			"Subagents are read-only (they read files and run inspection commands in your workspace but cannot change anything) " +
-			"and cannot spawn agents. Use them for parallel, independent investigation; do quick lookups yourself. " +
+			"Each type has its configured tools and read-only or read-write access, subject to your permissions. " +
+			"Children cannot spawn agents. Use them for parallel, independent work; do quick lookups yourself. " +
 			"Their final reply comes back to you automatically when they finish (or call wait_agent). Types:\n" +
 			strings.Join(lines, "\n"),
 		Parameters: objectSchema(map[string]any{
-			"agent_type": map[string]any{"type": "string", "enum": kinds, "description": "Which kind of subagent to start."},
+			"agent_type": agentType,
 			"task": map[string]any{"type": "string", "description": "The complete assignment. With fork_turns \"none\" the child sees only this, " +
 				"so include every fact, path and constraint it needs and say what to report back."},
 			"name": map[string]any{"type": "string", "description": "Optional short label, unique among your agents (e.g. \"auth-flow\")."},
@@ -133,11 +148,11 @@ func (m *subagentManager) spawnCall(raw json.RawMessage, ctx *tools.ToolCtx) (an
 	if err := decodeArgs("spawn_agent", raw, &a); err != nil {
 		return nil, err
 	}
-	kind, ok := findSubagentKind(strings.TrimSpace(a.AgentType))
+	kind, ok := m.r.findConfiguredSubagent(strings.TrimSpace(a.AgentType))
 	// A runtime-spawned kind is never a delegation target: the model
 	// naming it would be a wasted turn, not a capability.
 	if !ok || !subagentKindVisible(kind.Name) {
-		return nil, fmt.Errorf("agent_type must be one of %s, got %q", strings.Join(subagentKindNames(), ", "), a.AgentType)
+		return nil, fmt.Errorf("unknown or unavailable agent_type %q", a.AgentType)
 	}
 	task := strings.TrimSpace(a.Task)
 	if task == "" {
@@ -161,8 +176,8 @@ func (m *subagentManager) spawnCall(raw json.RawMessage, ctx *tools.ToolCtx) (an
 		return nil, err
 	}
 	return map[string]any{
-		"agent_id": info.ID, "name": info.Name, "agent_type": info.Type, "status": info.Status,
-		"fork_turns": info.ForkTurns, "workspace": workspaceNote,
+		"agent_id": m.modelID(ctx.SessionID, info.ID), "name": info.Name, "agent_type": info.Type, "status": info.Status,
+		"fork_turns": info.ForkTurns, "workspace": map[bool]string{true: "shared, read-write subject to parent permissions", false: workspaceNote}[kind.ReadWrite],
 		"note": "Running in the background. Its result is delivered to you when it finishes; keep working or call wait_agent.",
 	}, nil
 }
@@ -220,7 +235,7 @@ func (m *subagentManager) sendCall(raw json.RawMessage, ctx *tools.ToolCtx) (any
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"agent_id": info.ID, "name": info.Name, "status": info.Status, "delivered": true}, nil
+	return map[string]any{"agent_id": m.modelID(ctx.SessionID, info.ID), "name": info.Name, "status": info.Status, "delivered": true}, nil
 }
 
 func followupDef() tools.ToolDefinition {
@@ -250,7 +265,7 @@ func (m *subagentManager) followupCall(raw json.RawMessage, ctx *tools.ToolCtx) 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"agent_id": info.ID, "name": info.Name, "status": info.Status}, nil
+	return map[string]any{"agent_id": m.modelID(ctx.SessionID, info.ID), "name": info.Name, "status": info.Status}, nil
 }
 
 func waitDef() tools.ToolDefinition {
@@ -289,6 +304,7 @@ func (m *subagentManager) waitCall(raw json.RawMessage, ctx *tools.ToolCtx) (any
 	}
 	agents := make([]map[string]any, 0, len(res.Agents))
 	for _, info := range res.Agents {
+		info.ID = m.modelID(ctx.SessionID, info.ID)
 		agents = append(agents, agentView(info, true))
 	}
 	out := map[string]any{"agents": agents, "timed_out": res.TimedOut}
@@ -317,7 +333,7 @@ func (m *subagentManager) interruptCall(raw json.RawMessage, ctx *tools.ToolCtx)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{"agent_id": info.ID, "name": info.Name, "status": info.Status, "interrupted": stopped}
+	out := map[string]any{"agent_id": m.modelID(ctx.SessionID, info.ID), "name": info.Name, "status": info.Status, "interrupted": stopped}
 	if !stopped {
 		out["note"] = "The agent was not running; nothing to stop."
 	}
@@ -342,6 +358,7 @@ func (m *subagentManager) listCall(raw json.RawMessage, ctx *tools.ToolCtx) (any
 	}
 	agents := make([]map[string]any, 0, len(infos))
 	for _, info := range infos {
+		info.ID = m.modelID(ctx.SessionID, info.ID)
 		agents = append(agents, agentView(info, false))
 	}
 	return map[string]any{"agents": agents}, nil

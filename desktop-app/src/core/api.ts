@@ -48,6 +48,7 @@ import type {
   TurnInfo,
   FileEntry,
   FsList,
+  IDEExplorerSettings,
   MessageInfo,
   OverallUsage,
   ProviderInfo,
@@ -92,6 +93,73 @@ export function resolveWorkspace(cwd: string | null): Promise<string> {
 
 export function setWorkspace(path: string): Promise<string> {
   return invoke<string>("setWorkspace", { path });
+}
+
+export function creatorModeGet(): Promise<boolean> {
+  return invoke<boolean>("creatorModeGet");
+}
+
+export function creatorModeSet(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("creatorModeSet", { enabled });
+}
+
+export function creatorWorkspace(): Promise<string> {
+  return invoke<string>("creatorWorkspace");
+}
+
+export type IDEFile = { path: string; content: string; version: string };
+export type IDEDiagnostics = {
+  state: "ready" | "unavailable" | "disabled" | "timeout";
+  server?: string;
+  errors: number;
+  diagnostics: { line: number; column: number; message: string; source?: string; code?: string }[];
+};
+export function ideDiagnose(cwd: string, path: string, content: string): Promise<IDEDiagnostics> {
+  return invoke<IDEDiagnostics>("ideDiagnose", { cwd, path, content });
+}
+export type IDELayout = {
+  files: { path: string; draft?: { content: string; saved: string; version: string; lineEnding: "\n" | "\r\n" } }[];
+  activePath: string;
+  expanded: string[];
+  explorerVisible: boolean;
+  agentVisible: boolean;
+  terminalHeight: number;
+  sessionId: string;
+};
+export function ideLayoutGet(cwd: string): Promise<IDELayout | null> {
+  return invoke<IDELayout | null>("ideLayoutGet", { cwd });
+}
+export function ideLayoutSet(cwd: string, layout: IDELayout): Promise<boolean> {
+  return invoke<boolean>("ideLayoutSet", { cwd, layout });
+}
+export function ideReadFile(cwd: string, path: string): Promise<IDEFile> {
+  return invoke<IDEFile>("ideReadFile", { cwd, path });
+}
+export function ideFileStatuses(
+  cwd: string,
+  files: { path: string; version: string }[],
+): Promise<{ path: string; state: "same" | "changed" | "unavailable"; version?: string }[]> {
+  return invoke("ideFileStatuses", { cwd, files });
+}
+export function ideSaveFile(cwd: string, path: string, content: string, version: string): Promise<IDEFile> {
+  return invoke<IDEFile>("ideSaveFile", { cwd, path, content, version });
+}
+
+export function ideList(cwd: string, path: string, settings: IDEExplorerSettings): Promise<FsList> {
+  return invoke<FsList>("ideList", { cwd, path, ...settings });
+}
+
+export function ideSearch(
+  cwd: string,
+  query: string,
+): Promise<{ hits: { path: string; line: number; text: string }[]; truncated: boolean }> {
+  return invoke("ideSearch", { cwd, query });
+}
+export function ideExplorerSettingsGet(cwd: string): Promise<IDEExplorerSettings> {
+  return invoke<IDEExplorerSettings>("ideExplorerSettingsGet", { cwd });
+}
+export function ideExplorerSettingsSet(cwd: string, settings: IDEExplorerSettings): Promise<boolean> {
+  return invoke<boolean>("ideExplorerSettingsSet", { cwd, ...settings });
 }
 
 export function fsList(path: string | null): Promise<FsList> {
@@ -202,8 +270,25 @@ export function sessionDiff(
 
 // revertSession restores the folder to the snapshot taken before the
 // message at index and drops that message and everything after it.
-export function revertSession(sessionId: string, cwd: string | null, index: number): Promise<RevertResult> {
-  return invoke<RevertResult>("revertSession", { sessionId, cwd, index });
+export function revertSession(
+  sessionId: string,
+  cwd: string | null,
+  index: number,
+  version?: string,
+): Promise<RevertResult> {
+  return invoke<RevertResult>("revertSession", { sessionId, cwd, index, version });
+}
+
+export function recoveryAvailable(sessionId: string): Promise<boolean> {
+  return invoke<boolean>("recoveryAvailable", { sessionId });
+}
+
+export function recoveryPreview(sessionId: string): Promise<RevertPreview> {
+  return invoke<RevertPreview>("recoveryPreview", { sessionId });
+}
+
+export function recoverLatest(sessionId: string, version?: string): Promise<RevertResult> {
+  return invoke<RevertResult>("recoverLatest", { sessionId, version });
 }
 
 export function gitInfo(cwd: string): Promise<GitInfo> {

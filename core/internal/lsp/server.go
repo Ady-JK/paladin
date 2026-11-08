@@ -224,6 +224,19 @@ func (s *server) syncLocked(path string) (int, time.Time, bool) {
 	if !ok {
 		return 0, time.Time{}, false
 	}
+	return s.syncTextLocked(path, text, true)
+}
+
+func (s *server) syncText(path, text string) (int, time.Time, bool) {
+	if len(text) > maxDocBytes {
+		return 0, time.Time{}, false
+	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	return s.syncTextLocked(path, text, false)
+}
+
+func (s *server) syncTextLocked(path, text string, saved bool) (int, time.Time, bool) {
 	uri := fileURI(path)
 	s.mu.Lock()
 	v, opened := s.versions[uri]
@@ -242,7 +255,9 @@ func (s *server) syncLocked(path string) (int, time.Time, bool) {
 			"contentChanges": []map[string]any{{"text": text}},
 		})
 	}
-	_ = s.c.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": uri}, "text": text})
+	if saved {
+		_ = s.c.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": uri}, "text": text})
+	}
 	return v, sent, true
 }
 
@@ -270,6 +285,15 @@ func fitsDoc(path string) bool {
 // than the sync. ok is false when none arrived in time.
 func (s *server) diagnose(ctx context.Context, path string, timeout time.Duration) ([]lspDiagnostic, bool) {
 	version, sent, ok := s.sync(path)
+	return s.waitDiagnostics(ctx, path, timeout, version, sent, ok)
+}
+
+func (s *server) diagnoseText(ctx context.Context, path, text string, timeout time.Duration) ([]lspDiagnostic, bool) {
+	version, sent, ok := s.syncText(path, text)
+	return s.waitDiagnostics(ctx, path, timeout, version, sent, ok)
+}
+
+func (s *server) waitDiagnostics(ctx context.Context, path string, timeout time.Duration, version int, sent time.Time, ok bool) ([]lspDiagnostic, bool) {
 	if !ok {
 		return nil, false
 	}

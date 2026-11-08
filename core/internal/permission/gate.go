@@ -33,8 +33,10 @@ type Approval struct {
 	MCPTool string `json:"mcpTool,omitempty"`
 	Args    string `json:"args,omitempty"`
 	// Host and URL describe a web request.
-	Host        string   `json:"host,omitempty"`
-	URL         string   `json:"url,omitempty"`
+	Host string `json:"host,omitempty"`
+	URL  string `json:"url,omitempty"`
+	// Sandbox is the shell policy the approved command will receive.
+	Sandbox     string   `json:"sandbox,omitempty"`
 	Reasons     []string `json:"reasons"`
 	Destructive bool     `json:"destructive,omitempty"`
 	Choices     []string `json:"choices"`
@@ -205,6 +207,15 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 	card := Approval{ID: callID, Tool: name, Kind: req.Kind, Command: req.Command, Path: req.Path,
 		Server: req.Server, MCPTool: req.MCPTool, Args: req.Args, Host: req.Host, URL: req.URL,
 		Reasons: d.Reasons, Destructive: d.Destructive, Choices: d.Choices, Remember: d.Remember, State: StatePending}
+	if req.Kind == KindShell {
+		if g.SandboxKind == "" {
+			card.Sandbox = "unavailable"
+		} else if d.Sandbox == sandbox.ModeNone {
+			card.Sandbox = "none"
+		} else {
+			card.Sandbox = string(d.Sandbox)
+		}
+	}
 	reply, err := g.ask(ctx, card, notify)
 	if err != nil {
 		return Auth{Content: refusal("interrupted while waiting for the user's approval; it did not run")}

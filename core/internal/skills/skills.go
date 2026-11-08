@@ -111,9 +111,10 @@ func List(dataDir, cwd string) []Skill {
 		}
 	}
 	off := Disabled(dataDir)
+	creatorAvailable := creatorSkillsAvailable(dataDir, cwd)
 	out := make([]Skill, 0, len(byName))
 	for key, s := range byName {
-		if !off[key] {
+		if !off[key] && (!IsCreatorSkill(key) || creatorAvailable) {
 			out = append(out, s)
 		}
 	}
@@ -127,6 +128,9 @@ func Load(dataDir, cwd, name string) (Skill, error) {
 	name = strings.TrimSpace(name)
 	if !ValidName(name) {
 		return Skill{}, fmt.Errorf("parse: invalid skill name %q", name)
+	}
+	if IsCreatorSkill(name) && !creatorSkillsAvailable(dataDir, cwd) {
+		return Skill{}, fmt.Errorf("not found: skill %q is available only in the Creator workspace while Creator mode is on", name)
 	}
 	roots := []struct {
 		dir    string
