@@ -43,6 +43,24 @@
 #headerStatusActions {
   order: 3;
 }
+/* The readings change width as a turn runs (session id, context fill,
+   process load). Pinning them to the left of the header keeps the icon
+   row and window controls from sliding sideways whenever a pill grows
+   or shrinks. */
+#headerMetrics {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 1;
+  align-items: center;
+  gap: 12px;
+  order: 0;
+}
+#headerMetrics:empty {
+  display: none;
+}
+#mainCard:has(#agentView.hidden) #headerMetrics {
+  display: none;
+}
 #headerIdentity {
   order: 1;
   margin-left: auto;

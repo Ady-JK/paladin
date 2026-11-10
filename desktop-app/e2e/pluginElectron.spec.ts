@@ -159,7 +159,7 @@ test("real plugin panels and overlays use the restricted bridge", async ({ brows
 
     await page.locator("#creatorModeBtn").click();
     await expect(page.locator("#creatorModeBtn")).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator("#ideFolderName")).toHaveText("creator");
+    await expect(page.locator("#workspaceLabel")).toHaveText("creator");
     const creatorRoot = path.join(root, "creator");
     expect(await creatorSkills(creatorRoot)).toEqual(
       expect.arrayContaining(["writing-an-extension", "writing-a-plugin-ui", "creating-paladin-ui"]),

@@ -20,6 +20,29 @@ test("header menu opens side chats and preserves layout controls", async ({ page
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
 });
 
+test("the readings sit left of the icon row and never push it sideways", async ({ page }) => {
+  const actions = page.locator("#paneActions");
+  const metrics = page.locator("#headerMetrics");
+  await expect(metrics).toBeVisible();
+  await expect(page.locator("#headerMetrics #usagePill")).toBeVisible();
+
+  // Readings left, action icons right: a growing pill extends into the
+  // free space instead of shifting the IDE/Creator/layout icons.
+  const read = async (): Promise<{ metrics: number; actions: number }> => ({
+    metrics: (await metrics.boundingBox())!.x,
+    actions: (await actions.boundingBox())!.x,
+  });
+  const before = await read();
+  expect(before.metrics).toBeLessThan(before.actions);
+
+  await page.locator("#headerMetrics #usageLabel").evaluate((el) => {
+    el.textContent = "100% · $1234.5678 · 120k tok";
+  });
+  const after = await read();
+  expect(after.metrics).toBeGreaterThanOrEqual(before.metrics);
+  expect(Math.abs(after.actions - before.actions)).toBeLessThan(1);
+});
+
 test("browser has one entry and new side chats and terminals share a menu", async ({ page }) => {
   await expect(page.locator("#paneBrowserBtn")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Browser", exact: true })).toHaveCount(1);
