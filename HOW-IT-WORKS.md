@@ -823,6 +823,24 @@ If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
 
 **The sidebar is a drawer.** The app starts with it closed. It floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The separate Chat view is gone: websites live in the side pane's web tabs, so the agent conversation and a Gemini/ChatGPT page can share the window in split view or swap full width in the tabs layout.
 
+**Keyboard shortcuts** live in one table (`features/shortcuts.ts`): Cmd (macOS) or Ctrl elsewhere plus Alt, chosen so the chords never collide with the editor's own bindings (Cmd+P, Cmd+Shift+F), the model picker (Cmd+K) or a guest page. Each entry drives the same control a click would, so a shortcut and its button cannot drift apart. The rail's keyboard button (or Cmd/Ctrl+Alt+/) opens a cheat-sheet listing them:
+
+| Key | Does |
+|---|---|
+| ⌘/Ctrl+Alt+B | Show or hide the sessions sidebar |
+| ⌘/Ctrl+Alt+L | Switch between light and dark |
+| ⌘/Ctrl+Alt+I | Turn IDE mode on or off |
+| ⌘/Ctrl+Alt+Y | Switch between split and tabs layout |
+| ⌘/Ctrl+Alt+T | Open a terminal |
+| ⌘/Ctrl+Alt+A | Back to the agent conversation |
+| ⌘/Ctrl+Alt+W | Open the browser menu |
+| ⌘/Ctrl+Alt+G | View the files changed in this session |
+| ⌘/Ctrl+Alt+U | Open session analytics (needs an open session) |
+| ⌘/Ctrl+Alt+N | Start a new chat |
+| ⌘/Ctrl+Alt+/ | Show the shortcut list |
+
+A composer that stops its own keydown events (the side chat input does, so Enter sends there) must let a chord through when it carries both the platform modifier and Alt, or the shortcut would die whenever that box had focus.
+
 **IDE mode** opens from the header’s code button and shows the current workspace in an explorer and code editor beside the existing agent chat. Explorer filters for Git-ignored items and dot-prefixed folders are saved per workspace in `.config/paladin/explorer.json`; both filters default to off. In Git repositories the core uses Git's ignore rules; outside a repository it applies the built-in basic `.gitignore` matcher. Personal websites and the agent browser open as tabs in the editor area, using the same profiles as outside IDE mode. With no chat open, the chat pane lists sessions in that workspace; selecting one resumes it, and the folder picker can choose another workspace. Editor tabs retain unsaved text and undo history while switching views or workspaces. Text files up to 2 MiB can be saved; the sidecar compares the file's version with the version read before saving and refuses a stale edit. Files outside the workspace, symbolic-link files and binary files are not editable. The editor supports syntax highlighting for JavaScript, TypeScript, Python, Go, Markdown, JSON, HTML and CSS; it is not a full VS Code replacement.
 
 **The personal browser** uses the existing saved sites as bookmarks and works even without an open chat. There is no separate Chat window. The title bar's browser menu opens Gemini, ChatGPT, Claude, DeepSeek or any `https` address as a tab in the side pane: split layout puts it beside the agent, tabs layout gives either one the full width (the conversation tab is labelled **Agent**). Personal web tabs share the existing persistent profile (`persist:paladin-sites`), so persistent sign-in cookies and Google SSO carry across sites and survive restarts (subject to each site’s cookie policy); secure sign-in popups share that profile. Saved passwords and autofill are not provided; each tab has back/forward, reload, an address bar and open-in-system-browser. A page keeps its renderer and state while its tab exists, even when hidden, so a chat can finish answering while you read the agent; closing the tab drops the view, and reloading the renderer drops every web view. `views:state` keeps the tab title and address bar truthful after link clicks and SPA route changes. Clicking an `https` link in the conversation opens a web tab.

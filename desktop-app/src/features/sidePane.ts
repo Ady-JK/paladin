@@ -1066,6 +1066,30 @@ function toggleLayout(): void {
   render();
 }
 
+// openTerminalDockFromKey toggles the IDE terminal dock; in split/tabs
+// mode it falls back to adding a terminal tab, which is the same place a
+// terminal shows there.
+export function openTerminalDockFromKey(): void {
+  if (ideTerminalMode && terminalDock) terminalDock.toggle();
+  else openTerminalTab(visibleSessionId());
+}
+
+// focusAgentFromKey brings the conversation back: it hides the side pane
+// and focuses the prompt. The IDE's own toggle owns turning IDE off, so
+// this stays a view switch. Focusing happens after the pane's render has
+// settled: render() moves the focused side pane out of the document, and
+// removing the focused node sends focus to the body first.
+export function focusAgentFromKey(): void {
+  closePane();
+  requestAnimationFrame(() => $<HTMLTextAreaElement>("#promptInput").focus());
+}
+
+// toggleLayoutFromKey switches split <-> tabs, the same as the layout
+// button in the toolbar.
+export function toggleLayoutFromKey(): void {
+  toggleLayout();
+}
+
 function closeTab(key: string, dropBrowser = true, sessionId = visibleSessionId()): void {
   const set = sessionId ? sets.get(sessionId) : undefined;
   if (!set) return;

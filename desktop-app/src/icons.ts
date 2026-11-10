@@ -225,6 +225,11 @@ const ICONS: Record<string, Icon> = {
     line: true,
     thin: true,
   },
+  keyboard: {
+    d: "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm3 4h.01M11 9h.01M15 9h.01M8 13h8",
+    line: true,
+    thin: true,
+  },
   "sl-skill": {
     d: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9L12 3Z",
     line: true,

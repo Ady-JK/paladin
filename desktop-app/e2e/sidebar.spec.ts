@@ -49,14 +49,14 @@ async function setup(page: Page): Promise<void> {
   await expect(page.locator('[data-session="s-api-2"]')).toBeVisible();
 }
 
-test("the rail holds the agent and settings, with no separate sidebar button", async ({ page }) => {
+test("the rail holds the agent, shortcuts and settings, with no separate sidebar button", async ({ page }) => {
   await setup(page);
-  for (const id of ["#agentTab", "#settingsBtn"]) {
+  for (const id of ["#agentTab", "#shortcutsBtn", "#settingsBtn"]) {
     await expect(page.locator(`#rail ${id}`)).toBeVisible();
   }
   await expect(page.locator("#chatTab")).toHaveCount(0);
   await expect(page.locator("#sidebarToggleBtn")).toHaveCount(0);
-  await expect(page.locator("#rail .rail-btn")).toHaveCount(2);
+  await expect(page.locator("#rail .rail-btn")).toHaveCount(3);
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
 });
 

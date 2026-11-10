@@ -40,6 +40,18 @@ function toggleTheme(): void {
   setColorMode(state.dark ? "light" : "dark");
 }
 
+// toggleThemeFromKey flips the shell theme from a keyboard shortcut.
+export function toggleThemeFromKey(): void {
+  toggleTheme();
+}
+
+// toggleSidebarFromKey is the agentTab/Agent-button toggle without the
+// pointer, so a shortcut can hide or show the sessions drawer.
+export function toggleSidebarFromKey(): void {
+  state.collapsed = !state.collapsed;
+  paintSideVisibility();
+}
+
 // paintSideVisibility shows the floating session drawer. The main card
 // keeps its full width whether the drawer is open or not, so nothing
 // reflows while it animates.
@@ -115,8 +127,7 @@ function wireDrawer(): void {
   });
   sidebarEl.addEventListener("dblclick", () => window.clearTimeout(pickTimer));
   agentTabEl.addEventListener("click", () => {
-    state.collapsed = !state.collapsed;
-    paintSideVisibility();
+    toggleSidebarFromKey();
   });
 }
 

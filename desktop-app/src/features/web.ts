@@ -109,6 +109,19 @@ function browserSession(): string {
   return state.sessionId || STANDALONE_PANE_SESSION;
 }
 
+// openWebMenuFromKey pops the personal-browser menu open, the same menu
+// the toolbar's Browser button shows, so a shortcut can reach saved sites
+// and the address field.
+export function openWebMenuFromKey(): void {
+  if (!button) buildMenu();
+  if (!button || !menu) return;
+  if (!isMenuOpen(menu)) toggleMenu(menu);
+  button.setAttribute("aria-expanded", "true");
+  menu.style.left = `${button.offsetLeft}px`;
+  paintMenu();
+  menu.querySelector<HTMLElement>("[data-web-address]")?.focus();
+}
+
 function openSite(url: string, title: string): void {
   const sessionId = browserSession();
   closeWebMenu();

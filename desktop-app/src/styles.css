@@ -36,5 +36,6 @@
 @import "./styles/terminal.css";
 @import "./styles/settings.css";
 @import "./styles/customize.css";
+@import "./styles/shortcuts.css";
 
 @import "./styles/ide.css";

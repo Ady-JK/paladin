@@ -41,6 +41,9 @@
           </button>
         </div>
         <div class="rail-drag flex-1 self-stretch"></div>
+        <button id="shortcutsBtn" class="rail-btn" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">
+          <span data-icon="keyboard" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+        </button>
         <button id="settingsBtn" class="rail-btn" title="Settings" aria-label="Settings">
           <span data-icon="rl-gear" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
         </button>
@@ -1272,6 +1275,38 @@
           </div>
         </div>
         <div id="usageBody" class="min-h-0 flex-1 overflow-y-auto p-5"></div>
+      </div>
+    </div>
+    <!-- ==================== KEYBOARD SHORTCUTS ==================== -->
+    <div
+      id="shortcutsModal"
+      class="modal-overlay fixed inset-0 z-50 hidden items-center justify-center p-4 sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="shortcutsTitle"
+    >
+      <div
+        class="modal-card flex max-h-[80%] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      >
+        <div
+          class="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800"
+        >
+          <div class="flex min-w-0 items-center gap-2">
+            <span data-icon="keyboard" class="flex-shrink-0 text-slate-400"></span>
+            <h3 id="shortcutsTitle" class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Keyboard shortcuts
+            </h3>
+          </div>
+          <button
+            id="shortcutsCloseBtn"
+            class="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            title="Close"
+            aria-label="Close shortcuts"
+          >
+            <span data-icon="window-close"></span>
+          </button>
+        </div>
+        <div id="shortcutsBody" class="min-h-0 flex-1 overflow-y-auto px-5 py-4"></div>
       </div>
     </div>
     <!-- ==================== THE TOAST ==================== -->

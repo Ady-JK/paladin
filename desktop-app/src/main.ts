@@ -40,6 +40,7 @@ import { initSlash } from "./features/slash";
 import { initSkills } from "./features/skills";
 import { initWindow } from "./features/window";
 import { initResources } from "./features/resources";
+import { initShortcuts } from "./features/shortcuts";
 import { clearContextBox, initContextBox, reloadContextSources } from "./features/contextBox";
 import { initMotion } from "./ui/motion";
 import { initUndo } from "./features/undo";
@@ -146,6 +147,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initUsage();
   initResources();
   initContextBox();
+  initShortcuts();
 
   modelAdvancedBtn.addEventListener("click", () => {
     closeMenu(modelMenu);

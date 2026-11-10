@@ -58,7 +58,10 @@ export function createChatTab(
     send();
   });
   input.addEventListener("keydown", (event) => {
-    event.stopPropagation();
+    // The side composer keeps its own keys, but an app shortcut (the
+    // platform modifier plus Alt) must still reach the document listener
+    // that owns it, or the chord would die in whatever box has focus.
+    if (!(event.altKey && (event.metaKey || event.ctrlKey))) event.stopPropagation();
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       send();
