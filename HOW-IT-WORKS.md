@@ -823,24 +823,29 @@ If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
 
 **The sidebar is a drawer.** The app starts with it closed. It floats over the chat, like a sheet of paper laid on top, so the chat never squeezes or shifts. A click outside, Escape, or picking a session puts it away; clicking the Agent button on the left brings it back (there's no separate sidebar button). The separate Chat view is gone: websites live in the side pane's web tabs, so the agent conversation and a Gemini/ChatGPT page can share the window in split view or swap full width in the tabs layout.
 
-**Keyboard shortcuts** live in one table (`features/shortcuts.ts`): Cmd (macOS) or Ctrl elsewhere plus Alt, chosen so the chords never collide with the editor's own bindings (Cmd+P, Cmd+Shift+F), the model picker (Cmd+K) or a guest page. Each entry drives the same control a click would, so a shortcut and its button cannot drift apart. The rail's keyboard button (or Cmd/Ctrl+Alt+/) opens a cheat-sheet listing them:
+**Keyboard shortcuts** live in one table (`features/shortcuts.ts`): Shift plus Cmd (macOS) or Ctrl (elsewhere), on one key. `Ctrl+Alt` was the first choice and a bad one — desktops claim several of those globally, so the app never saw them. The rail's keyboard button (or ⌘/Ctrl+Shift+/) opens a cheat-sheet listing them:
 
 | Key | Does |
 |---|---|
-| ⌘/Ctrl+Alt+B | Show or hide the sessions sidebar |
-| ⌘/Ctrl+Alt+I | Turn IDE mode on or off |
-| ⌘/Ctrl+Alt+Y | Switch between split and tabs layout |
-| ⌘/Ctrl+Shift+Alt+T | Open a terminal |
-| ⌘/Ctrl+Alt+A | Back to the agent conversation |
-| ⌘/Ctrl+Alt+W | Open the browser menu |
-| ⌘/Ctrl+Alt+G | View the files changed in this session |
-| ⌘/Ctrl+Alt+U | Open session analytics (needs an open session) |
-| ⌘/Ctrl+Alt+N | Start a new chat |
-| ⌘/Ctrl+Alt+/ | Show the shortcut list |
+| ⌘/Ctrl+Shift+B | Show or hide the sessions sidebar |
+| ⌘/Ctrl+Shift+M | Switch between light and dark |
+| ⌘/Ctrl+Shift+I | Turn IDE mode on or off |
+| ⌘/Ctrl+Shift+L | Switch between split and tabs layout |
+| ⌘/Ctrl+Shift+T | Open a terminal |
+| ⌘/Ctrl+Shift+H | Back to the agent conversation |
+| ⌘/Ctrl+Shift+J | Open the browser menu |
+| ⌘/Ctrl+Shift+V | View the files changed in this session |
+| ⌘/Ctrl+Shift+Y | Open session analytics (needs an open session) |
+| ⌘/Ctrl+Shift+O | Start a new chat |
+| ⌘/Ctrl+Shift+/ | Show the shortcut list |
 
-**Some chords belong to the desktop, not the app.** A window manager takes its own global shortcuts before any window sees the key, so an app chord that collides with one dead-ends — or, worse, does the desktop's thing. On Cinnamon and most GTK desktops `Ctrl+Alt+L` locks the screen and `Ctrl+Alt+T` opens the system terminal. The light/dark toggle therefore has no shortcut at all (use the header's theme button), and the terminal chord carries Shift to step out of the desktop's way. `checkShortcutTable()` enforces this at startup: an entry matching `DESKTOP_GRABS` without Shift throws with a message naming the chord, so the class of bug cannot ship again.
+**A chord has to survive three layers to work**, and each has its own list in `shortcuts.ts` that `checkShortcutTable()` enforces at startup:
 
-A composer that stops its own keydown events (the side chat input does, so Enter sends there) must let a chord through when it carries both the platform modifier and Alt, or the shortcut would die whenever that box had focus.
+1. **The desktop.** A window manager grabs its own global bindings before any window sees the key. On Cinnamon/GNOME, `Ctrl+Shift+U` is ibus Unicode input and `Ctrl+Shift+Print` is the area screenshot. (`Ctrl+Alt+L` locks the screen and `Ctrl+Alt+T` opens a terminal — that is why the scheme moved.)
+2. **The app's own features.** `Ctrl+K` opens the model picker regardless of Shift, `Ctrl+S` saves in the editor and the MCP/hook editors, and the editor owns `P`/`F`/`G` (palette, search, go-to-line) and `E`/`W`/`N` (explorer, close tab, new file). Those handlers run first, so a chord on one of them would never reach the shortcut table.
+3. **The focused node.** A composer that stops its own keydown events (the side chat input) must let a chord through when it carries both modifiers, or the shortcut dies whenever that box has focus.
+
+A colliding entry throws with a message naming the key and which layer claims it, so this class of bug cannot ship again. The error is caught at startup (so one bad row cannot take every other shortcut down) and stashed on `window.__shortcutTableError` for the spec to assert on.
 
 **IDE mode** opens from the header’s code button and shows the current workspace in an explorer and code editor beside the existing agent chat. Explorer filters for Git-ignored items and dot-prefixed folders are saved per workspace in `.config/paladin/explorer.json`; both filters default to off. In Git repositories the core uses Git's ignore rules; outside a repository it applies the built-in basic `.gitignore` matcher. Personal websites and the agent browser open as tabs in the editor area, using the same profiles as outside IDE mode. With no chat open, the chat pane lists sessions in that workspace; selecting one resumes it, and the folder picker can choose another workspace. Editor tabs retain unsaved text and undo history while switching views or workspaces. Text files up to 2 MiB can be saved; the sidecar compares the file's version with the version read before saving and refuses a stale edit. Files outside the workspace, symbolic-link files and binary files are not editable. The editor supports syntax highlighting for JavaScript, TypeScript, Python, Go, Markdown, JSON, HTML and CSS; it is not a full VS Code replacement.
 

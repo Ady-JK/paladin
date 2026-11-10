@@ -122,9 +122,16 @@ window.addEventListener("DOMContentLoaded", () => {
   initMemory();
   initSessions();
   initSidePane();
-  const ideButton = $("#ideModeBtn");
+  const ideButton = $<HTMLButtonElement>("#ideModeBtn");
+  // A second press while the IDE module is still loading must toggle the
+  // mode instead of being dropped (the busy guard used to swallow it, so
+  // pressing the shortcut twice quickly left the IDE open).
+  let ideToggleQueued = false;
   const loadIDE = (): void => {
-    if (ideButton.hasAttribute("aria-busy")) return;
+    if (ideButton.hasAttribute("aria-busy")) {
+      ideToggleQueued = true;
+      return;
+    }
     ideButton.setAttribute("aria-busy", "true");
     void import("./features/ide")
       .then(({ initIDE }) => {
@@ -132,8 +139,13 @@ window.addEventListener("DOMContentLoaded", () => {
         ideButton.removeAttribute("aria-busy");
         initIDE();
         ideButton.click();
+        if (ideToggleQueued) {
+          ideToggleQueued = false;
+          ideButton.click();
+        }
       })
       .catch((error: unknown) => {
+        ideToggleQueued = false;
         ideButton.removeAttribute("aria-busy");
         setStatus(`Could not open IDE: ${String(error)}`, "error");
       });
