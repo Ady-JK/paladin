@@ -9,12 +9,13 @@ test("Creator mode opens its workspace and restores the previous one", async ({ 
   await expect(button).toHaveAttribute("aria-pressed", "false");
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#ideFolderName")).toHaveText("creator");
+  await expect(page.locator("#workspaceLabel")).toHaveText("creator");
+  await expect(page.locator("#ideModeBtn")).toHaveAttribute("aria-pressed", "false");
   expect(await page.evaluate(() => localStorage.getItem("e2e-workspace"))).toBe("/home/creator");
   await showSidebar(page);
   await page.locator('button.session-pick[data-session="sess-notify-1"]').click();
   await expect(page.getByText("Exit Creator mode to switch workspaces")).toBeVisible();
-  await expect(page.locator("#ideFolderName")).toHaveText("creator");
+  await expect(page.locator("#workspaceLabel")).toHaveText("creator");
   expect(await page.evaluate(() => localStorage.getItem("e2e-workspace"))).toBe("/home/creator");
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "false");

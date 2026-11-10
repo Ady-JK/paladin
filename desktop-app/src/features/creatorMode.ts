@@ -50,7 +50,6 @@ async function toggle(button: HTMLButtonElement): Promise<void> {
         await api.setWorkspace(folder);
         setWorkspace(folder);
         enabled = true;
-        if ($("#ideModeBtn").getAttribute("aria-pressed") !== "true") $("#ideModeBtn").click();
       } catch (error) {
         await api.creatorModeSet(false);
         throw error;
