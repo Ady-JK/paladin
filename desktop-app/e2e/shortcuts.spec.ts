@@ -12,10 +12,11 @@ test.beforeEach(async ({ page }) => {
 
 // press sends a chord from the prompt, the place a user is most likely to
 // be typing when they want one — the shortcuts must work from there. Pass
-// focus=false when the prompt is behind a modal.
-async function press(page: Page, key: string, focus = true): Promise<void> {
+// focus=false when the prompt is behind a modal, and shift=true for the
+// one chord that needs it.
+async function press(page: Page, key: string, focus = true, shift = false): Promise<void> {
   if (focus) await page.locator("#promptInput").click();
-  await page.keyboard.press(`${MOD}+Alt+${key}`);
+  await page.keyboard.press(`${MOD}+${shift ? "Shift+" : ""}Alt+${key}`);
 }
 
 test("the shortcut sheet lists every key group and toggles closed", async ({ page }) => {
@@ -27,12 +28,50 @@ test("the shortcut sheet lists every key group and toggles closed", async ({ pag
     await expect(page.locator("#shortcutsBody .shortcut-group h4", { hasText: group })).toBeVisible();
   }
   // One row per shortcut, each with its chord spelled out.
-  await expect(page.locator("#shortcutsBody .shortcut-row")).toHaveCount(10);
+  await expect(page.locator("#shortcutsBody .shortcut-row")).toHaveCount(9);
   await expect(page.locator('[data-shortcut="ide"] kbd')).toHaveText(/Alt\+I$/);
-  await expect(page.locator('[data-shortcut="terminal"] kbd')).toHaveText(/Alt\+T$/);
+  // The terminal chord carries Shift, which is what keeps it clear of the
+  // desktop's own Ctrl+Alt+T.
+  await expect(page.locator('[data-shortcut="terminal"] kbd')).toHaveText(/Shift\+Alt\+T$/);
   // Pressing the chord again closes it (focus is inside the sheet now).
   await press(page, "/", false);
   await expect(modal).toBeHidden();
+});
+
+// A chord the desktop grabs never reaches the app, so the table must not
+// contain one. Ctrl+Alt+L is the screen locker on Cinnamon and most GTK
+// desktops; using it locked the user's machine instead of switching theme.
+test("no shortcut uses a chord the desktop claims globally", async ({ page }) => {
+  const bad = await page.evaluate(async () => {
+    // Vite serves the module source by URL at runtime; it is not a
+    // compile-time import target for the spec's tsconfig.
+    const url = "/src/features/shortcuts.ts";
+    const mod = (await import(/* @vite-ignore */ url)) as {
+      checkShortcutTable(table?: unknown[]): void;
+    };
+    const found: string[] = [];
+    try {
+      // The real table must pass.
+      mod.checkShortcutTable();
+    } catch (error) {
+      found.push(`table: ${String(error)}`);
+    }
+    // And the guard must actually reject a grabbed chord, or it protects
+    // nothing.
+    for (const item of [
+      { id: "theme", keys: "Ctrl+Alt+L", key: "l", what: "", group: "Workspace", run: () => {} },
+      { id: "term", keys: "Ctrl+Alt+T", key: "t", what: "", group: "Panes", run: () => {} },
+    ]) {
+      try {
+        mod.checkShortcutTable([item]);
+        found.push(`guard let ${item.keys} through`);
+      } catch {
+        // expected: the guard refused it
+      }
+    }
+    return found;
+  });
+  expect(bad).toEqual([]);
 });
 
 test("the rail button opens the same sheet", async ({ page }) => {
@@ -51,15 +90,6 @@ test("the sidebar shortcut shows and hides the sessions drawer", async ({ page }
   await expect(page.locator("#sidebar.is-closed")).toHaveCount(1);
   await press(page, "b", false);
   await expect(page.locator("#sidebar:not(.is-closed)")).toHaveCount(1);
-});
-
-test("the theme shortcut swaps light and dark", async ({ page }) => {
-  const html = page.locator("html");
-  const wasDark = await html.evaluate((el) => el.classList.contains("dark"));
-  await press(page, "l");
-  await expect(html).toHaveClass(wasDark ? /(^|\s)light(\s|$)/ : /(^|\s)dark(\s|$)/);
-  await press(page, "l");
-  await expect(html).toHaveClass(wasDark ? /(^|\s)dark(\s|$)/ : /(^|\s)light(\s|$)/);
 });
 
 test("the IDE shortcut turns IDE mode on and off", async ({ page }) => {
@@ -89,8 +119,19 @@ test("the terminal shortcut opens a terminal in IDE mode", async ({ page }) => {
   await page.locator("#promptInput").press("Enter");
   await press(page, "i");
   await expect(page.locator("#ideWorkspace")).toBeVisible();
-  await press(page, "t");
+  await press(page, "t", true, true);
   await expect(page.locator("#ideTerminalDock .pane-terminal")).toBeVisible();
+});
+
+// The plain (no Shift) form of the terminal chord belongs to the desktop,
+// so the app must ignore it: on Cinnamon Ctrl+Alt+T launches a system
+// terminal. Nothing in the app may react.
+test("a desktop-owned chord without Shift does nothing in the app", async ({ page }) => {
+  const before = await page.evaluate(() => document.querySelectorAll("#ideTerminalDock .pane-terminal").length);
+  await press(page, "t");
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => document.querySelectorAll("#ideTerminalDock .pane-terminal").length);
+  expect(after).toBe(before);
 });
 
 test("the browser shortcut opens the browser menu", async ({ page }) => {
@@ -120,11 +161,12 @@ test("the agent shortcut leaves the side pane and focuses the prompt", async ({ 
 test("a shortcut typed into the prompt does not leak text or send a turn", async ({ page }) => {
   const input = page.locator("#promptInput");
   await input.fill("keep me");
-  await page.keyboard.press(`${MOD}+Alt+L`);
+  const closedBefore = await page.locator("#sidebar.is-closed").count();
+  await page.keyboard.press(`${MOD}+Alt+B`);
   // The chord is claimed, so no character lands in the draft and nothing
   // was submitted: the draft is intact and no turn row appeared.
   await expect(input).toHaveValue("keep me");
   await expect(page.locator("#messages .turn-row")).toHaveCount(0);
-  // And the chord really ran: the theme flipped.
-  await expect(page.locator("html")).toHaveClass(/(^|\s)(light|dark)(\s|$)/);
+  // And the chord really ran: the sidebar flipped.
+  await expect(page.locator("#sidebar.is-closed")).toHaveCount(closedBefore === 1 ? 0 : 1);
 });

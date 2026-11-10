@@ -828,16 +828,17 @@ If not, it's remembered, and only the sidebar row changes (spinner, unread dot).
 | Key | Does |
 |---|---|
 | ⌘/Ctrl+Alt+B | Show or hide the sessions sidebar |
-| ⌘/Ctrl+Alt+L | Switch between light and dark |
 | ⌘/Ctrl+Alt+I | Turn IDE mode on or off |
 | ⌘/Ctrl+Alt+Y | Switch between split and tabs layout |
-| ⌘/Ctrl+Alt+T | Open a terminal |
+| ⌘/Ctrl+Shift+Alt+T | Open a terminal |
 | ⌘/Ctrl+Alt+A | Back to the agent conversation |
 | ⌘/Ctrl+Alt+W | Open the browser menu |
 | ⌘/Ctrl+Alt+G | View the files changed in this session |
 | ⌘/Ctrl+Alt+U | Open session analytics (needs an open session) |
 | ⌘/Ctrl+Alt+N | Start a new chat |
 | ⌘/Ctrl+Alt+/ | Show the shortcut list |
+
+**Some chords belong to the desktop, not the app.** A window manager takes its own global shortcuts before any window sees the key, so an app chord that collides with one dead-ends — or, worse, does the desktop's thing. On Cinnamon and most GTK desktops `Ctrl+Alt+L` locks the screen and `Ctrl+Alt+T` opens the system terminal. The light/dark toggle therefore has no shortcut at all (use the header's theme button), and the terminal chord carries Shift to step out of the desktop's way. `checkShortcutTable()` enforces this at startup: an entry matching `DESKTOP_GRABS` without Shift throws with a message naming the chord, so the class of bug cannot ship again.
 
 A composer that stops its own keydown events (the side chat input does, so Enter sends there) must let a chord through when it carries both the platform modifier and Alt, or the shortcut would die whenever that box had focus.
 
