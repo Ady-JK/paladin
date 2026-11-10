@@ -771,6 +771,9 @@ browser — open and test the local app (or a web site) in this session's browse
 - If a role/name matches several controls, use a narrower Playwright
   selector, e.g. {"action": "click", "selector": "li:has-text('Learn Node.js') input[type=checkbox]"}.
 - Enter text: {"action": "fill", "role": "textbox", "name": "Task", "text": "Try it"}.
+- Press a key: {"action": "press", "key": "Escape"} sends it to the page,
+  so page-level shortcuts work; add a selector or role to send it to one
+  element instead.
 - Wait for an element: {"action": "wait", "role": "heading", "name": "Done"}.
   The wait action needs a selector or role; it is not a sleep timer.
 - See the rendered page: {"action": "screenshot", "full_page": true}.

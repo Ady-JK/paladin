@@ -64,6 +64,30 @@ func TestBrowserToolOpensOnlySafeURLs(t *testing.T) {
 	}
 }
 
+// A key press with no locator targets the page itself, so page-level
+// shortcuts work; the other interactions still need an element.
+func TestBrowserPressWorksWithoutLocator(t *testing.T) {
+	browser := NewBrowserTool()
+	var got []BrowserRequest
+	browser.SetSink(func(req BrowserRequest) {
+		got = append(got, req)
+		go browser.Reply(BrowserReply{ID: req.ID, OK: true})
+	})
+	ctx := &ToolCtx{SessionID: "s", SessionDir: t.TempDir(), Cancel: context.Background()}
+	if _, err := browser.CallRich(json.RawMessage(`{"action":"press","key":"Control+Alt+Slash"}`), ctx); err != nil {
+		t.Fatalf("press without a locator: %v", err)
+	}
+	if len(got) != 1 || got[0].Action != "press" || got[0].Key != "Control+Alt+Slash" {
+		t.Fatalf("request: %+v", got)
+	}
+	for _, action := range []string{"click", "fill", "hover", "select", "wait"} {
+		raw, _ := json.Marshal(map[string]string{"action": action})
+		if _, err := browser.CallRich(raw, ctx); err == nil || !strings.Contains(err.Error(), "selector or role is required") {
+			t.Fatalf("%s without a locator: %v", action, err)
+		}
+	}
+}
+
 // Every request tells the desktop app whether private networks are
 // allowed, so its proxy follows the user's switch.
 func TestBrowserRequestsCarryThePrivateNetworkSwitch(t *testing.T) {

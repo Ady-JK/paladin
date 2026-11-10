@@ -173,6 +173,9 @@ export async function runBrowserSmoke(
     }
     const shot = await call("smoke-a", "screenshot");
     if (!shot.imageBase64 || shot.imageBase64.length < 100) throw new Error("screenshot was empty");
+    // A key with no locator goes to the page, so page-level shortcuts work
+    // without an element to target.
+    await call("smoke-a", "press", { key: "Escape" });
     if (browsers.show("smoke-a")) throw new Error("a session browser was shown before the pane gave its bounds");
     browsers.setBounds({ x: 760, y: 56, width: 440, height: 620 });
     if (!browsers.show("smoke-a")) throw new Error("a session browser did not show in the pane");

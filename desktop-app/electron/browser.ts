@@ -546,7 +546,10 @@ export class BrowserManager {
         await this.locator(page, req).fill(req.text ?? "", { timeout: 15_000 });
         break;
       case "press":
-        await this.locator(page, req).press(req.key ?? "Enter", { timeout: 15_000 });
+        // No locator means the key goes to the page itself, so page-level
+        // shortcuts work without an element to target.
+        if (!req.selector && !req.role) await page.keyboard.press(req.key ?? "Enter");
+        else await this.locator(page, req).press(req.key ?? "Enter", { timeout: 15_000 });
         break;
       case "hover":
         await this.locator(page, req).hover({ timeout: 15_000 });
