@@ -73,6 +73,25 @@ export async function turnTotal(sessionId: string, turn: SessionChanges["turns"]
 // is what made the collapsed card flicker while a turn ran.
 const paintedMarker = new WeakMap<HTMLElement, { heading: string; files: string }>();
 
+// turnAnchor is the last row of the turn that starts at row. It stops at
+// the next turn's user row, and at a live root (which holds another
+// turn's rows), so a turn's card can never end up under a later turn.
+function turnAnchor(row: HTMLElement): HTMLElement {
+  let anchor = row;
+  let next = anchor.nextElementSibling as HTMLElement | null;
+  while (
+    next &&
+    !next.hasAttribute("data-turn-index") &&
+    !next.hasAttribute("data-turn-id") &&
+    !next.classList.contains("live-root") &&
+    !next.classList.contains("turn-change-card")
+  ) {
+    anchor = next;
+    next = anchor.nextElementSibling as HTMLElement | null;
+  }
+  return anchor;
+}
+
 export function paintTurnMarker(
   row: HTMLElement,
   turn: number,
@@ -97,13 +116,13 @@ export function paintTurnMarker(
       row.querySelector<HTMLElement>("[data-revert]")?.click();
     });
   }
-  // Keep the card at the end of its turn. Rows arrive after an earlier
-  // paint, and a live turn's first card lands while the turn is still
-  // growing, so a create-once insertion would leave it mid-turn.
-  let anchor = row;
-  while (anchor.nextElementSibling && !anchor.nextElementSibling.hasAttribute("data-turn-index")) {
-    anchor = anchor.nextElementSibling as HTMLElement;
-  }
+  // Keep the card at the end of its own turn: after the turn's user row
+  // and its agent rows, before the next turn's user row. The walk stops
+  // at the next user row and never leaves the turn's container, because
+  // drifting past either one put the card under a turn it does not
+  // belong to (and, from the live root, at the bottom of the
+  // transcript), where every repaint could move it again.
+  const anchor = turnAnchor(row);
   if (anchor !== button && anchor.nextElementSibling !== button) anchor.after(button);
   button.dataset.changeTurn = String(turn);
   button.setAttribute("role", "button");

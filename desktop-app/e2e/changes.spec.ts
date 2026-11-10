@@ -406,3 +406,93 @@ test("the card sits close to the Context strip below it", async ({ page }) => {
   expect(gap.marginTop).toBeLessThanOrEqual(12);
   expect(gap.sameWidth).toBe(true);
 });
+
+// A turn's card sits with its own turn: after that turn's user row and
+// the rows it streamed, before the next turn starts. The anchor walk used
+// to run past the next turn's user row, so an older card drifted to the
+// bottom of the transcript and could be re-anchored on every repaint.
+test("each turn keeps its own card, inside its own block", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    const at = Math.floor(Date.now() / 1000);
+    w.__e2eHistory = [
+      { role: "user", content: "first question", createdAt: at, index: 0 },
+      { role: "assistant", content: "first answer", createdAt: at },
+      { role: "user", content: "second question", createdAt: at, index: 2 },
+      { role: "assistant", content: "second answer", createdAt: at },
+    ];
+    const turns = (extra = false) => [
+      { turn: 0, files: [{ path: "a.txt", status: "modified" }], callIds: [] },
+      { turn: 2, files: [{ path: "b.txt", status: "created" }], callIds: [] },
+      ...(extra ? [{ turn: 4, files: [{ path: "c.txt", status: "created" }], callIds: ["c3"] }] : []),
+    ];
+    w.__e2eChanges = { available: true, turns: turns(), files: [{ path: "a.txt", status: "modified" }] };
+    w.__e2eRunTurn = async (_p: unknown, h: any) => {
+      h?.onTool?.({ id: "c3", name: "write", arguments: '{"path":"c.txt"}', result: "{}", status: "done" });
+      w.__e2eChanges = { available: true, turns: turns(true), files: [{ path: "a.txt", status: "modified" }] };
+      for (let i = 0; i < 30; i++) {
+        h?.onReasoning?.(`thinking ${i} `);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      return { reply: "done", index: 4 };
+    };
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await expect(page.locator("#promptInput")).toBeVisible();
+  await expect(page.locator('#messages .turn-change-card[data-change-turn="0"]')).toHaveCount(1);
+  await page.locator("#promptInput").fill("third question");
+  await page.click("#sendBtn");
+  await page.waitForTimeout(1400);
+
+  // Each card lives beside its own turn's rows, in the same container: a
+  // persisted turn's card sits in #messages, a live turn's card inside
+  // that turn's live root. The anchor walk used to leave the container,
+  // putting an older turn's card at the bottom of the transcript.
+  // A card must come before the next turn begins. Flatten #messages in
+  // true document order (descending into the live root) and check that
+  // the nearest row *before* each card belongs to that card's turn. The
+  // anchor walk used to step onto the next turn's live root, so an older
+  // turn's card landed after it — at the bottom of the transcript.
+  const stray = await page.evaluate(() => {
+    // The live turn is the highest change turn in the answer (4 here).
+    const liveTurn = "4";
+    const order: { kind: "row" | "card"; turn: string | null; live: boolean }[] = [];
+    const walk = (el: Element): void => {
+      for (const child of Array.from(el.children) as HTMLElement[]) {
+        if (child.dataset.turnIndex !== undefined)
+          order.push({ kind: "row", turn: child.dataset.turnIndex, live: false });
+        else if (child.dataset.turnId) order.push({ kind: "row", turn: null, live: true });
+        else if (child.classList.contains("turn-change-card"))
+          order.push({ kind: "card", turn: child.dataset.changeTurn ?? null, live: false });
+        walk(child);
+      }
+    };
+    walk(document.getElementById("messages")!);
+
+    const out: string[] = [];
+    let lastRow: { kind: "row" | "card"; turn: string | null; live: boolean } | null = null;
+    for (const step of order) {
+      if (step.kind === "row") {
+        lastRow = step;
+        continue;
+      }
+      if (!lastRow) {
+        out.push(`turn ${step.turn}: no turn starts before it`);
+        continue;
+      }
+      // A live row is the turn being streamed: its own card belongs right
+      // after its rows, but an older turn's card may not slide below it.
+      if (lastRow.live && step.turn !== liveTurn) {
+        out.push(`turn ${step.turn} sits after the live turn's row`);
+      }
+      if (!lastRow.live && lastRow.turn !== step.turn) {
+        out.push(`turn ${step.turn} sits after the rows of turn ${lastRow.turn}`);
+      }
+    }
+    return out;
+  });
+  expect(stray).toEqual([]);
+});
