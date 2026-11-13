@@ -143,7 +143,8 @@ async function buildHelper() {
   const source = path.join(appDir, "voice-helper", "voice-helper.cpp");
   const include = path.join(voiceDir, "include");
   const lib = path.join(voiceDir, "lib");
-  const out = path.join(voiceDir, process.platform === "win32" ? "voice-helper.exe" : "voice-helper");
+  const exe = process.platform === "win32" ? "voice-helper.exe" : "voice-helper";
+  const out = path.join(voiceDir, exe);
   const cxx = process.env.CXX || (process.platform === "darwin" ? "clang++" : "c++");
   if (process.platform === "win32") {
     // Windows links the import libraries directly and needs onnxruntime.dll
@@ -153,6 +154,15 @@ async function buildHelper() {
         await copyFile(path.join(lib, name), path.join(voiceDir, name));
       }
     }
+  }
+  // A prebuilt helper makes a source build compiler-free. The committed
+  // Linux binary lives in voice/bin/linux-x64/; add the matching directory
+  // for another platform (or build it once in CI) to skip the compiler.
+  const prebuilt = path.join(voiceDir, "bin", `${process.platform}-${process.arch}`, exe);
+  if (!force && existsSync(prebuilt)) {
+    await copyFile(prebuilt, out);
+    process.stdout.write(`  ✓ prebuilt ${path.relative(appDir, prebuilt)}\n`);
+    return;
   }
   const winLibs =
     process.platform === "win32"

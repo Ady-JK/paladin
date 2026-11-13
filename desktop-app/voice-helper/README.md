@@ -46,17 +46,24 @@ incomplete one as live text, and inserts the finished lines on `stopped`.
 1. extracts the pinned Moonshine runtime archive (ONNX Runtime +
    `libmoonshine`) from `desktop-app/voice/runtimes/` (vendored in git),
 2. verifies the Tiny model files already under `voice/models/`,
-3. compiles this file into `desktop-app/voice/voice-helper`.
+3. installs `voice/bin/<platform>-<arch>/voice-helper` when it exists, or
+   compiles this file into `desktop-app/voice/voice-helper`.
 
-No network is needed: the runtime archives and the Tiny model are committed.
-If a file is missing, the script falls back to the pinned GitHub release /
-Moonshine CDN and verifies its SHA-256. `make voice-all` fetches Small and
-Medium from the CDN if they are not present. The extracted runtime, helper
-binary and notices are gitignored; only the source, registry, model and
-compressed runtime archives are tracked.
+No network is needed: the runtime archives, the Tiny model and the Linux x64
+helper are committed. On Linux x64 a source build therefore needs neither a
+network nor a C++ compiler. If a file is missing, the script falls back to the
+pinned GitHub release / Moonshine CDN and verifies its SHA-256. `make voice-all`
+fetches Small and Medium from the CDN if they are not present. The extracted
+runtime, the copied helper and notices are gitignored; the source, registry,
+model, runtime archives and prebuilt Linux helper are tracked.
 
 On Linux the helper links with an `$ORIGIN/lib` rpath. On macOS the script
 uses `@loader_path/lib`. On Windows the DLLs sit beside `voice-helper.exe`.
+
+To make another platform compiler-free, build the helper once there (or in CI)
+and commit it as `voice/bin/<platform>-<arch>/voice-helper` (`.exe` on
+Windows). `process.platform-process.arch` gives the directory name, e.g.
+`darwin-arm64` or `win32-x64`.
 
 ## Adding a model
 
