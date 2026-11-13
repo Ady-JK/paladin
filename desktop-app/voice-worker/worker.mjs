@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const wasmEntry = path.join(here, "wasm", "dist", "index.js");
+const wasmEntry = path.join(here, "wasm", "dist", "transcriber.js");
 const SAMPLE_RATE = 16000;
 const UPDATE_INTERVAL = 0.1;
 
@@ -106,7 +106,9 @@ function closeStream() {
 async function load(message) {
   const { dir, arch } = message;
   if (!Transcriber) {
-    const binding = await import(new URL("./wasm/dist/index.js", import.meta.url).href);
+    // Import the STT entry point, not the package barrel: the archive also
+    // ships TTS and agent-flow modules this worker never uses.
+    const binding = await import(new URL("./wasm/dist/transcriber.js", import.meta.url).href);
     Transcriber = binding.Transcriber;
   }
   closeStream();

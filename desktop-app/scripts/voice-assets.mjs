@@ -51,7 +51,7 @@ async function download(url, dest, expected) {
 // ensureWasm extracts the single WebAssembly build that runs on every
 // platform, so there is no per-platform archive and nothing to compile.
 async function ensureWasm() {
-  const entry = path.join(voiceDir, "wasm", "dist", "index.js");
+  const entry = path.join(voiceDir, "wasm", "dist", "transcriber.js");
   const dest = path.join(voiceDir, "wasm", "dist");
   // The binding's dist/ is ESM but ships without its package manifest, so
   // Node would guess CommonJS and warn on every import.
@@ -81,8 +81,32 @@ async function ensureWasm() {
   if (!existsSync(dist)) throw new Error("the WASM archive has no dist/ directory");
   await rm(path.dirname(dest), { recursive: true, force: true });
   await mkdir(path.dirname(dest), { recursive: true });
-  // Skip the AppleDouble "._*" entries that macOS tar leaves behind.
-  await cp(dist, dest, { recursive: true, filter: (name) => !path.basename(name).startsWith("._") });
+  // Only the speech-to-text chain is installed: the worker imports
+  // transcriber.js, which pulls in module/stream/events/errors/enums/types
+  // and the .wasm. TTS, agent-flow, voice-clone, mic capture helpers,
+  // source maps and type declarations are not needed at runtime.
+  const runtime = new Set([
+    "asset-downloader.js",
+    "enums.js",
+    "errors.js",
+    "events.js",
+    "module.js",
+    "stream.js",
+    "transcriber.js",
+    "types.js",
+    "moonshine.mjs",
+    "moonshine.wasm",
+  ]);
+  await cp(dist, dest, {
+    recursive: true,
+    filter: (name) => {
+      const base = path.basename(name);
+      if (base.startsWith("._")) return false;
+      if (base.endsWith(".map") || base.endsWith(".d.ts")) return false;
+      if (base.endsWith(".js") || base.endsWith(".mjs") || base.endsWith(".wasm")) return runtime.has(base);
+      return true;
+    },
+  });
   await writeFile(manifest, '{\n  "type": "module"\n}\n');
   await rm(extract, { recursive: true, force: true });
   if (archive !== vendored) await rm(archive, { force: true });

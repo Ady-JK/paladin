@@ -71,7 +71,7 @@ export class VoiceManager {
   }
 
   wasmPath(): string {
-    return path.join(this.voiceRoot(), "wasm", "dist", "index.js");
+    return path.join(this.voiceRoot(), "wasm", "dist", "transcriber.js");
   }
 
   private modelRoots(): string[] {
