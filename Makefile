@@ -9,7 +9,7 @@
 #   make lint     golangci-lint, deadcode and eslint/knip/prettier
 #   make clean    remove every build output
 
-.PHONY: app app-dev test fmt lint clean
+.PHONY: app app-dev test fmt lint clean voice voice-all
 .DEFAULT_GOAL := app-dev
 
 ifeq ($(OS),Windows_NT)
@@ -29,14 +29,25 @@ DEADCODE ?= $(GO_TOOLS_BIN)/deadcode
 # Release builds are static and stripped (no cgo is used anywhere).
 app: export CGO_ENABLED := 0
 
-app:
+app: voice
 	$(MAKE) clean
 	cd core && go build -trimpath -buildvcs=false -ldflags "-s -w" -o $(AGENT_HOST) ./cmd/agent-host
 	cd desktop-app && pnpm install --frozen-lockfile --prefer-offline && pnpm build
 
-app-dev:
+app-dev: voice
 	cd core && go build -o $(AGENT_HOST) ./cmd/agent-host
 	cd desktop-app && pnpm install --prefer-offline && pnpm build:electron && pnpm dev
+
+# voice downloads the Moonshine runtime + Tiny model and builds the helper.
+# Assets are cached in desktop-app/voice/ (gitignored); `make clean` keeps
+# them so a rebuild does not refetch ~60 MB.
+voice:
+	cd desktop-app && node scripts/voice-assets.mjs
+
+# voice-all also fetches the Small and Medium models so they appear in the
+# dictation model menu.
+voice-all:
+	cd desktop-app && node scripts/voice-assets.mjs --all
 
 test:
 	cd core && go test ./... && go build -o $(AGENT_HOST) ./cmd/agent-host

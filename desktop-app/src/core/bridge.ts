@@ -2,6 +2,33 @@
 // Under Electron the preload exposes window.paladin; in e2e runs the
 // Playwright stub injects the same shape.
 
+export type VoiceModel = {
+  id: string;
+  label: string;
+  arch: number;
+  language: string;
+  description?: string;
+  source: "bundled" | "user";
+};
+
+type VoiceOverview = {
+  available: boolean;
+  models: VoiceModel[];
+  helper?: string;
+};
+
+export type VoiceEvent = {
+  event: "ready" | "line" | "stopped" | "cancelled" | "error";
+  index?: number;
+  id?: string;
+  text?: string;
+  complete?: boolean;
+  latencyMs?: number;
+  message?: string;
+  arch?: number;
+  dir?: string;
+};
+
 export interface PaladinBridge {
   invoke: (method: string, params?: unknown) => Promise<unknown>;
   core?: {
@@ -70,6 +97,15 @@ export interface PaladinBridge {
       sessionId: string,
     ) => Promise<Array<{ url: string; selector: string; tag: string; label: string; text: string; comment: string }>>;
     clearNotes: (sessionId: string) => Promise<void>;
+  };
+  voice?: {
+    overview: () => Promise<VoiceOverview>;
+    start: (modelId: string) => Promise<void>;
+    audio: (samples: Float32Array) => void;
+    stop: () => Promise<boolean>;
+    cancel: () => Promise<boolean>;
+    openFolder: () => Promise<string>;
+    onEvent: (cb: (event: VoiceEvent) => void) => () => void;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

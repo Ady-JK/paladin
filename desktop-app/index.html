@@ -408,6 +408,13 @@
                   <div class="composer-float relative rounded-3xl">
                     <div id="skillChipSlot" class="px-4 pt-2"></div>
                     <div id="thinkingSlot" class="thinking-slot"></div>
+                    <div id="voiceStatus" class="voice-status" hidden>
+                      <span class="voice-status-dot" aria-hidden="true"></span>
+                      <span id="voiceStatusLabel" class="voice-status-label">Listening…</span>
+                      <span id="voiceStatusText" class="voice-status-text" hidden></span>
+                      <span id="voiceStatusTime" class="voice-status-time">0:00</span>
+                      <button id="voiceCancelBtn" type="button" class="voice-status-cancel">Cancel</button>
+                    </div>
                     <div id="attachmentCards" class="attachment-cards" aria-label="Attached files"></div>
                     <div id="tagCards" class="tag-cards" aria-label="Tagged files"></div>
                     <textarea
@@ -427,6 +434,34 @@
                       >
                         <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
                       </button>
+                      <div class="voice-control relative flex flex-shrink-0 items-center">
+                        <button
+                          id="voiceBtn"
+                          type="button"
+                          class="voice-btn flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                          aria-pressed="false"
+                          title="Hold to dictate"
+                        >
+                          <span data-icon="microphone" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
+                        </button>
+                        <button
+                          id="voiceMenuBtn"
+                          type="button"
+                          class="voice-menu-btn flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                          aria-label="Choose the dictation model"
+                          aria-expanded="false"
+                          title="Choose the dictation model"
+                        >
+                          <span data-icon="chevron-down" class="flex-shrink-0 [&>svg]:h-3 [&>svg]:w-3"></span>
+                        </button>
+                        <div id="voiceMenu" class="voice-menu" hidden>
+                          <div class="voice-menu-title">Dictation model</div>
+                          <div id="voiceMenuList" class="voice-menu-list"></div>
+                          <button id="voiceModelsFolder" type="button" class="voice-menu-folder">
+                            Open models folder
+                          </button>
+                        </div>
+                      </div>
                       <div class="composer-model-slot relative flex min-w-0 flex-1 items-center gap-1">
                         <button
                           id="modelSelectBtn"

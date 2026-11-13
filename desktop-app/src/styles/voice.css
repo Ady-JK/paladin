@@ -1,0 +1,232 @@
+/* ============ Dictation (push-to-talk) ============ */
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 12px 4px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgb(16 185 129 / 0.25);
+  background: rgb(16 185 129 / 0.08);
+  color: var(--color-slate-600);
+  font-size: 11.5px;
+  animation: voice-status-in 140ms ease-out;
+}
+
+.dark .voice-status {
+  border-color: rgb(16 185 129 / 0.3);
+  background: rgb(16 185 129 / 0.1);
+  color: var(--color-slate-300);
+}
+
+.voice-status-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--color-agent-emerald);
+  box-shadow: 0 0 0 0 rgb(16 185 129 / 0.45);
+  animation: voice-pulse 1.4s ease-out infinite;
+}
+
+.voice-status-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--color-agent-emerald);
+}
+
+.voice-status-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-status-time {
+  flex-shrink: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--color-slate-400);
+}
+
+.voice-status-cancel {
+  flex-shrink: 0;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-slate-500);
+}
+
+.voice-status-cancel:hover {
+  background: rgb(148 163 184 / 0.16);
+  color: var(--color-slate-700);
+}
+
+.dark .voice-status-cancel:hover {
+  background: rgb(148 163 184 / 0.14);
+  color: var(--color-slate-200);
+}
+
+.voice-btn.is-recording {
+  background: var(--color-agent-rose);
+  border-color: var(--color-agent-rose);
+  color: #fff;
+  animation: voice-recording 1.2s ease-in-out infinite;
+}
+
+.voice-btn.is-recording:hover {
+  background: var(--color-agent-rose);
+  border-color: var(--color-agent-rose);
+  color: #fff;
+}
+
+.voice-menu-btn {
+  margin-left: -4px;
+}
+
+.voice-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  width: 19rem;
+  max-width: 92vw;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  box-shadow: 0 16px 40px -18px rgb(15 23 42 / 0.28);
+}
+
+.dark .voice-menu {
+  border-color: rgb(71 85 105 / 0.7);
+  background: var(--color-slate-900);
+  box-shadow: 0 16px 40px -16px rgb(0 0 0 / 0.6);
+}
+
+.voice-menu-title {
+  padding: 8px 12px 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+}
+
+.voice-menu-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 6px 6px;
+}
+
+.voice-menu-item,
+.voice-menu-folder {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  border-radius: 8px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.voice-menu-item:hover,
+.voice-menu-folder:hover {
+  background: var(--color-slate-100);
+}
+
+.dark .voice-menu-item:hover,
+.dark .voice-menu-folder:hover {
+  background: rgb(51 65 85 / 0.55);
+}
+
+.voice-menu-item.is-selected {
+  background: rgb(16 185 129 / 0.1);
+}
+
+.dark .voice-menu-item.is-selected {
+  background: rgb(16 185 129 / 0.14);
+}
+
+.voice-menu-check {
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--color-agent-emerald);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.voice-menu-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.voice-menu-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-slate-700);
+}
+
+.dark .voice-menu-label {
+  color: var(--color-slate-100);
+}
+
+.voice-menu-detail {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--color-slate-400);
+}
+
+.voice-menu-folder {
+  border-top: 1px solid var(--color-slate-200);
+  border-radius: 0;
+  padding: 9px 14px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-slate-500);
+}
+
+.dark .voice-menu-folder {
+  border-top-color: var(--color-slate-800);
+  color: var(--color-slate-400);
+}
+
+@keyframes voice-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@keyframes voice-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgb(16 185 129 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0);
+  }
+}
+
+@keyframes voice-recording {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(244 63 94 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(244 63 94 / 0);
+  }
+}
+
+html[data-motion="off"] .voice-status,
+html[data-motion="off"] .voice-status-dot,
+html[data-motion="off"] .voice-btn.is-recording {
+  animation: none;
+}

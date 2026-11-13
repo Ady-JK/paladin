@@ -39,9 +39,17 @@ cd desktop-app && pnpm install
 Dev loop (builds the Go sidecar, Electron main, then Vite + Electron):
 
 ```sh
-make app-dev      # = core build + pnpm build:electron + pnpm dev
+make app-dev      # = voice + core build + pnpm build:electron + pnpm dev
 make              # same, it is the default goal
+make voice        # fetch the Moonshine runtime + Tiny model and build voice-helper
+make voice-all    # also fetch the Small and Medium dictation models
 ```
+
+Voice assets are downloaded into `desktop-app/voice/` (gitignored) and
+packaged as `resources/voice/`. `make app` and `make app-dev` run `make voice`
+first; an offline checkout still builds, with the microphone button disabled.
+Models are swappable at runtime: any directory under `voice/models/` or
+`<data>/voice/models/` with a `model.json` appears in the composer's model menu.
 
 Build a release (static stripped sidecar + electron-builder → `desktop-app/release/`):
 

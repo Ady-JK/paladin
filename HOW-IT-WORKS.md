@@ -354,6 +354,38 @@ widget, shown as a card in the turn (not folded into the tool group) and again w
   `.svg` or `.html` file. A copy is also kept in `<session>/visuals/`.
 - A script can call `paladin.sendPrompt(text)`: it fills your message box, it never sends.
 
+### Voice dictation (push-to-talk)
+
+The microphone button in the composer is **push-to-talk dictation**. Hold it
+(or Space/Enter while it has focus) and the live transcript appears above the
+composer; release and the finished line is inserted at the caret. Escape, a
+window blur, or the Cancel button drops the take. Text is never sent
+automatically.
+
+- **Fully local.** The Moonshine runtime and model ship inside the app under
+  `voice/`; Electron main spawns `voice-helper`, a tiny C++ process that feeds
+  audio to the Moonshine model over a framed stdio protocol. No audio, text or
+  request leaves the machine; the helper opens no socket.
+- **Models are swappable.** The mic's chevron opens a list of every model
+  directory under `voice/models/` (bundled) and `<data>/voice/models/` (yours).
+  The pick is remembered per app. `make voice` fetches the default Tiny
+  Streaming model (~45 MB); `make voice-all` also fetches Small and Medium.
+  Each directory carries a small `model.json` with its label and Moonshine
+  architecture number.
+- **Only the app window may use the microphone.** The guest site partition and
+  plugin frames stay denied; the main window's permission handler accepts
+  `media` only when the request is audio-only. No recording is saved.
+- **Idle cost is zero.** The helper loads the model on the first press and
+  exits five minutes after the last dictation, so an idle Paladin holds no
+  voice memory. Audio is streamed while it runs; nothing is transcribed in the
+  background.
+- **English only for now.** Tiny Streaming is the fastest and least accurate
+  (12% average WER on the Open ASR benchmark); Small (7.8%) and Medium (6.7%)
+  are available through `make voice-all` and the model menu.
+
+The helper is built by `make voice`; without it the mic button is disabled and
+the app is otherwise unchanged.
+
 ### Search tools (grep, glob, list)
 
 `grep` searches file contents, `glob` finds files by name (newest first) and `list` draws a folder tree with file counts.

@@ -40,6 +40,7 @@ import { initSkills } from "./features/skills";
 import { initWindow } from "./features/window";
 import { initResources } from "./features/resources";
 import { initShortcuts } from "./features/shortcuts";
+import { initVoiceFeature } from "./features/voice";
 import { clearContextBox, initContextBox, reloadContextSources } from "./features/contextBox";
 import { initMotion, motionMs } from "./ui/motion";
 import { initUndo } from "./features/undo";
@@ -201,6 +202,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initResources();
   initContextBox();
   initShortcuts();
+  initVoiceFeature();
 
   $("#resPill").addEventListener("click", () => {
     openSettings();

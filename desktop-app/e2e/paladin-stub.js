@@ -1445,6 +1445,26 @@ window.paladin = {
     window.__e2ePendingOpen = null;
     return id;
   },
+  voice: {
+    overview: async () => window.__e2eVoiceOverview || { available: false, models: [] },
+    start: async (modelId) => {
+      window.__e2eVoiceStarted = modelId;
+      return true;
+    },
+    audio: (samples) => {
+      window.__e2eVoiceSamples = (window.__e2eVoiceSamples || 0) + samples.length;
+    },
+    stop: async () => {
+      window.__e2eVoiceStops = (window.__e2eVoiceStops || 0) + 1;
+      return true;
+    },
+    cancel: async () => true,
+    openFolder: async () => "/tmp/paladin-voice-models",
+    onEvent: (cb) => {
+      window.__e2eVoiceEmit = cb;
+      return () => {};
+    },
+  },
   views: {
     ensure: async (name, url, partition) => {
       window.__e2eViewEnsures = (window.__e2eViewEnsures || []).concat([{ name, url, partition }]);

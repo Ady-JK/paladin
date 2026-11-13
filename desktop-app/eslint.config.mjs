@@ -68,7 +68,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["*.mjs"],
-    languageOptions: { globals: globals.node },
+    files: ["*.mjs", "scripts/voice-assets.mjs"],
+    languageOptions: { globals: { ...globals.node, fetch: "readonly" } },
   },
 );

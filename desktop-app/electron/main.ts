@@ -25,6 +25,7 @@ import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
 import { hostCommand, hostEnv, validateConnection, type CoreConnection } from "./remote";
 import { allowedPersonalPopup, guestPermissionAllowed } from "./guestPolicy";
 import { BrowserManager, type BrowserRequest, type BrowserState, type EgressSetup } from "./browser";
+import { VoiceManager } from "./voice";
 import { remoteOpenRefusal } from "./browserPolicy";
 import { runBrowserSmoke } from "./browserSmoke";
 import { refuseAll } from "./browserEgress";
@@ -248,6 +249,16 @@ function forwardBrowserState(event: BrowserState): void {
 }
 
 const browsers = new BrowserManager(liveWindow, forwardBrowserState, smokeEgress);
+// Voice keeps one Moonshine helper alive only while dictation is warm.
+// Events go straight to the window that captured the audio.
+const voice = new VoiceManager();
+voice.onEvent = (event) => {
+  try {
+    liveWindow()?.webContents.send("voice:event", event);
+  } catch {
+    /* renderer reloading */
+  }
+};
 let nextUIBrowserID = 0;
 
 // isWebUrl admits only http(s) URLs: guest views and the OS browser
@@ -807,12 +818,23 @@ async function lockAppSession(): Promise<void> {
   });
   // The window uses no web permissions (notifications come from the main
   // process): Electron would otherwise grant every request, including to
-  // code in a visual.
+  // code in a visual. The one exception is the microphone, which only
+  // dictation uses, and only from the app window itself.
   const allowed = (permission: string) => permission === "clipboard-sanitized-write";
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) =>
-    callback(allowed(permission)),
+  const appWindow = (contents: Electron.WebContents | null): boolean => !!win && contents === win.webContents;
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    if (allowed(permission)) return callback(true);
+    const mediaTypes = "mediaTypes" in details ? (details.mediaTypes ?? []) : [];
+    const audioOnly = mediaTypes.length > 0 && mediaTypes.every((type: string) => type === "audio");
+    // Main frame only: plugin panels and visual iframes share this
+    // webContents and must never reach the microphone.
+    callback(permission === "media" && appWindow(contents) && details.isMainFrame && audioOnly);
+  });
+  session.defaultSession.setPermissionCheckHandler(
+    (contents, permission, _origin, details) =>
+      allowed(permission) ||
+      (permission === "media" && appWindow(contents) && details.isMainFrame && details.mediaType !== "video"),
   );
-  session.defaultSession.setPermissionCheckHandler((_contents, permission) => allowed(permission));
   session.defaultSession.setDevicePermissionHandler(() => false);
 }
 
@@ -1306,6 +1328,29 @@ app
     handleTrusted("browser:getNotes", (_e, sessionId: string) => browsers.getNotes(sessionId));
     handleTrusted("browser:clearNotes", (_e, sessionId: string) => browsers.clearNotes(sessionId));
 
+    handleTrusted("voice:overview", () => voice.overview());
+    handleTrusted("voice:start", (_e, modelId: unknown) => {
+      if (typeof modelId !== "string") throw new Error("voice: invalid model");
+      return voice.start(modelId);
+    });
+    handleTrusted("voice:stop", () => {
+      voice.stop();
+      return true;
+    });
+    handleTrusted("voice:cancel", () => {
+      voice.cancel();
+      return true;
+    });
+    handleTrusted("voice:openFolder", () => voice.openModelsFolder());
+    // Audio is high-frequency, so it uses a fire-and-forget channel rather
+    // than a request/reply for every 100 ms chunk.
+    ipcMain.on("voice:audio", (event, samples: unknown) => {
+      if (!win || !isMainWindowFrame(event.sender, event.senderFrame, win.webContents, win.webContents.mainFrame))
+        return;
+      if (!(samples instanceof Float32Array)) return;
+      voice.audio(samples);
+    });
+
     await lockAppSession();
     createWindow();
     if (process.argv.includes("--smoke-browser")) {
@@ -1419,6 +1464,7 @@ app.on("before-quit", (event) => {
   creatorWatcher?.close();
   creatorWatcher = null;
   if (creatorReloadTimer) clearTimeout(creatorReloadTimer);
+  voice.dispose();
   void browsers.stop();
   if (quitting || !agent.running) return;
   quitting = true;

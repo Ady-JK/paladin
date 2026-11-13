@@ -10,6 +10,11 @@
       "from": "../core/bin",
       "to": "agent-host",
       "filter": ["agent-host", "agent-host.exe"]
+    },
+    {
+      "from": "voice",
+      "to": "voice",
+      "filter": ["voice-helper", "voice-helper.exe", "NOTICES.md", "lib/**", "models/**"]
     }
   ],
   "linux": {
@@ -17,6 +22,11 @@
     "category": "Utility",
     "executableName": "paladin",
     "maintainer": "paladin"
+  },
+  "mac": {
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Paladin uses the microphone only for on-device dictation."
+    }
   },
   "compression": "maximum"
 }

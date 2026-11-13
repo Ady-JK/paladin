@@ -138,6 +138,21 @@ if (!process.isMainFrame) {
       clearNotes: (sessionId: string) => ipcRenderer.invoke("browser:clearNotes", sessionId),
     },
 
+    voice: {
+      overview: () => ipcRenderer.invoke("voice:overview"),
+      start: (modelId: string) => ipcRenderer.invoke("voice:start", modelId),
+      // Fire-and-forget: one call per ~100 ms of audio.
+      audio: (samples: Float32Array) => ipcRenderer.send("voice:audio", samples),
+      stop: () => ipcRenderer.invoke("voice:stop"),
+      cancel: () => ipcRenderer.invoke("voice:cancel"),
+      openFolder: () => ipcRenderer.invoke("voice:openFolder"),
+      onEvent: (cb: (msg: unknown) => void): (() => void) => {
+        const fn = (_e: unknown, msg: unknown): void => cb(msg);
+        ipcRenderer.on("voice:event", fn);
+        return () => ipcRenderer.removeListener("voice:event", fn);
+      },
+    },
+
     shell: {
       openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
     },
