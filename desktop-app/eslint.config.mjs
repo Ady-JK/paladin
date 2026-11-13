@@ -13,6 +13,8 @@ export default tseslint.config(
       "node_modules/**",
       "test-results/**",
       "playwright-report/**",
+      // Extracted third-party WASM binding; not our source.
+      "voice/**",
     ],
   },
   js.configs.recommended,
@@ -68,7 +70,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["*.mjs", "scripts/voice-assets.mjs"],
+    files: ["*.mjs", "scripts/voice-assets.mjs", "voice-worker/**/*.mjs"],
     languageOptions: { globals: { ...globals.node, fetch: "readonly" } },
   },
 );

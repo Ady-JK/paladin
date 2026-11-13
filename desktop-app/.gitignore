@@ -11,10 +11,7 @@ voice/*
 !voice/models/**
 !voice/runtimes/
 !voice/runtimes/**
-!voice/bin/
-!voice/bin/**
-voice/lib/
-voice/voice-helper
-voice/voice-helper.exe
+voice/wasm/
+voice/worker.mjs
 voice/NOTICES.md
 voice/.extract/

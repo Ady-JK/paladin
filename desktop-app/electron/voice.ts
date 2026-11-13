@@ -1,15 +1,19 @@
-// Voice dictation: a long-lived Moonshine helper in a child process.
+// Voice dictation: a Moonshine WASM transcriber in a utility process.
 //
 // The renderer captures microphone audio (getUserMedia) and sends 16 kHz
-// mono float32 chunks over IPC. This module frames them to the helper's
-// stdin and forwards the helper's JSON lines to the window as `voice:event`.
-// The model stays warm for five minutes after a dictation, then the process
-// exits so an idle Paladin holds no voice memory at all.
+// mono float32 chunks over IPC. This module forwards them to a utility
+// process that owns the WebAssembly module and the streaming transcriber,
+// then forwards the line events to the window as `voice:event`. The model
+// stays warm for five minutes after a dictation, then the process exits so
+// an idle Paladin holds no voice memory at all.
+//
+// The WebAssembly runtime and the model are the same files on Linux, macOS
+// and Windows, so there is nothing native to compile and nothing to ship per
+// platform.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
-import { app, shell } from "electron";
+import { app, shell, utilityProcess, type UtilityProcess } from "electron";
 import { paladinDataDir } from "./pluginHost";
 
 export type VoiceModel = {
@@ -24,7 +28,7 @@ export type VoiceModel = {
 export type VoiceOverview = {
   available: boolean;
   models: VoiceModel[];
-  helper: string;
+  runtime?: string;
 };
 
 export type VoiceEvent = {
@@ -45,18 +49,10 @@ const MAX_AUDIO_SAMPLES = 16000 * 2; // two seconds; the renderer sends 100 ms
 const IDLE_UNLOAD_MS = 5 * 60 * 1000;
 const LOAD_TIMEOUT_MS = 30_000;
 
-type Frame = 1 | 2 | 3 | 4 | 5;
-const FRAME_AUDIO: Frame = 1;
-const FRAME_LOAD: Frame = 2;
-const FRAME_STOP: Frame = 3;
-const FRAME_CANCEL: Frame = 4;
-const FRAME_SHUTDOWN: Frame = 5;
-
 type ResolvedModel = VoiceModel & { dir: string };
 
 export class VoiceManager {
-  private child: ChildProcessWithoutNullStreams | null = null;
-  private stdout = "";
+  private child: UtilityProcess | null = null;
   private running = false;
   private starting = false;
   private idleTimer: NodeJS.Timeout | null = null;
@@ -70,8 +66,12 @@ export class VoiceManager {
     return app.isPackaged ? path.join(process.resourcesPath, "voice") : path.join(__dirname, "..", "voice");
   }
 
-  helperPath(): string {
-    return path.join(this.voiceRoot(), process.platform === "win32" ? "voice-helper.exe" : "voice-helper");
+  workerPath(): string {
+    return path.join(this.voiceRoot(), "worker.mjs");
+  }
+
+  wasmPath(): string {
+    return path.join(this.voiceRoot(), "wasm", "dist", "index.js");
   }
 
   private modelRoots(): string[] {
@@ -79,9 +79,13 @@ export class VoiceManager {
   }
 
   // overview lists the models found in the app bundle and in the user's
-  // data directory, and whether the native helper exists at all.
+  // data directory, and whether the WASM runtime is present at all.
   overview(): VoiceOverview {
-    return { available: existsSync(this.helperPath()), models: this.models(), helper: this.helperPath() };
+    return {
+      available: existsSync(this.workerPath()) && existsSync(this.wasmPath()),
+      models: this.models(),
+      runtime: this.wasmPath(),
+    };
   }
 
   models(): VoiceModel[] {
@@ -146,7 +150,7 @@ export class VoiceManager {
 
   // start loads the chosen model (or reuses the warm one) and opens a
   // fresh stream. Calls are serialized so a quick second press cannot
-  // interleave frames with the first load.
+  // interleave audio with the first load.
   start(modelId: string): Promise<void> {
     const run = this.queue.then(() => this.startNow(modelId));
     this.queue = run.catch(() => undefined);
@@ -157,17 +161,18 @@ export class VoiceManager {
     if (this.disposed) throw new Error("voice is shutting down");
     const model = this.resolve(modelId);
     if (!model) throw new Error(`voice: model "${modelId}" is not installed`);
-    if (!existsSync(this.helperPath())) {
-      throw new Error("voice: the dictation helper is missing; run `make voice` and restart Paladin");
+    if (!existsSync(this.workerPath()) || !existsSync(this.wasmPath())) {
+      throw new Error("voice: the dictation runtime is missing; run `make voice` and restart Paladin");
     }
     this.clearIdle();
     this.starting = true;
     try {
       this.ensureChild();
-      const payload = Buffer.alloc(4 + Buffer.byteLength(model.dir));
-      payload.writeUInt32LE(model.arch, 0);
-      payload.write(model.dir, 4, "utf8");
-      await this.request(FRAME_LOAD, payload);
+      // Register the wait before posting: a warm model can answer `ready`
+      // in the same tick.
+      const ready = this.awaitReady();
+      this.post({ type: "load", dir: model.dir, arch: model.arch });
+      await ready;
       this.running = true;
     } finally {
       this.starting = false;
@@ -176,20 +181,19 @@ export class VoiceManager {
 
   stop(): void {
     if (!this.running) return;
-    this.write(FRAME_STOP);
+    this.post({ type: "stop" });
   }
 
   cancel(): void {
     if (!this.running) return;
-    this.write(FRAME_CANCEL);
+    this.post({ type: "cancel" });
   }
 
   // audio accepts one chunk of 16 kHz mono float32 samples. The renderer
   // is the only caller, and main verifies the frame before this point.
   audio(samples: Float32Array): void {
     if (!this.running || samples.length === 0 || samples.length > MAX_AUDIO_SAMPLES) return;
-    const payload = Buffer.from(samples.buffer.slice(samples.byteOffset, samples.byteOffset + samples.byteLength));
-    this.write(FRAME_AUDIO, payload);
+    this.post({ type: "audio", audio: samples });
   }
 
   openModelsFolder(): string {
@@ -208,10 +212,7 @@ export class VoiceManager {
     this.running = false;
     if (!child) return;
     try {
-      const header = Buffer.alloc(5);
-      header[0] = FRAME_SHUTDOWN;
-      child.stdin.write(header);
-      child.stdin.end();
+      child.postMessage({ type: "shutdown" });
     } catch {
       // Already gone.
     }
@@ -219,56 +220,37 @@ export class VoiceManager {
   }
 
   private ensureChild(): void {
-    if (this.child && !this.child.killed) return;
-    const helper = this.helperPath();
-    const child = spawn(helper, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    this.child = child;
-    this.stdout = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      this.stdout += chunk;
-      let newline = this.stdout.indexOf("\n");
-      while (newline >= 0) {
-        const line = this.stdout.slice(0, newline);
-        this.stdout = this.stdout.slice(newline + 1);
-        this.handleLine(line);
-        newline = this.stdout.indexOf("\n");
-      }
-      if (this.stdout.length > 256 << 10) this.stdout = "";
+    if (this.child) return;
+    const child = utilityProcess.fork(this.workerPath(), [], {
+      serviceName: "paladin-voice",
+      stdio: "pipe",
     });
-    child.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString().trim();
+    this.child = child;
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      const text = chunk.trim();
       if (text) console.log(`[voice] ${text}`);
     });
-    child.stdin.on("error", (error) => console.log(`[voice] stdin: ${error.message}`));
-    child.on("error", (error) => {
-      console.log(`[voice] helper failed: ${error.message}`);
-      this.child = null;
-      this.running = false;
-      this.rejectPending(new Error(`voice: ${error.message}`));
-      this.emit({ event: "error", message: error.message });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      const text = chunk.trim();
+      if (text) console.log(`[voice] ${text}`);
     });
-    child.on("exit", (code, signal) => {
+    child.on("message", (message: VoiceEvent) => this.handleEvent(message));
+    child.on("exit", (code) => {
       if (this.child !== child) return;
       this.child = null;
       this.running = false;
-      this.rejectPending(new Error("voice: the dictation helper exited"));
+      this.rejectPending(new Error("voice: the dictation process exited"));
       if (!this.disposed) {
-        console.log(`[voice] helper exited (${signal ?? code})`);
-        this.emit({ event: "error", message: "the dictation helper stopped unexpectedly" });
+        console.log(`[voice] process exited (${code})`);
+        this.emit({ event: "error", message: "the dictation process stopped unexpectedly" });
       }
     });
   }
 
-  private handleLine(line: string): void {
-    if (!line.trim()) return;
-    let event: VoiceEvent;
-    try {
-      event = JSON.parse(line) as VoiceEvent;
-    } catch {
-      console.log(`[voice] non-JSON line: ${line.slice(0, 200)}`);
-      return;
-    }
+  private handleEvent(event: VoiceEvent): void {
+    if (!event || typeof event !== "object") return;
     switch (event.event) {
       case "ready":
         this.running = true;
@@ -293,7 +275,7 @@ export class VoiceManager {
     this.onEvent?.(event);
   }
 
-  private request(type: Frame, payload: Buffer): Promise<void> {
+  private awaitReady(): Promise<void> {
     if (this.pending) return Promise.reject(new Error("voice is already loading"));
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -301,7 +283,6 @@ export class VoiceManager {
         reject(new Error("voice: the model took too long to load"));
       }, LOAD_TIMEOUT_MS);
       this.pending = { resolve, reject, timer };
-      this.write(type, payload);
     });
   }
 
@@ -321,17 +302,13 @@ export class VoiceManager {
     pending.reject(error);
   }
 
-  private write(type: Frame, payload?: Buffer): void {
+  private post(message: unknown): void {
     const child = this.child;
-    if (!child || !child.stdin.writable) return;
-    const header = Buffer.alloc(5);
-    header[0] = type;
-    header.writeUInt32LE(payload?.length ?? 0, 1);
+    if (!child) return;
     try {
-      child.stdin.write(header);
-      if (payload?.length) child.stdin.write(payload);
+      child.postMessage(message);
     } catch (error) {
-      console.log(`[voice] write: ${String(error)}`);
+      console.log(`[voice] post: ${String(error)}`);
     }
   }
 
@@ -351,15 +328,12 @@ export class VoiceManager {
 
   private unloadIdle(): void {
     // No dictation for five minutes: drop the model and its memory. The
-    // next press respawns the helper and reloads it.
+    // next press respawns the process and reloads it.
     if (this.running || this.starting || !this.child) return;
     const child = this.child;
     this.child = null;
     try {
-      const header = Buffer.alloc(5);
-      header[0] = FRAME_SHUTDOWN;
-      child.stdin.write(header);
-      child.stdin.end();
+      child.postMessage({ type: "shutdown" });
     } catch {
       // Already gone.
     }

@@ -38,9 +38,9 @@ app-dev: voice
 	cd core && go build -o $(AGENT_HOST) ./cmd/agent-host
 	cd desktop-app && pnpm install --prefer-offline && pnpm build:electron && pnpm dev
 
-# voice extracts the vendored runtime + Tiny model and installs a prebuilt
-# helper (or compiles it when no matching binary is committed). On Linux x64
-# this needs no network and no C++ compiler.
+# voice extracts the vendored WebAssembly runtime + Tiny model and installs the
+# worker. It needs no network and no C++ compiler on any platform, because the
+# same WASM build runs on Linux, macOS and Windows.
 voice:
 	cd desktop-app && node scripts/voice-assets.mjs
 

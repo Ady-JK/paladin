@@ -1,9 +1,10 @@
 // voice.ts is click-to-toggle dictation into the composer.
 //
 // Click the microphone button: audio is captured at 16 kHz, streamed to the
-// Moonshine helper in Electron main, and the live transcript is shown above
-// the composer. Click it again to stop and insert the finished text at the
-// caret. Escape cancels, and the finished lines are never sent automatically.
+// Moonshine WebAssembly transcriber in Electron main, and the live transcript
+// is shown above the composer. Click it again to stop and insert the finished
+// text at the caret. Escape cancels, and the finished lines are never sent
+// automatically.
 
 import { bridge, hasBridge, type VoiceEvent, type VoiceModel } from "../core/bridge";
 import { $, inputEl } from "../core/dom";
@@ -406,7 +407,7 @@ async function initVoice(): Promise<void> {
     menuBtn.disabled = true;
     micBtn.title = overview.available
       ? "No dictation model is installed (see `make voice`)"
-      : "The dictation helper is missing (run `make voice`)";
+      : "The dictation runtime is missing (run `make voice`)";
     return;
   }
   const saved = localStorage.getItem(STORE_KEY);

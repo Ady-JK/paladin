@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// The native helper is replaced by the stub's voice object. The test pins
+// The WASM worker is replaced by the stub's voice object. The test pins
 // the UI contract: click to start, live lines, click again to insert, and
 // the model menu. The real microphone path is exercised by the app's manual
 // smoke test because headless Chromium has no capture device.

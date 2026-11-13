@@ -1,7 +1,12 @@
 /* styles.css is the stylesheet entry: Tailwind, fonts, then the
  * feature sheets in cascade order. Later files override earlier ones,
  * so keep this order when adding rules. */
-@import "tailwindcss";
+/* Scan only the app's own markup. Automatic detection also walks
+ * voice/ (tens of MB of WASM and model binaries), which costs ~30 s on
+ * the first dev build. */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "./**/*.ts";
 @import "@fontsource/geist/400.css";
 @import "@fontsource/geist/500.css";
 @import "@fontsource/geist/600.css";

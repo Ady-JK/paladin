@@ -1,23 +1,9 @@
 {
   "version": 1,
   "release": "v0.1.6",
-  "runtime": {
-    "linux-x64": {
-      "name": "moonshine-voice-linux-x86_64.tar.gz",
-      "sha256": "0e6074838d47f174b0188533f1819d502f376e77dccb771df5c09380737b76ec"
-    },
-    "linux-arm64": {
-      "name": "moonshine-voice-linux-arm64.tar.gz",
-      "sha256": "1e0a88f27c428cab43590ce1635fe122406ef9e70236b58d077daf4b95cf162c"
-    },
-    "darwin-arm64": {
-      "name": "moonshine-voice-macos-arm64.tar.gz",
-      "sha256": "809555a4e2c9a6972c0960a4cbf08b95121763ca17bce69f817adaac3b804fd0"
-    },
-    "win32-x64": {
-      "name": "moonshine-voice-windows-x86_64.tar.gz",
-      "sha256": "9e33fa88c1dd627314072ffe005af94888515c534cc599617462bc72ed3770f3"
-    }
+  "wasm": {
+    "name": "moonshine-voice-wasm.tar.gz",
+    "sha256": "47a8b94f0b10f9b0687491d86e4606a3cd2b332e566766774f8eb0f984d0ed42"
   },
   "models": [
     {

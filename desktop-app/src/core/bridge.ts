@@ -14,7 +14,7 @@ export type VoiceModel = {
 type VoiceOverview = {
   available: boolean;
   models: VoiceModel[];
-  helper?: string;
+  runtime?: string;
 };
 
 export type VoiceEvent = {

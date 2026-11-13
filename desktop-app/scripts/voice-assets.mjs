@@ -1,20 +1,20 @@
 #!/usr/bin/env node
-// voice-assets.mjs prepares the Moonshine runtime + model files and builds
-// the stdio helper that `electron/voice.ts` spawns.
+// voice-assets.mjs prepares the Moonshine WebAssembly runtime and model files
+// and installs the worker that `electron/voice.ts` runs in a utility process.
 //
 //   node scripts/voice-assets.mjs            # the default (Tiny) model
 //   node scripts/voice-assets.mjs --all      # every model in the registry
-//   node scripts/voice-assets.mjs --force    # redownload and rebuild
+//   node scripts/voice-assets.mjs --force    # redownload and re-extract
 //
-// The Tiny model and the runtime archives are vendored under voice/, so a
+// The WASM runtime archive and the Tiny model are vendored under voice/, so a
 // normal run needs no network. Missing files fall back to the pinned URLs.
-// Output lives in desktop-app/voice/ (the extracted runtime, helper and
+// Output lives in desktop-app/voice/ (the extracted runtime, worker copy and
 // notices are gitignored; `make voice` is the friendly door).
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,15 +29,6 @@ const strict = process.env.PALADIN_VOICE_STRICT === "1" || all;
 
 const RELEASE = registry.release;
 const RELEASE_BASE = `https://github.com/moonshine-ai/moonshine/releases/download/${RELEASE}`;
-
-function runtimeAsset() {
-  const key = `${process.platform}-${process.arch}`;
-  const asset = registry.runtime[key];
-  if (!asset) {
-    throw new Error(`no Moonshine runtime for ${key} (supported: ${Object.keys(registry.runtime).join(", ")})`);
-  }
-  return asset;
-}
 
 function sha256(data) {
   return createHash("sha256").update(data).digest("hex");
@@ -57,25 +48,22 @@ async function download(url, dest, expected) {
   await rename(`${dest}.part`, dest);
 }
 
-async function ensureRuntime() {
-  // macOS ships a static libmoonshine.a; Linux ships libmoonshine.so.
-  const libNames =
-    process.platform === "win32"
-      ? ["moonshine.dll", "libmoonshine.dll"]
-      : process.platform === "darwin"
-        ? ["libmoonshine.a", "libmoonshine.dylib"]
-        : ["libmoonshine.so"];
-  if (
-    !force &&
-    libNames.some((name) => existsSync(path.join(voiceDir, "lib", name))) &&
-    existsSync(path.join(voiceDir, "include", "moonshine-c-api.h"))
-  ) {
+// ensureWasm extracts the single WebAssembly build that runs on every
+// platform, so there is no per-platform archive and nothing to compile.
+async function ensureWasm() {
+  const entry = path.join(voiceDir, "wasm", "dist", "index.js");
+  const dest = path.join(voiceDir, "wasm", "dist");
+  // The binding's dist/ is ESM but ships without its package manifest, so
+  // Node would guess CommonJS and warn on every import.
+  const manifest = path.join(path.dirname(dest), "package.json");
+  if (!force && existsSync(entry)) {
+    await writeFile(manifest, '{\n  "type": "module"\n}\n');
     return;
   }
-  const asset = runtimeAsset();
-  // The runtime archives are vendored under voice/runtimes/ so a clone
-  // with no network can still extract them. The extracted libs stay
-  // gitignored; only the compressed archives are tracked.
+  const asset = registry.wasm;
+  // The archive is vendored under voice/runtimes/ so a clone with no
+  // network can still extract it. The expanded files stay gitignored;
+  // only the compressed archive is tracked.
   const vendored = path.join(voiceDir, "runtimes", asset.name);
   let archive = vendored;
   if (!existsSync(archive)) {
@@ -89,29 +77,13 @@ async function ensureRuntime() {
   await rm(extract, { recursive: true, force: true });
   await mkdir(extract, { recursive: true });
   execFileSync("tar", ["-xzf", archive, "-C", extract], { stdio: "inherit" });
-  const top = (await readdir(extract)).find((name) => !name.startsWith("."));
-  if (!top) throw new Error("the runtime archive was empty");
-  const root = path.join(extract, top);
-  const libSrc = path.join(root, "lib");
-  const includeSrc = path.join(root, "include");
-  const libDst = path.join(voiceDir, "lib");
-  const includeDst = path.join(voiceDir, "include");
-  await rm(libDst, { recursive: true, force: true });
-  await rm(includeDst, { recursive: true, force: true });
-  await mkdir(libDst, { recursive: true });
-  await mkdir(includeDst, { recursive: true });
-  for (const name of await readdir(libSrc)) {
-    if (name.startsWith("._")) continue;
-    const source = path.join(libSrc, name);
-    if (!statSync(source).isFile()) continue;
-    await copyFile(source, path.join(libDst, name));
-  }
-  for (const name of await readdir(includeSrc)) {
-    if (name.startsWith("._")) continue;
-    const source = path.join(includeSrc, name);
-    if (!statSync(source).isFile()) continue;
-    await copyFile(source, path.join(includeDst, name));
-  }
+  const dist = path.join(extract, "dist");
+  if (!existsSync(dist)) throw new Error("the WASM archive has no dist/ directory");
+  await rm(path.dirname(dest), { recursive: true, force: true });
+  await mkdir(path.dirname(dest), { recursive: true });
+  // Skip the AppleDouble "._*" entries that macOS tar leaves behind.
+  await cp(dist, dest, { recursive: true, filter: (name) => !path.basename(name).startsWith("._") });
+  await writeFile(manifest, '{\n  "type": "module"\n}\n');
   await rm(extract, { recursive: true, force: true });
   if (archive !== vendored) await rm(archive, { force: true });
 }
@@ -138,60 +110,21 @@ async function ensureModels() {
   }
 }
 
-async function buildHelper() {
-  await copyFile(path.join(appDir, "voice-helper", "THIRD-PARTY-NOTICES.md"), path.join(voiceDir, "NOTICES.md"));
-  const source = path.join(appDir, "voice-helper", "voice-helper.cpp");
-  const include = path.join(voiceDir, "include");
-  const lib = path.join(voiceDir, "lib");
-  const exe = process.platform === "win32" ? "voice-helper.exe" : "voice-helper";
-  const out = path.join(voiceDir, exe);
-  const cxx = process.env.CXX || (process.platform === "darwin" ? "clang++" : "c++");
-  if (process.platform === "win32") {
-    // Windows links the import libraries directly and needs onnxruntime.dll
-    // beside the executable; the loader does not look in lib/.
-    for (const name of await readdir(lib)) {
-      if (name.toLowerCase().endsWith(".dll")) {
-        await copyFile(path.join(lib, name), path.join(voiceDir, name));
-      }
-    }
-  }
-  // A prebuilt helper makes a source build compiler-free. The committed
-  // Linux binary lives in voice/bin/linux-x64/; add the matching directory
-  // for another platform (or build it once in CI) to skip the compiler.
-  const prebuilt = path.join(voiceDir, "bin", `${process.platform}-${process.arch}`, exe);
-  if (!force && existsSync(prebuilt)) {
-    await copyFile(prebuilt, out);
-    process.stdout.write(`  ✓ prebuilt ${path.relative(appDir, prebuilt)}\n`);
-    return;
-  }
-  const winLibs =
-    process.platform === "win32"
-      ? (await readdir(lib)).filter((name) => name.toLowerCase().endsWith(".lib")).map((name) => path.join(lib, name))
-      : [];
-  const msvc = process.platform === "win32" && /(^|[\\/])cl(\.exe)?$/i.test(cxx);
-  const args = msvc
-    ? ["/O2", "/std:c++17", `/I${include}`, source, ...winLibs, `/Fe${out}`]
-    : ["-O2", "-std=c++17", "-I", include, source];
-  if (process.platform === "win32") {
-    if (!msvc) args.push(...winLibs);
-  } else {
-    args.push("-L", lib, "-lmoonshine");
-    if (process.platform === "darwin") args.push("-Wl,-rpath,@loader_path/lib");
-    else args.push("-Wl,-rpath,$ORIGIN/lib");
-  }
-  if (!msvc) args.push("-o", out);
-  process.stdout.write(`  ⚒ ${cxx} voice-helper.cpp\n`);
-  execFileSync(cxx, args, { stdio: "inherit", cwd: voiceDir });
+// installWorker copies the tracked worker into voice/, where packaging and
+// the dev build both expect it next to wasm/ and models/.
+async function installWorker() {
+  await copyFile(path.join(appDir, "voice-worker", "worker.mjs"), path.join(voiceDir, "worker.mjs"));
+  await copyFile(path.join(appDir, "voice-worker", "THIRD-PARTY-NOTICES.md"), path.join(voiceDir, "NOTICES.md"));
 }
 
 async function main() {
   await mkdir(voiceDir, { recursive: true });
-  process.stdout.write("voice: runtime\n");
-  await ensureRuntime();
+  process.stdout.write("voice: wasm runtime\n");
+  await ensureWasm();
   process.stdout.write("voice: models\n");
   await ensureModels();
-  process.stdout.write("voice: helper\n");
-  await buildHelper();
+  process.stdout.write("voice: worker\n");
+  await installWorker();
   process.stdout.write(`voice: ready in ${path.relative(appDir, voiceDir)}/\n`);
 }
 

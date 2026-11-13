@@ -41,20 +41,19 @@ Dev loop (builds the Go sidecar, Electron main, then Vite + Electron):
 ```sh
 make app-dev      # = voice + core build + pnpm build:electron + pnpm dev
 make              # same, it is the default goal
-make voice        # fetch the Moonshine runtime + Tiny model and build voice-helper
+make voice        # fetch the Moonshine WASM runtime + Tiny model, install the worker
 make voice-all    # also fetch the Small and Medium dictation models
 ```
 
-Voice assets live in `desktop-app/voice/`: the compressed runtime archives
-(`runtimes/`), the Tiny model (`models/`) and the Linux x64 helper
-(`bin/linux-x64/voice-helper`) are committed, so `make voice` on Linux is
-fully offline and needs no C++ compiler. Other platforms compile the helper
-once (or drop a binary in `voice/bin/<platform>-<arch>/`). The extracted
-`lib/`, headers and notices are gitignored. `make app` and `make app-dev` run
-`make voice` first; an offline checkout still builds, with the microphone
-button disabled if the helper could not be produced. Models are swappable at
-runtime: any directory under `voice/models/` or `<data>/voice/models/` with a
-`model.json` appears in the composer's model menu.
+Voice assets live in `desktop-app/voice/`: the compressed WebAssembly runtime
+(`runtimes/moonshine-voice-wasm.tar.gz`) and the Tiny model (`models/`) are
+committed, so `make voice` is fully offline and needs no C++ compiler on any
+platform. The same WASM build runs on Linux, macOS and Windows. The extracted
+`wasm/`, the copied worker and the notices are gitignored. `make app` and
+`make app-dev` run `make voice` first; an offline checkout still builds, with
+the microphone button disabled if the runtime could not be produced. Models
+are swappable at runtime: any directory under `voice/models/` or
+`<data>/voice/models/` with a `model.json` appears in the composer's model menu.
 
 Build a release (static stripped sidecar + electron-builder → `desktop-app/release/`):
 
