@@ -76,7 +76,7 @@ async function ensureWasm() {
   const extract = path.join(voiceDir, ".extract");
   await rm(extract, { recursive: true, force: true });
   await mkdir(extract, { recursive: true });
-  execFileSync("tar", ["-xzf", archive, "-C", extract], { stdio: "inherit" });
+  execFileSync("tar", ["--no-same-owner", "-xzf", archive, "-C", extract], { stdio: "inherit" });
   const dist = path.join(extract, "dist");
   if (!existsSync(dist)) throw new Error("the WASM archive has no dist/ directory");
   await rm(path.dirname(dest), { recursive: true, force: true });
