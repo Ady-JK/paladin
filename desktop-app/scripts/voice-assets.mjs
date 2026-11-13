@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// voice-assets.mjs downloads the Moonshine runtime + model files and
-// builds the stdio helper that `electron/voice.ts` spawns.
+// voice-assets.mjs prepares the Moonshine runtime + model files and builds
+// the stdio helper that `electron/voice.ts` spawns.
 //
 //   node scripts/voice-assets.mjs            # the default (Tiny) model
 //   node scripts/voice-assets.mjs --all      # every model in the registry
 //   node scripts/voice-assets.mjs --force    # redownload and rebuild
 //
-// Output lives in desktop-app/voice/ (gitignored): the helper, its
-// shared libraries, and models/<id>/. `make voice` is the friendly door.
+// The Tiny model and the runtime archives are vendored under voice/, so a
+// normal run needs no network. Missing files fall back to the pinned URLs.
+// Output lives in desktop-app/voice/ (the extracted runtime, helper and
+// notices are gitignored; `make voice` is the friendly door).
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -71,14 +73,22 @@ async function ensureRuntime() {
     return;
   }
   const asset = runtimeAsset();
-  const tarball = path.join(voiceDir, asset.name);
-  if (force || !existsSync(tarball)) {
-    await download(asset.url ?? `${RELEASE_BASE}/${asset.name}`, tarball, asset.sha256);
+  // The runtime archives are vendored under voice/runtimes/ so a clone
+  // with no network can still extract them. The extracted libs stay
+  // gitignored; only the compressed archives are tracked.
+  const vendored = path.join(voiceDir, "runtimes", asset.name);
+  let archive = vendored;
+  if (!existsSync(archive)) {
+    archive = path.join(voiceDir, asset.name);
+    await download(asset.url ?? `${RELEASE_BASE}/${asset.name}`, archive, asset.sha256);
+  } else if (asset.sha256) {
+    const got = sha256(await readFile(archive));
+    if (got !== asset.sha256) throw new Error(`${archive}: checksum mismatch (${got})`);
   }
   const extract = path.join(voiceDir, ".extract");
   await rm(extract, { recursive: true, force: true });
   await mkdir(extract, { recursive: true });
-  execFileSync("tar", ["-xzf", tarball, "-C", extract], { stdio: "inherit" });
+  execFileSync("tar", ["-xzf", archive, "-C", extract], { stdio: "inherit" });
   const top = (await readdir(extract)).find((name) => !name.startsWith("."));
   if (!top) throw new Error("the runtime archive was empty");
   const root = path.join(extract, top);
@@ -103,7 +113,7 @@ async function ensureRuntime() {
     await copyFile(source, path.join(includeDst, name));
   }
   await rm(extract, { recursive: true, force: true });
-  await rm(tarball, { force: true });
+  if (archive !== vendored) await rm(archive, { force: true });
 }
 
 async function ensureModels() {
@@ -135,12 +145,33 @@ async function buildHelper() {
   const lib = path.join(voiceDir, "lib");
   const out = path.join(voiceDir, process.platform === "win32" ? "voice-helper.exe" : "voice-helper");
   const cxx = process.env.CXX || (process.platform === "darwin" ? "clang++" : "c++");
-  const args = ["-O2", "-std=c++17", "-I", include, source, "-L", lib, "-lmoonshine"];
-  if (process.platform === "darwin") args.push("-Wl,-rpath,@loader_path/lib");
-  else if (process.platform !== "win32") args.push("-Wl,-rpath,$ORIGIN/lib");
-  args.push("-o", out);
+  if (process.platform === "win32") {
+    // Windows links the import libraries directly and needs onnxruntime.dll
+    // beside the executable; the loader does not look in lib/.
+    for (const name of await readdir(lib)) {
+      if (name.toLowerCase().endsWith(".dll")) {
+        await copyFile(path.join(lib, name), path.join(voiceDir, name));
+      }
+    }
+  }
+  const winLibs =
+    process.platform === "win32"
+      ? (await readdir(lib)).filter((name) => name.toLowerCase().endsWith(".lib")).map((name) => path.join(lib, name))
+      : [];
+  const msvc = process.platform === "win32" && /(^|[\\/])cl(\.exe)?$/i.test(cxx);
+  const args = msvc
+    ? ["/O2", "/std:c++17", `/I${include}`, source, ...winLibs, `/Fe${out}`]
+    : ["-O2", "-std=c++17", "-I", include, source];
+  if (process.platform === "win32") {
+    if (!msvc) args.push(...winLibs);
+  } else {
+    args.push("-L", lib, "-lmoonshine");
+    if (process.platform === "darwin") args.push("-Wl,-rpath,@loader_path/lib");
+    else args.push("-Wl,-rpath,$ORIGIN/lib");
+  }
+  if (!msvc) args.push("-o", out);
   process.stdout.write(`  ⚒ ${cxx} voice-helper.cpp\n`);
-  execFileSync(cxx, args, { stdio: "inherit" });
+  execFileSync(cxx, args, { stdio: "inherit", cwd: voiceDir });
 }
 
 async function main() {

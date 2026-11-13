@@ -14,7 +14,7 @@
     {
       "from": "voice",
       "to": "voice",
-      "filter": ["voice-helper", "voice-helper.exe", "NOTICES.md", "lib/**", "models/**"]
+      "filter": ["voice-helper", "voice-helper.exe", "*.dll", "NOTICES.md", "lib/**", "models/**"]
     }
   ],
   "linux": {

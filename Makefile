@@ -38,9 +38,9 @@ app-dev: voice
 	cd core && go build -o $(AGENT_HOST) ./cmd/agent-host
 	cd desktop-app && pnpm install --prefer-offline && pnpm build:electron && pnpm dev
 
-# voice downloads the Moonshine runtime + Tiny model and builds the helper.
-# Assets are cached in desktop-app/voice/ (gitignored); `make clean` keeps
-# them so a rebuild does not refetch ~60 MB.
+# voice downloads/extracts the Moonshine runtime + Tiny model and builds the
+# helper. The runtime archives and model are vendored, so this works offline;
+# `make clean` keeps them so a rebuild does not refetch anything.
 voice:
 	cd desktop-app && node scripts/voice-assets.mjs
 

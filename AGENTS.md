@@ -45,11 +45,14 @@ make voice        # fetch the Moonshine runtime + Tiny model and build voice-hel
 make voice-all    # also fetch the Small and Medium dictation models
 ```
 
-Voice assets are downloaded into `desktop-app/voice/` (gitignored) and
-packaged as `resources/voice/`. `make app` and `make app-dev` run `make voice`
-first; an offline checkout still builds, with the microphone button disabled.
-Models are swappable at runtime: any directory under `voice/models/` or
-`<data>/voice/models/` with a `model.json` appears in the composer's model menu.
+Voice assets live in `desktop-app/voice/`: the compressed runtime archives
+(`runtimes/`) and the Tiny model (`models/`) are committed, so `make voice`
+works offline; the extracted `lib/`, headers, helper binary and notices are
+gitignored. `make app` and `make app-dev` run `make voice` first; an offline
+checkout still builds, with the microphone button disabled if the helper could
+not be produced. Models are swappable at runtime: any directory under
+`voice/models/` or `<data>/voice/models/` with a `model.json` appears in the
+composer's model menu.
 
 Build a release (static stripped sidecar + electron-builder → `desktop-app/release/`):
 

@@ -6,4 +6,13 @@ release/
 *.log
 test-results/
 playwright-report/
-voice/
+voice/*
+!voice/models/
+!voice/models/**
+!voice/runtimes/
+!voice/runtimes/**
+voice/lib/
+voice/voice-helper
+voice/voice-helper.exe
+voice/NOTICES.md
+voice/.extract/

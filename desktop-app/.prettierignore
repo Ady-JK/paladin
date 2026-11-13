@@ -6,4 +6,5 @@ test-results
 playwright-report
 pnpm-lock.yaml
 pnpm-workspace.yaml
+voice
 *.md

@@ -43,13 +43,17 @@ incomplete one as live text, and inserts the finished lines on `stopped`.
 
 `make voice` runs `desktop-app/scripts/voice-assets.mjs`, which:
 
-1. downloads the pinned Moonshine runtime archive (ONNX Runtime +
-   `libmoonshine`) from the GitHub release,
-2. downloads and SHA-256-verifies the English streaming model files,
+1. extracts the pinned Moonshine runtime archive (ONNX Runtime +
+   `libmoonshine`) from `desktop-app/voice/runtimes/` (vendored in git),
+2. verifies the Tiny model files already under `voice/models/`,
 3. compiles this file into `desktop-app/voice/voice-helper`.
 
-`make voice-all` additionally fetches Small and Medium. The assets are
-gitignored; only this source and the registry are committed.
+No network is needed: the runtime archives and the Tiny model are committed.
+If a file is missing, the script falls back to the pinned GitHub release /
+Moonshine CDN and verifies its SHA-256. `make voice-all` fetches Small and
+Medium from the CDN if they are not present. The extracted runtime, helper
+binary and notices are gitignored; only the source, registry, model and
+compressed runtime archives are tracked.
 
 On Linux the helper links with an `$ORIGIN/lib` rpath. On macOS the script
 uses `@loader_path/lib`. On Windows the DLLs sit beside `voice-helper.exe`.

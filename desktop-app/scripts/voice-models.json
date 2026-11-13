@@ -15,7 +15,8 @@
       "sha256": "809555a4e2c9a6972c0960a4cbf08b95121763ca17bce69f817adaac3b804fd0"
     },
     "win32-x64": {
-      "name": "moonshine-voice-windows-x86_64.tar.gz"
+      "name": "moonshine-voice-windows-x86_64.tar.gz",
+      "sha256": "9e33fa88c1dd627314072ffe005af94888515c534cc599617462bc72ed3770f3"
     }
   },
   "models": [
