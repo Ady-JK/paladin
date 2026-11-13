@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 // The native helper is replaced by the stub's voice object. The test pins
-// the UI contract: hold to start, live lines, release to insert, and the
-// model menu. The real microphone path is exercised by the app's manual
+// the UI contract: click to start, live lines, click again to insert, and
+// the model menu. The real microphone path is exercised by the app's manual
 // smoke test because headless Chromium has no capture device.
 
 const models = [
@@ -50,9 +50,9 @@ test.beforeEach(async ({ page }) => {
   await expect.poll(() => page.evaluate(() => typeof (window as any).__e2eVoiceEmit)).toBe("function");
 });
 
-test("push-to-talk shows live text and inserts the finished line", async ({ page }) => {
+test("clicking the microphone shows live text and inserts the finished line", async ({ page }) => {
   await expect(page.locator("#voiceBtn")).toBeEnabled();
-  await page.locator("#voiceBtn").dispatchEvent("pointerdown");
+  await page.locator("#voiceBtn").click();
   await expect(page.locator("#voiceStatus")).toBeVisible();
   await expect(page.locator("#voiceStatusLabel")).toHaveText("Listening…");
 
@@ -61,7 +61,7 @@ test("push-to-talk shows live text and inserts the finished line", async ({ page
   );
   await expect(page.locator("#voiceStatusText")).toHaveText("hello world");
 
-  await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })));
+  await page.locator("#voiceBtn").click();
   await expect(page.locator("#voiceStatusLabel")).toHaveText("Transcribing…");
 
   await page.evaluate(() => {
@@ -87,7 +87,7 @@ test("the model menu lists installed models and remembers the pick", async ({ pa
 });
 
 test("Escape cancels without inserting text", async ({ page }) => {
-  await page.locator("#voiceBtn").dispatchEvent("pointerdown");
+  await page.locator("#voiceBtn").click();
   await expect(page.locator("#voiceStatusLabel")).toHaveText("Listening…");
   await page.evaluate(() =>
     (window as any).__e2eVoiceEmit({ event: "line", index: 0, text: "discard me", complete: false }),

@@ -1,4 +1,4 @@
-/* ============ Dictation (push-to-talk) ============ */
+/* ============ Dictation (click to start/stop) ============ */
 
 .voice-status {
   display: flex;
@@ -90,7 +90,8 @@
 .voice-menu {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 0;
+  right: 0;
+  left: auto;
   z-index: 60;
   width: 19rem;
   max-width: 92vw;

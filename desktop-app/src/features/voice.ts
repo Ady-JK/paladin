@@ -1,10 +1,9 @@
-// voice.ts is push-to-talk dictation into the composer.
+// voice.ts is click-to-toggle dictation into the composer.
 //
-// Hold the microphone button (or Space/Enter while it has focus): audio is
-// captured at 16 kHz, streamed to the Moonshine helper in Electron main, and
-// the live transcript is shown above the composer. Releasing the button
-// inserts the finished text at the caret. Escape cancels, and the finished
-// lines are never sent automatically.
+// Click the microphone button: audio is captured at 16 kHz, streamed to the
+// Moonshine helper in Electron main, and the live transcript is shown above
+// the composer. Click it again to stop and insert the finished text at the
+// caret. Escape cancels, and the finished lines are never sent automatically.
 
 import { bridge, hasBridge, type VoiceEvent, type VoiceModel } from "../core/bridge";
 import { $, inputEl } from "../core/dom";
@@ -57,8 +56,13 @@ function paintButton(): void {
   const model = selectedModel();
   micBtn.disabled = !voiceApi() || models.length === 0 || phase === "stopping";
   menuBtn.disabled = !voiceApi() || models.length === 0;
-  micBtn.title = model ? `Hold to dictate · ${model.label}` : "Hold to dictate";
-  micBtn.setAttribute("aria-pressed", phase === "listening" ? "true" : "false");
+  micBtn.title =
+    phase === "listening" || phase === "starting"
+      ? "Click to stop dictating"
+      : model
+        ? `Click to dictate · ${model.label}`
+        : "Click to dictate";
+  micBtn.setAttribute("aria-pressed", phase === "listening" || phase === "starting" ? "true" : "false");
   micBtn.classList.toggle("is-recording", phase === "listening" || phase === "starting");
 }
 
@@ -411,34 +415,12 @@ async function initVoice(): Promise<void> {
   api.onEvent(handleEvent);
   paintButton();
 
-  micBtn.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    if (phase !== "idle") return;
-    try {
-      micBtn.setPointerCapture(event.pointerId);
-    } catch {
-      // Synthetic events (e2e) have no active pointer to capture.
-    }
-    void start();
+  micBtn.addEventListener("click", () => {
+    if (phase === "idle") void start();
+    else if (phase === "starting" || phase === "listening") stop();
   });
-  window.addEventListener("pointerup", () => {
-    if (phase === "starting" || phase === "listening") stop();
-  });
-  window.addEventListener("pointercancel", () => cancel());
   window.addEventListener("blur", () => {
     if (phase !== "idle") cancel();
-  });
-  micBtn.addEventListener("keydown", (event) => {
-    if ((event.key === " " || event.key === "Enter") && !event.repeat) {
-      event.preventDefault();
-      void start();
-    }
-  });
-  micBtn.addEventListener("keyup", (event) => {
-    if (event.key === " " || event.key === "Enter") {
-      event.preventDefault();
-      stop();
-    }
   });
   cancelBtn.addEventListener("click", () => cancel());
   menuBtn.addEventListener("click", (event) => {

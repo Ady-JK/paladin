@@ -354,12 +354,13 @@ widget, shown as a card in the turn (not folded into the tool group) and again w
   `.svg` or `.html` file. A copy is also kept in `<session>/visuals/`.
 - A script can call `paladin.sendPrompt(text)`: it fills your message box, it never sends.
 
-### Voice dictation (push-to-talk)
+### Voice dictation
 
-The microphone button in the composer is **push-to-talk dictation**. Hold it
-(or Space/Enter while it has focus) and the live transcript appears above the
-composer; release and the finished line is inserted at the caret. Escape, a
-window blur, or the Cancel button drops the take. Text is never sent
+The microphone button in the composer is **click-to-toggle dictation**. Click
+it once and the live transcript appears above the composer; click it again to
+stop, and the finished line is inserted at the caret. Space/Enter while the
+button has focus does the same, so it stays usable from the keyboard. Escape,
+a window blur, or the Cancel button drops the take. Text is never sent
 automatically.
 
 - **Fully local.** The Moonshine runtime and model ship inside the app under
