@@ -3,6 +3,7 @@
 package session
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/media"
@@ -12,11 +13,12 @@ import (
 // HistoryMessage is the client-facing history row: tool rows link back
 // to their call; reminders keep their job link instead.
 type HistoryMessage struct {
-	Arguments   *string            `json:"arguments,omitempty"`
-	Image       *media.Image       `json:"image,omitempty"`
-	Attachments []media.Attachment `json:"attachments,omitempty"`
-	Content     string             `json:"content"`
-	CreatedAt   int64              `json:"createdAt"`
+	Arguments   *string                `json:"arguments,omitempty"`
+	Image       *media.Image           `json:"image,omitempty"`
+	Attachments []media.Attachment     `json:"attachments,omitempty"`
+	Compaction  *transcript.Compaction `json:"compaction,omitempty"`
+	Content     string                 `json:"content"`
+	CreatedAt   int64                  `json:"createdAt"`
 	// Index is a user row's transcript position, the handle for undo.
 	Index *int `json:"index,omitempty"`
 	// Kind tags special rows; "compaction" is a context-compaction
@@ -84,8 +86,38 @@ func historyRowCount(msg transcript.Message) int {
 // means all remaining rows. Tool calls are indexed from the entire history
 // so a result at a page boundary keeps its arguments.
 func historyViewRange(msgs []transcript.Message, statsAt map[int]*transcript.TurnStats, start, end int) []HistoryMessage {
-	// Only tool results on the requested page need their call arguments.
-	// Full-history rendering keeps the original complete index.
+	calls := map[string]transcript.ToolCall{}
+	indexHistoryToolCalls(msgs, start, end, calls)
+	var out []HistoryMessage
+	ordinal := 0
+	add := func(row HistoryMessage) {
+		if ordinal >= start && (end < 0 || ordinal < end) {
+			out = append(out, row)
+		}
+		ordinal++
+	}
+	for index, msg := range msgs {
+		count := historyRowCount(msg)
+		if count == 0 {
+			continue
+		}
+		if ordinal+count <= start {
+			ordinal += count
+			continue
+		}
+		if end >= 0 && ordinal >= end {
+			break
+		}
+		appendHistoryRows(msg, index, statsAt[index], calls, add)
+	}
+	if out == nil {
+		out = []HistoryMessage{}
+	}
+	return out
+}
+
+// indexHistoryToolCalls indexes only the call arguments needed on a page.
+func indexHistoryToolCalls(msgs []transcript.Message, start, end int, calls map[string]transcript.ToolCall) {
 	var wanted map[string]bool
 	if end >= 0 {
 		wanted = map[string]bool{}
@@ -101,143 +133,124 @@ func historyViewRange(msgs []transcript.Message, statsAt map[int]*transcript.Tur
 			ordinal += count
 		}
 	}
-	calls := map[string]transcript.ToolCall{}
+	collectHistoryToolCalls(msgs, wanted, calls)
+}
+
+func collectHistoryToolCalls(msgs []transcript.Message, wanted map[string]bool, calls map[string]transcript.ToolCall) {
 	for _, msg := range msgs {
 		if wanted != nil && len(wanted) == 0 {
 			break
 		}
-		if msg.Role != transcript.RoleAssistant {
-			continue
-		}
-		if msg.ToolCalls == nil {
+		if msg.Role != transcript.RoleAssistant || msg.ToolCalls == nil {
 			continue
 		}
 		for _, call := range *msg.ToolCalls {
-			if call.ID == "" {
+			if call.ID == "" || (wanted != nil && !wanted[call.ID]) {
 				continue
 			}
-			if wanted != nil && !wanted[call.ID] {
+			if _, exists := calls[call.ID]; exists {
 				continue
 			}
-			if _, ok := calls[call.ID]; !ok {
-				calls[call.ID] = call
-				if wanted != nil {
-					delete(wanted, call.ID)
-				}
+			calls[call.ID] = call
+			delete(wanted, call.ID)
+		}
+	}
+}
+
+func appendHistoryRows(msg transcript.Message, index int, stats *transcript.TurnStats, calls map[string]transcript.ToolCall, add func(HistoryMessage)) {
+	if msg.IsCompaction() {
+		kind := "compaction"
+		add(HistoryMessage{Role: "system", Content: msg.Content, CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: stats, Compaction: msg.Compaction})
+		return
+	}
+	if msg.Role == transcript.RoleTool {
+		add(historyToolRow(msg, stats, calls))
+		return
+	}
+	if msg.Role == transcript.RoleAssistant && strings.TrimSpace(msg.Reasoning) != "" {
+		kind := "thinking"
+		add(HistoryMessage{Role: "assistant", Content: msg.Reasoning, CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: stats})
+		stats = nil
+	}
+	if msg.Visible() {
+		add(historyTextRow(msg, index, stats))
+	}
+}
+
+func historyToolRow(msg transcript.Message, stats *transcript.TurnStats, calls map[string]transcript.ToolCall) HistoryMessage {
+	args := ""
+	if msg.ToolCallID != nil {
+		if call, ok := calls[*msg.ToolCallID]; ok {
+			args = call.Arguments
+		}
+	}
+	if args == "" && IsNotifyMessage(msg) {
+		args = notifyHistoryArgs(msg.Content)
+	}
+	var argsPtr *string
+	if args != "" {
+		argsPtr = &args
+	}
+	status := ToolOK
+	if msg.IsError {
+		status = ToolFailed
+	}
+	return HistoryMessage{
+		Role: "tool", Image: msg.Image, Content: msg.Content,
+		CreatedAt: msg.CreatedAt.Unix(), ToolCallID: msg.ToolCallID,
+		Name: msg.Name, Arguments: argsPtr, Status: &status, Stats: stats,
+	}
+}
+
+func historyTextRow(msg transcript.Message, index int, stats *transcript.TurnStats) HistoryMessage {
+	role := "tool"
+	switch msg.Role {
+	case transcript.RoleUser:
+		role = "user"
+	case transcript.RoleAssistant:
+		role = "assistant"
+	case transcript.RoleSystem:
+		role = "system"
+	}
+	content := msg.Content
+	if msg.Role == transcript.RoleUser && msg.Display != "" {
+		content = legacyTaggedImages(msg.Display, msg.Content)
+	}
+	row := HistoryMessage{
+		Role: role, Content: content, CreatedAt: msg.CreatedAt.Unix(),
+		Attachments: msg.Attachments, Stats: stats,
+	}
+	if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
+		messageIndex := index
+		row.Index = &messageIndex
+	}
+	return row
+}
+
+// Older turns stored picker tags as paths in the model message only.
+// Recover unambiguous appended image names without reading the old files.
+func legacyTaggedImages(display, content string) string {
+	tail, ok := strings.CutPrefix(content, display+"\n\n")
+	if !ok {
+		return display
+	}
+	var labels []string
+	for _, path := range strings.Split(tail, "\n") {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+			label := "@" + filepath.Base(path)
+			if !strings.Contains(display, label) {
+				labels = append(labels, label)
 			}
 		}
 	}
-	var out []HistoryMessage
-	ordinal := 0
-	add := func(row HistoryMessage) {
-		if ordinal >= start && (end < 0 || ordinal < end) {
-			out = append(out, row)
-		}
-		ordinal++
+	if len(labels) == 0 {
+		return display
 	}
-	for i, msg := range msgs {
-		count := historyRowCount(msg)
-		if count == 0 {
-			continue
-		}
-		if ordinal+count <= start {
-			ordinal += count
-			continue
-		}
-		if end >= 0 && ordinal >= end {
-			break
-		}
-		// Stats land on the row built from the turn's last message; see
-		// the function comment. The lookup is by index, so nothing has
-		// to be consumed from statsAt (and this stays safe for callers
-		// that hand the same map to two views).
-		turnStats := statsAt[i]
-		if msg.IsCompaction() {
-			kind := "compaction"
-			add(HistoryMessage{
-				Role: "system", Content: msg.Content,
-				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: turnStats,
-			})
-			continue
-		}
-		if msg.Role == transcript.RoleTool {
-			args := ""
-			if msg.ToolCallID != nil {
-				if c, ok := calls[*msg.ToolCallID]; ok {
-					args = c.Arguments
-				}
-			}
-			if args == "" && IsNotifyMessage(msg) {
-				args = notifyHistoryArgs(msg.Content)
-			}
-			var argsPtr *string
-			if args != "" {
-				argsPtr = &args
-			}
-			status := ToolOK
-			if msg.IsError {
-				status = ToolFailed
-			}
-			add(HistoryMessage{
-				Role:       "tool",
-				Image:      msg.Image,
-				Content:    msg.Content,
-				CreatedAt:  msg.CreatedAt.Unix(),
-				ToolCallID: msg.ToolCallID,
-				Name:       msg.Name,
-				Arguments:  argsPtr,
-				Status:     &status,
-				Stats:      turnStats,
-			})
-			continue
-		}
-		if msg.Role == transcript.RoleAssistant && strings.TrimSpace(msg.Reasoning) != "" {
-			kind := "thinking"
-			add(HistoryMessage{
-				Role: "assistant", Content: msg.Reasoning,
-				CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: turnStats,
-			})
-			// The thinking row took the summary; the reply starts a
-			// second row for the same message.
-			turnStats = nil
-		}
-		if !msg.Visible() {
-			continue
-		}
-		var role string
-		switch msg.Role {
-		case transcript.RoleUser:
-			role = "user"
-		case transcript.RoleAssistant:
-			role = "assistant"
-		case transcript.RoleSystem:
-			role = "system"
-		default:
-			role = "tool"
-		}
-		content := msg.Content
-		if msg.Role == transcript.RoleUser && msg.Display != "" {
-			content = msg.Display
-		}
-		row := HistoryMessage{
-			Role:        role,
-			Content:     content,
-			CreatedAt:   msg.CreatedAt.Unix(),
-			Attachments: msg.Attachments,
-			Stats:       turnStats,
-		}
-		if msg.Role == transcript.RoleUser && !IsNotifyMessage(msg) {
-			idx := i
-			row.Index = &idx
-		}
-		add(row)
-	}
-	// A page can start in the middle of a turn, so the turn's first
-	// message may not be in msgs at all.
-	if out == nil {
-		out = []HistoryMessage{}
-	}
-	return out
+	return display + "\n" + strings.Join(labels, " ")
 }
 
 // HistoryPage is one window of the transcript. Start is the row

@@ -23,6 +23,8 @@ type Usage struct {
 	ReasoningTokens  int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
+	CacheReadKnown   bool
+	CacheWriteKnown  bool
 	TotalTokens      int64
 	// Cost is the gateway-reported actual charge in USD. ListCost is the
 	// undiscounted list price. Both are zero when the provider did not
@@ -63,6 +65,8 @@ func (u *Usage) Add(o Usage) {
 	u.ReasoningTokens += o.ReasoningTokens
 	u.CacheReadTokens += o.CacheReadTokens
 	u.CacheWriteTokens += o.CacheWriteTokens
+	u.CacheReadKnown = u.CacheReadKnown || o.CacheReadKnown
+	u.CacheWriteKnown = u.CacheWriteKnown || o.CacheWriteKnown
 	u.TotalTokens += o.TotalTokens
 	if o.HasCost {
 		u.Cost += o.Cost
@@ -201,4 +205,29 @@ func withHeaderCost(u *Usage, res *http.Response) *Usage {
 	}
 	u.Cost, u.HasCost = cost, true
 	return u
+}
+
+// captureCacheDetails records whether cache counts were actually reported.
+func captureCacheDetails(out *Usage, raw, details string) {
+	var envelope struct {
+		Usage map[string]json.RawMessage `json:"usage"`
+	}
+	if json.Unmarshal([]byte(raw), &envelope) != nil {
+		return
+	}
+	var values struct {
+		Cached *int64 `json:"cached_tokens"`
+		Write  *int64 `json:"cache_write_tokens"`
+	}
+	if json.Unmarshal(envelope.Usage[details], &values) != nil {
+		return
+	}
+	if values.Cached != nil {
+		out.CacheReadKnown = true
+		out.CacheReadTokens = *values.Cached
+	}
+	if values.Write != nil {
+		out.CacheWriteKnown = true
+		out.CacheWriteTokens = *values.Write
+	}
 }

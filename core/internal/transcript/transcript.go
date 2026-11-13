@@ -62,6 +62,7 @@ type Message struct {
 type Compaction struct {
 	// TokensBefore is the estimated context size that triggered it.
 	TokensBefore int64 `json:"tokensBefore"`
+	TokensAfter  int64 `json:"tokensAfter,omitempty"`
 	// Reason is "auto" (threshold) or "overflow" (provider rejected).
 	Reason string `json:"reason"`
 }
@@ -76,6 +77,8 @@ type Meta struct {
 	CreatedAt     time.Time `json:"createdAt"`
 	Provider      *string   `json:"provider,omitempty"`
 	Model         *string   `json:"model,omitempty"`
+	// ContextChoices stores per-provider and model context settings for this session.
+	ContextChoices map[string]map[string]ContextChoice `json:"contextChoices,omitempty"`
 	// Title is a user-chosen name; empty means derive from messages.
 	Title string `json:"title,omitempty"`
 	// ForkedFrom is the source session id of a fork.
@@ -96,6 +99,12 @@ type Meta struct {
 	// Children are the subagent sessions this session spawned, oldest
 	// first.
 	Children []string `json:"children,omitempty"`
+}
+
+// ContextChoice is the saved compaction threshold and input window for one model.
+type ContextChoice struct {
+	Window  int64   `json:"window"`
+	Percent float64 `json:"percent"`
 }
 
 // Subagent ties a child session to the parent that spawned it. A child

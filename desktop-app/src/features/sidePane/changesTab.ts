@@ -1,4 +1,5 @@
 import { errorText } from "./utils";
+import { renderDiff } from "./diffView";
 import * as api from "../../core/api";
 import { escapeAttr, escapeHtml } from "../../core/format";
 import type { SessionChanges } from "../../core/types";
@@ -39,6 +40,7 @@ export function newChangesTab(
     if (target.closest("[data-change-all]")) {
       tab.turn = null;
       tab.selected = null;
+      tab.request++;
       paintChangesTab(tab, getChanges());
       return;
     }
@@ -61,6 +63,10 @@ export function paintChangesTab(tab: ChangesTab, data: SessionChanges | undefine
       (tab.turn === null ? "" : `<button type="button" data-change-all>All session changes</button>`),
     true,
   );
+  if (tab.selected && !files?.some((f) => f.path === tab.selected)) {
+    tab.selected = null;
+    tab.request++;
+  }
   const list = tab.body.querySelector<HTMLElement>(".change-files")!;
   if (!data) {
     paintContent(list, "Loading file changes…");
@@ -72,13 +78,12 @@ export function paintChangesTab(tab: ChangesTab, data: SessionChanges | undefine
     const content = files
       .map(
         (f) =>
-          `<button type="button" class="change-file${tab.selected === f.path ? " is-active" : ""}" data-change-file="${escapeAttr(f.path)}" title="${escapeAttr(f.path)}">` +
+          `<button type="button" class="change-file${tab.selected === f.path ? " is-active" : ""}" aria-pressed="${tab.selected === f.path}" data-change-file="${escapeAttr(f.path)}" title="${escapeAttr(f.path)}">` +
           `${icon("tl-file", "h-3.5 w-3.5")}<span>${escapeHtml(f.path)}</span><small>${f.status}</small></button>`,
       )
       .join("");
     paintContent(list, content, true);
   }
-  if (tab.selected && !files?.some((f) => f.path === tab.selected)) tab.selected = null;
   if (!tab.selected)
     tab.body.querySelector<HTMLElement>(".change-diff")!.textContent = "Select a file to view its changes.";
 }
@@ -95,40 +100,13 @@ export async function loadChangeDiff(tab: ChangesTab, path: string): Promise<voi
       preview.textContent = "No text diff available for this file.";
       return;
     }
-    const lines = diff.patch.split("\n");
-    const fragment = document.createDocumentFragment();
     const mark = tab.mark?.path === path ? tab.mark : null;
-    let newLine = 0;
-    let firstMark: HTMLElement | null = null;
-    for (const line of lines.slice(0, 5000)) {
-      const el = document.createElement("div");
-      el.className =
-        line.startsWith("+") && !line.startsWith("+++")
-          ? "change-add"
-          : line.startsWith("-") && !line.startsWith("---")
-            ? "change-remove"
-            : line.startsWith("@@")
-              ? "change-hunk"
-              : "";
-      // Track the new file's line numbers from each hunk header so a
-      // finding's lines can be marked.
-      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line);
-      if (hunk) {
-        newLine = Number(hunk[1]);
-      } else if (newLine && !line.startsWith("-")) {
-        if (mark && newLine >= mark.start && newLine <= mark.end && !line.startsWith("\\")) {
-          el.classList.add("change-mark");
-          firstMark ??= el;
-        }
-        if (!line.startsWith("\\")) newLine++;
-      }
-      el.textContent = line || " ";
-      fragment.append(el);
-    }
-    preview.append(fragment);
-    firstMark?.scrollIntoView({ block: "center" });
-    if (diff.truncated || lines.length > 5000) preview.append("\nDiff preview truncated.");
+    preview.innerHTML = renderDiff(diff.patch, path, mark, diff.truncated);
+    Array.from(preview.querySelectorAll<HTMLElement>(".change-mark"))
+      .find((element) => element.getClientRects().length > 0)
+      ?.scrollIntoView({ block: "center" });
   } catch (error) {
-    if (request === tab.request) preview.textContent = `Could not load diff: ${errorText(error)}`;
+    if (request === tab.request && tab.selected === path)
+      preview.textContent = `Could not load diff: ${errorText(error)}`;
   }
 }

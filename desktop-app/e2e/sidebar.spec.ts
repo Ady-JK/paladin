@@ -49,14 +49,21 @@ async function setup(page: Page): Promise<void> {
   await expect(page.locator('[data-session="s-api-2"]')).toBeVisible();
 }
 
-test("the rail holds the agent, shortcuts and settings, with no separate sidebar button", async ({ page }) => {
+test("the rail holds sessions, shortcuts and settings, with no separate sidebar button", async ({ page }) => {
   await setup(page);
   for (const id of ["#agentTab", "#shortcutsBtn", "#settingsBtn"]) {
     await expect(page.locator(`#rail ${id}`)).toBeVisible();
   }
   await expect(page.locator("#chatTab")).toHaveCount(0);
   await expect(page.locator("#sidebarToggleBtn")).toHaveCount(0);
-  await expect(page.locator("#rail .rail-btn")).toHaveCount(3);
+  await expect(page.locator("#rail #ideModeBtn")).toBeVisible();
+  await expect(page.locator("#rail #ideTerminalToggle")).toBeVisible();
+  // Files and Activity are always on the rail; Problems only appears in IDE mode.
+  for (const id of ["Explorer", "Activity"]) {
+    await expect(page.locator(`#rail #ide${id}Toggle`)).toBeVisible();
+  }
+  await expect(page.locator("#rail #ideProblemsToggle")).toBeHidden();
+  await expect(page.locator("#titleBar #sessionChangesBtn, #titleBar #ideModeBtn")).toHaveCount(0);
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
 });
 
@@ -118,7 +125,7 @@ test("the app starts with the drawer closed", async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
 });
 
-test("the Agent button opens and closes the drawer", async ({ page }) => {
+test("the Sessions button opens and closes the drawer", async ({ page }) => {
   await setup(page);
   await page.click("#agentTab");
   await expect(page.locator("#sidebar")).toBeHidden();
@@ -188,10 +195,27 @@ test("the session row menu works inside the drawer", async ({ page }) => {
   await expect(page.locator("#sidebar")).toBeVisible();
 });
 
-test("the Agent button reports the drawer state", async ({ page }) => {
+test("the Sessions button reports the drawer state", async ({ page }) => {
   await setup(page);
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "true");
   await page.click("#agentTab");
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
+});
+
+test("switching to IDE closes the sessions drawer and keeps Sessions available", async ({ page }) => {
+  await setup(page);
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await expect(page.locator("#sidebar")).toBeHidden();
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-label", "Sessions");
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeHidden();
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-label", "Sessions");
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeVisible();
 });

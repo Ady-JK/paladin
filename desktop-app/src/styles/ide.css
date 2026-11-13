@@ -33,15 +33,10 @@
 }
 .ide-explorer {
   display: flex;
-  flex: 0 0 var(--ide-explorer-width, clamp(160px, 22%, 260px));
   min-width: 0;
   flex-direction: column;
-  border-right: 1px solid var(--color-slate-200);
-  background: var(--color-slate-100);
-}
-.dark .ide-explorer {
-  border-color: var(--color-slate-800);
-  background: var(--color-slate-900);
+  width: min(var(--ide-explorer-width, 22rem), calc(100vw - 4rem));
+  overflow: hidden;
 }
 .ide-explorer-head,
 .ide-editor-bar,
@@ -95,16 +90,54 @@
 }
 .ide-root {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 6px;
   padding: 12px 10px 7px;
+  text-align: left;
   font-size: 11px;
   text-transform: uppercase;
+}
+.ide-root:hover {
+  color: var(--color-slate-900);
+}
+.dark .ide-root:hover {
+  color: var(--color-slate-100);
+}
+.ide-root:focus-visible,
+.ide-explorer-filters input:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: -2px;
+}
+.ide-root[aria-expanded="false"] .ide-root-chevron {
+  transform: rotate(-90deg);
+}
+.ide-tree[hidden] {
+  display: none;
 }
 .ide-root strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+#ideChooseFolder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 6px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  color: var(--color-slate-500);
+  font-size: 11px;
+}
+#ideChooseFolder:hover {
+  background: var(--color-slate-200);
+}
+.dark #ideChooseFolder:hover {
+  background: var(--color-slate-700);
+}
+#ideChooseFolder:focus-visible {
+  outline: 2px solid var(--color-accent-500);
 }
 .ide-tree {
   min-height: 0;
@@ -126,9 +159,27 @@
   cursor: pointer;
 }
 .ide-explorer-filters input {
-  width: 11px;
-  height: 11px;
-  accent-color: #8faafa;
+  appearance: none;
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-content: center;
+  border: 1px solid var(--color-slate-400);
+  border-radius: 3px;
+  background: transparent;
+}
+.ide-explorer-filters input:checked {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-500);
+}
+.ide-explorer-filters input:checked::after {
+  width: 7px;
+  height: 4px;
+  content: "";
+  transform: rotate(-45deg) translateY(-1px);
+  border-bottom: 1.5px solid white;
+  border-left: 1.5px solid white;
 }
 .ide-tree-row {
   display: flex;
@@ -201,14 +252,14 @@
   white-space: nowrap;
 }
 .ide-tab.is-active {
-  border-color: #8faafa;
+  border-color: var(--color-accent-500);
 }
 .ide-tab-select {
   padding: 8px;
   font-size: 12px;
 }
 .ide-tab-select span {
-  color: #8faafa;
+  color: var(--color-accent-500);
 }
 .ide-tab-close {
   padding: 4px 6px;
@@ -293,9 +344,6 @@
   #agentSplit.ide-mode > #agentMain {
     flex-basis: var(--ide-chat-width, 300px);
   }
-  .ide-explorer {
-    flex-basis: var(--ide-explorer-width, 150px);
-  }
 }
 
 /* Keep the editor and chat visible when the regular pane uses tab layout. */
@@ -323,11 +371,19 @@
 }
 .ide-resize:hover,
 .ide-resize:focus-visible {
-  background: #8faafa;
+  background: var(--color-accent-500);
   outline: none;
 }
 .ide-resize[hidden] {
   display: none;
+}
+
+#ideExplorerResize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
 }
 
 .ide-chat-head strong {
@@ -375,7 +431,7 @@
   height: 7px;
   margin-top: 5px;
   border-radius: 50%;
-  background: #8faafa;
+  background: var(--color-accent-500);
 }
 .ide-session-text {
   display: flex;
@@ -423,7 +479,7 @@
 }
 .ide-terminal-resize:hover,
 .ide-terminal-resize:focus-visible {
-  background: #8faafa;
+  background: var(--color-accent-500);
   outline: none;
 }
 .ide-terminal-head {
@@ -467,7 +523,7 @@
   color: var(--color-slate-500);
 }
 .ide-terminal-tabs button[aria-selected="true"] {
-  border-bottom: 2px solid #8faafa;
+  border-bottom: 2px solid var(--color-accent-500);
   color: var(--color-slate-800);
 }
 .dark .ide-terminal-tabs button[aria-selected="true"] {
@@ -502,7 +558,6 @@
   background: var(--color-slate-800);
 }
 
-.ide-explorer[hidden],
 #agentSplit.ide-mode.ide-agent-hidden > #agentMain {
   display: none !important;
 }
@@ -524,7 +579,7 @@
   border-color: var(--color-slate-800);
 }
 .ide-disk-notice button {
-  color: #8faafa;
+  color: var(--color-accent-500);
 }
 .ide-disk-compare {
   display: flex;
@@ -571,17 +626,43 @@
 }
 .ide-changes-panel {
   display: flex;
-  flex: 0 1 42%;
+  flex: 1 1 auto;
   min-width: 200px;
   min-height: 0;
-  border-left: 1px solid var(--color-slate-200);
 }
-.dark .ide-changes-panel {
-  border-color: var(--color-slate-800);
+.ide-editor-content:has(#ideChangesPanel:not([hidden])) > #ideEmpty,
+.ide-editor-content:has(#ideChangesPanel:not([hidden])) > #ideEditorWrap,
+.ide-editor-area:has(#ideChangesPanel:not([hidden])) #idePath,
+.ide-editor-area:has(#ideChangesPanel:not([hidden])) #ideSaveBtn,
+.ide-editor-area:has(#ideChangesPanel:not([hidden])) #ideReloadBtn {
+  display: none;
+}
+.ide-editor-area:has(#ideChangesPanel:not([hidden])) .ide-editor-bar:not(:has(.ide-tab)) {
+  display: none;
 }
 .ide-changes-panel .pane-changes {
+  display: grid;
+  grid-template-columns: minmax(120px, 24%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 12px;
   min-width: 0;
   flex: 1;
+}
+.ide-changes-panel .change-scope {
+  grid-column: 1;
+  grid-row: 1;
+}
+.ide-changes-panel .change-files {
+  grid-column: 1;
+  grid-row: 2;
+  max-height: none;
+  align-content: start;
+  padding-right: 4px;
+}
+.ide-changes-panel .change-diff {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  min-width: 0;
 }
 
 .ide-palette-backdrop {
@@ -699,9 +780,10 @@
 .ide-activity-list {
   position: absolute;
   z-index: 30;
-  top: 36px;
-  right: 10px;
-  width: min(320px, 90%);
+  top: 0;
+  left: calc(100% + 10px);
+  width: 280px;
+  max-width: calc(100vw - 80px);
   max-height: 320px;
   overflow: auto;
   padding: 6px;
@@ -787,4 +869,117 @@
 }
 .ide-problems-panel button small {
   color: var(--color-slate-500);
+}
+
+/* Keep model and action controls usable when the agent pane is narrow. */
+.ide-mode .composer-toolbar {
+  flex-wrap: wrap;
+}
+.ide-mode .composer-model-slot {
+  min-width: 110px;
+}
+
+/* Keep the floating explorer aligned with the session drawer. */
+.ide-explorer-head {
+  min-height: 64px;
+  padding: 12px 14px 10px;
+  gap: 6px;
+}
+.ide-explorer-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ide-explorer-title strong {
+  color: var(--color-slate-900);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.ide-explorer-title span {
+  color: var(--color-slate-500);
+  font-size: 11px;
+}
+.dark .ide-explorer-title strong {
+  color: var(--color-slate-100);
+}
+.ide-explorer-head button {
+  padding: 7px;
+  border-radius: 8px;
+}
+.ide-root {
+  margin: 12px 10px 4px;
+  width: calc(100% - 20px);
+  padding: 9px 10px;
+  gap: 9px;
+  border-radius: 9px;
+  background: var(--color-slate-200);
+  text-transform: none;
+}
+.dark .ide-root {
+  background: var(--color-slate-850);
+}
+.ide-root:hover {
+  background: var(--color-slate-300);
+}
+.dark .ide-root:hover {
+  background: var(--color-slate-800);
+}
+.ide-root-chevron {
+  color: var(--color-slate-500);
+  display: flex;
+  align-items: center;
+}
+.ide-root-label {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.ide-root-label small {
+  color: var(--color-slate-500);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.ide-root-label strong {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+}
+#ideChooseFolder {
+  margin: 2px 12px 6px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+.ide-explorer-filters {
+  margin: 0 12px;
+  padding: 6px 0 10px;
+  gap: 8px 14px;
+  border-bottom: 1px solid var(--color-slate-200);
+  font-size: 11px;
+}
+.dark .ide-explorer-filters {
+  border-color: var(--color-slate-800);
+}
+.ide-tree {
+  flex: 1;
+  padding: 8px 6px 14px;
+}
+.ide-tree-row {
+  min-height: 30px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-radius: 7px;
+}
+.ide-tree-row.is-active {
+  color: var(--color-slate-900);
+  font-weight: 600;
+}
+.dark .ide-tree-row.is-active {
+  color: var(--color-slate-100);
 }

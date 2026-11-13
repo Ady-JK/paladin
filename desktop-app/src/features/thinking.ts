@@ -44,8 +44,6 @@ const HINTS: Record<string, string> = {
   max: "The model's deepest thinking — slowest, costs most",
 };
 
-const SPARKLES = 14;
-
 let strip: HTMLElement | null = null;
 let chip: HTMLButtonElement | null = null;
 let card: HTMLElement | null = null;
@@ -162,6 +160,9 @@ function paintStrip(): void {
   }
   strip!.classList.remove("hidden");
   strip!.dataset.level = view.level || "default";
+  // Streaming "Thinking" blocks read these to shade blue (low) to purple (max).
+  document.documentElement.style.setProperty("--think-lvl", intensity(view, view.level).toFixed(3));
+  document.documentElement.dataset.thinkLevel = view.level || "default";
 
   const toggle = strip!.querySelector<HTMLElement>(".think-toggle-level")!;
   if (view.levels.length === 0) {
@@ -180,7 +181,7 @@ function paintStrip(): void {
 }
 
 // intensity is how far along the slider a level sits, 0..1; it drives
-// the fill and how lively the animation is.
+// the fill position.
 function intensity(v: ThinkingView, level: string): number {
   const all = stops(v);
   return all.length > 1 ? Math.max(0, all.indexOf(level)) / (all.length - 1) : 0;
@@ -190,11 +191,11 @@ function paintCard(): void {
   if (!card || !view) return;
   const all = stops(view);
   const idx = Math.max(0, all.indexOf(view.level));
-  const sparkles = Array.from({ length: SPARKLES }, (_, i) => {
-    const x = ((i * 37) % 97) + 1;
-    const y = 18 + ((i * 53) % 64);
-    const delay = ((i * 0.37) % 3).toFixed(2);
-    const size = 1 + (i % 3);
+  const sparkles = Array.from({ length: 12 }, (_, index) => {
+    const x = ((index * 37) % 96) + 2;
+    const y = 18 + ((index * 53) % 64);
+    const size = 2 + (index % 2);
+    const delay = ((index * 0.37) % 3).toFixed(2);
     return `<span style="left:${x}%;top:${y}%;width:${size}px;height:${size}px;animation-delay:-${delay}s"></span>`;
   }).join("");
   card.innerHTML =
@@ -340,6 +341,9 @@ export async function setThinkingLevel(level: string): Promise<void> {
 }
 
 export function initThinking(): void {
+  window.addEventListener("paladin:provider-catalog-refreshed", (event) => {
+    if (state.selectedProvider === (event as CustomEvent<string>).detail) refreshThinkingOptions();
+  });
   ensureChrome();
   onModelChange(() => void syncThinking());
 }

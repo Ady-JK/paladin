@@ -23,6 +23,12 @@ test("dropped image appears as a removable card and is copied into the session o
   await expect(page.locator("#attachmentCards .attachment-card")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as any).__e2eUploads?.length ?? 0)).toBe(1);
   expect(await page.evaluate(() => (window as any).__e2eSubmits[0].attachmentIds)).toEqual(["file-1"]);
+  // The thumbnail shows as soon as the message does, before the turn ends.
+  const thumb = page.locator("#messages .session-image-thumb");
+  await expect(thumb).toHaveCount(1);
+  const bubble = await page.locator("#messages .bubble-user").last().boundingBox();
+  const box = await thumb.boundingBox();
+  expect(box && bubble && box.y + box.height <= bubble.y + 1).toBe(true);
 });
 
 test("a finished turn mounts the user's image from sessionImages", async ({ page }) => {
@@ -71,6 +77,10 @@ test("a finished turn mounts the user's image from sessionImages", async ({ page
   // The live row had no attachments; finishTurn asks sessionImages and
   // mounts the stored one.
   await expect(page.locator("#messages .session-image-thumb")).toHaveCount(1);
+  // The image sits above the message bubble, not under it.
+  const thumb = await page.locator("#messages .session-image-thumb").boundingBox();
+  const bubble = await page.locator("#messages .bubble-user").last().boundingBox();
+  expect(thumb && bubble && thumb.y + thumb.height <= bubble.y + 1).toBe(true);
 });
 
 test("stored screenshots render small and open in the session image viewer", async ({ page }) => {

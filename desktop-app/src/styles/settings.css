@@ -22,7 +22,18 @@
   border-color: rgb(255 255 255 / 0.08);
 }
 
-#settingsSidebar > div:first-child {
+.settings-sidebar-heading {
+  position: sticky;
+  top: -22px;
+  z-index: 2;
+  margin-top: -22px;
+  padding-top: 22px;
+  background: #1f1f22;
+}
+.light .settings-sidebar-heading {
+  background: #f1f1f3;
+}
+.settings-sidebar-title {
   padding: 4px 12px 17px;
   font-size: 1.12rem;
   letter-spacing: -0.025em;
@@ -426,4 +437,27 @@ html[data-font-size="large"] {
   .settings-field-row select {
     width: 100%;
   }
+}
+
+/* Keep controls readable and consistent across settings sections and themes. */
+#settingsContentBody select,
+#settingsContentBody input[type="checkbox"],
+#settingsContentBody input[type="radio"],
+#settingsContentBody input[type="range"] {
+  accent-color: var(--color-accent-500);
+}
+.dark #settingsContentBody select,
+.dark #settingsContentBody input[type="checkbox"],
+.dark #settingsContentBody input[type="radio"] {
+  color-scheme: dark;
+}
+#settingsContentBody select {
+  padding-inline: 12px;
+}
+#settingsContentBody :is(button, select, input, textarea):disabled {
+  cursor: not-allowed;
+}
+.light .settings-lead,
+.light .settings-pane-subtitle {
+  color: #5a5a64;
 }

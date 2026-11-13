@@ -1,6 +1,6 @@
 // toolRun.ts groups consecutive tool calls of one turn. A lone call is
-// a plain row; from the second call on, the run folds behind a single
-// summary line ("Ran 2 commands, read 1 file") that expands to the rows.
+// a plain row (a command is its own terminal card); from the second call
+// on, the run folds behind a summary that expands to the rows.
 
 import type { ToolInfo, ToolView } from "../core/types";
 import { icon } from "../icons";
@@ -107,6 +107,7 @@ export class ToolRun {
     this.el.classList.toggle("is-open", grouped && this.open);
     this.list.classList.toggle("is-folded", grouped && !this.open);
     this.list.setAttribute("aria-hidden", String(grouped && !this.open));
+    this.list.inert = grouped && !this.open;
     if (!grouped) {
       this.head.remove();
       return;
@@ -118,11 +119,12 @@ export class ToolRun {
 
     const running = [...tools].reverse().find((t) => t.status === "running");
     const failed = tools.filter((t) => t.status === "failed").length;
-    setGlyph(this.ico, running ? "spin" : "tools", () =>
-      running ? '<span class="tool-spin"></span>' : icon("tl-tools", "h-4 w-4"),
+    const glyph = tools.every((tool) => tool.name === "shell") ? "tl-term" : "tl-tools";
+    setGlyph(this.ico, running ? "spin" : glyph, () =>
+      running ? '<span class="tool-spin"></span>' : icon(glyph, "h-4 w-4"),
     );
     let now = "";
-    if (running) {
+    if (running && running.name !== "shell") {
       const label = toolLabel(running);
       now = label.chip || label.detail;
     }

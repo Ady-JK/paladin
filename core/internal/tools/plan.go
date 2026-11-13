@@ -108,73 +108,95 @@ func ReadOnlyCommand(cmd string) error {
 // and rejects output redirection (other than to /dev/null or another
 // descriptor) and comments: the shell ignores a quote inside a comment,
 // so a parser that does not would read the next line as quoted text.
-func splitShellSegments(cmd string) ([]string, error) {
-	var (
-		segs  []string
-		cur   strings.Builder
-		quote rune
-	)
-	runes := []rune(cmd)
-	flush := func() {
-		segs = append(segs, cur.String())
-		cur.Reset()
-	}
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		if quote != 0 {
-			if r == quote {
-				quote = 0
-			} else if r == '\\' && quote == '"' && i+1 < len(runes) {
-				cur.WriteRune(r)
-				i++
-				r = runes[i]
-			}
-			cur.WriteRune(r)
+func splitShellSegments(command string) ([]string, error) {
+	parser := shellSegmentParser{runes: []rune(command)}
+	for parser.index = 0; parser.index < len(parser.runes); parser.index++ {
+		if parser.quote != 0 {
+			parser.consumeQuoted()
 			continue
 		}
-		switch r {
-		case '#':
-			if i == 0 || strings.ContainsRune(" \t\n;|&()", runes[i-1]) {
-				return nil, fmt.Errorf("comments are not allowed in read-only commands")
-			}
-			cur.WriteRune(r)
-		case '\'', '"':
-			quote = r
-			cur.WriteRune(r)
-		case '\\':
-			cur.WriteRune(r)
-			if i+1 < len(runes) {
-				i++
-				cur.WriteRune(runes[i])
-			}
-		case ';', '\n', '|':
-			flush()
-			if r == '|' && i+1 < len(runes) && runes[i+1] == '|' {
-				i++
-			}
-		case '&':
-			if i+1 < len(runes) && runes[i+1] == '&' {
-				i++
-				flush()
-			} else if i > 0 && runes[i-1] == '>' {
-				cur.WriteRune(r)
-			} else {
-				return nil, fmt.Errorf("background operator & is not allowed")
-			}
-		case '>':
-			if !harmlessRedirect.MatchString(string(runes[i+1:])) {
-				return nil, fmt.Errorf("output redirection is not allowed")
-			}
-			cur.WriteRune(r)
-		default:
-			cur.WriteRune(r)
+		if err := parser.consumeUnquoted(); err != nil {
+			return nil, err
 		}
 	}
-	if quote != 0 {
+	if parser.quote != 0 {
 		return nil, fmt.Errorf("unbalanced quotes")
 	}
-	flush()
-	return segs, nil
+	parser.flush()
+	return parser.segments, nil
+}
+
+type shellSegmentParser struct {
+	runes    []rune
+	index    int
+	quote    rune
+	current  strings.Builder
+	segments []string
+}
+
+func (p *shellSegmentParser) flush() {
+	p.segments = append(p.segments, p.current.String())
+	p.current.Reset()
+}
+
+func (p *shellSegmentParser) consumeQuoted() {
+	current := p.runes[p.index]
+	if current == p.quote {
+		p.quote = 0
+	} else if current == '\\' && p.quote == '"' && p.index+1 < len(p.runes) {
+		p.current.WriteRune(current)
+		p.index++
+		current = p.runes[p.index]
+	}
+	p.current.WriteRune(current)
+}
+
+func (p *shellSegmentParser) consumeUnquoted() error {
+	current := p.runes[p.index]
+	switch current {
+	case '#':
+		if p.index == 0 || strings.ContainsRune(" \t\n;|&()", p.runes[p.index-1]) {
+			return fmt.Errorf("comments are not allowed in read-only commands")
+		}
+		p.current.WriteRune(current)
+	case '\'', '"':
+		p.quote = current
+		p.current.WriteRune(current)
+	case '\\':
+		p.current.WriteRune(current)
+		if p.index+1 < len(p.runes) {
+			p.index++
+			p.current.WriteRune(p.runes[p.index])
+		}
+	case ';', '\n', '|':
+		p.flush()
+		if current == '|' && p.index+1 < len(p.runes) && p.runes[p.index+1] == '|' {
+			p.index++
+		}
+	case '&':
+		return p.consumeAmpersand()
+	case '>':
+		if !harmlessRedirect.MatchString(string(p.runes[p.index+1:])) {
+			return fmt.Errorf("output redirection is not allowed")
+		}
+		p.current.WriteRune(current)
+	default:
+		p.current.WriteRune(current)
+	}
+	return nil
+}
+
+func (p *shellSegmentParser) consumeAmpersand() error {
+	if p.index+1 < len(p.runes) && p.runes[p.index+1] == '&' {
+		p.index++
+		p.flush()
+		return nil
+	}
+	if p.index > 0 && p.runes[p.index-1] == '>' {
+		p.current.WriteRune('&')
+		return nil
+	}
+	return fmt.Errorf("background operator & is not allowed")
 }
 
 // shellWords splits a segment into words, dropping quotes.
@@ -244,102 +266,113 @@ func readOnlyArgs(words []string) error {
 	args := words[1:]
 	switch prog {
 	case "git":
-		sub := ""
-		for _, a := range args {
-			if !strings.HasPrefix(a, "-") {
-				sub = a
-				break
-			}
-		}
-		if !readOnlyGit[sub] {
-			return fmt.Errorf("git %s may change the repository", sub)
-		}
-		if err := gitReadOnly(sub, args); err != nil {
-			return err
-		}
+		return readOnlyGitArgs(args)
 	case "go":
-		if len(args) == 0 || !readOnlyGo[args[0]] {
-			return fmt.Errorf("go %s is not read-only", strings.Join(args, " "))
-		}
-		for _, a := range args {
-			if hasAnyPrefix(strings.TrimPrefix(a, "-"), "-toolexec", "-vettool", "-exec", "toolexec", "vettool", "exec") && strings.HasPrefix(a, "-") {
-				return fmt.Errorf("go %s runs another program", a)
-			}
-		}
+		return readOnlyGoArgs(args)
 	case "sed":
-		if err := sedReadOnly(args); err != nil {
-			return err
-		}
-	case "find":
-		for _, a := range args {
-			switch a {
-			case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls":
-				return fmt.Errorf("find %s is not read-only", a)
-			}
-		}
-	case "awk":
-		for _, a := range args {
-			if a == "-f" || a == "-E" || a == "-i" || a == "-l" || hasAnyPrefix(a, "--file", "--exec", "--include", "--load") {
-				return fmt.Errorf("awk %s loads a program from a file", a)
-			}
-			if strings.Contains(a, "system") || strings.Contains(a, "getline") || awkPipe.MatchString(a) || awkPrint.MatchString(a) {
-				return fmt.Errorf("awk program may run commands or write files")
-			}
-			if strings.Contains(a, "ENVIRON") {
-				return fmt.Errorf("awk ENVIRON reads the environment")
-			}
-		}
-	case "rg":
-		for _, a := range args {
-			if a == "--pre" || strings.HasPrefix(a, "--pre=") {
-				return fmt.Errorf("rg --pre runs a program on each file")
-			}
-		}
-	case "fd":
-		for _, a := range args {
-			if hasAnyPrefix(a, "--exec") || (strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsAny(a, "xX")) {
-				return fmt.Errorf("fd %s runs a program on each match", a)
-			}
-		}
-	case "ag":
-		for _, a := range args {
-			if hasAnyPrefix(a, "--pager") {
-				return fmt.Errorf("ag --pager runs a program")
-			}
-		}
-	case "sort":
-		for _, a := range args {
-			if hasAnyPrefix(a, "--output", "--compress-program") || (strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "o")) {
-				return fmt.Errorf("sort %s writes a file or runs a program", a)
-			}
-		}
+		return sedReadOnly(args)
 	case "uniq", "xxd":
 		if len(positional(args)) > 1 {
 			return fmt.Errorf("%s with a second file writes it", prog)
 		}
+		return nil
+	}
+	for _, arg := range args {
+		if err := readOnlyExecutionArg(prog, arg); err != nil {
+			return err
+		}
+		if err := readOnlyOutputArg(prog, arg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readOnlyGitArgs(args []string) error {
+	subcommand := ""
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			subcommand = arg
+			break
+		}
+	}
+	if !readOnlyGit[subcommand] {
+		return fmt.Errorf("git %s may change the repository", subcommand)
+	}
+	return gitReadOnly(subcommand, args)
+}
+
+func readOnlyGoArgs(args []string) error {
+	if len(args) == 0 || !readOnlyGo[args[0]] {
+		return fmt.Errorf("go %s is not read-only", strings.Join(args, " "))
+	}
+	for _, arg := range args {
+		if hasAnyPrefix(strings.TrimPrefix(arg, "-"), "-toolexec", "-vettool", "-exec", "toolexec", "vettool", "exec") && strings.HasPrefix(arg, "-") {
+			return fmt.Errorf("go %s runs another program", arg)
+		}
+	}
+	return nil
+}
+
+func readOnlyExecutionArg(program, arg string) error {
+	switch program {
+	case "find":
+		switch arg {
+		case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls":
+			return fmt.Errorf("find %s is not read-only", arg)
+		}
+	case "awk":
+		return readOnlyAwkArg(arg)
+	case "rg":
+		if arg == "--pre" || strings.HasPrefix(arg, "--pre=") {
+			return fmt.Errorf("rg --pre runs a program on each file")
+		}
+	case "fd":
+		if hasAnyPrefix(arg, "--exec") || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.ContainsAny(arg, "xX")) {
+			return fmt.Errorf("fd %s runs a program on each match", arg)
+		}
+	case "ag":
+		if hasAnyPrefix(arg, "--pager") {
+			return fmt.Errorf("ag --pager runs a program")
+		}
+	}
+	return nil
+}
+
+func readOnlyAwkArg(arg string) error {
+	if arg == "-f" || arg == "-E" || arg == "-i" || arg == "-l" || hasAnyPrefix(arg, "--file", "--exec", "--include", "--load") {
+		return fmt.Errorf("awk %s loads a program from a file", arg)
+	}
+	if strings.Contains(arg, "system") || strings.Contains(arg, "getline") || awkPipe.MatchString(arg) || awkPrint.MatchString(arg) {
+		return fmt.Errorf("awk program may run commands or write files")
+	}
+	if strings.Contains(arg, "ENVIRON") {
+		return fmt.Errorf("awk ENVIRON reads the environment")
+	}
+	return nil
+}
+
+func readOnlyOutputArg(program, arg string) error {
+	switch program {
+	case "sort":
+		if hasAnyPrefix(arg, "--output", "--compress-program") || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "o")) {
+			return fmt.Errorf("sort %s writes a file or runs a program", arg)
+		}
 	case "tree":
-		for _, a := range args {
-			if a == "-o" || strings.HasPrefix(a, "-o") && !strings.HasPrefix(a, "--") {
-				return fmt.Errorf("tree -o writes a file")
-			}
+		if arg == "-o" || strings.HasPrefix(arg, "-o") && !strings.HasPrefix(arg, "--") {
+			return fmt.Errorf("tree -o writes a file")
 		}
 	case "less", "more":
-		for _, a := range args {
-			if hasAnyPrefix(a, "-o", "-O", "--log-file", "--LOG-FILE") {
-				return fmt.Errorf("%s %s writes a log file", prog, a)
-			}
+		if hasAnyPrefix(arg, "-o", "-O", "--log-file", "--LOG-FILE") {
+			return fmt.Errorf("%s %s writes a log file", program, arg)
 		}
 	case "file":
-		for _, a := range args {
-			if a == "-C" || a == "--compile" {
-				return fmt.Errorf("file -C writes a file")
-			}
+		if arg == "-C" || arg == "--compile" {
+			return fmt.Errorf("file -C writes a file")
 		}
 	case "jq":
-		for _, a := range args {
-			if strings.Contains(a, "$ENV") || strings.Contains(a, "env") {
-				return fmt.Errorf("jq env reads the environment")
-			}
+		if strings.Contains(arg, "$ENV") || strings.Contains(arg, "env") {
+			return fmt.Errorf("jq env reads the environment")
 		}
 	}
 	return nil
@@ -426,34 +459,53 @@ func wordSet(words ...string) map[string]bool {
 // gitReadOnly refuses git options that run programs, write files or
 // change refs, for the read-only subcommands.
 func gitReadOnly(sub string, args []string) error {
-	for _, a := range args {
-		if a == sub {
+	if err := gitReadOnlyPrefix(sub, args); err != nil {
+		return err
+	}
+	listing, err := gitReadOnlyListing(sub, args)
+	if err != nil {
+		return err
+	}
+	return gitReadOnlyChanges(sub, args, listing)
+}
+
+func gitReadOnlyPrefix(sub string, args []string) error {
+	for _, arg := range args {
+		if arg == sub {
 			break
 		}
-		if a == "-c" || hasAnyPrefix(a, "--config-env", "--exec-path") {
-			return fmt.Errorf("git %s sets configuration that can run programs", a)
+		if arg == "-c" || hasAnyPrefix(arg, "--config-env", "--exec-path") {
+			return fmt.Errorf("git %s sets configuration that can run programs", arg)
 		}
 	}
+	return nil
+}
+
+func gitReadOnlyListing(sub string, args []string) (bool, error) {
 	listing := false
-	for _, a := range args {
-		if hasAnyPrefix(a, "--output", "--open-files-in-pager", "--ext-diff") || (sub == "grep" && strings.HasPrefix(a, "-O")) {
-			return fmt.Errorf("git %s %s writes a file or runs a program", sub, a)
+	for _, arg := range args {
+		if hasAnyPrefix(arg, "--output", "--open-files-in-pager", "--ext-diff") || (sub == "grep" && strings.HasPrefix(arg, "-O")) {
+			return false, fmt.Errorf("git %s %s writes a file or runs a program", sub, arg)
 		}
-		if gitListing[strings.SplitN(a, "=", 2)[0]] {
+		if gitListing[strings.SplitN(arg, "=", 2)[0]] {
 			listing = true
 		}
 	}
-	after := false
-	for _, a := range args {
-		if !after {
-			after = a == sub
+	return listing, nil
+}
+
+func gitReadOnlyChanges(sub string, args []string, listing bool) error {
+	afterSubcommand := false
+	for _, arg := range args {
+		if !afterSubcommand {
+			afterSubcommand = arg == sub
 			continue
 		}
-		if gitChanges[sub][a] {
-			return fmt.Errorf("git %s %s changes the repository", sub, a)
+		if gitChanges[sub][arg] {
+			return fmt.Errorf("git %s %s changes the repository", sub, arg)
 		}
-		if (sub == "branch" || sub == "tag") && !listing && !strings.HasPrefix(a, "-") {
-			return fmt.Errorf("git %s %s creates a %s", sub, a, sub)
+		if (sub == "branch" || sub == "tag") && !listing && !strings.HasPrefix(arg, "-") {
+			return fmt.Errorf("git %s %s creates a %s", sub, arg, sub)
 		}
 	}
 	return nil
@@ -462,164 +514,215 @@ func gitReadOnly(sub string, args []string) error {
 // sedReadOnly refuses in-place edits, script files and scripts that
 // write files or run commands.
 func sedReadOnly(args []string) error {
-	var scripts, files []string
-	explicit := false
-	for j := 0; j < len(args); j++ {
-		a := args[j]
-		switch {
-		case a == "--in-place" || strings.HasPrefix(a, "--in-place="):
-			return fmt.Errorf("sed -i edits files")
-		case a == "--file" || strings.HasPrefix(a, "--file="):
-			return fmt.Errorf("sed -f runs a script from a file")
-		case a == "--expression" || strings.HasPrefix(a, "--expression="):
-			explicit = true
-			if v, ok := strings.CutPrefix(a, "--expression="); ok {
-				scripts = append(scripts, v)
-			} else if j+1 < len(args) {
-				j++
-				scripts = append(scripts, args[j])
-			}
-		case strings.HasPrefix(a, "--"):
-		case len(a) > 1 && a[0] == '-':
-			for k := 1; k < len(a); k++ {
-				switch a[k] {
-				case 'i', 'I':
-					return fmt.Errorf("sed -i edits files")
-				case 'f':
-					return fmt.Errorf("sed -f runs a script from a file")
-				case 'e':
-					explicit = true
-					if k+1 < len(a) {
-						scripts = append(scripts, a[k+1:])
-					} else if j+1 < len(args) {
-						j++
-						scripts = append(scripts, args[j])
-					}
-					k = len(a)
-				}
-			}
-		default:
-			files = append(files, a)
+	var parsed sedArguments
+	for index := 0; index < len(args); index++ {
+		consumedNext, err := parsed.consume(args[index:])
+		if err != nil {
+			return err
+		}
+		if consumedNext {
+			index++
 		}
 	}
-	if !explicit && len(files) > 0 {
-		scripts = append(scripts, files[0])
+	if !parsed.explicit && len(parsed.files) > 0 {
+		parsed.scripts = append(parsed.scripts, parsed.files[0])
 	}
-	for _, sc := range scripts {
-		if sedScriptUnsafe(sc) {
+	for _, script := range parsed.scripts {
+		if sedScriptUnsafe(script) {
 			return fmt.Errorf("sed script may write files or run commands")
 		}
 	}
 	return nil
 }
 
+type sedArguments struct {
+	scripts  []string
+	files    []string
+	explicit bool
+}
+
+// consume reports whether it used the next argument as a script.
+func (p *sedArguments) consume(args []string) (bool, error) {
+	arg := args[0]
+	switch {
+	case arg == "--in-place" || strings.HasPrefix(arg, "--in-place="):
+		return false, fmt.Errorf("sed -i edits files")
+	case arg == "--file" || strings.HasPrefix(arg, "--file="):
+		return false, fmt.Errorf("sed -f runs a script from a file")
+	case arg == "--expression" || strings.HasPrefix(arg, "--expression="):
+		p.explicit = true
+		if value, ok := strings.CutPrefix(arg, "--expression="); ok {
+			p.scripts = append(p.scripts, value)
+			return false, nil
+		}
+		if len(args) > 1 {
+			p.scripts = append(p.scripts, args[1])
+			return true, nil
+		}
+	case strings.HasPrefix(arg, "--"):
+	case len(arg) > 1 && arg[0] == '-':
+		return p.consumeShort(args)
+	default:
+		p.files = append(p.files, arg)
+	}
+	return false, nil
+}
+
+func (p *sedArguments) consumeShort(args []string) (bool, error) {
+	arg := args[0]
+	for index := 1; index < len(arg); index++ {
+		switch arg[index] {
+		case 'i', 'I':
+			return false, fmt.Errorf("sed -i edits files")
+		case 'f':
+			return false, fmt.Errorf("sed -f runs a script from a file")
+		case 'e':
+			p.explicit = true
+			if index+1 < len(arg) {
+				p.scripts = append(p.scripts, arg[index+1:])
+				return false, nil
+			}
+			if len(args) > 1 {
+				p.scripts = append(p.scripts, args[1])
+				return true, nil
+			}
+			return false, nil
+		}
+	}
+	return false, nil
+}
+
 // sedScriptUnsafe reports a script with the w, W, r, R or e commands or
 // the s command's w or e flags. A script it cannot follow counts as
 // unsafe.
-func sedScriptUnsafe(s string) bool {
-	i, n := 0, len(s)
-	addr := func() bool {
-		switch {
-		case i < n && s[i] >= '0' && s[i] <= '9':
-			for i < n && (s[i] >= '0' && s[i] <= '9' || s[i] == '~') {
-				i++
-			}
-		case i < n && s[i] == '$':
-			i++
-		case i < n && (s[i] == '/' || s[i] == '\\'):
-			delim := byte('/')
-			if s[i] == '\\' {
-				i++
-				if i >= n {
-					return false
-				}
-				delim = s[i]
-			}
-			i++
-			for i < n && s[i] != delim {
-				if s[i] == '\\' {
-					i++
-				}
-				i++
-			}
-			if i >= n {
-				return false
-			}
-			i++
-			for i < n && (s[i] == 'I' || s[i] == 'M') {
-				i++
+func sedScriptUnsafe(script string) bool {
+	parser := sedScriptParser{script: script}
+	for {
+		parser.skip(" \t\n;{}!")
+		if parser.done() {
+			return false
+		}
+		if !parser.readAddress() {
+			return true
+		}
+		parser.skip(" ")
+		if !parser.done() && parser.current() == ',' {
+			parser.pos++
+			parser.skip(" ")
+			if !parser.readAddress() {
+				return true
 			}
 		}
+		parser.skip(" !")
+		if parser.done() {
+			return false
+		}
+		command := parser.current()
+		parser.pos++
+		if parser.unsafeCommand(command) {
+			return true
+		}
+	}
+}
+
+type sedScriptParser struct {
+	script string
+	pos    int
+}
+
+func (p *sedScriptParser) done() bool    { return p.pos >= len(p.script) }
+func (p *sedScriptParser) current() byte { return p.script[p.pos] }
+
+func (p *sedScriptParser) skip(chars string) {
+	for !p.done() && strings.IndexByte(chars, p.current()) >= 0 {
+		p.pos++
+	}
+}
+
+func (p *sedScriptParser) readAddress() bool {
+	if p.done() {
 		return true
 	}
-	for {
-		for i < n && strings.IndexByte(" \t\n;{}!", s[i]) >= 0 {
-			i++
+	c := p.current()
+	switch {
+	case c >= '0' && c <= '9':
+		for !p.done() && (p.current() >= '0' && p.current() <= '9' || p.current() == '~') {
+			p.pos++
 		}
-		if i >= n {
+	case c == '$':
+		p.pos++
+	case c == '/' || c == '\\':
+		delim := byte('/')
+		if c == '\\' {
+			p.pos++
+			if p.done() {
+				return false
+			}
+			delim = p.current()
+		}
+		p.pos++
+		if !p.readDelimited(delim) {
 			return false
 		}
-		if !addr() {
+		p.skip("IM")
+	}
+	return true
+}
+
+// readDelimited consumes through an unescaped delimiter, failing closed on EOF.
+func (p *sedScriptParser) readDelimited(delim byte) bool {
+	for !p.done() && p.current() != delim {
+		if p.current() == '\\' {
+			p.pos++
+		}
+		p.pos++
+	}
+	if p.done() {
+		return false
+	}
+	p.pos++
+	return true
+}
+
+func (p *sedScriptParser) unsafeCommand(command byte) bool {
+	switch command {
+	case 'e', 'w', 'W', 'r', 'R':
+		return true
+	case 's', 'y':
+		return p.unsafeSubstitution(command)
+	case 'a', 'i', 'c', '#':
+		p.skipUntil("\n")
+	case ':', 'b', 't', 'T', 'q', 'Q', 'l', 'L':
+		p.skipUntil("\n;}")
+	case '{', '}', 'p', 'P', 'd', 'D', 'n', 'N', 'g', 'G', 'h', 'H', 'x', '=', 'z', 'F':
+	default:
+		return true
+	}
+	return false
+}
+
+func (p *sedScriptParser) unsafeSubstitution(command byte) bool {
+	if p.done() || p.current() == '\\' || p.current() == '\n' {
+		return true
+	}
+	delim := p.current()
+	p.pos++
+	for part := 0; part < 2; part++ {
+		if !p.readDelimited(delim) {
 			return true
 		}
-		for i < n && s[i] == ' ' {
-			i++
-		}
-		if i < n && s[i] == ',' {
-			i++
-			for i < n && s[i] == ' ' {
-				i++
-			}
-			if !addr() {
-				return true
-			}
-		}
-		for i < n && (s[i] == ' ' || s[i] == '!') {
-			i++
-		}
-		if i >= n {
-			return false
-		}
-		c := s[i]
-		i++
-		switch c {
-		case 'e', 'w', 'W', 'r', 'R':
-			return true
-		case 's', 'y':
-			if i >= n || s[i] == '\\' || s[i] == '\n' {
-				return true
-			}
-			delim := s[i]
-			i++
-			for part := 0; part < 2; part++ {
-				for i < n && s[i] != delim {
-					if s[i] == '\\' {
-						i++
-					}
-					i++
-				}
-				if i >= n {
-					return true
-				}
-				i++
-			}
-			for c == 's' && i < n && strings.IndexByte("gpiImMew0123456789", s[i]) >= 0 {
-				if s[i] == 'e' || s[i] == 'w' {
-					return true
-				}
-				i++
-			}
-		case 'a', 'i', 'c', '#':
-			for i < n && s[i] != '\n' {
-				i++
-			}
-		case ':', 'b', 't', 'T', 'q', 'Q', 'l', 'L':
-			for i < n && s[i] != '\n' && s[i] != ';' && s[i] != '}' {
-				i++
-			}
-		case '{', '}', 'p', 'P', 'd', 'D', 'n', 'N', 'g', 'G', 'h', 'H', 'x', '=', 'z', 'F':
-		default:
+	}
+	for command == 's' && !p.done() && strings.IndexByte("gpiImMew0123456789", p.current()) >= 0 {
+		if p.current() == 'e' || p.current() == 'w' {
 			return true
 		}
+		p.pos++
+	}
+	return false
+}
+
+func (p *sedScriptParser) skipUntil(delimiters string) {
+	for !p.done() && strings.IndexByte(delimiters, p.current()) < 0 {
+		p.pos++
 	}
 }

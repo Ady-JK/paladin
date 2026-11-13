@@ -1,45 +1,64 @@
-// models.ts owns providers and the model picker.
-// It loads the catalog, restores the saved pick, and renders the
-// provider/lab/model tree, dropdowns, and detail pane.
-
+// Loads providers and manages the composer's model picker.
 import * as api from "../core/api";
 import {
-  filterBarEl,
-  filterClearBtn,
-  filterLabelEl,
   inputEl,
-  labPickEl,
-  modelBreadcrumbEl,
-  modelDetailEl,
   modelMenu,
-  modelPillEl,
-  modelQuickBtn,
   modelSearchClearEl,
   modelSearchEl,
   modelSelectBtn,
   modelSelectLabelEl,
   modelTreeEl,
-  providerPickEl,
 } from "../core/dom";
-import {
-  approxTokens,
-  bare,
-  escapeAttr,
-  escapeHtml,
-  fuzzyMatch,
-  labKey,
-  modelsInLab,
-  modelsOf,
-  splitModel,
-} from "../core/format";
-import { collapsedLabs, collapsedProviders, state } from "../core/state";
-import type { GroupedLab, GroupedProvider, ModelMeta, ProviderInfo } from "../core/types";
+import { bare, escapeAttr, escapeHtml, modelsOf, splitModel } from "../core/format";
+import { state } from "../core/state";
+import { loadJson, saveJson } from "../core/storage";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
 import { claimPopover, registerPopover } from "../ui/popover";
-import { icon } from "../icons";
-import { loadJson, saveJson } from "../core/storage";
+import { toast } from "../ui/toast";
 
 const MODEL_KEY = "paladin.model";
+const DEFAULT_CATALOG_TTL = 30 * 60_000;
+const DEFAULT_CATALOG_CHECK_INTERVAL = 5 * 60_000;
+type ModelChoice = { provider: string; model: string };
+const providerFilter = document.querySelector<HTMLSelectElement>("#modelProviderFilter")!;
+const providerLabel = document.querySelector<HTMLElement>("#modelSelectProvider")!;
+let filter = "";
+let highlighted: ModelChoice | null = null;
+let defaultRefreshInFlight = false;
+let nextDefaultRefresh = 0;
+let defaultRefreshGeneration = 0;
+
+export function resetDefaultRefresh(): void {
+  defaultRefreshGeneration++;
+  defaultRefreshInFlight = false;
+  nextDefaultRefresh = 0;
+}
+
+// Only the default provider is fetched, with a cooldown between refreshes.
+export async function refreshDefaultCatalog(): Promise<void> {
+  const provider = state.providers.find((item) => item.default);
+  if (!provider || defaultRefreshInFlight || Date.now() < nextDefaultRefresh) return;
+  const generation = defaultRefreshGeneration;
+  defaultRefreshInFlight = true;
+  nextDefaultRefresh = Date.now() + 60_000;
+  try {
+    const result = await api.refreshProvider(provider.name);
+    if (result.error || generation !== defaultRefreshGeneration) return;
+    const providers = await api.listProviders();
+    if (generation !== defaultRefreshGeneration) return;
+    state.providers = [...providers];
+    restoreModel();
+    syncModelSelects();
+    void loadContext();
+    state.onProvidersChanged();
+    nextDefaultRefresh = Date.now() + DEFAULT_CATALOG_TTL;
+    window.dispatchEvent(new CustomEvent("paladin:provider-catalog-refreshed", { detail: provider.name }));
+  } catch {
+    return;
+  } finally {
+    if (generation === defaultRefreshGeneration) defaultRefreshInFlight = false;
+  }
+}
 
 export async function loadProviders(): Promise<void> {
   try {
@@ -47,488 +66,159 @@ export async function loadProviders(): Promise<void> {
   } catch {
     state.providers = [];
   }
-
   restoreModel();
   syncModelSelects();
+  void loadContext();
   state.onProvidersChanged();
 }
 
 function restoreModel(): void {
-  state.selectedProvider = "";
-  state.selectedLab = "";
-  state.selectedModel = "";
-
-  const saved = loadJson(MODEL_KEY) as { provider?: string; lab?: string; model?: string } | null | undefined;
-  if (saved && state.providers.some((p) => p.name === saved.provider)) {
-    state.selectedProvider = saved.provider ?? "";
-    state.selectedLab = saved.lab ?? "";
-    state.selectedModel = saved.model ?? "";
-  }
-
-  if (!state.selectedProvider) {
-    const fallback = state.providers.find((p) => p.default) ?? state.providers[0];
-    if (fallback) {
-      state.selectedProvider = fallback.name;
-    }
-  }
-
-  const provider = state.providers.find((p) => p.name === state.selectedProvider);
-  const rawLabs = [...new Set(modelsOf(provider).map((m) => splitModel(m).lab))];
-  state.selectedLab = rawLabs.find((lab) => bare(lab) === bare(state.selectedLab)) ?? rawLabs[0] ?? "";
-  const models = modelsInLab(provider, state.selectedLab);
-  const savedShort = state.selectedModel ? splitModel(state.selectedModel).short : "";
+  const saved = loadJson(MODEL_KEY) as { provider?: string; model?: string } | null | undefined;
+  const provider =
+    state.providers.find((p) => p.name === saved?.provider) ??
+    state.providers.find((p) => p.default) ??
+    state.providers[0];
+  state.selectedProvider = provider?.name ?? "";
+  const models = modelsOf(provider);
+  const short = saved?.model ? splitModel(saved.model).short : "";
   state.selectedModel =
-    models.find((m) => m === state.selectedModel) ??
-    (savedShort
+    models.find((m) => m === saved?.model) ??
+    (short
       ? [...models]
           .reverse()
-          .find((m) => splitModel(m).short.startsWith(savedShort) || savedShort.startsWith(splitModel(m).short))
+          .find((m) => splitModel(m).short.startsWith(short) || short.startsWith(splitModel(m).short))
       : undefined) ??
     models[0] ??
     provider?.model ??
     "";
+  state.selectedLab = state.selectedModel ? splitModel(state.selectedModel).lab : "";
+}
 
-  paintModel();
+// Prefer exact and contiguous matches, then compact subsequences. A small edit
+// distance also permits common typing errors without flooding the result list.
+function score(query: string, text: string): number {
+  const q = query;
+  const t = text.toLowerCase();
+  if (!q) return 0;
+  if (t === q) return 0;
+  const at = t.indexOf(q);
+  if (at >= 0) return 10 + at + (t.length - q.length) / 100;
+  let pos = -1;
+  let first = -1;
+  for (const char of q) {
+    pos = t.indexOf(char, pos + 1);
+    if (pos < 0) break;
+    if (first < 0) first = pos;
+  }
+  if (pos >= 0) return 30 + pos - first - q.length + 1 + first / 100;
+  const maxDistance = Math.min(3, Math.floor(q.length / 3));
+  if (Math.abs(t.length - q.length) > maxDistance) return Infinity;
+  let previous = Array.from({ length: q.length + 1 }, (_, i) => i);
+  for (let i = 0; i < t.length; i++) {
+    const current = [i + 1];
+    for (let j = 0; j < q.length; j++)
+      current.push(Math.min(current[j] + 1, previous[j + 1] + 1, previous[j] + (t[i] === q[j] ? 0 : 1)));
+    previous = current;
+  }
+  const distance = previous[q.length];
+  return distance <= maxDistance ? 60 + distance : Infinity;
+}
+
+// Search results are reused for keyboard navigation until the catalog or query changes.
+let lastSearch:
+  { providers: typeof state.providers; query: string; filter: string; choices: ModelChoice[] } | undefined;
+
+function choices(query: string): ModelChoice[] {
+  const normalized = query.toLowerCase().trim();
+  if (lastSearch?.providers === state.providers && lastSearch.query === normalized && lastSearch.filter === filter)
+    return lastSearch.choices;
+
+  // A provider or model can occur many times in a catalog. Score each distinct
+  // text once per query; the provider is still part of each returned choice.
+  const scores = new Map<string, number>();
+  const scoreOnce = (text: string): number => {
+    const cached = scores.get(text);
+    if (cached !== undefined) return cached;
+    const rank = score(normalized, text);
+    scores.set(text, rank);
+    return rank;
+  };
+  const matches = state.providers
+    .filter((provider) => filter === "*" || provider.name === filter)
+    .flatMap((provider) => {
+      const providerScore = scoreOnce(bare(provider.name));
+      return modelsOf(provider).map((model) => {
+        const rank =
+          providerScore === 0
+            ? 0
+            : Math.min(providerScore, scoreOnce(bare(splitModel(model).short)), scoreOnce(bare(model)));
+        return { choice: { provider: provider.name, model }, rank };
+      });
+    });
+  const catalogPriority = (provider: string): number =>
+    state.providers.find((p) => p.name === provider)?.default ? 0 : 1;
+  const result = matches
+    .filter((item) => Number.isFinite(item.rank))
+    .sort(
+      (a, b) =>
+        catalogPriority(a.choice.provider) - catalogPriority(b.choice.provider) ||
+        a.choice.provider.localeCompare(b.choice.provider) ||
+        a.rank - b.rank ||
+        a.choice.model.localeCompare(b.choice.model) ||
+        a.choice.provider.localeCompare(b.choice.provider),
+    )
+    .map((item) => item.choice);
+  lastSearch = { providers: state.providers, query: normalized, filter, choices: result };
+  return result;
+}
+
+function same(a: ModelChoice | null, b: ModelChoice): boolean {
+  return a?.provider === b.provider && a.model === b.model;
 }
 
 export function syncModelSelects(): void {
-  collapsedProviders.delete(bare(state.selectedProvider));
-  collapsedLabs.delete(labKey(bare(state.selectedProvider), bare(state.selectedLab)));
-
-  if (state.treeFilter) {
-    const groups = groupedTree("", null);
-    const group = groups.find((g) => g.display === state.treeFilter!.provider);
-    if (!group || bare(state.selectedProvider) !== state.treeFilter.provider) {
-      state.treeFilter = null;
-    } else if (state.treeFilter.lab && bare(state.selectedLab) !== state.treeFilter.lab) {
-      state.treeFilter = { provider: state.treeFilter.provider, lab: "" };
-    }
-  }
-
-  const flat = flatModels(groupedTree(modelSearchEl.value));
-  if (state.highlightedModel && !flat.some((m) => m.model === state.highlightedModel)) {
-    state.highlightedModel = "";
-  }
-
-  paintPick();
-  renderTrees();
   paintModel();
-}
-
-// renderTrees repaints the composer picker tree while its menu is open.
-// The detail pane is cheap and always fresh.
-function renderTrees(): void {
-  if (!modelMenu.classList.contains("hidden")) {
-    modelTreeEl.innerHTML = treeHTML(groupedTree(modelSearchEl.value));
-  }
-  modelDetailEl.innerHTML = detailHTML();
-}
-
-function groupedTree(
-  query: string,
-  filter: { provider: string; lab: string } | null = state.treeFilter,
-): GroupedProvider[] {
-  const byProvider = new Map<string, ProviderInfo[]>();
-  for (const info of state.providers) {
-    const key = bare(info.name) || info.name;
-    byProvider.set(key, [...(byProvider.get(key) ?? []), info]);
-  }
-
-  const out: GroupedProvider[] = [];
-  for (const display of [...byProvider.keys()].sort((a, b) => a.localeCompare(b))) {
-    const infos = byProvider.get(display)!;
-
-    const byLab = new Map<string, { provider: string; id: string }[]>();
-    for (const info of infos) {
-      for (const m of modelsOf(info)) {
-        const lab = bare(splitModel(m).lab);
-        byLab.set(lab, [...(byLab.get(lab) ?? []), { provider: info.name, id: m }]);
-      }
-    }
-
-    const matchModel = (id: string): boolean => fuzzyMatch(query, id) || fuzzyMatch(query, bare(splitModel(id).short));
-
-    const labs: GroupedLab[] = [];
-    for (const lab of [...byLab.keys()].sort((a, b) => a.localeCompare(b))) {
-      const models = byLab
-        .get(lab)!
-        .filter((e) => matchModel(e.id))
-        .sort((a, b) => a.id.localeCompare(b.id));
-      if (models.length > 0 || fuzzyMatch(query, lab)) {
-        labs.push({ display: lab, models });
-      }
-    }
-
-    if (labs.length === 0) {
-      const self = fuzzyMatch(query, display) || infos.some((i) => fuzzyMatch(query, i.name));
-      if (!self) {
-        continue;
-      }
-      for (const lab of [...byLab.keys()].sort((a, b) => a.localeCompare(b))) {
-        labs.push({
-          display: lab,
-          models: [...byLab.get(lab)!].sort((a, b) => a.id.localeCompare(b.id)),
-        });
-      }
-    }
-
-    out.push({
-      display,
-      infos,
-      isDefault: infos.some((i) => i.default),
-      labs,
-    });
-  }
-
-  if (filter) {
-    const group = out.find((g) => g.display === filter.provider);
-    if (!group) {
-      return [];
-    }
-    if (filter.lab) {
-      const lab = group.labs.find((l) => l.display === filter.lab);
-      return lab ? [{ ...group, labs: [lab] }] : [];
-    }
-    return [group];
-  }
-
-  return out;
-}
-
-function flatModels(tree: GroupedProvider[]): { provider: string; model: string }[] {
-  const out: { provider: string; model: string }[] = [];
-  for (const p of tree) {
-    for (const lab of p.labs) {
-      for (const model of lab.models) {
-        out.push({ provider: model.provider, model: model.id });
-      }
-    }
-  }
-  return out;
-}
-
-// treeHTML renders the provider/lab/model tree. Output is capped: a 467+
-// row tree rebuilt per keystroke is the picker jank. Past the cap the UI
-// says so instead of silently dropping rows.
-function treeHTML(tree: GroupedProvider[]): string {
-  if (tree.length === 0) {
-    return `<p class="px-2 py-3 text-center font-mono text-[11px] text-slate-400">no match</p>`;
-  }
-
-  const picked = state.highlightedModel || state.selectedModel;
-  const CAP = 300;
-  const total = tree.reduce((n, p) => n + p.labs.reduce((m, l) => m + l.models.length, 0), 0);
-  let shown = 0;
-
-  let out = "";
-  outer: for (const p of tree) {
-    const open = !collapsedProviders.has(p.display);
-    out += `
-      <button
-        data-ptoggle="${escapeAttr(p.display)}"
-        class="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800"
-      >
-        <span class="flex-shrink-0 text-slate-400">${icon(open ? "chevron-down" : "chevron-right", "h-3 w-3")}</span>
-        <span class="flex-shrink-0 text-accent-500">${icon("globe", "h-3.5 w-3.5")}</span>
-        <span class="truncate">${escapeHtml(p.display)}</span>
-        ${p.isDefault ? `<span class="flex-shrink-0 font-mono text-[10px] font-normal text-slate-400">default</span>` : ""}
-      </button>`;
-
-    if (!open) {
-      continue;
-    }
-
-    for (const lab of p.labs) {
-      const key = labKey(p.display, lab.display);
-      const labOpen = !collapsedLabs.has(key);
-      out += `
-        <button
-          data-ltoggle="${escapeAttr(p.display)}	${escapeAttr(lab.display)}"
-          class="flex w-full items-center gap-1.5 rounded-md py-1 pl-6 pr-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          <span class="flex-shrink-0 text-slate-400">${icon(labOpen ? "chevron-down" : "chevron-right", "h-3 w-3")}</span>
-          <span class="flex-shrink-0 text-agent-amber">${icon("flask", "h-3.5 w-3.5")}</span>
-          <span class="truncate">${escapeHtml(lab.display)}</span>
-        </button>`;
-
-      if (!labOpen) {
-        continue;
-      }
-
-      for (const entry of lab.models) {
-        if (shown >= CAP) {
-          break outer;
-        }
-        shown++;
-        const isPicked = entry.id === state.selectedModel && entry.provider === state.selectedProvider;
-        const hot = entry.id === picked;
-        out += `
-          <button
-            data-mpick="${escapeAttr(entry.provider)}	${escapeAttr(entry.id)}"
-            title="${escapeAttr(entry.id)}"
-            class="pick-row flex w-full items-center gap-1.5 rounded-md py-1 pl-11 pr-1.5 text-left font-mono text-[11px] ${
-              isPicked
-                ? "bg-accent-600/10 font-semibold text-slate-900 ring-1 ring-inset ring-accent-500/60 dark:text-slate-50"
-                : hot
-                  ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            }"
-          >
-            <span class="flex-shrink-0 text-agent-rose">${icon("brain", "h-3.5 w-3.5")}</span>
-            <span class="truncate">${escapeHtml(bare(splitModel(entry.id).short))}</span>
-          </button>`;
-      }
-    }
-  }
-
-  if (shown < total) {
-    out += `<p class="px-2 py-2 text-center font-mono text-[10px] text-slate-400">…and ${total - shown} more — refine the search</p>`;
-  }
-
-  return out;
-}
-
-function detailHTML(): string {
-  const target = state.highlightedModel || state.selectedModel;
-  const info = state.providers.find((p) => p.name === state.selectedProvider);
-  const lab = target ? bare(splitModel(target).lab) : bare(state.selectedLab);
-  const apiType = info?.apiType ?? "";
-  const meta = target ? info?.meta?.[target] : undefined;
-
-  if (!target) {
-    return `<p class="font-mono text-[11px] text-slate-400">Pick a model from the tree.</p>`;
-  }
-
-  const row = (name: string, value: string, real?: string): string => `
-    <div class="mt-1.5">
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">${name}</div>
-      <div class="truncate font-mono text-[11px] text-slate-700 dark:text-slate-200" title="${escapeAttr(real ?? value)}">${escapeHtml(value)}</div>
-    </div>`;
-
-  // Prices arrive in USD per million tokens; the row keeps them to the
-  // precision the catalog publishes so a $0.0028 cache read still reads.
-  const prices = priceLine(meta);
-  const thinking = thinkingLine(meta);
-
-  return `
-    <div class="flex items-center gap-1.5">
-      <span class="flex-shrink-0 text-agent-rose">${icon("brain", "h-5 w-5")}</span>
-      <div class="min-w-0 font-mono text-sm font-semibold text-slate-900 dark:text-slate-50" title="${escapeAttr(target)}">${escapeHtml(bare(splitModel(target).short))}</div>
-    </div>
-    ${row("Full id", target)}
-    ${state.selectedProvider ? row("Provider", bare(state.selectedProvider), state.selectedProvider) : ""}
-    ${lab ? row("Lab", lab) : ""}
-    ${apiType ? row("API", apiType) : ""}
-    ${meta?.contextWindow ? row("Context", contextLine(meta)) : ""}
-    ${thinking ? row("Thinking", thinking) : ""}
-    ${prices ? row("Price / 1M", prices) : ""}`;
-}
-
-// priceLine words a model's published prices, in USD per million tokens.
-// Levels the listing omitted stay out, so a model with no cache price
-// does not claim a free one. Precision is kept as published.
-function priceLine(meta: ModelMeta | undefined): string {
-  if (!meta) {
-    return "";
-  }
-  const price = (n: number): string =>
-    `$${String(n)
-      .replace(/(\.\d*?)0+$/, "$1")
-      .replace(/\.$/, "")}`;
-  return [
-    meta.priceInput !== undefined ? `in ${price(meta.priceInput)}` : "",
-    meta.priceOutput !== undefined ? `out ${price(meta.priceOutput)}` : "",
-    meta.priceCacheRead ? `cache ${price(meta.priceCacheRead)}` : "",
-    meta.priceCacheWrite ? `write ${price(meta.priceCacheWrite)}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-// contextLine words the model's published limits: its context window and,
-// when the listing names one, its output ceiling.
-function contextLine(meta: ModelMeta): string {
-  const window = `${approxTokens(meta.contextWindow ?? 0)} tokens`;
-  return meta.maxOutput ? `${window} · ${approxTokens(meta.maxOutput)} out` : window;
-}
-
-// thinkingLine words the levels the model accepts. A listing that
-// described the model's reasoning and named none means "none"; one that
-// said nothing about it shows no line at all.
-function thinkingLine(meta: ModelMeta | undefined): string {
-  if (!meta?.thinkingKnown) {
-    return "";
-  }
-  return meta.thinkingLevels && meta.thinkingLevels.length > 0 ? meta.thinkingLevels.join(" · ") : "none";
-}
-
-function paintPick(): void {
-  const pickedProvider = bare(state.selectedProvider);
-  const pickedLab = bare(state.selectedLab);
-  const short = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "";
-
-  const groups = groupedTree("", null);
-  providerPickEl.innerHTML =
-    groups.length === 0
-      ? `<option value="">—</option>`
-      : groups
-          .map(
-            (g) =>
-              `<option value="${escapeAttr(g.display)}"${g.display === pickedProvider ? " selected" : ""}>${escapeHtml(g.display)}${g.isDefault ? " (default)" : ""}</option>`,
-          )
-          .join("");
-  providerPickEl.disabled = groups.length === 0;
-  if (groups.length > 0 && !groups.some((g) => g.display === pickedProvider)) {
-    providerPickEl.value = groups[0].display;
-  }
-
-  const group = groups.find((g) => g.display === pickedProvider);
-  const labs = group?.labs ?? [];
-  labPickEl.innerHTML =
-    labs.length === 0
-      ? `<option value="">—</option>`
-      : labs
-          .map(
-            (lab) =>
-              `<option value="${escapeAttr(lab.display)}"${lab.display === pickedLab ? " selected" : ""}>${escapeHtml(lab.display)}</option>`,
-          )
-          .join("");
-  labPickEl.disabled = labs.length === 0;
-  if (labs.length > 0 && !labs.some((lab) => lab.display === pickedLab)) {
-    labPickEl.value = labs[0].display;
-  }
-
-  modelPillEl.innerHTML = short
-    ? `${icon("brain", "h-3.5 w-3.5 flex-shrink-0 text-agent-rose")}<span class="truncate">${escapeHtml(short)}</span>`
-    : `<span class="text-slate-400">—</span>`;
-
-  const parts = [pickedProvider, pickedLab, short].filter(Boolean);
-  const crumb = parts.length > 0 ? parts.join(" / ") : "default";
-  modelBreadcrumbEl.textContent = crumb;
-  modelBreadcrumbEl.title = crumb;
-
-  if (state.treeFilter) {
-    filterBarEl.classList.remove("hidden");
-    filterBarEl.classList.add("flex");
-    filterLabelEl.textContent =
-      `Showing ${state.treeFilter.provider}` + (state.treeFilter.lab ? ` / ${state.treeFilter.lab}` : "");
-  } else {
-    filterBarEl.classList.add("hidden");
-    filterBarEl.classList.remove("flex");
-  }
-}
-
-function preferReal(infos: ProviderInfo[], display: string): ProviderInfo | undefined {
-  return infos.find((i) => i.name === display) ?? infos.find((i) => i.default) ?? infos[0];
-}
-
-function applyProviderGroup(display: string): void {
-  const group = groupedTree("", null).find((g) => g.display === display);
-  if (!group) {
-    return;
-  }
-
-  const first = group.labs[0]?.models[0];
-  if (first) {
-    pickModel(first.provider, first.id);
-    return;
-  }
-
-  const real = preferReal(group.infos, display);
-  if (real) {
-    state.selectedProvider = real.name;
-    state.selectedLab = "";
-    state.selectedModel = real.model;
-    persistModel();
-    syncModelSelects();
-  }
-}
-
-function applyLabGroup(display: string): void {
-  const group = groupedTree("", null).find((g) => g.display === bare(state.selectedProvider));
-  const lab = group?.labs.find((l) => l.display === display);
-  const first = lab?.models[0];
-  if (first) {
-    pickModel(first.provider, first.id);
-  }
+  if (!isMenuOpen(modelMenu)) return;
+  hidePrice();
+  renderProviderFilter();
+  const all = choices(modelSearchEl.value);
+  if (highlighted && !all.some((choice) => same(highlighted, choice))) highlighted = null;
+  const rows = all
+    .slice(0, 300)
+    .map((choice) => {
+      const selected = choice.provider === state.selectedProvider && choice.model === state.selectedModel;
+      const hot = same(highlighted, choice);
+      return `<button type="button" data-mpick="${escapeAttr(choice.provider)}&#9;${escapeAttr(choice.model)}" aria-pressed="${selected}" class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left ${hot ? "bg-slate-100 dark:bg-slate-800" : "hover:bg-slate-100 dark:hover:bg-slate-800"}">
+      <span class="min-w-0 flex-1"><span class="block truncate text-sm text-slate-900 dark:text-slate-100">${escapeHtml(bare(splitModel(choice.model).short))}</span><span class="block truncate text-xs text-slate-500 dark:text-slate-400">${escapeHtml(bare(choice.provider))}</span></span>
+      ${selected ? '<span aria-hidden="true" class="text-accent-600 dark:text-accent-400">✓</span>' : ""}</button>`;
+    })
+    .join("");
+  modelTreeEl.innerHTML = rows || '<p class="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">No models found</p>';
+  if (all.length > 300)
+    modelTreeEl.insertAdjacentHTML(
+      "beforeend",
+      `<p class="px-3 py-2 text-xs text-slate-500">${all.length - 300} more — refine your search</p>`,
+    );
 }
 
 export function pickModel(name: string, model: string): void {
-  const provider = state.providers.find((p) => p.name === name);
-  if (!provider) {
-    return;
-  }
-
-  state.selectedProvider = provider.name;
+  if (!state.providers.some((p) => p.name === name)) return;
+  state.selectedProvider = name;
   state.selectedLab = splitModel(model).lab;
   state.selectedModel = model;
-  state.highlightedModel = "";
-  persistModel();
+  highlighted = null;
+  persistModelChoice();
   syncModelSelects();
 }
 
-function quickSelect(query: string): boolean {
-  const flat = flatModels(groupedTree(query));
-  const target =
-    flat.find((m) => m.model === state.highlightedModel) ??
-    flat.find((m) => m.model === state.selectedModel && m.provider === state.selectedProvider) ??
-    flat[0];
-  if (!target) {
-    return false;
-  }
-
-  pickModel(target.provider, target.model);
-  return true;
-}
-
-function moveHighlight(query: string, delta: 1 | -1): void {
-  const flat = flatModels(groupedTree(query));
-  if (flat.length === 0) {
-    return;
-  }
-
-  const current = flat.findIndex((m) => m.model === (state.highlightedModel || state.selectedModel));
-  const next = flat[(current + delta + flat.length) % flat.length];
-  state.highlightedModel = next.model;
-
-  modelTreeEl.querySelectorAll("[data-mpick].bg-slate-100,[data-mpick].dark\\:bg-slate-800").forEach((row) => {
-    row.classList.remove("bg-slate-100", "dark:bg-slate-800");
-  });
-  const row = modelTreeEl.querySelector(`[data-mpick="${CSS.escape(next.provider)}	${CSS.escape(next.model)}"]`);
-  row?.classList.add("bg-slate-100", "dark:bg-slate-800");
-  row?.scrollIntoView({ block: "nearest" });
-
-  modelDetailEl.innerHTML = detailHTML();
-}
-
-function persistModel(): void {
-  saveJson(MODEL_KEY, { provider: state.selectedProvider, lab: state.selectedLab, model: state.selectedModel });
-}
-
-// persistModelChoice records an out-of-picker model change (e.g. the
-// session bringing its own last-used model) so the global default and
-// a later provider refresh agree with the composer instead of
-// clobbering it back.
 export function persistModelChoice(): void {
-  persistModel();
+  saveJson(MODEL_KEY, { provider: state.selectedProvider, model: state.selectedModel });
 }
 
-// Listeners hear about every change to the picked provider or model.
 const modelListeners: Array<() => void> = [];
 let lastPicked = "";
-
 export function onModelChange(fn: () => void): void {
   modelListeners.push(fn);
-}
-
-// openModelMenu opens the model picker (no-op when it is open).
-export function openModelMenu(): void {
-  if (!isMenuOpen(modelMenu)) {
-    claimPopover("model");
-    toggleMenu(modelMenu);
-  }
-  syncModelSelects();
-  modelSearchEl.focus();
 }
 
 function paintModel(): void {
@@ -536,117 +226,90 @@ function paintModel(): void {
   if (picked !== lastPicked) {
     lastPicked = picked;
     for (const fn of modelListeners) fn();
+    void loadContext();
   }
-  const provider = bare(state.selectedProvider);
-  const short = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "";
-  const label = short ? (provider ? `${provider}/${short}` : short) : provider || "default";
-
+  const label = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "default";
+  providerLabel.textContent = bare(state.selectedProvider);
   modelSelectLabelEl.textContent = label;
-  modelSelectLabelEl.title =
-    [state.selectedProvider, state.selectedLab, state.selectedModel].filter(Boolean).join(" / ") || label;
-
-  paintPick();
+  modelSelectLabelEl.title = label;
 }
 
-// handleTreeClick toggles provider/lab groups and picks models.
-function handleTreeClick(event: Event): void {
-  event.stopPropagation();
-  const toggle = (event.target as HTMLElement).closest<HTMLElement>("[data-ptoggle],[data-ltoggle]");
-  if (toggle) {
-    if (toggle.dataset.ptoggle !== undefined) {
-      const name = toggle.dataset.ptoggle;
-      if (collapsedProviders.has(name)) {
-        collapsedProviders.delete(name);
-      } else {
-        collapsedProviders.add(name);
-      }
-    } else {
-      const [name, lab] = (toggle.dataset.ltoggle ?? "").split("	");
-      const key = labKey(name, lab);
-      if (collapsedLabs.has(key)) {
-        collapsedLabs.delete(key);
-      } else {
-        collapsedLabs.add(key);
-      }
-    }
-    renderTrees();
-    return;
+export function openModelMenu(): void {
+  void refreshDefaultCatalog();
+  if (!isMenuOpen(modelMenu)) {
+    claimPopover("model");
+    toggleMenu(modelMenu);
   }
-
-  const pick = (event.target as HTMLElement).closest<HTMLElement>("[data-mpick]");
-  if (pick) {
-    const [name, model] = (pick.dataset.mpick ?? "").split("	");
-    pickModel(name, model);
-  }
+  highlighted = null;
+  filter = state.providers.find((p) => p.default)?.name ?? state.providers[0]?.name ?? "";
+  modelSearchEl.value = "";
+  syncModelSelects();
+  modelSearchEl.focus();
 }
 
-// initModelPicker wires the model menu, dropdowns, and search fields.
+function selectChoice(choice: ModelChoice): void {
+  hidePrice();
+  pickModel(choice.provider, choice.model);
+  closeMenu(modelMenu);
+  inputEl.focus();
+}
+
 export function initModelPicker(): void {
-  let searchTimer = 0;
-  providerPickEl.addEventListener("change", () => {
-    const value = providerPickEl.value;
-    if (!groupedTree("", null).some((g) => g.display === value)) {
-      return;
-    }
-    state.treeFilter = { provider: value, lab: "" };
-    applyProviderGroup(value);
-  });
-
-  labPickEl.addEventListener("change", () => {
-    const value = labPickEl.value;
-    const group = groupedTree("", null).find((g) => g.display === bare(state.selectedProvider));
-    if (!group?.labs.some((lab) => lab.display === value)) {
-      return;
-    }
-    applyLabGroup(value);
-    state.treeFilter = { provider: bare(state.selectedProvider), lab: bare(state.selectedLab) };
-    syncModelSelects();
-  });
-
-  const clearFilter = (): void => {
-    state.treeFilter = null;
-    syncModelSelects();
-  };
-  filterClearBtn.addEventListener("click", clearFilter);
-
   registerPopover("model", () => closeMenu(modelMenu));
+  initContextControl();
+  window.addEventListener("paladin:session-selected", () => void loadContext());
+  window.setInterval(() => void refreshDefaultCatalog(), DEFAULT_CATALOG_CHECK_INTERVAL);
   modelSelectBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (isMenuOpen(modelMenu)) {
-      closeMenu(modelMenu);
-    } else {
-      openModelMenu();
-    }
+    if (isMenuOpen(modelMenu)) closeMenu(modelMenu);
+    else openModelMenu();
   });
-
   document.addEventListener("click", (event) => {
-    const inside = event
-      .composedPath()
-      .some((node) => node instanceof Element && node.matches("#modelSelectBtn, #modelMenu"));
-    if (!inside) {
+    if (!event.composedPath().some((node) => node instanceof Element && node.matches("#modelSelectBtn, #modelMenu")))
       closeMenu(modelMenu);
-    }
   });
-
-  modelTreeEl.addEventListener("click", handleTreeClick);
-
+  modelTreeEl.addEventListener("click", (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-mpick]");
+    if (!row) return;
+    const [provider, model] = (row.dataset.mpick ?? "").split("\t");
+    selectChoice({ provider, model });
+  });
+  document.querySelector<HTMLButtonElement>("#modelRefresh")!.addEventListener("click", () => {
+    void refreshPickerProvider();
+  });
+  providerFilter.addEventListener("change", () => {
+    filter = providerFilter.value;
+    highlighted = null;
+    syncModelSelects();
+  });
+  modelTreeEl.addEventListener("mouseover", showPrice);
+  modelTreeEl.addEventListener("focusin", showPrice);
+  modelTreeEl.addEventListener("mouseout", hidePrice);
+  modelTreeEl.addEventListener("focusout", hidePrice);
+  modelTreeEl.addEventListener("scroll", hidePrice);
   modelSearchEl.addEventListener("input", () => {
-    window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(() => {
-      state.highlightedModel = "";
-      syncModelSelects();
-    }, 150);
+    highlighted = null;
+    syncModelSelects();
   });
   modelSearchEl.addEventListener("keydown", (event) => {
+    const all = choices(modelSearchEl.value).slice(0, 300);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      moveHighlight(modelSearchEl.value, event.key === "ArrowDown" ? 1 : -1);
+      if (!all.length) return;
+      const current = all.findIndex((choice) => same(highlighted, choice));
+      const next =
+        current < 0
+          ? event.key === "ArrowDown"
+            ? 0
+            : all.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + all.length) % all.length;
+      highlighted = all[next];
+      syncModelSelects();
+      modelTreeEl.querySelectorAll<HTMLElement>("[data-mpick]")[next]?.scrollIntoView({ block: "nearest" });
     } else if (event.key === "Enter") {
       event.preventDefault();
-      if (quickSelect(modelSearchEl.value)) {
-        closeMenu(modelMenu);
-        inputEl.focus();
-      }
+      const choice = highlighted ?? all[0];
+      if (choice) selectChoice(choice);
     } else if (event.key === "Escape") {
       closeMenu(modelMenu);
       inputEl.focus();
@@ -654,34 +317,265 @@ export function initModelPicker(): void {
   });
   modelSearchClearEl.addEventListener("click", () => {
     modelSearchEl.value = "";
-    state.highlightedModel = "";
+    highlighted = null;
     syncModelSelects();
     modelSearchEl.focus();
   });
-
-  modelQuickBtn.addEventListener("click", () => {
-    if (quickSelect(modelSearchEl.value)) {
-      closeMenu(modelMenu);
-      inputEl.focus();
-    }
-  });
-
   document.addEventListener("keydown", (event) => {
-    const mod = event.metaKey || event.ctrlKey;
-    if (mod && event.key.toLowerCase() === "k") {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      if (!isMenuOpen(modelMenu)) claimPopover("model");
-      const opened = toggleMenu(modelMenu);
-      syncModelSelects();
-      if (opened) {
-        modelSearchEl.focus();
-      }
-    } else if (event.ctrlKey && event.key === "1" && isMenuOpen(modelMenu)) {
-      event.preventDefault();
-      if (quickSelect(modelSearchEl.value)) {
-        closeMenu(modelMenu);
-        inputEl.focus();
-      }
+      if (isMenuOpen(modelMenu)) closeMenu(modelMenu);
+      else openModelMenu();
     }
   });
+}
+
+function renderProviderFilter(): void {
+  const providers = [...state.providers].sort(
+    (a, b) => Number(b.default) - Number(a.default) || a.name.localeCompare(b.name),
+  );
+  if (filter !== "*" && !providers.some((p) => p.name === filter)) filter = providers[0]?.name ?? "";
+  providerFilter.innerHTML =
+    providers
+      .map(
+        (p) =>
+          `<option value="${escapeAttr(p.name)}">${escapeHtml(bare(p.name))}${p.default ? " (default)" : ""}</option>`,
+      )
+      .join("") + '<option value="*">All providers</option>';
+  providerFilter.value = filter;
+}
+
+function hidePrice(): void {
+  document.querySelector("#modelPriceTooltip")?.remove();
+}
+
+function showPrice(event: Event): void {
+  const row = (event.target as HTMLElement).closest<HTMLElement>("[data-mpick]");
+  if (!row) return;
+  hidePrice();
+  const [provider, model] = (row.dataset.mpick ?? "").split("\t");
+  const metadata = state.providers.find((p) => p.name === provider)?.meta?.[model];
+  const pricing = metadata?.pricing;
+  const tiers = pricing?.tiers ?? [];
+  const oldRates = metadata && [
+    metadata.priceInput,
+    metadata.priceOutput,
+    metadata.priceCacheRead,
+    metadata.priceCacheWrite,
+  ];
+  const fallback = oldRates?.some((rate) => rate !== undefined)
+    ? [
+        {
+          aboveInputTokens: 0,
+          input: oldRates[0],
+          output: oldRates[1],
+          cacheRead: oldRates[2],
+          cacheWrite: oldRates[3],
+        },
+      ]
+    : [];
+  const display = tiers.length ? tiers : fallback;
+  const amount = (n: number | undefined): string =>
+    n === undefined ? "Unavailable" : `$${n.toLocaleString(undefined, { maximumFractionDigits: 8 })}`;
+  const tooltip = document.createElement("div");
+  tooltip.id = "modelPriceTooltip";
+  tooltip.className = "model-price-tooltip";
+  tooltip.setAttribute("role", "tooltip");
+  tooltip.innerHTML = `<strong>Price per 1M tokens</strong>${
+    display.length
+      ? display
+          .map(
+            (tier, index) =>
+              `<div class="model-price-tier">${"aboveInputTokens" in tier && tier.aboveInputTokens ? `Above ${tier.aboveInputTokens.toLocaleString()} input tokens` : display[index + 1] && "aboveInputTokens" in display[index + 1] && display[index + 1].aboveInputTokens ? `Up to ${display[index + 1].aboveInputTokens!.toLocaleString()} input tokens` : "Standard"}</div>${[
+                ["Input", tier.input],
+                ["Output", tier.output],
+                ["Cache read", tier.cacheRead],
+                ["Cache write", tier.cacheWrite],
+              ]
+                .map(
+                  ([name, rate]) =>
+                    `<div class="model-price-line"><span>${name}</span><span>${amount(rate as number | undefined)}</span></div>`,
+                )
+                .join("")}`,
+          )
+          .join("")
+      : '<div class="model-price-tier">Pricing unavailable</div>'
+  }${pricing ? `<div class="model-price-note">${pricing.source === "litellm" ? "LiteLLM" : "GitHub Copilot"} · as of ${new Date(pricing.fetchedAt * 1000).toLocaleDateString()}</div>` : ""}${pricing && pricing.source !== "litellm" ? '<div class="model-price-note">100 AI credits = $1 · estimated usage</div>' : ""}`;
+  document.body.append(tooltip);
+  const bounds = row.getBoundingClientRect();
+  const rect = tooltip.getBoundingClientRect();
+  tooltip.style.left = `${Math.max(8, Math.min(window.innerWidth - rect.width - 8, bounds.right + 8))}px`;
+  tooltip.style.top = `${Math.max(8, Math.min(window.innerHeight - rect.height - 8, bounds.top))}px`;
+}
+
+const contextButton = document.querySelector<HTMLButtonElement>("#contextButton")!;
+const contextMenu = document.querySelector<HTMLElement>("#contextMenu")!;
+const contextDescription = document.querySelector<HTMLElement>("#contextDescription")!;
+const contextPercent = document.querySelector<HTMLInputElement>("#contextPercent")!;
+const contextSizeRow = document.querySelector<HTMLElement>("#contextSizeRow")!;
+const contextSize = document.querySelector<HTMLSelectElement>("#contextSize")!;
+const contextTokens = document.querySelector<HTMLInputElement>("#contextTokens")!;
+const contextError = document.querySelector<HTMLElement>("#contextError")!;
+const contextSave = document.querySelector<HTMLButtonElement>("#contextSave")!;
+let contextView: api.CompactionView | undefined;
+let contextRequest = 0;
+
+function shortTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
+  if (tokens >= 1000) return `${Number((tokens / 1000).toFixed(1))}k`;
+  return String(Math.round(tokens));
+}
+
+async function loadContext(): Promise<void> {
+  const request = ++contextRequest;
+  contextView = undefined;
+  contextMenu.hidden = true;
+  contextButton.setAttribute("aria-expanded", "false");
+  contextButton.textContent = "Ctx —";
+  if (!state.selectedProvider || !state.selectedModel) return;
+  try {
+    const view = await api.compactionGet(state.selectedProvider, state.selectedModel, state.sessionId || undefined);
+    if (request !== contextRequest) return;
+    contextView = view;
+    paintContextButton();
+    renderContext();
+  } catch {
+    if (request === contextRequest) contextButton.textContent = "Ctx —";
+  }
+}
+
+function paintContextButton(): void {
+  if (!contextView) return;
+  const total = contextView.options?.find((option) => option.window === contextView!.window)?.totalWindow;
+  contextButton.textContent = `${contextView.known ? "" : "~"}${shortTokens(total ?? contextView.window)}`;
+  contextButton.title = `Input limit: ${shortTokens(contextView.window)} tokens`;
+}
+
+function renderContext(): void {
+  if (!contextView) return;
+  const choices = contextView.options ?? [];
+  contextSizeRow.hidden = choices.length < 2;
+  contextSize.innerHTML = choices
+    .map(
+      (choice) =>
+        `<option value="${choice.window}">${choice.totalWindow ? `${shortTokens(choice.totalWindow)} context · ` : ""}${shortTokens(choice.window)} input${choice.surcharge ? " · different rates" : ""}</option>`,
+    )
+    .join("");
+  contextSize.value = String(contextView.window);
+  const total =
+    choices.find((choice) => choice.window === contextView!.window)?.totalWindow ??
+    (choices.length ? undefined : contextView.totalWindow);
+  contextDescription.textContent = `${contextView.known ? "Maximum input" : "Assumed input limit"}: ${shortTokens(contextView.window)} tokens${total && total > contextView.window ? ` · ${shortTokens(total)} total including output` : ""}. ${state.sessionId ? "Saved for this session." : "Used as the default for new sessions."}`;
+  contextPercent.value = String(Number(contextView.percent.toFixed(2)));
+  contextTokens.value = shortTokens((contextView.window * contextView.percent) / 100);
+  contextError.textContent = "";
+}
+
+function tokensValue(value: string): number {
+  const match = value
+    .trim()
+    .replace(/,/g, "")
+    .match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
+  if (!match) return NaN;
+  return Number(match[1]) * (match[2]?.toLowerCase() === "m" ? 1_000_000 : match[2]?.toLowerCase() === "k" ? 1000 : 1);
+}
+
+function initContextControl(): void {
+  contextButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    contextMenu.hidden = !contextMenu.hidden;
+    contextButton.setAttribute("aria-expanded", String(!contextMenu.hidden));
+    if (!contextMenu.hidden) {
+      closeMenu(modelMenu);
+      renderContext();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!(event.target as Element).closest(".context-control")) {
+      contextMenu.hidden = true;
+      contextButton.setAttribute("aria-expanded", "false");
+    }
+  });
+  contextSize.addEventListener("change", () => {
+    if (!contextView) return;
+    contextView = {
+      ...contextView,
+      window: Number(contextSize.value),
+      percent: Number(contextPercent.value) || contextView.percent,
+    };
+    renderContext();
+  });
+  contextPercent.addEventListener("input", () => {
+    const pct = Number(contextPercent.value);
+    contextTokens.value = contextView && Number.isFinite(pct) ? shortTokens((contextView.window * pct) / 100) : "";
+    contextError.textContent = "";
+  });
+  contextTokens.addEventListener("input", () => {
+    const tokens = tokensValue(contextTokens.value);
+    contextPercent.value =
+      contextView && Number.isFinite(tokens) ? String(Number(((tokens / contextView.window) * 100).toFixed(4))) : "";
+    contextError.textContent = "";
+  });
+  contextSave.addEventListener("click", () => {
+    void saveContext();
+  });
+  contextMenu.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void saveContext();
+    }
+    if (event.key === "Escape") {
+      contextMenu.hidden = true;
+      contextButton.setAttribute("aria-expanded", "false");
+      contextButton.focus();
+    }
+  });
+}
+
+async function saveContext(): Promise<void> {
+  const pct = Number(contextPercent.value);
+  if (!contextView || !contextPercent.value || !Number.isFinite(pct) || pct < 1 || pct > 100) {
+    contextError.textContent = "Choose a threshold from 1% to 100%.";
+    return;
+  }
+  const view = contextView;
+  contextSave.disabled = true;
+  try {
+    const updated = await api.compactionSet(view.provider, view.model, pct, view.window, state.sessionId || undefined);
+    if (contextView === view) {
+      contextView = updated;
+      paintContextButton();
+      contextMenu.hidden = true;
+      contextButton.setAttribute("aria-expanded", "false");
+    }
+  } catch (error) {
+    contextError.textContent = `Could not save threshold: ${String(error)}`;
+  } finally {
+    contextSave.disabled = false;
+  }
+}
+
+async function refreshPickerProvider(): Promise<void> {
+  if (filter === "*" || !filter) {
+    toast("Choose a provider to refresh", "error");
+    return;
+  }
+  const button = document.querySelector<HTMLButtonElement>("#modelRefresh")!;
+  button.disabled = true;
+  try {
+    const result = await api.refreshProvider(filter);
+    if (result.error) {
+      toast(result.error, "error");
+      return;
+    }
+    state.providers = await api.listProviders();
+    syncModelSelects();
+    state.onProvidersChanged();
+    void loadContext();
+    toast(result.warning ?? `${result.count} models refreshed`);
+  } catch (error) {
+    toast(String(error), "error");
+  } finally {
+    button.disabled = false;
+  }
 }

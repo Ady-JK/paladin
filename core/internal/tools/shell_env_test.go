@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -117,5 +118,33 @@ func TestLookPathFindsHelper(t *testing.T) {
 	}
 	if _, err := lookPath("definitely-not-a-binary-xyz"); err == nil {
 		t.Fatal("missing binary found")
+	}
+}
+
+func TestZshCommandsLoadInteractiveEnvironment(t *testing.T) {
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("zsh unavailable")
+	}
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("export PALADIN_TEST_ZSH_ENV=available\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ZDOTDIR", zdot)
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("PALADIN_TEST_ZSH_ENV", "")
+	cmd := spawnShellCmd(`printf %s "$PALADIN_TEST_ZSH_ENV"`, t.TempDir(), "TERM=dumb")
+	out, err := cmd.Output()
+	if err != nil || string(out) != "available" {
+		t.Fatalf("zsh environment: %q, %v", out, err)
+	}
+}
+
+func TestUserShellDefaultsToMacTerminalShell(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS shell fallback")
+	}
+	t.Setenv("SHELL", "")
+	if got := userShell(); got != "/bin/zsh" {
+		t.Fatalf("macOS default shell = %q", got)
 	}
 }

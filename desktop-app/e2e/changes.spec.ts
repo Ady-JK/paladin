@@ -1,6 +1,67 @@
 import { expect, test } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
+test("diff adapts to its panel width with line numbers and syntax colors", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const w = window as any;
+    w.__e2ePatch =
+      "diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -3,2 +3,2 @@\n const keep = 1;\n-const value = 2;\n+const value = 3;\n";
+    const modulePath = "/src/features/sidePane/changesTab.ts";
+    const { newChangesTab, paintChangesTab } = await import(modulePath);
+    const data = { available: true, turns: [], files: [{ path: "app.ts", status: "modified" }] };
+    const tab = newChangesTab("session", "changes", () => data);
+    tab.body.id = "testDiff";
+    tab.body.style.cssText = "position:fixed;inset:0 auto auto 0;width:1000px;height:600px;z-index:200";
+    document.body.append(tab.body);
+    paintChangesTab(tab, data);
+  });
+  await page.locator('#testDiff [data-change-file="app.ts"]').click();
+  const split = page.locator("#testDiff .diff-split");
+  const unified = page.locator("#testDiff .diff-unified");
+  await expect(split).toBeVisible();
+  await expect(unified).toBeHidden();
+  await expect(split.locator('[data-line="3"]')).toHaveCount(2);
+  await expect(split.locator(".tok-keyword").first()).toHaveText("const");
+  await expect(split).toContainText("const value = 2;");
+  await expect(split).toContainText("const value = 3;");
+  await page.locator("#testDiff").evaluate((el) => (el.style.width = "420px"));
+  await expect(unified).toBeVisible();
+  await expect(split).toBeHidden();
+  await expect(unified).toContainText("-const value = 2;");
+  await expect(unified).toContainText("+const value = 3;");
+});
+
+test("diff preserves multiple hunks, newline notes, and escapes file content", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/features/sidePane/diffView.ts";
+    const { renderDiff } = await import(modulePath);
+    const patch =
+      '@@ -1 +1 @@\n-old\n+def greet():\n@@ -9 +9 @@\n-old\n+print("<img src=x onerror=alert(1)>")\n\\ No newline at end of file';
+    const element = document.createElement("div");
+    element.innerHTML = renderDiff(patch, "sample.py", { start: 9, end: 9 }, false);
+    const go = document.createElement("div");
+    go.innerHTML = renderDiff("@@ -1,1 +1,2 @@\n package main\n+func main() {}", "main.go", null, false);
+    return {
+      hunkCount: element.querySelectorAll(".diff-unified .diff-hunk").length,
+      note: element.querySelector(".diff-unified .diff-note")?.textContent,
+      marked: element.querySelector(".diff-unified .change-mark")?.textContent,
+      keywords: element.querySelectorAll(".diff-unified .tok-keyword").length,
+      goKeywords: go.querySelectorAll(".diff-unified .tok-keyword").length,
+      images: element.querySelectorAll("img").length,
+    };
+  });
+  expect(result.hunkCount).toBe(2);
+  expect(result.note).toContain("No newline at end of file");
+  expect(result.marked).toContain("<img src=x onerror=alert(1)>");
+  expect(result.keywords).toBeGreaterThan(0);
+  expect(result.goKeywords).toBeGreaterThan(0);
+  expect(result.images).toBe(0);
+});
+
 test("overlapping change refreshes share the same in-flight diff request", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
@@ -495,4 +556,69 @@ test("each turn keeps its own card, inside its own block", async ({ page }) => {
     return out;
   });
   expect(stray).toEqual([]);
+});
+
+test("a stale diff failure cannot overwrite the cleared selection", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const w = window as any;
+    const invoke = w.paladin.invoke;
+    let rejectDiff: (reason: Error) => void = () => undefined;
+    w.paladin.invoke = (method: string, args: unknown) =>
+      method === "sessionDiff"
+        ? new Promise((_resolve, reject) => {
+            rejectDiff = reject;
+          })
+        : invoke(method, args);
+    const modulePath = "/src/features/sidePane/changesTab.ts";
+    const { newChangesTab, paintChangesTab, loadChangeDiff } = await import(modulePath);
+    const data = { available: true, turns: [], files: [{ path: "file.txt", status: "modified" }] };
+    const tab = newChangesTab("session", "changes", () => data);
+    tab.selected = "file.txt";
+    const pending = loadChangeDiff(tab, "file.txt");
+    tab.selected = null;
+    paintChangesTab(tab, data);
+    rejectDiff(new Error("old request failed"));
+    await pending;
+    return tab.body.querySelector(".change-diff")?.textContent;
+  });
+  expect(result).toBe("Select a file to view its changes.");
+});
+
+test("the edits card, context strip and composer stack tightly", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    (window as any).__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "index.html", status: "modified" }] }],
+      files: [{ path: "index.html", status: "modified" }],
+    };
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  const card = page.locator("#messages .turn-changes").last();
+  await expect(card).toBeVisible();
+  await page.evaluate(() => {
+    const chat = document.querySelector("#chatView")!;
+    chat.scrollTop = chat.scrollHeight;
+  });
+  const cardBox = (await card.boundingBox())!;
+  const context = (await page.locator("#contextBox").boundingBox())!;
+  // The plan bar (#todoHat) is drawn inside the composer's frame but sits above .composer-float.
+  const composerTop = await page.evaluate(() => {
+    const tops = ["#todoHat", ".composer-float"]
+      .map((s) => document.querySelector(s))
+      .filter((e): e is Element => !!e && getComputedStyle(e).display !== "none")
+      .map((e) => e.getBoundingClientRect().top);
+    return Math.min(...tops);
+  });
+  expect(context.y - (cardBox.y + cardBox.height)).toBeLessThanOrEqual(12);
+  expect(composerTop - (context.y + context.height)).toBeLessThanOrEqual(12);
+  // The thinking toggle sits right above the prompt text, not a line apart.
+  const toggle = (await page.locator(".think-inline").boundingBox())!;
+  const prompt = (await page.locator("#promptInput").boundingBox())!;
+  expect(prompt.y - (toggle.y + toggle.height)).toBeLessThanOrEqual(2);
 });

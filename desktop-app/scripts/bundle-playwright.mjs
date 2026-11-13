@@ -8,7 +8,8 @@ import { stdout } from "node:process";
 
 const require = createRequire(import.meta.url);
 const testRequire = createRequire(require.resolve("@playwright/test"));
-const source = path.dirname(testRequire.resolve("playwright-core/package.json"));
+const playwrightRequire = createRequire(testRequire.resolve("playwright"));
+const source = path.dirname(playwrightRequire.resolve("playwright-core/package.json"));
 const target = path.resolve("dist-electron/vendor/playwright-core");
 rmSync(target, { recursive: true, force: true });
 mkdirSync(path.dirname(target), { recursive: true });

@@ -95,7 +95,7 @@ test("any https address can be opened, and unsafe addresses are refused", async 
   await input.press("Enter");
   await expect(page.locator("#paneTabs .pane-tab[data-web]")).toContainText("example.com");
   await expect
-    .poll(() => page.evaluate(() => (window as any).__e2eViewEnsures.at(-1).url))
+    .poll(() => page.evaluate(() => (window as any).__e2eViewEnsures?.at(-1)?.url))
     .toBe("https://example.com/");
 
   for (const bad of ["http://example.com", "javascript:alert(1)", "   "]) {
@@ -368,4 +368,76 @@ test("the personal browser opens without starting a chat", async ({ page }) => {
     .toBe("persist:paladin-sites");
   await page.locator("#paneTabs .pane-tab[data-web] .pane-tab-close").click();
   await expect(page.locator("#sidePane .pane-web")).toHaveCount(0);
+});
+
+// Native pages draw above all HTML, so anything that opens over one must
+// freeze it to a still first and bring the live page back afterwards.
+const snapshots = (page: Page): Promise<number> => page.evaluate(() => (window as any).__e2eSnapshots || 0);
+const surfaceStill = (page: Page): Promise<string> =>
+  page.evaluate(() => getComputedStyle(document.querySelector<HTMLElement>(".web-surface")!).backgroundImage);
+
+test("a menu opened over the page freezes it to a still, and the live page returns after", async ({ page }) => {
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+  expect(await surfaceStill(page)).toBe("none");
+
+  // The Browser menu itself drops down over the page area.
+  await page.click("#paneWebBtn");
+  await expect(page.locator("#webMenu")).toBeVisible();
+  await expect.poll(() => viewShown(page)).toBe("agent");
+  await expect.poll(() => surfaceStill(page)).toContain("data:image");
+  expect(await snapshots(page)).toBeGreaterThan(0);
+
+  await page.keyboard.press("Escape");
+  await page.click("#paneWebBtn");
+  await expect(page.locator("#webMenu")).toBeHidden();
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+  await expect.poll(() => surfaceStill(page)).toBe("none");
+});
+
+test("an overlay missing from any list still covers the page", async ({ page }) => {
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+
+  // An arbitrary element dropped over the page: no id, no class the app knows.
+  await page.evaluate(() => {
+    const el = document.createElement("div");
+    el.id = "mystery";
+    const rect = document.querySelector<HTMLElement>(".web-surface")!.getBoundingClientRect();
+    el.style.cssText = `position:fixed;z-index:9999;background:#222;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:80px`;
+    document.body.append(el);
+  });
+  await expect.poll(() => viewShown(page)).toBe("agent");
+  await expect.poll(() => surfaceStill(page)).toContain("data:image");
+
+  await page.evaluate(() => document.getElementById("mystery")!.remove());
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+  await expect.poll(() => surfaceStill(page)).toBe("none");
+});
+
+test("the live page stays up when nothing overlaps it", async ({ page }) => {
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+  // Chat streaming and typing are not overlays.
+  await page.fill("#promptInput", "typing away");
+  await page.waitForTimeout(400);
+  expect(await viewShown(page)).toBe("web:t1");
+  expect(await snapshots(page)).toBe(0);
+});
+
+test("the sessions drawer opened over the page freezes it", async ({ page }) => {
+  // In a narrow window the drawer reaches the side pane where the page is.
+  await page.setViewportSize({ width: 700, height: 700 });
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+  await page.click("#agentTab");
+  await expect(page.locator("#sidebar")).not.toHaveClass(/is-closed/);
+  await expect.poll(() => viewShown(page)).toBe("agent");
+  await page.click("#agentTab");
+  await expect(page.locator("#sidebar")).toHaveClass(/is-closed/);
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
 });

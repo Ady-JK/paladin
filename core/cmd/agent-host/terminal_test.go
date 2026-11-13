@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +108,22 @@ func TestTerminalPTYStreamsAndAcceptsInput(t *testing.T) {
 		case <-deadline:
 			t.Fatal("PTY output did not arrive")
 		}
+	}
+}
+
+func TestTerminalRunLoadsZshEnvironment(t *testing.T) {
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("zsh unavailable")
+	}
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("export PALADIN_TERMINAL_TEST=available\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ZDOTDIR", zdot)
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("PALADIN_TERMINAL_TEST", "")
+	result, err := terminalRun(`printf %s "$PALADIN_TERMINAL_TEST"`, t.TempDir())
+	if err != nil || result.ExitCode != 0 || result.Output != "available" {
+		t.Fatalf("terminal environment: %+v %v", result, err)
 	}
 }

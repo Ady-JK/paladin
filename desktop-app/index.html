@@ -20,13 +20,107 @@
       body {
         background: #17171a;
       }
+      #appShell {
+        visibility: hidden;
+        opacity: 0;
+        transition: opacity 300ms ease;
+      }
+      #appShell.is-ready {
+        visibility: visible;
+        opacity: 1;
+      }
+      .startup {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #17171a;
+        color: #a3a3ad;
+        font:
+          14px system-ui,
+          sans-serif;
+        transition: opacity 300ms ease;
+      }
+      .startup.is-leaving {
+        opacity: 0;
+      }
+      .startup-content {
+        display: grid;
+        justify-items: center;
+        gap: 18px;
+      }
+      .startup-mark {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 13px;
+        background: #e9e8ee;
+        color: #24232a;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .startup-line {
+        width: 72px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 3px;
+        background: #34323c;
+      }
+      .startup-line::after {
+        display: block;
+        width: 45%;
+        height: 100%;
+        border-radius: inherit;
+        background: #a79be1;
+        content: "";
+        animation: startup-drift 1.4s ease-in-out infinite alternate;
+      }
+      @keyframes startup-drift {
+        from {
+          transform: translateX(0);
+        }
+        to {
+          transform: translateX(122%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html:not([data-motion="full"]) #appShell {
+          transition: none;
+        }
+        html:not([data-motion="full"]) .startup {
+          transition: none;
+        }
+        html:not([data-motion="full"]) .startup-line::after {
+          animation: none;
+        }
+      }
+      html[data-motion="off"] #appShell,
+      html[data-motion="off"] .startup,
+      html[data-motion="reduced"] #appShell,
+      html[data-motion="reduced"] .startup {
+        transition: none;
+      }
+      html[data-motion="off"] .startup-line::after,
+      html[data-motion="reduced"] .startup-line::after {
+        animation: none;
+      }
     </style>
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
   <body class="h-screen">
-    <div class="relative flex h-screen overflow-hidden">
+    <div id="startup" class="startup" role="status" aria-label="Loading Paladin">
+      <div class="startup-content">
+        <div class="startup-mark" aria-hidden="true">P</div>
+        <div>Opening Paladin</div>
+        <div class="startup-line" aria-hidden="true"></div>
+      </div>
+    </div>
+    <div id="appShell" class="relative flex h-screen overflow-hidden" inert>
       <!-- ==================== RAIL ==================== -->
       <nav id="rail" class="flex w-14 flex-shrink-0 flex-col items-center gap-1 pb-3 pt-3" aria-label="Views">
         <div
@@ -34,10 +128,51 @@
         >
           P
         </div>
-        <div id="tabsWrap" role="tablist" aria-orientation="vertical" class="mt-1 flex flex-col items-center gap-1">
-          <button id="agentTab" role="tab" class="rail-btn" title="Agent: the coding harness">
-            <span data-icon="rl-agent" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
-            <span class="sr-only">Agent</span>
+        <div id="railPanels" class="mt-1 flex flex-col items-center gap-1">
+          <div role="tablist" aria-label="Session navigation">
+            <button id="agentTab" role="tab" class="rail-btn" title="Sessions" aria-label="Sessions">
+              <span data-icon="home" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+            </button>
+          </div>
+          <button id="ideExplorerToggle" type="button" class="rail-btn" title="Files" aria-label="Files">
+            <span data-icon="folder" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+          </button>
+          <button
+            id="sessionChangesBtn"
+            type="button"
+            class="rail-btn"
+            title="Session changes"
+            aria-label="Session changes"
+          >
+            <span data-icon="code-branch" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span
+            ><span id="sessionChangesCount" class="rail-count"></span>
+          </button>
+          <button id="ideTerminalToggle" type="button" class="rail-btn" title="Terminal" aria-label="Terminal">
+            <span data-icon="terminal" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+          </button>
+          <button
+            id="ideActivityToggle"
+            type="button"
+            class="rail-btn"
+            title="Activity"
+            aria-label="Activity"
+            aria-expanded="false"
+          >
+            <span data-icon="chart" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span
+            ><span class="sr-only rail-activity-label">Activity</span>
+          </button>
+          <button
+            id="ideModeBtn"
+            type="button"
+            class="rail-btn"
+            title="Toggle IDE mode"
+            aria-label="Toggle IDE mode"
+            aria-pressed="false"
+          >
+            <span data-icon="code" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+          </button>
+          <button id="ideProblemsToggle" type="button" class="rail-btn" title="Problems" aria-label="Problems" hidden>
+            <span data-icon="warning" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
           </button>
         </div>
         <div class="rail-drag flex-1 self-stretch"></div>
@@ -170,16 +305,6 @@
               <div id="paneHistoryItems"></div>
             </div>
             <button
-              id="ideModeBtn"
-              type="button"
-              class="pane-btn"
-              title="Toggle IDE mode"
-              aria-label="Toggle IDE mode"
-              aria-pressed="false"
-            >
-              <span data-icon="code"></span>
-            </button>
-            <button
               id="creatorModeBtn"
               type="button"
               class="pane-btn creator-mode-btn"
@@ -210,15 +335,6 @@
           </div>
 
           <div id="headerStatusActions" class="flex items-center gap-3">
-            <button
-              id="sessionChangesBtn"
-              class="session-changes-btn hidden"
-              type="button"
-              title="View files changed in this session"
-              aria-label="View files changed in this session"
-            >
-              <span data-icon="tl-file"></span><span id="sessionChangesCount"></span>
-            </button>
             <button
               id="runningJobsBtn"
               class="session-changes-btn hidden"
@@ -303,7 +419,7 @@
                       spellcheck="false"
                     ></textarea>
 
-                    <div class="flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1">
+                    <div class="composer-toolbar flex flex-nowrap items-center gap-2 px-2.5 pb-2.5 pt-1">
                       <button
                         id="attachBtn"
                         class="flex flex-shrink-0 items-center justify-center rounded-full border border-transparent p-2 font-mono text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
@@ -311,18 +427,58 @@
                       >
                         <span data-icon="plus" class="flex-shrink-0 [&>svg]:h-4 [&>svg]:w-4"></span>
                       </button>
-                      <div class="relative flex min-w-0 flex-1 items-center gap-1">
+                      <div class="composer-model-slot relative flex min-w-0 flex-1 items-center gap-1">
                         <button
                           id="modelSelectBtn"
                           class="flex min-w-0 max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
                           title="Pick the provider and the model"
                         >
+                          <span id="modelSelectProvider" class="truncate"></span><span aria-hidden="true"> / </span>
                           <span id="modelSelectLabel" class="truncate">—</span>
                           <span data-icon="chevron-down" class="flex-shrink-0"></span>
                         </button>
+                        <div class="context-control relative shrink-0">
+                          <button
+                            id="contextButton"
+                            type="button"
+                            class="context-button"
+                            aria-label="Context window and compaction"
+                            aria-expanded="false"
+                          >
+                            Ctx —
+                          </button>
+                          <div id="contextMenu" class="context-menu" hidden>
+                            <div class="context-menu-title">Context and compaction</div>
+                            <p id="contextDescription"></p>
+                            <label id="contextSizeRow" hidden
+                              >Context size
+                              <select id="contextSize" aria-label="Context size"></select
+                            ></label>
+                            <label
+                              >Compact at
+                              <span class="context-input"
+                                ><input
+                                  id="contextPercent"
+                                  inputmode="decimal"
+                                  aria-label="Compaction percentage"
+                                /><span>%</span></span
+                              ></label
+                            >
+                            <label
+                              >Token threshold
+                              <span class="context-input"
+                                ><input
+                                  id="contextTokens"
+                                  inputmode="decimal"
+                                  aria-label="Compaction token threshold" /></span
+                            ></label>
+                            <p id="contextError" role="alert"></p>
+                            <button id="contextSave" type="button">Save</button>
+                          </div>
+                        </div>
                         <div
                           id="modelMenu"
-                          class="absolute bottom-full left-0 z-50 mb-2 hidden w-[52rem] max-w-[94vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
+                          class="absolute bottom-full left-0 z-50 mb-2 hidden w-80 max-w-[94vw] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-slate-900/10 dark:border-slate-700/70 dark:bg-slate-900 dark:shadow-black/50"
                         >
                           <div
                             class="flex items-center gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800"
@@ -331,7 +487,7 @@
                             <input
                               id="modelSearch"
                               type="text"
-                              placeholder="Search providers, labs, or models... (Cmd+K)"
+                              placeholder="Search models or providers..."
                               spellcheck="false"
                               class="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
                             />
@@ -343,92 +499,22 @@
                               <span data-icon="xmark"></span>
                             </button>
                           </div>
-                          <div class="grid grid-cols-3 gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
-                            <div class="min-w-0">
-                              <div
-                                class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
-                              >
-                                Provider
-                              </div>
-                              <select
-                                id="providerPick"
-                                title="Switch the provider"
-                                class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
-                              ></select>
-                            </div>
-                            <div class="min-w-0">
-                              <div
-                                class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
-                              >
-                                <span data-icon="flask"></span>
-                                <span>Lab</span>
-                              </div>
-                              <select
-                                id="labPick"
-                                title="Switch the lab"
-                                class="w-full cursor-pointer truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 hover:border-slate-300 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
-                              ></select>
-                            </div>
-                            <div class="min-w-0">
-                              <div
-                                class="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500"
-                              >
-                                <span data-icon="brain"></span>
-                                <span>Model</span>
-                              </div>
-                              <div
-                                id="modelPill"
-                                class="flex min-w-0 items-center gap-1.5 truncate rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                              ></div>
-                            </div>
-                          </div>
-                          <div
-                            id="filterBar"
-                            class="hidden items-center justify-between gap-2 border-b border-slate-200 px-3 py-1.5 dark:border-slate-800"
-                          >
-                            <div
-                              id="filterLabel"
-                              class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
-                            ></div>
+                          <div class="flex items-center gap-2 px-3 pt-2">
+                            <select
+                              id="modelProviderFilter"
+                              aria-label="Model provider"
+                              class="model-provider-filter"
+                            ></select>
                             <button
-                              id="filterClearBtn"
-                              class="flex-shrink-0 rounded-md border border-slate-200 px-2 py-0.5 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                              title="Show every provider and lab again"
+                              id="modelRefresh"
+                              type="button"
+                              class="model-refresh"
+                              title="Refresh this provider’s models and pricing"
                             >
-                              Clear filter
+                              Refresh
                             </button>
                           </div>
-                          <div class="grid grid-cols-[1fr_18rem]">
-                            <div id="modelTree" class="max-h-[25rem] min-h-48 overflow-y-auto p-1.5"></div>
-                            <div
-                              id="modelDetail"
-                              class="min-h-48 border-l border-slate-200 p-3 dark:border-slate-800"
-                            ></div>
-                          </div>
-                          <div
-                            class="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 dark:border-slate-800"
-                          >
-                            <div
-                              id="modelBreadcrumb"
-                              class="min-w-0 flex-1 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500"
-                            ></div>
-                            <div class="flex flex-shrink-0 gap-2">
-                              <button
-                                id="modelQuickBtn"
-                                class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                                title="Apply the highlighted match"
-                              >
-                                Quick Select (Ctrl+1)
-                              </button>
-                              <button
-                                id="modelAdvancedBtn"
-                                class="rounded-md border border-slate-200 px-2.5 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                                title="Open the settings"
-                              >
-                                Advanced Config…
-                              </button>
-                            </div>
-                          </div>
+                          <div id="modelTree" class="max-h-[25rem] overflow-y-auto p-1.5"></div>
                         </div>
                       </div>
                       <div class="ml-auto flex flex-shrink-0 items-center gap-2">
@@ -493,8 +579,10 @@
           id="settingsSidebar"
           class="flex w-48 flex-shrink-0 flex-col gap-1 border-r border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60"
         >
-          <div class="px-2 pb-2 pt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
-          <input id="settingsSearch" type="search" placeholder="Search settings" aria-label="Search settings" />
+          <div class="settings-sidebar-heading">
+            <div class="settings-sidebar-title text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
+            <input id="settingsSearch" type="search" placeholder="Search settings" aria-label="Search settings" />
+          </div>
           <div class="settings-nav-group">Core</div>
           <button
             id="settingsNavWorkspace"
@@ -623,8 +711,10 @@
 
           <div id="settingsContentBody" class="flex-1 space-y-5 overflow-y-auto p-5 text-xs">
             <div id="settingsPaneWorkspace" class="space-y-5">
-              <div>
-                <label class="mb-1 block font-medium text-slate-700 dark:text-slate-300"> Default workspace </label>
+              <div class="settings-group">
+                <label for="settingsDefaultWorkspace" class="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+                  Default workspace
+                </label>
                 <div class="flex gap-2">
                   <input
                     id="settingsDefaultWorkspace"
@@ -637,8 +727,9 @@
                     id="settingsWorkspaceBrowseBtn"
                     class="flex-shrink-0 rounded border border-slate-200 bg-slate-100 px-3 py-2 text-slate-600 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     title="Browse the folders on the machine of the daemon"
+                    aria-label="Browse workspace folders"
                   >
-                    <span data-icon="folder-tree"></span>
+                    <span data-icon="folder-open"></span>
                   </button>
                 </div>
                 <div
@@ -923,6 +1014,44 @@
       </div>
 
       <!-- Provider add/connect card -->
+      <div id="copilotSignIn" class="modal-overlay absolute inset-0 z-10 hidden items-center justify-center p-4">
+        <div
+          class="modal-card w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900"
+        >
+          <h4 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Connect GitHub Copilot</h4>
+          <p class="text-xs text-slate-600 dark:text-slate-300">
+            Open GitHub and enter this code. GitHub will show the GitHub Copilot Plugin authorization used for Copilot
+            access.
+          </p>
+          <a
+            id="copilotSignInLink"
+            href="https://github.com/login/device"
+            class="block break-all text-center text-xs text-accent-600 underline hover:text-accent-700 dark:text-accent-400"
+            >https://github.com/login/device</a
+          >
+          <p
+            id="copilotSignInCode"
+            class="select-all text-center font-mono text-xl font-semibold text-slate-900 dark:text-slate-100"
+          ></p>
+          <p id="copilotSignInStatus" role="status" class="text-xs text-slate-500 dark:text-slate-400">
+            Waiting for GitHub authorization…
+          </p>
+          <div class="flex justify-end gap-2">
+            <button
+              id="copilotSignInCancel"
+              class="rounded px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              id="copilotSignInOpen"
+              class="rounded bg-accent-600 px-4 py-2 text-xs font-semibold text-white hover:bg-accent-700"
+            >
+              Open GitHub
+            </button>
+          </div>
+        </div>
+      </div>
       <div id="providerCard" class="modal-overlay absolute inset-0 z-10 hidden items-center justify-center p-4">
         <div
           class="modal-card w-full max-w-sm space-y-3 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900"

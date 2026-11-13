@@ -24,11 +24,11 @@ export function initIDEPalette(options: Options): void {
   const commands: Item[] = [
     { label: "Toggle terminal", run: () => document.querySelector<HTMLElement>("#ideTerminalToggle")?.click() },
     { label: "Search workspace", run: () => window.dispatchEvent(new Event("paladin:ide-search-open")) },
-    { label: "Show or hide changes", run: () => document.querySelector<HTMLElement>("#ideChangesToggle")?.click() },
+    { label: "Show or hide changes", run: () => document.querySelector<HTMLElement>("#sessionChangesBtn")?.click() },
     { label: "Switch session", run: () => document.querySelector<HTMLElement>("#ideShowSessions")?.click() },
     { label: "Change workspace", run: () => document.querySelector<HTMLElement>("#ideChooseFolder")?.click() },
     { label: "Toggle explorer", run: () => document.querySelector<HTMLElement>("#ideExplorerToggle")?.click() },
-    { label: "Toggle agent", run: () => document.querySelector<HTMLElement>("#ideAgentToggle")?.click() },
+    { label: "Toggle agent", run: () => window.dispatchEvent(new Event("paladin:ide-toggle-agent")) },
   ];
   const paint = (): void => {
     results.innerHTML = entries.length

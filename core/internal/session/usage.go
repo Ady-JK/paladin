@@ -15,16 +15,18 @@ import (
 // gateway-reported USD; HasCost is false when no call has ever
 // reported cost (plain providers), distinguishing "free" from "unknown".
 type Counters struct {
-	Calls            int64   `json:"calls"`
-	PromptTokens     int64   `json:"promptTokens"`
-	CompletionTokens int64   `json:"completionTokens"`
-	ReasoningTokens  int64   `json:"reasoningTokens"`
-	CacheReadTokens  int64   `json:"cacheReadTokens"`
-	CacheWriteTokens int64   `json:"cacheWriteTokens"`
-	TotalTokens      int64   `json:"totalTokens"`
-	Cost             float64 `json:"cost"`
-	ListCost         float64 `json:"listCost"`
-	HasCost          bool    `json:"hasCost"`
+	Calls            int64    `json:"calls"`
+	UnpricedCalls    int64    `json:"unpricedCalls,omitempty"`
+	TrackedSpend     *float64 `json:"trackedSpend,omitempty"`
+	PromptTokens     int64    `json:"promptTokens"`
+	CompletionTokens int64    `json:"completionTokens"`
+	ReasoningTokens  int64    `json:"reasoningTokens"`
+	CacheReadTokens  int64    `json:"cacheReadTokens"`
+	CacheWriteTokens int64    `json:"cacheWriteTokens"`
+	TotalTokens      int64    `json:"totalTokens"`
+	Cost             float64  `json:"cost"`
+	ListCost         float64  `json:"listCost"`
+	HasCost          bool     `json:"hasCost"`
 	// CostEstimated marks spend the gateway did not charge: a
 	// subscription plan or free tier, where Cost is 0 and ListCost is
 	// what the tokens would have cost. The UI shows ListCost then, so a
@@ -34,7 +36,15 @@ type Counters struct {
 
 // Add folds o into c. Spend only moves when o reported it.
 func (c *Counters) Add(o Counters) {
+	spend := c.SpendUsd()
+	if o.HasCost {
+		spend += o.SpendUsd()
+	}
+	if c.HasCost || o.HasCost {
+		c.TrackedSpend = &spend
+	}
 	c.Calls += o.Calls
+	c.UnpricedCalls += o.UnpricedCalls
 	c.PromptTokens += o.PromptTokens
 	c.CompletionTokens += o.CompletionTokens
 	c.ReasoningTokens += o.ReasoningTokens
@@ -67,6 +77,9 @@ func (c Counters) Estimated() bool {
 // subscription or free plan that charged nothing, the list price of
 // what it served.
 func (c Counters) SpendUsd() float64 {
+	if c.TrackedSpend != nil {
+		return *c.TrackedSpend
+	}
 	if c.Estimated() && c.ListCost > 0 {
 		return c.ListCost
 	}
@@ -96,9 +109,8 @@ type UsageTotals struct {
 	RecoveredFrom string `json:"recoveredFrom,omitempty"`
 }
 
-// SpendIncomplete reports that earlier spend was lost to a corrupt
-// ledger, so Cost undercounts.
-func (t UsageTotals) SpendIncomplete() bool { return t.RecoveredFrom != "" }
+// SpendIncomplete reports a corrupt ledger or calls with unknown costs.
+func (t UsageTotals) SpendIncomplete() bool { return t.RecoveredFrom != "" || t.UnpricedCalls > 0 }
 
 // ModelUsage is one model's slice of a session's ledger.
 type ModelUsage struct {
@@ -117,6 +129,9 @@ func dayKey(now int64) string {
 // non-empty model wins as the session's current model.
 func (t *UsageTotals) AddCall(model string, call Counters, now int64) {
 	call.Calls = 1
+	if !call.HasCost {
+		call.UnpricedCalls = 1
+	}
 	if model != "" {
 		t.Model = model
 	}

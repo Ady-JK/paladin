@@ -1,6 +1,6 @@
 {
   "name": "paladin-desktop",
-  "version": "0.9.7",
+  "version": "0.9.20",
   "private": true,
   "description": "Paladin desktop (Electron + agent-host sidecar)",
   "author": "paladin",
@@ -10,13 +10,14 @@
     "dev": "pnpm build:electron && concurrently -k \"vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:renderer": "vite --port 5173 --strictPort",
     "dev:electron": "electron .",
-    "build": "vite build && pnpm build:electron && electron-builder -c electron-builder.json",
+    "build": "node scripts/repair-pnpm-links.mjs && vite build && pnpm build:electron && electron-builder -c electron-builder.json",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json && node scripts/bundle-playwright.mjs",
     "dist": "electron-builder -c electron-builder.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
     "lint": "eslint . && knip && prettier --check .",
     "fmt": "prettier --write .",
+    "test:build": "node --test scripts/bundle-playwright.test.mjs scripts/repair-pnpm-links.test.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "@codemirror/view": "^6.43.15",
     "@fontsource/geist": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
+    "@lezer/highlight": "1.2.5",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2"

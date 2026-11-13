@@ -85,6 +85,7 @@ export function activateIDEFile(): void {
 }
 
 function activateIDEPage(key: string): void {
+  window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
   ideBrowserKey = key;
   window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: true }));
   render();
@@ -149,11 +150,11 @@ export function setIDETerminalMode(on: boolean): void {
       create: () => openTerminalTab(visibleSessionId()),
       close: (key) => closeTab(key),
     });
-    $("#ideTerminalToggle").addEventListener("click", () => terminalDock?.toggle());
   }
   const set = sets.get(visibleSessionId());
   const selected = set && activeTab(set);
   if (on && selected && isBrowserPage(selected) && paneOpen) {
+    window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
     paneOpen = false;
     ideBrowserKey = selected.key;
     window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: true }));
@@ -330,9 +331,8 @@ function browserEvent(raw: unknown): void {
 
 function paintChangesHeader(data: SessionChanges | undefined): void {
   const count = data?.files.length ?? 0;
-  changesBtn.classList.toggle("hidden", count === 0);
   $("#sessionChangesCount").textContent = count ? String(count) : "";
-  changesBtn.title = `View ${count} ${count === 1 ? "file" : "files"} changed in this session`;
+  if (!ideTerminalMode) changesBtn.title = `View ${count} ${count === 1 ? "file" : "files"} changed in this session`;
 }
 
 let changeRequest = 0;
@@ -617,6 +617,8 @@ export function closeWebTabsForUrl(url: string): void {
 
 function modalCoveringPage(): boolean {
   if (document.querySelector(".plugin-overlay")) return true;
+  const explorer = document.querySelector<HTMLElement>(".ide-explorer");
+  if (explorer && getComputedStyle(explorer).visibility !== "hidden") return true;
   return ["settingsModal", "sessionModal", "confirmModal", "siteModal", "askModal"].some((id) => {
     const el = document.getElementById(id);
     return el && !el.classList.contains("hidden");
@@ -629,23 +631,173 @@ function hideWebSurface(): void {
   void api.hideExternalPage().catch(() => undefined);
 }
 
+// ---- native pages under overlays ----
+//
+// A native page (a web tab or the agent browser) is a WebContentsView, so
+// Electron draws it above every HTML element: a menu, drawer or dialog
+// opened over it would end up underneath. While anything overlaps the
+// page, it is frozen to a still image set as the surface's background and
+// the live view is detached; once the overlay is gone the live view comes
+// back and the still is dropped.
+
+// A bare sample grid over the surface finds any overlay without a list of
+// them: whatever answers a hit test there that is not the surface itself
+// is on top of it.
+const COVER_COLS = 7;
+const COVER_ROWS = 5;
+// The live view needs a moment to paint after it is re-attached; keeping
+// the still this long avoids a blank flash.
+const STILL_RELEASE_MS = 180;
+
+let nativeBrowserOn = false;
+let frozenSurface: HTMLElement | null = null;
+let freezing = false;
+
+function nativeOn(): boolean {
+  return visibleWeb !== "" || nativeBrowserOn;
+}
+
+function overlayOver(surface: HTMLElement): boolean {
+  const r = surface.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return false;
+  // The toast ignores the pointer, so a hit test cannot see it.
+  const toast = document.getElementById("toast");
+  if (toast && !toast.classList.contains("hidden")) {
+    const t = toast.getBoundingClientRect();
+    if (t.left < r.right && t.right > r.left && t.top < r.bottom && t.bottom > r.top) return true;
+  }
+  for (let col = 0; col < COVER_COLS; col++) {
+    for (let row = 0; row < COVER_ROWS; row++) {
+      const hit = document.elementFromPoint(
+        r.left + ((col + 0.5) / COVER_COLS) * r.width,
+        r.top + ((row + 0.5) / COVER_ROWS) * r.height,
+      );
+      if (hit && !surface.contains(hit)) return true;
+    }
+  }
+  return false;
+}
+
+// nativeTarget is the native page the pane wants on screen right now,
+// before any overlay is taken into account.
+function nativeTarget(): { web: WebTab | null; browser: BrowserTab | null; surface: HTMLElement | null } {
+  const set = sets.get(visibleSessionId());
+  const idePage = ideTerminalMode && set?.tabs.find((item) => item.key === ideBrowserKey && isBrowserPage(item));
+  const tab = idePage || (set && activeTab(set));
+  const pageVisible = !!idePage || (paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
+  const web = pageVisible && tab?.kind === "web" && tab.url !== "" ? tab : null;
+  const browser = pageVisible && tab?.kind === "browser" ? tab : null;
+  const surface = web
+    ? web.body.querySelector<HTMLElement>(".web-surface")
+    : browser
+      ? browser.body.querySelector<HTMLElement>(".browser-surface")
+      : null;
+  return { web, browser, surface };
+}
+
+function pageCovered(surface: HTMLElement | null): boolean {
+  return modalCoveringPage() || (!!surface && overlayOver(surface));
+}
+
+function showStill(surface: HTMLElement, data: string): void {
+  surface.style.backgroundImage = `url("${data}")`;
+  surface.style.backgroundSize = "100% 100%";
+  surface.style.backgroundRepeat = "no-repeat";
+}
+
+function clearStill(surface: HTMLElement): void {
+  surface.style.backgroundImage = "";
+  surface.style.backgroundSize = "";
+  surface.style.backgroundRepeat = "";
+}
+
+function releaseStill(): void {
+  const surface = frozenSurface;
+  frozenSurface = null;
+  if (surface) window.setTimeout(() => clearStill(surface), STILL_RELEASE_MS);
+}
+
+// freezeSurface captures the page that is still on screen, puts the still
+// behind where it was, and only then lets the sync detach the live view.
+async function freezeSurface(surface: HTMLElement): Promise<void> {
+  if (freezing) return;
+  freezing = true;
+  try {
+    let data: string | null = null;
+    try {
+      data = await api.snapshotExternalPage();
+    } catch {
+      data = null;
+    }
+    if (data) {
+      try {
+        const probe = new Image();
+        probe.src = data;
+        await probe.decode();
+        if (surface.isConnected) showStill(surface, data);
+      } catch {
+        // Not decodable: fall back to a blank surface behind the overlay.
+      }
+    }
+    frozenSurface = surface;
+  } finally {
+    freezing = false;
+  }
+  syncNativeSurfaces();
+}
+
+// watchOverlays re-syncs when an overlay opens or closes over the page.
+// Chat streaming only touches #messages, which is never over the pane, so
+// those mutations are skipped.
+function watchOverlays(): void {
+  let queued = false;
+  const check = (): void => {
+    queued = false;
+    const { surface } = nativeTarget();
+    if (!surface && !nativeOn() && !frozenSurface) return;
+    const covered = pageCovered(surface);
+    // Resync whenever what should be on screen differs from what is: a page
+    // that has to come back (or go under a still), or a still left behind.
+    const shouldBeLive = !!surface && !covered;
+    if (shouldBeLive !== nativeOn() || (!covered && frozenSurface !== null)) syncNativeSurfaces();
+  };
+  const schedule = (records: MutationRecord[]): void => {
+    if (queued) return;
+    if (records.every((r) => r.target instanceof Element && r.target.closest("#messages"))) return;
+    queued = true;
+    requestAnimationFrame(check);
+  };
+  new MutationObserver(schedule).observe(document.body, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "hidden", "style", "open", "inert", "aria-expanded"],
+    childList: true,
+  });
+}
+
 // syncNativeSurfaces attaches at most one native page over the side pane:
 // the agent's local browser or the active web tab. Everything else is
 // detached but kept alive, so switching back does not reload a chat.
 function syncNativeSurfaces(): void {
-  const set = sets.get(visibleSessionId());
-  const idePage = ideTerminalMode && set?.tabs.find((item) => item.key === ideBrowserKey && isBrowserPage(item));
-  const tab = idePage || (set && activeTab(set));
-  const covered = modalCoveringPage();
-  const pageVisible = !!idePage || (paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
-  const web = pageVisible && !covered && tab?.kind === "web" && tab.url !== "" ? tab : null;
-  const browser = pageVisible && !covered && tab?.kind === "browser" ? tab : null;
+  const { web: wantWeb, browser: wantBrowser, surface } = nativeTarget();
+  const covered = pageCovered(surface);
+  // Something is about to cover a page that is on screen: freeze it first,
+  // then this runs again with the still in place.
+  if (covered && surface && nativeOn() && frozenSurface !== surface) {
+    void freezeSurface(surface);
+    return;
+  }
+  if (!covered) releaseStill();
+
+  const web = covered ? null : wantWeb;
+  const browser = covered ? null : wantBrowser;
   const browserBridge = hasBridge() ? bridge().browser : undefined;
 
   if (!web) hideWebSurface();
   if (!hasBridge()) return;
 
   if (web) {
+    nativeBrowserOn = false;
     if (browserBridge) void browserBridge.show(null);
     const surface = web.body.querySelector<HTMLElement>(".web-surface");
     const rect = surface?.getBoundingClientRect();
@@ -671,18 +823,21 @@ function syncNativeSurfaces(): void {
   }
 
   if (!browser || !browserBridge) {
+    nativeBrowserOn = false;
     if (browserBridge) void browserBridge.show(null);
     document.body.classList.remove("guest-visible");
     return;
   }
-  const surface = browser.body.querySelector<HTMLElement>(".browser-surface")!;
-  const rect = surface.getBoundingClientRect();
+  const browserSurface = browser.body.querySelector<HTMLElement>(".browser-surface")!;
+  const rect = browserSurface.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) {
+    nativeBrowserOn = false;
     void browserBridge.show(null);
     document.body.classList.remove("guest-visible");
     return;
   }
   document.body.classList.add("guest-visible");
+  nativeBrowserOn = true;
   void browserBridge.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
   void browserBridge.show(browser.sessionId);
 }
@@ -987,6 +1142,14 @@ function paintTabs(): void {
 // render paints the open session's tabs, keeping each tab's DOM.
 function render(): void {
   if (ideTerminalMode) terminalDock?.sync();
+  else {
+    const toggle = $("#ideTerminalToggle");
+    const set = currentSet();
+    const visible = paneOpen && !!set && activeTab(set)?.kind === "terminal";
+    toggle.setAttribute("aria-pressed", String(visible));
+    toggle.setAttribute("aria-label", visible ? "Hide terminal" : "Show terminal");
+    toggle.title = visible ? "Hide terminal" : "Show terminal";
+  }
   renderIDEPages(currentSet());
   if (layoutMode === "tabs") {
     titleBar.insertBefore(stripEl, titleBar.lastElementChild);
@@ -1072,6 +1235,25 @@ function toggleLayout(): void {
 export function openTerminalDockFromKey(): void {
   if (ideTerminalMode && terminalDock) terminalDock.toggle();
   else openTerminalTab(visibleSessionId());
+}
+
+// The rail returns to an existing terminal instead of creating another tab.
+function toggleTerminalFromRail(): void {
+  if (ideTerminalMode && terminalDock) {
+    terminalDock.toggle();
+    return;
+  }
+  const set = currentSet();
+  const active = set && activeTab(set);
+  if (paneOpen && active?.kind === "terminal") {
+    closePane();
+    return;
+  }
+  const existing = set?.tabs.find((tab) => tab.kind === "terminal" && tab.cwd === state.cwd);
+  if (set && existing) {
+    set.active = existing.key;
+    showPane();
+  } else openTerminalTab(visibleSessionId());
 }
 
 // focusAgentFromKey brings the conversation back: it hides the side pane
@@ -1318,6 +1500,7 @@ export function initSidePane(): void {
   observer.observe(bodyEl);
   window.addEventListener("resize", syncNativeSurfaces);
   window.addEventListener("paladin:plugin-overlay-changed", syncNativeSurfaces);
+  watchOverlays();
   for (const id of ["settingsModal", "sessionModal", "confirmModal", "siteModal"]) {
     const el = document.getElementById(id);
     if (el) new MutationObserver(syncNativeSurfaces).observe(el, { attributes: true, attributeFilter: ["class"] });
@@ -1333,7 +1516,12 @@ export function initSidePane(): void {
       syncNativeSurfaces();
     }
   }).observe(document.body, { childList: true });
-  changesBtn.addEventListener("click", () => openChangesTab(null));
+  changesBtn.addEventListener("click", () => {
+    if (ideTerminalMode) return;
+    if (!state.sessionId) toast("Open a session to see its changes.", "error");
+    else openChangesTab(null);
+  });
+  $("#ideTerminalToggle").addEventListener("click", toggleTerminalFromRail);
   runningJobsBtn.addEventListener("click", openJobsTab);
   void refreshRunningJobs();
   window.setInterval(() => {

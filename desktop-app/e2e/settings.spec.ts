@@ -199,3 +199,92 @@ test("appearance theme and text size persist", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-font-size", "large");
   await expect(page.locator("html")).toHaveClass(/light/);
 });
+
+test("settings search stays available when the sidebar scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 1050, height: 720 });
+  await page.click("#settingsBtn");
+  await page.locator("#settingsNavTools").scrollIntoViewIfNeeded();
+  await page.locator("#settingsNavTools").click();
+  const sidebar = await page.locator("#settingsSidebar").boundingBox();
+  const search = await page.locator("#settingsSearch").boundingBox();
+  expect(search!.y).toBeGreaterThanOrEqual(sidebar!.y);
+  expect(search!.y + search!.height).toBeLessThanOrEqual(sidebar!.y + sidebar!.height);
+});
+
+test("Copilot sign-in refreshes models and makes them selectable", async ({ page }) => {
+  await page.evaluate(async () => {
+    const w = window as any;
+    const previous = w.paladin.invoke;
+    w.paladin.shell.openExternal = async (url: string) => {
+      w.__copilotExternalUrl = url;
+    };
+    const providers = await previous("listProviders", {});
+    for (const provider of providers) provider.default = false;
+    providers.find((provider: any) => provider.name === "openrouter").models = Array.from(
+      { length: 400 },
+      (_, index) => `a-model-${index}`,
+    );
+    providers.push({
+      name: "github-copilot",
+      apiType: "github-copilot",
+      apiUrl: "https://api.githubcopilot.com",
+      model: "",
+      models: [],
+      default: true,
+      hasKey: false,
+    });
+    let connected = false;
+    w.paladin.invoke = async (method: string, args: any) => {
+      if (method === "listProviders") {
+        const providers = await previous(method, args);
+        if (!providers.some((p: any) => p.name === "github-copilot")) {
+          providers.push({
+            name: "github-copilot",
+            apiType: "github-copilot",
+            apiUrl: "https://api.githubcopilot.com",
+            model: "",
+            models: [],
+            default: true,
+            hasKey: false,
+          });
+        }
+        return providers;
+      }
+      if (method === "copilotSignInStart") return { userCode: "ABCD-1234", interval: 1, expiresIn: 60 };
+      if (method === "copilotSignInPoll") {
+        if (!w.__copilotExternalUrl) return "pending";
+        connected = true;
+        return "connected";
+      }
+      if (method === "refreshProviders" && args?.name === "github-copilot") {
+        if (!connected) throw new Error("not connected");
+        const p = w.__e2eProviders.find((item: any) => item.name === "github-copilot");
+        p.hasKey = true;
+        p.models = ["claude-haiku"];
+        return { name: p.name, count: 1, models: p.models };
+      }
+      return previous(method, args);
+    };
+  });
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavProviders");
+  // The override above is installed after load; a refresh re-reads the provider list.
+  await page.locator('[data-refresh="local"]').click();
+  await expect(page.locator('[data-connect="github-copilot"]')).toBeVisible();
+  await page.locator('[data-connect="github-copilot"]').click();
+  await expect(page.locator("#copilotSignInCode")).toHaveText("ABCD-1234");
+  const link = page.getByRole("link", { name: "https://github.com/login/device" });
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__copilotExternalUrl))
+    .toBe("https://github.com/login/device");
+  await expect(page.locator("#copilotSignIn")).toBeHidden({ timeout: 5000 });
+  await expect(page.locator("#settingsProviderList")).toContainText("1 models");
+  await page.click("#settingsCloseBtn");
+  await page.click("#modelSelectBtn");
+  const row = page.locator('#modelTree [data-mpick="github-copilot\tclaude-haiku"]');
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page.locator("#modelSelectLabel")).toHaveText("claude-haiku");
+});

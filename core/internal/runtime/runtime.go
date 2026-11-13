@@ -43,7 +43,9 @@ type Settings struct {
 	DefaultBudgetUsd float64 `json:"defaultBudgetUsd,omitempty"`
 	// ThinkingLevels is each model's reasoning effort, by provider then
 	// model; absent means the provider default.
-	ThinkingLevels map[string]map[string]string `json:"thinkingLevels,omitempty"`
+	ThinkingLevels map[string]map[string]string  `json:"thinkingLevels,omitempty"`
+	CompactPercent map[string]map[string]float64 `json:"compactPercent,omitempty"`
+	ContextInputs  map[string]map[string]int64   `json:"contextInputs,omitempty"`
 	// MaxSubagents caps a session's queued or running children; 0
 	// means the default.
 	MaxSubagents int `json:"maxSubagents,omitempty"`
@@ -110,6 +112,8 @@ type AgentRuntime struct {
 	undoMu        sync.Mutex
 	jobs          *jobBook
 	providersMu   sync.Mutex
+	copilotMu     sync.Mutex
+	copilotLogin  copilotSignIn
 	refreshing    atomic.Bool
 	refreshWG     sync.WaitGroup
 	fetchMu       sync.RWMutex
@@ -352,7 +356,35 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	// The window the provider's catalog published beats the built-in
 	// table; the agent's own resolution covers the rest. The model is the
 	// turn's choice, else the one the session is already on.
-	req.ContextWindow = r.catalogWindow(sess.Meta.Provider, firstModel(req.Model, sess.Meta.Model))
+	selectedProvider := firstModel(req.Provider, sess.Meta.Provider)
+	selectedModel := firstModel(req.Model, sess.Meta.Model)
+	providerName, modelName := "", ""
+	if selectedProvider != nil {
+		providerName = *selectedProvider
+	}
+	if selectedModel != nil {
+		modelName = *selectedModel
+	}
+	if entry, _, err := r.store.Resolve(providerName); err == nil {
+		providerName = entry.Name
+		if strings.TrimSpace(modelName) == "" {
+			modelName = entry.Model
+		}
+		if strings.TrimSpace(modelName) == "" {
+			modelName = r.defaultModel(entry)
+		}
+	}
+	meta := r.store.ModelMeta(providerName, modelName)
+	req.ContextWindow = selectedContextWindow(meta, modelName, settings.ContextInputs[providerName][modelName])
+	req.CompactPercent = settings.CompactPercent[providerName][modelName]
+	if lerr == nil && providerName != "" && modelName != "" {
+		choice, err := r.sessionContextChoice(req.Cwd, req.SessionID, sess.Meta, providerName, modelName, req.ContextWindow, req.CompactPercent)
+		if err != nil {
+			return agent.ChatOutcome{}, fmt.Errorf("save session context choice: %w", err)
+		}
+		req.ContextWindow = selectedContextWindow(meta, modelName, choice.Window)
+		req.CompactPercent = choice.Percent
+	}
 	if settings.lspDiagnostics() {
 		req.Diagnose, req.Warm = r.lspHooks(ctx, req.Cwd, req.SessionID)
 	}
@@ -375,6 +407,16 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		Hooks:        hookEngine,
 		SessionStart: sessionStart,
 		Live:         func(m []inference.LlmMessage) { r.setLiveConversation(req.SessionID, m) },
+		ContextChoice: func() (int64, float64) {
+			if providerName == "" || modelName == "" {
+				return 0, 0
+			}
+			view, err := r.CompactionGetForSession(providerName, modelName, req.SessionID, req.Cwd)
+			if err != nil {
+				return 0, 0
+			}
+			return view.Window, view.Percent
+		},
 		Gate: &permission.Gate{
 			Preset:      preset,
 			Workspace:   workspace,

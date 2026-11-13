@@ -26,18 +26,8 @@ type IDESearchResult struct {
 // IDESearch searches literal text using the same ignore and size limits as grep.
 func IDESearch(root, query string) (IDESearchResult, error) {
 	result := IDESearchResult{Hits: []IDESearchHit{}}
-	if !filepath.IsAbs(root) {
-		return result, fmt.Errorf("IDE workspace must be an absolute path")
-	}
-	info, err := os.Stat(root)
-	if err != nil {
+	if err := validateIDESearch(root, query); err != nil {
 		return result, err
-	}
-	if !info.IsDir() {
-		return result, fmt.Errorf("IDE workspace is not a directory")
-	}
-	if strings.TrimSpace(query) == "" || len(query) > 512 {
-		return result, fmt.Errorf("search text must be between 1 and 512 bytes")
 	}
 	re, err := regexp.Compile("(?i)" + regexp.QuoteMeta(query))
 	if err != nil {
@@ -77,6 +67,23 @@ func IDESearch(root, query string) (IDESearchResult, error) {
 	}
 	result.Truncated = truncated
 	return result, nil
+}
+
+func validateIDESearch(root, query string) error {
+	if !filepath.IsAbs(root) {
+		return fmt.Errorf("IDE workspace must be an absolute path")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("IDE workspace is not a directory")
+	}
+	if strings.TrimSpace(query) == "" || len(query) > 512 {
+		return fmt.Errorf("search text must be between 1 and 512 bytes")
+	}
+	return nil
 }
 
 // The builtin walker also runs outside Git; check each ancestor so an

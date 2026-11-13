@@ -57,6 +57,16 @@ var methods = map[string]handler{
 	"listProviders": func(rt *runtime.AgentRuntime, _ args) (any, error) {
 		return rt.ListProviders(), nil
 	},
+	"copilotSignInStart": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		return rt.StartCopilotSignIn()
+	},
+	"copilotSignInPoll": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		return rt.PollCopilotSignIn()
+	},
+	"copilotSignInCancel": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		rt.CancelCopilotSignIn()
+		return true, nil
+	},
 	"refreshProviders": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		// {name} refreshes one provider synchronously; no name starts
 		// the background refresh-all. Both are user-initiated only.
@@ -251,6 +261,9 @@ var methods = map[string]handler{
 	"saveAttachment": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SaveAttachment(a.str("sessionId"), a.str("cwd"), a.str("name"), a.str("data"))
 	},
+	"saveTaggedImage": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SaveTaggedImage(a.str("sessionId"), a.str("cwd"), a.str("path"))
+	},
 	"sessionImage": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionImage(a.str("sessionId"), a.str("cwd"), a.str("path"))
 	},
@@ -274,6 +287,23 @@ var methods = map[string]handler{
 			return nil, err
 		}
 		return rt.BudgetSet(p.Scope, p.Cwd, p.SessionID, p.BudgetUsd)
+	},
+	"compactionGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CompactionGetForSession(a.str("provider"), a.str("model"), a.str("sessionId"), a.str("cwd"))
+	},
+	"compactionSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			Provider  string  `json:"provider"`
+			Model     string  `json:"model"`
+			Percent   float64 `json:"percent"`
+			Window    *int64  `json:"window"`
+			SessionID string  `json:"sessionId"`
+			Cwd       string  `json:"cwd"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.CompactionSetForSession(p.Provider, p.Model, p.Percent, p.Window, p.SessionID, p.Cwd)
 	},
 	"thinkingGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.ThinkingGet(a.str("provider"), a.str("model"))

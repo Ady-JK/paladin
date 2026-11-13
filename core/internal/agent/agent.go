@@ -88,7 +88,8 @@ type Request struct {
 	// ContextWindow, when positive, is the model's context window as the
 	// provider's catalog reported it, overriding the built-in table. Set
 	// by the runtime; never on the wire.
-	ContextWindow int64 `json:"-"`
+	ContextWindow  int64   `json:"-"`
+	CompactPercent float64 `json:"-"`
 }
 
 // Notice is a reminder delivered into a running turn: recorded as a
@@ -222,16 +223,18 @@ type runConfig struct {
 	system      string
 	// window overrides the model's context window; 0 means "resolve it
 	// from the provider's catalog, else the built-in table".
-	window      int64
-	ctx         context.Context
-	cancel      context.CancelFunc
-	tx          chan<- ChatChunk
-	done        <-chan struct{}
-	message     string
-	display     string
-	attachments []media.Attachment
-	resume      bool
-	compactOnly bool
+	window        int64
+	compactPct    float64
+	contextChoice func() (int64, float64)
+	ctx           context.Context
+	cancel        context.CancelFunc
+	tx            chan<- ChatChunk
+	done          <-chan struct{}
+	message       string
+	display       string
+	attachments   []media.Attachment
+	resume        bool
+	compactOnly   bool
 	// hooks runs the user's hook scripts; sessionStart is the
 	// SessionStart source ("startup"/"resume") when this turn opens the
 	// session, "" otherwise.
@@ -282,7 +285,9 @@ type Agent struct {
 	// window is the model's context window in tokens; unknown models
 	// fall back to unknownWindowTokens so proactive compaction still
 	// bounds the context.
-	window int64
+	window        int64
+	compactPct    float64
+	contextChoice func() (int64, float64)
 	// editStreaks counts consecutive unproductive edit/write results
 	// per path this turn (failures or lingering diagnostics); at the
 	// warning threshold the result carries an escalation note instead
@@ -380,13 +385,15 @@ func newAgent(c runConfig) *Agent {
 		}
 	}
 	return &Agent{
-		window:   window,
-		session:  c.session,
-		provider: c.provider,
-		tools:    c.tools,
-		shell:    c.shell,
-		cancel:   c.cancel,
-		ctx:      c.ctx,
+		window:        window,
+		compactPct:    c.compactPct,
+		contextChoice: c.contextChoice,
+		session:       c.session,
+		provider:      c.provider,
+		tools:         c.tools,
+		shell:         c.shell,
+		cancel:        c.cancel,
+		ctx:           c.ctx,
 		toolCtx: &tools.ToolCtx{
 			Workspace:  c.session.Meta.Cwd,
 			Project:    c.session.Meta.ProjectCwd(),
@@ -434,43 +441,22 @@ func (a *Agent) Run() (ChatOutcome, error) {
 	a.phase = phaseRunning
 	a.emptyRounds = 0
 	a.retries, a.timeoutRetries = 0, 0
-	if !a.compactOnly {
-		if !a.currentResume {
-			msg := transcript.UserMessage(a.currentMessage)
-			if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(a.currentMessage) {
-				msg.Display = d
-			}
-			msg.Attachments = a.currentAttachments
-			a.journalInput = []transcript.Message{msg}
-		}
-		j, err := a.session.BeginJournal(a.journalInput)
-		if err != nil {
-			return ChatOutcome{}, fmt.Errorf("start turn journal: %w", err)
-		}
-		a.journal = j
-		defer j.Release()
+	release, err := a.beginTurnJournal()
+	if err != nil {
+		return ChatOutcome{}, err
 	}
-	if !a.compactOnly && !a.currentResume {
-		if err := a.runPromptHooks(); err != nil {
-			if perr := a.journal.Finish(); perr != nil {
-				return ChatOutcome{}, fmt.Errorf("%w (and clearing turn journal failed: %w)", err, perr)
-			}
-			return ChatOutcome{}, err
-		}
-		a.journalInput[0].Content = a.currentMessage
-		if d := strings.TrimSpace(a.currentDisplay); d != "" && d != strings.TrimSpace(a.currentMessage) {
-			a.journalInput[0].Display = d
-		}
-		if err := a.checkpoint(""); err != nil {
-			return ChatOutcome{}, err
-		}
+	if release != nil {
+		defer release()
+	}
+	if err := a.prepareTurnInput(); err != nil {
+		return ChatOutcome{}, err
 	}
 	a.messages = a.modelMessages(a.currentMessage, a.currentResume)
 	if a.compactOnly {
 		return a.runCompact()
 	}
 
-	err := a.safeLoop()
+	err = a.safeLoop()
 	a.settleNotices(nil)
 	stopped := errors.As(err, new(turnStop))
 	if err != nil && !stopped {
@@ -495,6 +481,44 @@ func (a *Agent) Run() (ChatOutcome, error) {
 		Stats:     a.savedStats,
 		Index:     a.savedIndex,
 	}, nil
+}
+
+// beginTurnJournal records the submitted message before any model work.
+func (a *Agent) beginTurnJournal() (func(), error) {
+	if a.compactOnly {
+		return nil, nil
+	}
+	if !a.currentResume {
+		msg := transcript.UserMessage(a.currentMessage)
+		if display := strings.TrimSpace(a.currentDisplay); display != "" && display != strings.TrimSpace(a.currentMessage) {
+			msg.Display = display
+		}
+		msg.Attachments = a.currentAttachments
+		a.journalInput = []transcript.Message{msg}
+	}
+	journal, err := a.session.BeginJournal(a.journalInput)
+	if err != nil {
+		return nil, fmt.Errorf("start turn journal: %w", err)
+	}
+	a.journal = journal
+	return journal.Release, nil
+}
+
+func (a *Agent) prepareTurnInput() error {
+	if a.compactOnly || a.currentResume {
+		return nil
+	}
+	if err := a.runPromptHooks(); err != nil {
+		if persistErr := a.journal.Finish(); persistErr != nil {
+			return fmt.Errorf("%w (and clearing turn journal failed: %w)", err, persistErr)
+		}
+		return err
+	}
+	a.journalInput[0].Content = a.currentMessage
+	if display := strings.TrimSpace(a.currentDisplay); display != "" && display != strings.TrimSpace(a.currentMessage) {
+		a.journalInput[0].Display = display
+	}
+	return a.checkpoint("")
 }
 
 // safeLoop turns a panic anywhere in the loop into a failed turn; the

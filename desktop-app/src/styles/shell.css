@@ -32,6 +32,27 @@ body {
     transform 160ms cubic-bezier(0.32, 0.72, 0.28, 1);
 }
 
+#railPanels {
+  position: relative;
+}
+#railPanels .rail-btn[hidden] {
+  display: none;
+}
+.rail-count {
+  position: absolute;
+  right: 0;
+  top: 0;
+  border-radius: 999px;
+  background: var(--color-accent-600);
+  color: white;
+  font-size: 9px;
+  line-height: 14px;
+  min-width: 14px;
+  text-align: center;
+}
+.rail-count:empty {
+  display: none;
+}
 .rail-btn:hover {
   background: rgb(0 0 0 / 0.05);
   color: var(--color-slate-800);
@@ -46,14 +67,6 @@ body {
   outline-offset: 1px;
 }
 
-.rail-btn.is-active {
-  background: #fff;
-  color: var(--color-slate-900);
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.06),
-    0 2px 8px -2px rgb(0 0 0 / 0.1);
-}
-
 .dark .rail-btn {
   color: var(--color-slate-400);
 }
@@ -61,35 +74,6 @@ body {
 .dark .rail-btn:hover {
   background: rgb(255 255 255 / 0.06);
   color: var(--color-slate-100);
-}
-
-.dark .rail-btn.is-active {
-  background: var(--color-slate-800);
-  color: #fff;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.06),
-    0 2px 10px -2px rgb(0 0 0 / 0.6);
-}
-
-/* The active view gets a small accent tick on the rail edge. */
-.rail-btn.is-active::before {
-  content: "";
-  position: absolute;
-  left: -10px;
-  top: 50%;
-  height: 16px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--color-accent-500);
-  transform: translateY(-50%);
-  animation: tick-in 220ms cubic-bezier(0.32, 0.72, 0.28, 1) both;
-}
-
-@keyframes tick-in {
-  from {
-    transform: translateY(-50%) scaleY(0.2);
-    opacity: 0;
-  }
 }
 
 .rail-btn:disabled {
@@ -105,13 +89,14 @@ body {
 /* The sidebar is a floating drawer beside the rail, over the main card.
    The card never resizes for it, so the page under it doesn't reflow. */
 #sidebar.side-drawer,
-.dark #sidebar.side-drawer {
+.dark #sidebar.side-drawer,
+.ide-explorer {
   position: absolute;
   top: 8px;
   bottom: 8px;
   left: 3.5rem;
   z-index: 40;
-  width: 18rem;
+  width: min(22rem, calc(100vw - 4rem));
   border: 1px solid rgb(0 0 0 / 0.08);
   border-radius: 14px;
   background: var(--color-slate-100);
@@ -124,7 +109,8 @@ body {
     visibility 0s linear 0s;
 }
 
-.dark #sidebar.side-drawer {
+.dark #sidebar.side-drawer,
+.dark .ide-explorer {
   border-color: rgb(255 255 255 / 0.08);
   background: #18181b;
   box-shadow:
@@ -132,7 +118,8 @@ body {
     0 24px 48px -16px rgb(0 0 0 / 0.7);
 }
 
-#sidebar.side-drawer.is-closed {
+#sidebar.side-drawer.is-closed,
+.ide-explorer.is-closed {
   visibility: hidden;
   opacity: 0;
   transform: translateX(-12px);

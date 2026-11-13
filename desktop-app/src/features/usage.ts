@@ -56,8 +56,13 @@ export function isEstimatedSpend(u: { cost: number; listCost: number; costEstima
 // or a free tier) reports cost 0 with the tokens' list price beside it;
 // showing cost would read as "free" for millions of tokens, so the list
 // price is used and labelled. Everything else shows what it charged.
-export function estimatedSpend(u: { cost: number; listCost: number; costEstimated?: boolean }): number {
-  return isEstimatedSpend(u) ? u.listCost : u.cost;
+export function estimatedSpend(u: {
+  cost: number;
+  listCost: number;
+  costEstimated?: boolean;
+  trackedSpend?: number;
+}): number {
+  return u.trackedSpend ?? (isEstimatedSpend(u) ? u.listCost : u.cost);
 }
 
 // formatUsd renders money with cents ($0.40, $2.00); sub-cent spend
@@ -91,7 +96,7 @@ export function cacheHitRate(usage: { promptTokens: number; cacheReadTokens: num
 // the fill percentage; without one it shows raw tokens instead of a
 // misleading zero.
 function pillText(usage: SessionUsage): string {
-  const spend = usage.hasCost ? ` · ${formatCost(estimatedSpend(usage))}` : "";
+  const spend = usage.hasCost ? ` · ${usage.unpricedCalls ? "≥" : ""}${formatCost(estimatedSpend(usage))}` : "";
   if (usage.contextKnown && usage.fillPercent !== undefined) {
     return `${trimNum(roundTo(usage.fillPercent, 1))}%${spend}`;
   }
@@ -115,6 +120,7 @@ function pillTitle(usage: SessionUsage): string {
   } else {
     parts.push("spend unknown");
   }
+  if (usage.unpricedCalls) parts.push(`${usage.unpricedCalls} call(s) have unknown cost`);
   parts.push(`${usage.calls} call${usage.calls === 1 ? "" : "s"}`);
   return parts.join(" · ");
 }
@@ -591,10 +597,10 @@ function overviewHtml(usage: SessionUsage): string {
   const heroes = [
     heroCard({
       label: isEstimatedSpend(usage) ? "Est. total cost" : "Total cost",
-      value: usage.hasCost ? formatCost(spend) : "—",
+      value: usage.hasCost ? `${usage.unpricedCalls ? "≥" : ""}${formatCost(spend)}` : "—",
       sub:
         usage.hasCost && isEstimatedSpend(usage)
-          ? `list price · subscription billed $0`
+          ? `estimated list price · actual billing may differ`
           : usage.hasCost
             ? `avg ${formatCost(avgCost)}/run`
             : "spend not reported",

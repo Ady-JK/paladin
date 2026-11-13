@@ -142,6 +142,25 @@ export function tagPaths(): string[] {
   return items.map((item) => item.path);
 }
 
+// Include tagged names in the visible message even when the user typed
+// a separate prompt after choosing files from the picker.
+export function withTagLabels(text: string): string {
+  const missing = items.map((item) => `@${item.name}${item.isDir ? "/" : ""}`).filter((label) => !text.includes(label));
+  return [text, missing.join(" ")].filter(Boolean).join("\n");
+}
+
+// Tagged images are copied to the session so they survive changes to
+// the original file and are available to both the model and the viewer.
+export async function uploadTaggedImages(sessionId: string, cwd: string): Promise<api.SessionAttachment[]> {
+  const tagged = items.filter((item) => !item.isDir);
+  const saved: api.SessionAttachment[] = [];
+  for (const item of tagged) {
+    const image = await api.saveTaggedImage(sessionId, cwd, item.path);
+    if (image) saved.push(image);
+  }
+  return saved;
+}
+
 // clearTags empties the strip after a send.
 export function clearTags(): void {
   items = [];

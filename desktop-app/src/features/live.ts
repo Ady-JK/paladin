@@ -13,7 +13,7 @@ import { setStatus } from "../ui/status";
 import { toast } from "../ui/toast";
 import { escapeHtml } from "../core/format";
 import { createTurn, dismissGreeting, followTail, scrollToBottom, mountLinkCards } from "./chatView";
-import { mountImage, registerImage } from "./mediaGallery";
+import { mountImage, mountUserImage, registerImage } from "./mediaGallery";
 import { TurnView } from "./turnView";
 import { handleAskToolEvent } from "./ask";
 import { handleTodoToolEvent, refreshTodos } from "./todos";
@@ -556,7 +556,7 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
           for (const image of seen.images) {
             if (image.index !== seen.latestUser || image.role !== "user") continue;
             if (hasImage(userRow, image.path)) continue;
-            mountImage(userRow, e.sessionId, image.path, image.name ?? "");
+            mountUserImage(userRow, e.sessionId, image.path, image.name ?? "");
           }
         }
         if (!view) return;
@@ -636,6 +636,18 @@ export function noteSubmitted(info: TurnInfo): void {
     apply(e, { event: "turn/start", seq: 0, sessionId: info.sessionId, turnId: info.turnId, turn: info });
   } else if (info.state === "queued" && !e.queued.some((q) => q.turnId === info.turnId)) {
     apply(e, { event: "turn/queued", seq: 0, sessionId: info.sessionId, turnId: info.turnId, turn: info });
+  }
+}
+
+// showSentImages puts the images just sent above the user's row at once,
+// so they do not wait for the turn to finish. finishTurn skips any path
+// already on the row.
+export function showSentImages(info: TurnInfo, images: api.SessionAttachment[]): void {
+  const row = entry(info.sessionId).users.get(info.turnId);
+  if (!row) return;
+  for (const attachment of images) {
+    if (attachment.image && !hasImage(row, attachment.image.path))
+      mountUserImage(row, info.sessionId, attachment.image.path, attachment.name);
   }
 }
 

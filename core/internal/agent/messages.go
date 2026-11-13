@@ -41,40 +41,11 @@ const AbortedToolContent = `{"error":"aborted: this tool call did not complete (
 // after the block instead of breaking the provider contract. Only the
 // part after the last compaction marker is replayed, behind its summary.
 func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMessage {
-	out := []inference.LlmMessage{}
-	var (
-		open     bool
-		order    []inference.ToolCall
-		answered map[string]bool
-		deferred []inference.LlmMessage
-	)
-	closeBlock := func() {
-		if !open {
-			return
-		}
-		for _, call := range order {
-			if answered[call.ID] {
-				continue
-			}
-			id, name := call.ID, call.Name
-			out = append(out, inference.LlmMessage{Role: "tool", Content: AbortedToolContent, ToolCallID: &id, Name: &name})
-		}
-		out = append(out, deferred...)
-		open, order, answered, deferred = false, nil, nil, nil
-	}
-	demote := func(content string) {
-		msg := inference.LlmMessage{Role: "user", Content: content}
-		if open {
-			deferred = append(deferred, msg)
-			return
-		}
-		out = append(out, msg)
-	}
-	// The model view restarts at the newest compaction marker: its
-	// summary stands in for everything before it.
+	builder := messageBuilder{out: []inference.LlmMessage{}, withTools: withTools}
+	// The latest compaction summary replaces all earlier messages.
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].IsCompaction() {
-			out = append(out, inference.LlmMessage{Role: "user", Content: compactionUserContent(history[i].Content)})
+			builder.out = append(builder.out, inference.LlmMessage{Role: "user", Content: compactionUserContent(history[i].Content)})
 			history = history[i+1:]
 			break
 		}
@@ -82,57 +53,102 @@ func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMe
 	for _, msg := range history {
 		switch msg.Role {
 		case transcript.RoleUser:
-			closeBlock()
-			out = append(out, inference.LlmMessage{Role: "user", Content: msg.Content})
-			for _, attachment := range msg.Attachments {
-				if attachment.Image != nil {
-					out = append(out, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
-				}
-			}
+			builder.addUser(msg)
 		case transcript.RoleAssistant:
-			closeBlock()
-			var calls []inference.ToolCall
-			seen := map[string]bool{}
-			if withTools && msg.ToolCalls != nil {
-				for _, call := range *msg.ToolCalls {
-					if call.ID == "" || seen[call.ID] {
-						continue
-					}
-					seen[call.ID] = true
-					calls = append(calls, inference.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments, Signature: call.Signature})
-				}
-			}
-			if strings.TrimSpace(msg.Content) == "" && len(calls) == 0 {
-				continue
-			}
-			out = append(out, inference.LlmMessage{Role: "assistant", Content: msg.Content, ToolCalls: calls})
-			if len(calls) > 0 {
-				open, order, answered = true, calls, map[string]bool{}
-			}
+			builder.addAssistant(msg)
 		case transcript.RoleTool:
-			if !withTools {
-				continue
-			}
-			id := ""
-			if msg.ToolCallID != nil {
-				id = *msg.ToolCallID
-			}
-			if !open || id == "" || session.IsNotifyMessage(msg) || answered[id] || !blockHas(order, id) {
-				demote(msg.Content)
-				continue
-			}
-			answered[id] = true
-			callID := id
-			out = append(out, inference.LlmMessage{
-				Role: "tool", Content: msg.Content,
-				Image:      msg.Image,
-				ToolCallID: &callID, Name: msg.Name,
-			})
+			builder.addTool(msg)
 		case transcript.RoleSystem:
 		}
 	}
-	closeBlock()
-	return out
+	builder.closeBlock()
+	return builder.out
+}
+
+type messageBuilder struct {
+	out       []inference.LlmMessage
+	withTools bool
+	open      bool
+	order     []inference.ToolCall
+	answered  map[string]bool
+	deferred  []inference.LlmMessage
+}
+
+func (b *messageBuilder) closeBlock() {
+	if !b.open {
+		return
+	}
+	for _, call := range b.order {
+		if b.answered[call.ID] {
+			continue
+		}
+		id, name := call.ID, call.Name
+		b.out = append(b.out, inference.LlmMessage{Role: "tool", Content: AbortedToolContent, ToolCallID: &id, Name: &name})
+	}
+	b.out = append(b.out, b.deferred...)
+	b.open, b.order, b.answered, b.deferred = false, nil, nil, nil
+}
+
+func (b *messageBuilder) addUser(msg transcript.Message) {
+	b.closeBlock()
+	b.out = append(b.out, inference.LlmMessage{Role: "user", Content: msg.Content})
+	for _, attachment := range msg.Attachments {
+		if attachment.Image != nil {
+			b.out = append(b.out, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
+		}
+	}
+}
+
+func (b *messageBuilder) addAssistant(msg transcript.Message) {
+	b.closeBlock()
+	var calls []inference.ToolCall
+	seen := map[string]bool{}
+	if b.withTools && msg.ToolCalls != nil {
+		for _, call := range *msg.ToolCalls {
+			if _, duplicate := seen[call.ID]; call.ID == "" || duplicate {
+				continue
+			}
+			seen[call.ID] = false
+			calls = append(calls, inference.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments, Signature: call.Signature})
+		}
+	}
+	if strings.TrimSpace(msg.Content) == "" && len(calls) == 0 {
+		return
+	}
+	b.out = append(b.out, inference.LlmMessage{Role: "assistant", Content: msg.Content, ToolCalls: calls})
+	if len(calls) > 0 {
+		b.open, b.order, b.answered = true, calls, seen
+	}
+}
+
+func (b *messageBuilder) addTool(msg transcript.Message) {
+	if !b.withTools {
+		return
+	}
+	id := ""
+	if msg.ToolCallID != nil {
+		id = *msg.ToolCallID
+	}
+	wasAnswered, known := b.answered[id]
+	if !b.open || id == "" || session.IsNotifyMessage(msg) || wasAnswered || !known {
+		b.demote(msg.Content)
+		return
+	}
+	b.answered[id] = true
+	callID := id
+	b.out = append(b.out, inference.LlmMessage{
+		Role: "tool", Content: msg.Content,
+		Image: msg.Image, ToolCallID: &callID, Name: msg.Name,
+	})
+}
+
+func (b *messageBuilder) demote(content string) {
+	msg := inference.LlmMessage{Role: "user", Content: content}
+	if b.open {
+		b.deferred = append(b.deferred, msg)
+		return
+	}
+	b.out = append(b.out, msg)
 }
 
 func blockHas(calls []inference.ToolCall, id string) bool {

@@ -48,6 +48,7 @@ export interface PaladinBridge {
     ensure: (name: string, url: string, partition: string) => Promise<boolean>;
     show: (name: string) => Promise<boolean>;
     setBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<boolean>;
+    snapshot: () => Promise<string | null>;
     navigate: (name: string, url: string) => Promise<boolean>;
     reload: (name: string) => Promise<boolean>;
     back: (name: string) => Promise<boolean>;

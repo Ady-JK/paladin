@@ -229,6 +229,12 @@ func effortRejected(err error) bool {
 // listing said about the model; its levels win over the name-based guess,
 // because the provider knows which efforts it forwards.
 func ModelEffortLevels(apiType config.ApiType, baseURL, model string, meta config.ModelMeta) []string {
+	if apiType == config.ApiTypeCopilot {
+		if !meta.ThinkingKnown {
+			return nil
+		}
+		return EffortLevelsFor(copilotProtocol(model, meta), meta.ThinkingLevels)
+	}
 	if apiType != config.ApiTypeOpenai {
 		return nil
 	}

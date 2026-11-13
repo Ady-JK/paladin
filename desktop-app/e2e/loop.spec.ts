@@ -77,6 +77,25 @@ test("Cmd/Ctrl+Enter steers and Enter still queues", async ({ page }) => {
   expect((await calls(page, "__e2eSteers")).map((s) => s.message)).toEqual(["steer me"]);
 });
 
+test("steering with an image queues it with its attachment", async ({ page }) => {
+  await startRunning(page, "first");
+  await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([Uint8Array.from([137, 80, 78, 71])], "shot.png", { type: "image/png" }));
+    document
+      .querySelector(".composer-float")!
+      .dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  });
+  await expect(page.locator("#attachmentCards")).toContainText("shot.png");
+  await page.fill("#promptInput", "look at this image");
+  await page.click("#steerBtn");
+  await expect.poll(async () => (await calls(page, "__e2eSubmits")).length).toBe(2);
+  const submits = await calls(page, "__e2eSubmits");
+  expect(submits[1].attachmentIds).toEqual(["file-1"]);
+  expect(submits[1].display).toContain("look at this image");
+  expect(await calls(page, "__e2eSteers")).toHaveLength(0);
+});
+
 test("a steer that misses the turn is sent as a new message", async ({ page }) => {
   await startRunning(page, "racing");
   await page.evaluate(() => {

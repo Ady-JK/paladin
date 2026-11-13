@@ -226,7 +226,8 @@ export function compactionText(info: CompactionInfo): string {
     return `Compaction failed: ${info.error || "unknown error"}`;
   }
   const after = info.tokensAfter ? ` → ${approxTokens(info.tokensAfter)}` : "";
-  return `Context compacted · ${approxTokens(info.tokensBefore)}${after} tokens`;
+  const reason = info.reason === "overflow" ? " · provider context limit" : "";
+  return `Context compacted · ${approxTokens(info.tokensBefore)}${after} tokens${reason}`;
 }
 
 // createCompactionDivider builds the full-width divider marking where

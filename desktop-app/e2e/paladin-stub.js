@@ -12,6 +12,15 @@ async function __paladinBaseInvoke(cmd, args) {
     case "creatorWorkspace":
       if (!window.__e2eCreatorMode) throw new Error("enable Creator mode");
       return "/home/creator";
+    case "saveTaggedImage": {
+      if (!/\.(png|jpe?g|gif|webp)$/i.test(args.path)) return null;
+      return window.__paladinBaseInvoke("saveAttachment", {
+        sessionId: args.sessionId,
+        cwd: args.cwd,
+        name: args.path.split("/").pop(),
+        data: "iVBORw0KGgo=",
+      });
+    }
     case "saveAttachment": {
       window.__e2eUploads = (window.__e2eUploads || []).concat([args]);
       const id = `file-${window.__e2eUploads.length}`;
@@ -711,21 +720,23 @@ async function __paladinBaseInvoke(cmd, args) {
           },
         ];
       }
-      window.__e2eProviders[0].models =
-        window.__e2eLists > 1
-          ? ["anthropic/claude-fable-20990101", "anthropic/claude-3-opus", "openai/gpt-4o"]
-          : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
+      // The app refreshes the default provider once on startup, so the catalog
+      // counts as refreshed after a second refreshProviders call (the settings click).
+      const refreshed = (window.__e2eRefreshes || 0) >= 2;
+      window.__e2eProviders[0].models = refreshed
+        ? ["anthropic/claude-fable-20990101", "anthropic/claude-3-opus", "openai/gpt-4o"]
+        : ["~anthropic/claude-fable", "anthropic/claude-3-opus", "openai/gpt-4o"];
       // Catalog metadata as a provider listing publishes it: the picker's
       // detail pane shows the limits, thinking levels and prices.
       // claude-fable is only described with levels by the second listing,
       // so a refresh is what teaches the app them.
-      const fable = window.__e2eLists > 1 ? "anthropic/claude-fable-20990101" : "anthropic/claude-fable";
+      const fable = refreshed ? "anthropic/claude-fable-20990101" : "anthropic/claude-fable";
       window.__e2eProviders[0].meta = {
         [fable]: {
           contextWindow: 200000,
           maxOutput: 64000,
           protocol: "anthropic",
-          thinkingLevels: window.__e2eLists > 1 ? ["low", "medium", "high"] : [],
+          thinkingLevels: refreshed ? ["low", "medium", "high"] : [],
           thinkingKnown: true,
         },
         "anthropic/claude-3-opus": {
@@ -752,6 +763,7 @@ async function __paladinBaseInvoke(cmd, args) {
       return window.__e2eProviders;
     }
     case "refreshProviders":
+      window.__e2eRefreshes = (window.__e2eRefreshes || 0) + 1;
       if (args && args.name) {
         return { name: args.name, count: 3, models: [] };
       }
@@ -1446,6 +1458,11 @@ window.paladin = {
       window.__e2eViewBounds = bounds;
       window.__e2eMoves = (window.__e2eMoves || 0) + 1;
       return true;
+    },
+    snapshot: async () => {
+      window.__e2eSnapshots = (window.__e2eSnapshots || 0) + 1;
+      // A 1x1 gray PNG stands in for the captured page.
+      return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
     },
     navigate: async (name, url) => {
       window.__e2eViewEnsures = (window.__e2eViewEnsures || []).concat([{ name, url }]);

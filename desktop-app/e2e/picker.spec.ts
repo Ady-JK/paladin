@@ -3,6 +3,32 @@ import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const bridge = (window as any).paladin;
+    const original = bridge.invoke;
+    bridge.invoke = (method: string, params: unknown) => {
+      if (method === "listProviders")
+        return Promise.resolve([
+          {
+            name: "primary",
+            default: true,
+            apiType: "openai",
+            apiUrl: "",
+            model: "openai/gpt-4o",
+            models: ["openai/gpt-4o", "anthropic/claude-fable"],
+          },
+          {
+            name: "alternate",
+            default: false,
+            apiType: "openai",
+            apiUrl: "",
+            model: "openai/gpt-4o",
+            models: ["openai/gpt-4o"],
+          },
+        ]);
+      return original(method, params);
+    };
+  });
   await page.goto("/");
   await page.click("#modelSelectBtn");
   await expect(page.locator("#modelTree [data-mpick]").first()).toBeVisible();
@@ -10,118 +36,56 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#modelMenu")).toBeHidden();
 });
 
-test("composer picker stays open while toggling and picking", async ({ page }) => {
+test("picker lists models with their providers and selects one", async ({ page }) => {
+  await page.click("#modelSelectBtn");
   const menu = page.locator("#modelMenu");
+  await expect(menu.locator("#providerPick, #labPick, #modelDetail")).toHaveCount(0);
+  const rows = menu.locator("[data-mpick]");
+  await expect(rows.filter({ hasText: "gpt-4o" })).toHaveCount(1);
+  await expect(rows.filter({ hasText: "gpt-4o" }).first()).toContainText("primary");
+  await rows.filter({ hasText: "claude-fable" }).click();
   await expect(menu).toBeHidden();
-
-  await page.click("#modelSelectBtn");
-  await expect(menu).toBeVisible();
-
-  await expect(menu.locator("[data-ltoggle]")).toHaveCount(4);
-  await menu.locator('[data-ptoggle="Opencode Go"]').click();
-  await expect(menu).toBeVisible();
-  await expect(menu.locator("[data-ltoggle]")).toHaveCount(2);
-
-  await menu.locator('[data-ptoggle="Opencode Go"]').click();
-  await expect(menu).toBeVisible();
-  await expect(menu.locator("[data-ltoggle]")).toHaveCount(4);
-
-  await menu.locator("[data-mpick]").first().click();
-  await expect(menu).toBeVisible();
-  await expect(page.locator("#modelSelectLabel")).toHaveText("local/llama3.2");
-
-  await page.keyboard.press("Escape");
-  await expect(menu).toBeHidden();
-});
-
-test("the detail pane shows the catalog's window, thinking and prices", async ({ page }) => {
-  const menu = page.locator("#modelMenu");
-  await page.click("#modelSelectBtn");
-  // Only Opencode Go's listing carries metadata in the stub, and it is
-  // also the pick the app starts on. The dropdown narrows the tree so a
-  // model another provider also serves (gpt-4o) resolves once.
-  await page.locator("#providerPick").selectOption("Opencode Go");
-  const pick = async (model: string): Promise<void> => {
-    await menu.locator("[data-mpick]").filter({ hasText: model }).first().click();
-  };
-  const detail = page.locator("#modelDetail");
-
-  await pick("claude-3-opus");
-  await expect(detail).toContainText("1M tokens");
-  await expect(detail).toContainText("128k out");
-  await expect(detail).toContainText("low · medium · high · xhigh · max");
-  await expect(detail).toContainText("in $0.1 · out $0.5 · cache $0.01 · write $0.125");
-
-  // A model the catalog says has no thinking levels says so, and a
-  // price the listing omits leaves no invented cache number behind.
-  await pick("gpt-4o");
-  await expect(detail).toContainText("in $2.5 · out $10");
-  await expect(detail).not.toContainText("cache $");
-});
-
-test("a model without catalog metadata shows no invented numbers", async ({ page }) => {
-  const menu = page.locator("#modelMenu");
-  await page.click("#modelSelectBtn");
-  await page.locator("#providerPick").selectOption("Opencode Go");
-  await menu.locator("[data-mpick]").filter({ hasText: "claude-fable" }).first().click();
-  const detail = page.locator("#modelDetail");
-  await expect(detail).toContainText("anthropic/claude-fable");
-  await expect(detail).not.toContainText("Price / 1M");
-  await expect(detail).not.toContainText("Context");
-});
-
-test("the picked model survives a reload", async ({ page }) => {
-  await page.click("#modelSelectBtn");
-  const menu = page.locator("#modelMenu");
-  await menu.locator("[data-mpick]").filter({ hasText: "claude-fable" }).click();
-  await expect(page.locator("#modelSelectLabel")).toHaveText("Opencode Go/claude-fable");
-
+  await expect(page.locator("#modelSelectLabel")).toHaveText("claude-fable");
   await page.reload();
-  await expect(page.locator("#modelSelectLabel")).toHaveText("Opencode Go/claude-fable");
+  await expect(page.locator("#modelSelectLabel")).toHaveText("claude-fable");
 });
 
-test("the picked model survives a catalog refresh", async ({ page }) => {
+test("search ranks closest matches and keyboard selection uses provider and model", async ({ page }) => {
   await page.click("#modelSelectBtn");
-  const menu = page.locator("#modelMenu");
-  await menu.locator("[data-mpick]").filter({ hasText: "claude-fable" }).click();
-  await expect(page.locator("#modelSelectLabel")).toHaveText("Opencode Go/claude-fable");
-
-  // Catalogs only refresh on demand: the provider row's refresh button.
-  await page.click("#settingsBtn");
-  await page.click("#settingsNavProviders");
-  await page.locator('[data-refresh="Opencode Go"]').click();
-  await expect(page.locator("#modelSelectLabel")).toHaveText("Opencode Go/claude-fable-20990101");
+  await page.selectOption("#modelProviderFilter", "*");
+  await page.fill("#modelSearch", "gpt-4o");
+  const rows = page.locator("#modelTree [data-mpick]");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("gpt-4o");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#modelSelectLabel")).toHaveText("gpt-4o");
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("paladin.model") || "{}"));
+  expect(saved.provider).toBeTruthy();
+  expect(saved.model).toBe("openai/gpt-4o");
+  await page.click("#modelSelectBtn");
+  await page.fill("#modelSearch", "claude-fabl");
+  await expect(rows.first()).toContainText("claude-fable");
+  await page.fill("#modelSearch", "cld-fbl");
+  await expect(rows.first()).toContainText("claude-fable");
+  await page.fill("#modelSearch", "no-such-model-zzzz");
+  await expect(page.locator("#modelTree")).toContainText("No models found");
 });
 
-test("picker groups the ~ labs and shows no tilde", async ({ page }) => {
+test("search preserves typo matching, provider filtering and selection identity", async ({ page }) => {
   await page.click("#modelSelectBtn");
-  const tree = page.locator("#modelTree");
-
-  await expect(tree.getByRole("button", { name: "anthropic" })).toHaveCount(1);
-  await expect(tree).not.toContainText("~");
-});
-
-test("dropdowns filter the tree and clear shows everything", async ({ page }) => {
-  await page.click("#modelSelectBtn");
-  const menu = page.locator("#modelMenu");
-  const tree = page.locator("#modelTree");
-
-  await expect(tree.locator("[data-ptoggle]")).toHaveCount(4);
-
-  await page.locator("#providerPick").selectOption("Opencode Go");
-  await expect(tree.locator("[data-ptoggle]")).toHaveCount(1);
-  await expect(page.locator("#filterBar")).toBeVisible();
-  await expect(page.locator("#filterLabel")).toHaveText("Showing Opencode Go");
-
-  await page.locator("#labPick").selectOption("anthropic");
-  await expect(tree.locator("[data-ltoggle]")).toHaveCount(1);
-  await expect(tree.locator("[data-mpick]")).toHaveCount(2);
-  await expect(page.locator("#filterLabel")).toHaveText("Showing Opencode Go / anthropic");
-
-  await page.locator("#filterClearBtn").click();
-  await expect(tree.locator("[data-ptoggle]")).toHaveCount(4);
-  await expect(page.locator("#filterBar")).toBeHidden();
-  await expect(menu).toBeVisible();
+  await page.fill("#modelSearch", "claude-fable");
+  await expect(page.locator("#modelTree [data-mpick]").first()).toContainText("claude-fable");
+  await page.fill("#modelSearch", "clxude-fable");
+  await expect(page.locator("#modelTree [data-mpick]").first()).toContainText("claude-fable");
+  await page.selectOption("#modelProviderFilter", "alternate");
+  await page.fill("#modelSearch", "alternate");
+  const rows = page.locator("#modelTree [data-mpick]");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("gpt-4o");
+  await rows.first().click();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("paladin.model") || "{}"));
+  expect(saved).toMatchObject({ provider: "alternate", model: "openai/gpt-4o" });
 });
 
 test("new session is a single folder step that starts with the current model", async ({ page }) => {

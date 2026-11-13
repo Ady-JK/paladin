@@ -41,8 +41,11 @@ separate setup command, not a JSONL method.
 | `terminalResize` | `{sessionId,terminalId,cols,rows}` | `bool`: resizes that PTY |
 | `terminalClose` | `{sessionId,terminalId}` | `bool`: stops that PTY |
 | `terminalRun` | `{cwd,command}` | `{output,exitCode,truncated}`: runs a user-entered `!` or `!!` command outside the agent sandbox, in the workspace, with a 10-minute limit and 1 MiB output cap. It never writes a transcript entry by itself |
-| `listProviders` | `{}` | `ProviderInfo[]` (`name,apiType,apiUrl,model,models,default,hasKey,meta?`); `meta` is each listed model's catalog metadata, published by providers that describe their models (OpenCode Go): `contextWindow,maxOutput,protocol,thinkingLevels,thinkingKnown,priceInput,priceOutput,priceCacheRead,priceCacheWrite`, with prices in USD per 1M tokens. Models the listing said nothing about are absent, so the UI falls back to its built-in tables |
-| `refreshProviders` | `{name?}` | no name: `bool` (background refresh-all started); `{name}`: `RefreshResult` (`name,count,models,error?`) for that provider only. Catalogs are never fetched on startup or on add/update — only on this explicit call. A refresh also stores the listing's per-model metadata, which then drives that model's wire protocol, thinking levels and context window |
+| `listProviders` | `{}` | `ProviderInfo[]` (`name,apiType,apiUrl,model,models,default,hasKey,meta?`); `meta` is each listed model's catalog metadata, published by providers that describe their models (OpenCode Go and GitHub Copilot): `contextWindow,maxInput,maxOutput,protocol,thinkingLevels,thinkingKnown,priceInput,priceOutput,priceCacheRead,priceCacheWrite`, with prices in USD per 1M tokens. Optional `pricing` has `source`, `fetchedAt` (Unix seconds), and `tiers[]` with `aboveInputTokens`, `input`, `output`, `cacheRead`, and `cacheWrite`; omitted rates are unknown. Copilot prices are published estimates, not account charges, and retained prices retain their original timestamp. Models the listing said nothing about are absent |
+| `copilotSignInStart` | `{}` | Starts GitHub device sign-in and returns `{userCode,interval,expiresIn}`; the device secret stays in the sidecar |
+| `copilotSignInPoll` | `{}` | Polls the pending GitHub sign-in; returns `pending` or `connected` and stores the token in the key store |
+| `copilotSignInCancel` | `{}` | Discards the pending sign-in device code |
+| `refreshProviders` | `{name?}` | no name: `bool` (background refresh-all started); `{name}`: `RefreshResult` (`name,count,models,error?,warning?`) for that provider only. The desktop automatically calls this for the default provider on startup, after changing the default or its connection, and when its cached catalog expires. A refresh also stores the listing's per-model metadata, which then drives that model's wire protocol, thinking levels and context window |
 | `setDefaultProvider` | `{name}` | `ProviderInfo[]` |
 | `addProvider` | `{name,apiUrl,apiKey,apiType}` | `ProviderInfo` |
 | `updateProvider` | `{name,apiUrl,apiKey,apiType}` | `ProviderInfo` |
@@ -58,11 +61,14 @@ separate setup command, not a JSONL method.
 | `sessionHistoryPage` | `{sessionId,cwd?,limit?,before?}` | `HistoryPage` (`messages`, `start`, `hasMore`, `total`); `before` is the row ordinal to end at (`0` = newest), so appending a turn never shifts an older page. `limit` defaults to 120. The renderer uses this for the initial paint and for "load earlier" |
 | `sessionImages` | `{sessionId,cwd?}` | `ImagesView` (`latestUser`, `images[]` of `{index,role,path,name?}`): just the image rows, so a finished turn does not re-download the transcript to find a screenshot |
 | `saveAttachment` | `{sessionId,cwd?,name,data}` (base64, up to 10 MiB decoded) | Session-owned attachment reference |
+| `saveTaggedImage` | `{sessionId,cwd?,path}` | Copies a user-selected absolute image path (up to 4 MiB) into the session; returns its attachment reference, or null for a non-image |
 | `sessionImage` | `{sessionId,cwd?,path}` (path must occur in session history) | Image data URL |
 | `sessionTodos` | `{sessionId,cwd?}` | `TodoEntry[]` (`content,status`): the agent's todo list for the panel above the composer; empty before it plans |
-| `sessionUsage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,lastInputTokens,cost,listCost,hasCost,fillPercent?` + per-model `models[]` + per-day `daily[]`; `fillPercent` is the last call's input tokens over the window, omitted when the model's window is unknown) |
+| `sessionUsage` | `{sessionId,cwd?}` | `SessionUsage` (`sessionId,model,contextWindow,contextKnown,calls,promptTokens,completionTokens,reasoningTokens,cacheReadTokens,cacheWriteTokens,totalTokens,lastInputTokens,cost,listCost,hasCost,costEstimated?,trackedSpend?,unpricedCalls?,fillPercent?` + per-model `models[]` + per-day `daily[]`; `trackedSpend` combines reported charges with estimated prices; `unpricedCalls` marks an incomplete total. `fillPercent` is the last call's input tokens over the window, omitted when the model's window is unknown) |
 | `budgetGet` | `{sessionId?,cwd?}` | `BudgetView` (`defaultUsd,sessionUsd,effectiveUsd,spentUsd,hasCost,calls`); `calls` counts model calls that reported usage, so `hasCost:false` with `calls>0` means the provider sends no cost; `sessionUsd` is `null` when the session inherits the default; `effectiveUsd` `0` means no limit. Without `sessionId` only the default is reported |
 | `budgetSet` | `{scope,sessionId?,cwd?,budgetUsd}` | `BudgetView`; `scope` `global` (default in `config/settings.json` as `defaultBudgetUsd`) or `session` (session meta); `budgetUsd` a non-negative USD amount, `0` for a session turns the limit off, `null` clears it (inherit) |
+| `compactionGet` | `{provider,model,sessionId?,cwd?}` | `{provider,model,window,totalWindow?,known,percent,options?}` with the input limit, and an assumed 200k window when unknown; defaults to 90%. |
+| `compactionSet` | `{provider,model,percent,window?,sessionId?,cwd?}` | Same view after saving a per-provider/model threshold (1% to 100%); a running turn applies changes at its next round. `window` selects a provider-advertised input limit. With `sessionId` the choice is stored in that session; otherwise it changes the app default. |
 | `thinkingGet` | `{provider?,model?}` | `ThinkingView` (`provider,model,levels,level`); `levels` are the thinking (reasoning effort) levels the model accepts, weakest first, from `none,minimal,low,medium,high,xhigh,max` — empty when the model has no adjustable thinking; `level` `""` means the provider default (nothing is sent). Empty `provider`/`model` resolve to the default ones. The provider's own catalog metadata decides the levels when it published them (OpenCode Go), else the model's name does; the levels are only offered for the chat-completions and responses dialects, because the Anthropic and Gemini requests do not carry an effort yet |
 | `thinkingSet` | `{provider,model,level}` | `ThinkingView`; stores the level app-wide per model in `config/settings.json` as `thinkingLevels: {provider: {model: level}}`; `""` clears it. A level the model doesn't list is rejected. Applies from the next model call |
 | `overallUsage` | `{cwd?,limit?}` | `OverallUsage` (fleet totals + `models[]` heaviest-first + `sessions[]` heaviest-first capped at `limit` + `daily[]` oldest-first) |
@@ -338,16 +344,16 @@ More streaming events:
   header or a wait hint in its error message). Any progress resets the
   retry budget.
 - `chat/compact`: context compaction. `reason` is `auto` (the next
-  request would fill 85% of a known context window), `overflow` (the
+  request would fill the configured threshold of the known or assumed context window; default 90%), `overflow` (the
   provider rejected the prompt as too long), or `manual` (the user ran
   `/compact`). `phase` is `start`, then `done` (with `summary`, the
   model-written summary) or `failed` (with `error`). The older
   conversation is replaced
   by a model-written summary; the transcript keeps everything, and
   `sessionHistory` shows a `{"role": "system", "kind": "compaction",
-  "content": "<summary>"}` divider where it happened. A turn may
+  "content": "<summary>", "compaction": {"reason": "auto", "tokensBefore": 170000, "tokensAfter": 30000}}` divider where it happened. Older transcripts may lack the token counts. A turn may
   compact any number of times; three compactions in a row that fail or
-  leave the context over 85% stop compaction for the turn, and a later
+  leave the context over the threshold stop compaction for the turn, and a later
   overflow then fails it.
 - `chat/steer`: `{"steer": {"message", "display?"}}` — a message sent
   with `steerChat` joined the conversation here, as a user message.
@@ -952,6 +958,10 @@ skipped.
   renderer sends `views:back`, `views:forward` and gets `views:state`
   (`name,url,title,canGoBack,canGoForward`) after navigations so the
   address bar and tab title stay truthful.
+- Native views always draw above renderer HTML. When a menu, modal, drawer or
+  card overlaps the page, the renderer calls `views:snapshot` (a `capturePage`
+  of the web tab or local browser), shows that still in the surface, hides the
+  live view, and restores it when the overlay closes.
 - The window is frameless; the renderer owns the title bar and sends
   `window:*` for minimize/maximize/close. `views:setTheme` mirrors the
   shell theme onto each guest view's background so the native surface

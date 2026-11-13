@@ -63,7 +63,7 @@ import type { ProviderInfo } from "../core/types";
 import { toast } from "../ui/toast";
 import { closeModal, openModal } from "../ui/anim";
 import { icon } from "../icons";
-import { loadProviders, syncModelSelects } from "./models";
+import { loadProviders, refreshDefaultCatalog, resetDefaultRefresh, syncModelSelects } from "./models";
 import { refreshThinkingOptions } from "./thinking";
 import { refreshSessions } from "./sessions";
 import { browseWorkspace } from "./workspace";
@@ -285,6 +285,50 @@ const renderProviderList = (): void => {
     .join("");
 };
 
+let copilotSignInGeneration = 0;
+
+function closeCopilotSignIn(): void {
+  copilotSignInGeneration++;
+  closeModal($("#copilotSignIn"));
+}
+
+async function connectCopilot(button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  const generation = ++copilotSignInGeneration;
+  try {
+    const info = await api.startCopilotSignIn();
+    if (generation !== copilotSignInGeneration) return;
+    $("#copilotSignInCode").textContent = info.userCode;
+    $("#copilotSignInStatus").textContent = "Waiting for GitHub authorization…";
+    openModal($("#copilotSignIn"));
+    const deadline = Date.now() + info.expiresIn * 1000;
+    while (generation === copilotSignInGeneration && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, info.interval * 1000));
+      if (generation !== copilotSignInGeneration) return;
+      if ((await api.pollCopilotSignIn()) === "connected") {
+        if (generation !== copilotSignInGeneration) return;
+        closeCopilotSignIn();
+        toast("GitHub Copilot connected");
+        await reloadProviders();
+        if (state.providers.some((provider) => provider.name === "github-copilot" && provider.default)) {
+          resetDefaultRefresh();
+          void refreshDefaultCatalog();
+        }
+        return;
+      }
+    }
+    if (generation === copilotSignInGeneration)
+      $("#copilotSignInStatus").textContent = "Sign-in expired. Cancel and try again.";
+  } catch (error) {
+    if (generation === copilotSignInGeneration) {
+      $("#copilotSignInStatus").textContent = "Sign-in failed. Cancel and try again.";
+      toast(String(error), "error");
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // refreshOneProvider fetches a single provider's catalog on demand.
 const refreshOneProvider = async (btn: HTMLButtonElement, name: string): Promise<void> => {
   btn.disabled = true;
@@ -294,7 +338,7 @@ const refreshOneProvider = async (btn: HTMLButtonElement, name: string): Promise
     if (res.error) {
       toast(`${name}: ${res.error}`, "error");
     } else {
-      toast(`${name}: ${res.count} models`);
+      toast(`${name}: ${res.count} models${res.warning ? `. ${res.warning}` : ""}`);
     }
     // loadProviders remaps the saved pick onto the fresh catalog.
     await loadProviders();
@@ -411,6 +455,13 @@ const saveProviderCard = async (): Promise<void> => {
     }
     closeProviderCard();
     await reloadProviders();
+    if (
+      providerCardMode === "edit" &&
+      state.providers.some((provider) => provider.name === providerCardName && provider.default)
+    ) {
+      resetDefaultRefresh();
+      void refreshDefaultCatalog();
+    }
   } catch (error) {
     providerCardErrorEl.textContent = String(error);
     providerCardErrorEl.classList.remove("hidden");
@@ -583,8 +634,10 @@ export function initSettings(reconnect: () => Promise<void>): void {
       void (async () => {
         try {
           state.providers = await api.setDefaultProvider(name);
+          resetDefaultRefresh();
           renderProviderList();
           syncModelSelects();
+          void refreshDefaultCatalog();
           toast(`${name} is now the default provider`);
         } catch (error) {
           toast(String(error), "error");
@@ -601,12 +654,25 @@ export function initSettings(reconnect: () => Promise<void>): void {
     if (connectBtn?.dataset.connect) {
       const info = state.providers.find((p) => p.name === connectBtn.dataset.connect);
       if (info) {
-        openProviderCard("edit", info);
+        if (info.apiType === "github-copilot") void connectCopilot(connectBtn);
+        else openProviderCard("edit", info);
       }
     }
   });
 
   $("#settingsAddProviderBtn").addEventListener("click", () => openProviderCard("add"));
+  $("#copilotSignInCancel").addEventListener("click", () => {
+    closeCopilotSignIn();
+    void api.cancelCopilotSignIn().catch((error: unknown) => toast(String(error), "error"));
+  });
+  const openCopilotSignIn = (event: Event): void => {
+    event.preventDefault();
+    void api
+      .openExternalPage($<HTMLAnchorElement>("#copilotSignInLink").href)
+      .catch((error: unknown) => toast(String(error), "error"));
+  };
+  $("#copilotSignInLink").addEventListener("click", openCopilotSignIn);
+  $("#copilotSignInOpen").addEventListener("click", openCopilotSignIn);
   $("#providerCardCancel").addEventListener("click", closeProviderCard);
   $("#providerCardSave").addEventListener("click", () => {
     void saveProviderCard();

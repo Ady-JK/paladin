@@ -76,6 +76,9 @@ func ContextWindow(model string) (tokens int64, known bool) {
 // models the table has never heard of. Without a published window it
 // falls back to the table.
 func WindowFor(meta config.ModelMeta, model string) (tokens int64, known bool) {
+	if meta.MaxInput > 0 && (meta.ContextWindow <= 0 || meta.MaxInput < meta.ContextWindow) {
+		return meta.MaxInput, true
+	}
 	if meta.ContextWindow > 0 {
 		return meta.ContextWindow, true
 	}

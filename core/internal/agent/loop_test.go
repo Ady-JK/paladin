@@ -345,6 +345,8 @@ func TestRunPlainProviderError(t *testing.T) {
 }
 
 func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
+	// This test exercises job notification, not the user's shell startup files.
+	t.Setenv("SHELL", "/bin/sh")
 	sess := testSession(t, "00000000-0000-4000-8000-000000000005")
 	callArgs := `{"cmd":"echo notify-bg","background":true,"notify":true}`
 	prov := &mockProvider{streams: []streamScript{

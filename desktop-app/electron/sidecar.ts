@@ -76,6 +76,7 @@ const READ_METHODS = new Set([
   "fsHome",
   "resolveWorkspace",
   "listProviders",
+  "compactionGet",
   "fsList",
   "ideList",
   "ideExplorerSettingsGet",

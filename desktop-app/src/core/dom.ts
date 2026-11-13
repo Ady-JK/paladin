@@ -29,17 +29,7 @@ export const modelSelectLabelEl = $("#modelSelectLabel");
 export const modelMenu = $("#modelMenu");
 export const modelSearchEl = $<HTMLInputElement>("#modelSearch");
 export const modelSearchClearEl = $<HTMLButtonElement>("#modelSearchClear");
-export const providerPickEl = $<HTMLSelectElement>("#providerPick");
-export const labPickEl = $<HTMLSelectElement>("#labPick");
-export const modelPillEl = $("#modelPill");
 export const modelTreeEl = $("#modelTree");
-export const modelDetailEl = $("#modelDetail");
-export const modelBreadcrumbEl = $("#modelBreadcrumb");
-export const modelQuickBtn = $<HTMLButtonElement>("#modelQuickBtn");
-export const modelAdvancedBtn = $<HTMLButtonElement>("#modelAdvancedBtn");
-export const filterBarEl = $("#filterBar");
-export const filterLabelEl = $("#filterLabel");
-export const filterClearBtn = $<HTMLButtonElement>("#filterClearBtn");
 export const sessionModalEl = $("#sessionModal");
 // Hosts the attach-a-file picker.
 export const fileModalEl = $("#fileModal");

@@ -25,7 +25,7 @@ import { initMode, setMode, toggleMode } from "./mode";
 import { currentPreset, initPermissions, keepDraftFor } from "./permissions";
 import { dropFinishedPanel } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
-import { isBusy, noteSubmitted, syncComposer } from "./live";
+import { isBusy, noteSubmitted, showSentImages, syncComposer } from "./live";
 import { setWorktree, takeWorktreeRequest } from "./worktrees";
 import { shortPath } from "../core/format";
 import { syncMcp } from "./mcp";
@@ -34,7 +34,7 @@ import { applyBudgetDraft, syncBudget } from "./budget";
 import { reloadContextSources } from "./contextBox";
 import { showTerminalResult, STANDALONE_PANE_SESSION, syncSidePane } from "./sidePane";
 import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
-import { clearTags, hasTags, initTags, tagPaths, tagsLabel } from "./tags";
+import { clearTags, hasTags, initTags, tagPaths, tagsLabel, uploadTaggedImages, withTagLabels } from "./tags";
 
 // TurnPlan is what a composer line resolves to before it is sent.
 interface TurnPlan {
@@ -216,6 +216,7 @@ async function send(): Promise<void> {
     const sessionId = state.sessionId;
     const cwd = state.cwd;
     const attachmentBatch = await uploadAttachments(sessionId, cwd);
+    const taggedImages = await uploadTaggedImages(sessionId, cwd);
     dismissGreeting();
     // Fire and forget: the turn runs (or queues) in the sidecar and its
     // progress arrives as events for this session, even if the user
@@ -227,16 +228,17 @@ async function send(): Promise<void> {
       provider: state.selectedProvider || null,
       model: state.selectedModel || null,
       skill,
-      display,
+      display: withTagLabels(display),
       command: route?.command ?? null,
       compact: !!route?.compact,
       mode: turnMode(route),
       permissions: currentPreset(),
-      attachmentIds: attachmentBatch.ids,
+      attachmentIds: [...attachmentBatch.ids, ...taggedImages.map((image) => image.id)],
     });
     attachmentBatch.consume();
     clearTags();
     noteSubmitted(info);
+    showSentImages(info, [...attachmentBatch.images, ...taggedImages]);
   } catch (error) {
     if (!inputEl.value && !route?.compact) {
       inputEl.value = message;
@@ -277,7 +279,11 @@ function withTags(outgoing: string, paths: string[]): string {
 // normal (queued) send.
 async function steer(): Promise<void> {
   const message = inputEl.value.trim();
-  if (!message) return;
+  if (!message && !hasAttachments() && !hasTags()) return;
+  if (hasAttachments() || hasTags()) {
+    toast("Messages with files will run after the current turn.");
+    return send();
+  }
   if (message.startsWith("/") || message.startsWith("!") || !state.sessionId || !isBusy(state.sessionId)) {
     return send();
   }

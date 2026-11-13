@@ -56,3 +56,11 @@ test("a folder with nothing loaded says so instead of hiding", async ({ page }) 
   await expect(page.locator("#contextSummary")).toContainText("No context loaded");
   await expect(page.locator("#contextList .context-empty")).toContainText("AGENTS.md");
 });
+
+test("the context list opens upwards, above the head row", async ({ page }) => {
+  await page.click("#contextToggle");
+  const list = await page.locator("#contextList").boundingBox();
+  const head = await page.locator("#contextBox .context-head").boundingBox();
+  expect(list && head && list.y + list.height <= head.y + 1).toBe(true);
+  await expect(page.locator(".context-chevron")).toHaveCSS("transform", /matrix\(0, -1, 1, 0/);
+});

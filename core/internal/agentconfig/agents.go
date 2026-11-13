@@ -71,22 +71,7 @@ func List(root string) ([]Definition, []error) {
 			failures = append(failures, fmt.Errorf("%s: %w", path, err))
 			continue
 		}
-		var d Definition
-		dec := json.NewDecoder(bytes.NewReader(data))
-		dec.DisallowUnknownFields()
-		if err = dec.Decode(&d); err == nil {
-			var extra any
-			if e := dec.Decode(&extra); e != io.EOF {
-				if e == nil {
-					err = fmt.Errorf("unexpected additional JSON value")
-				} else {
-					err = e
-				}
-			}
-		}
-		if err == nil {
-			err = validate(entry.Name(), d)
-		}
+		d, err := decodeAgent(entry.Name(), data)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", path, err))
 			continue
@@ -94,6 +79,26 @@ func List(root string) ([]Definition, []error) {
 		out = append(out, d)
 	}
 	return out, failures
+}
+
+func decodeAgent(folder string, data []byte) (Definition, error) {
+	var definition Definition
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&definition); err != nil {
+		return Definition{}, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return Definition{}, fmt.Errorf("unexpected additional JSON value")
+		}
+		return Definition{}, err
+	}
+	if err := validate(folder, definition); err != nil {
+		return Definition{}, err
+	}
+	return definition, nil
 }
 
 // readAgentFile checks the opened file as well as the directory entry, so a
@@ -149,7 +154,11 @@ func validate(folder string, d Definition) error {
 			return fmt.Errorf("invalid tool name")
 		}
 	}
-	for server, names := range d.MCP {
+	return validateMCP(d.MCP)
+}
+
+func validateMCP(servers map[string][]string) error {
+	for server, names := range servers {
 		if strings.TrimSpace(server) == "" || len(server) > 128 {
 			return fmt.Errorf("invalid MCP server")
 		}

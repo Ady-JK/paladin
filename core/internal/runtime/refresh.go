@@ -1,7 +1,6 @@
 // refresh.go fetches provider model catalogs. Fetching
-// is always user-initiated: nothing here runs on startup or when a
-// provider is added or edited, so no provider is contacted unless the
-// user asks for it.
+// is invoked explicitly through the RPC. The desktop automatically
+// refreshes only the configured default provider's catalog.
 
 package runtime
 
@@ -23,10 +22,11 @@ const refreshTimeout = 30 * time.Second
 
 // CatalogFetch is one provider's listing: the model ids plus whatever
 // metadata the provider publishes about them (nil when it publishes
-// none, which is every provider but OpenCode Go today).
+// none, which is every provider but OpenCode Go and GitHub Copilot today).
 type CatalogFetch struct {
-	Models []string
-	Meta   map[string]config.ModelMeta
+	Models  []string
+	Meta    map[string]config.ModelMeta
+	Warning string
 }
 
 // ModelFetcher lists the models one provider serves. Injected so
@@ -39,13 +39,17 @@ type CatalogFetcher func(ctx context.Context, p config.Provider, apiKey string) 
 
 // RefreshResult is the outcome of refreshing one provider's catalog.
 type RefreshResult struct {
-	Name   string   `json:"name"`
-	Count  int      `json:"count"`
-	Models []string `json:"models"`
-	Error  string   `json:"error,omitempty"`
+	Name    string   `json:"name"`
+	Count   int      `json:"count"`
+	Models  []string `json:"models"`
+	Error   string   `json:"error,omitempty"`
+	Warning string   `json:"warning,omitempty"`
 }
 
 func networkModelFetcher(ctx context.Context, p config.Provider, apiKey string) (CatalogFetch, error) {
+	if p.ApiType == config.ApiTypeCopilot && config.IsPlaceholderKey(apiKey) {
+		return CatalogFetch{}, fmt.Errorf("sign in to GitHub Copilot before refreshing models")
+	}
 	// BuildProvider refuses a placeholder key, but the listing is public:
 	// the catalog read only needs a provider to talk to. A placeholder is
 	// not a real credential, so it must not be sent as one — the gateway
@@ -80,7 +84,54 @@ func networkModelFetcher(ctx context.Context, p config.Provider, apiKey string) 
 			out[id] = m
 		}
 	}
-	return CatalogFetch{Models: models, Meta: out}, nil
+	// Price discovery is limited to the provider being refreshed. A missing
+	// price leaves the catalog usable and never implies a free model.
+	var prices map[string]*config.ModelPricing
+	var priceErr error
+	var liteMeta map[string]config.ModelMeta
+	if p.ApiType == config.ApiTypeCopilot {
+		for _, id := range models {
+			if out[id].Pricing == nil {
+				prices, priceErr = inference.FetchCopilotPricing(ctx)
+				break
+			}
+		}
+	} else if strings.EqualFold(p.Name, config.LiteLLMName) {
+		liteMeta, priceErr = inference.FetchLiteLLMPricing(ctx, p.ApiURL, apiKey)
+	}
+	for _, id := range models {
+		price := prices[id]
+		if m, ok := liteMeta[id]; ok {
+			if out == nil {
+				out = make(map[string]config.ModelMeta)
+			}
+			current := out[id]
+			if m.ContextWindow > 0 {
+				current.ContextWindow = m.ContextWindow
+			}
+			if m.MaxOutput > 0 {
+				current.MaxOutput = m.MaxOutput
+			}
+			current.Pricing = m.Pricing
+			out[id] = current
+		}
+		if p.ApiType == config.ApiTypeCopilot {
+			price = inference.CopilotPriceFor(prices, id)
+		}
+		if price != nil && out[id].Pricing == nil {
+			if out == nil {
+				out = make(map[string]config.ModelMeta)
+			}
+			m := out[id]
+			m.Pricing = price
+			out[id] = m
+		}
+	}
+	warning := ""
+	if priceErr != nil {
+		warning = "Pricing could not be refreshed; last known rates may be shown."
+	}
+	return CatalogFetch{Models: models, Meta: out, Warning: warning}, nil
 }
 
 // SetModelFetcher replaces how catalogs are fetched (tests, offline mode).
@@ -217,7 +268,9 @@ func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFet
 		sort.Strings(models)
 		entry := catalog.Providers[p.Name]
 		entry.AllModels = models
-		if len(entry.EnabledModels) == 0 {
+		// LiteLLM's proxy catalog is the source of truth; keeping the
+		// initially enabled snapshot hides models added on later refreshes.
+		if strings.EqualFold(p.Name, config.LiteLLMName) || p.ApiType == config.ApiTypeCopilot || len(entry.EnabledModels) == 0 {
 			entry.EnabledModels = append([]string(nil), models...)
 		}
 		// A listing that carries no metadata says nothing about its
@@ -227,7 +280,7 @@ func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFet
 			catalog.Providers = map[string]config.ProviderModels{}
 		}
 		catalog.Providers[p.Name] = entry
-		res.Count, res.Models = len(models), models
+		res.Count, res.Models, res.Warning = len(models), models, fetched.Warning
 		results = append(results, res)
 	}
 	if err := store.SaveModels(catalog); err != nil {
@@ -247,6 +300,9 @@ func mergeMeta(stored, fresh map[string]config.ModelMeta, models []string) map[s
 	out := make(map[string]config.ModelMeta, len(models))
 	for _, id := range models {
 		if m, ok := fresh[id]; ok && !m.Empty() {
+			if m.Pricing == nil {
+				m.Pricing = stored[id].Pricing
+			}
 			out[id] = m
 			continue
 		}

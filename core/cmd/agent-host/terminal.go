@@ -218,6 +218,9 @@ func terminalRun(command, dir string) (terminalResult, error) {
 	defer cancel()
 	shell := terminalShell()
 	args := []string{"-lc", command}
+	if strings.EqualFold(filepath.Base(shell), "zsh") {
+		args = []string{"-ilc", command}
+	}
 	if runtime.GOOS == "windows" {
 		args = []string{"/d", "/s", "/c", command}
 	}

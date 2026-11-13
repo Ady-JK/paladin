@@ -4,3 +4,4 @@ core/agent-host
 
 tmp/
 .idea/
+.config/

@@ -22,7 +22,8 @@ export function initIDEActivity(): void {
         browser: hasAgentBrowser(session.sessionId),
       }))
       .filter((item) => item.status || item.browser);
-    button.textContent = rows.length ? `Activity ${rows.length}` : "Activity";
+    button.querySelector(".rail-activity-label")!.textContent = rows.length ? `Activity ${rows.length}` : "Activity";
+    button.setAttribute("aria-label", rows.length ? `Activity ${rows.length}` : "Activity");
     const html = rows.length
       ? rows
           .map(
@@ -41,6 +42,7 @@ export function initIDEActivity(): void {
     button.setAttribute("aria-expanded", "false");
   };
   button.addEventListener("click", () => {
+    window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
     list.hidden = !list.hidden;
     button.setAttribute("aria-expanded", String(!list.hidden));
     if (!list.hidden) paint();
@@ -53,7 +55,7 @@ export function initIDEActivity(): void {
     void openSession(id);
   });
   document.addEventListener("click", (event) => {
-    if (!list.hidden && !list.contains(event.target as Node) && event.target !== button) close();
+    if (!list.hidden && !list.contains(event.target as Node) && !button.contains(event.target as Node)) close();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !list.hidden) {

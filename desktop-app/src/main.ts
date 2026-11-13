@@ -7,7 +7,6 @@ import {
   $,
   inputEl,
   messagesEl,
-  modelAdvancedBtn,
   modelMenu,
   paintIcons,
   sessionLabelEl,
@@ -22,7 +21,7 @@ import { closeMenu } from "./ui/anim";
 import { initChat } from "./features/chat";
 import { clearTodos, initTodos } from "./features/todos";
 import { renderGreeting } from "./features/chatView";
-import { initModelPicker, loadProviders } from "./features/models";
+import { initModelPicker, loadProviders, refreshDefaultCatalog, resetDefaultRefresh } from "./features/models";
 import { syncPermChip } from "./features/permissions";
 import { closeConfirm, initSessions, openSession, refreshSessions } from "./features/sessions";
 import { initSidePane } from "./features/sidePane";
@@ -42,16 +41,18 @@ import { initWindow } from "./features/window";
 import { initResources } from "./features/resources";
 import { initShortcuts } from "./features/shortcuts";
 import { clearContextBox, initContextBox, reloadContextSources } from "./features/contextBox";
-import { initMotion } from "./ui/motion";
+import { initMotion, motionMs } from "./ui/motion";
 import { initUndo } from "./features/undo";
 import { bootLive, initLive, openPendingSession, syncComposer } from "./features/live";
 import { syncMcp } from "./features/mcp";
 import { syncTools } from "./features/toolSwitches";
 import { syncBudget } from "./features/budget";
 import { initThinking, syncThinking } from "./features/thinking";
+import { initIDEActivity } from "./features/ide/activity";
 
 async function connect(): Promise<void> {
   setStatus("connecting…", "busy");
+  resetDefaultRefresh();
 
   try {
     let savedWorkspace = "";
@@ -94,12 +95,25 @@ async function connect(): Promise<void> {
     setStatus("local", "ok");
     statusDetailEl.textContent = "in-process";
 
-    // Catalogs are only fetched on an explicit user refresh.
     await loadProviders();
+    void refreshDefaultCatalog();
   } catch (error) {
     setStatus(String(error), "error");
     statusDetailEl.textContent = "—";
   }
+}
+
+async function revealApp(connection: Promise<void>): Promise<void> {
+  const delay = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms));
+  await Promise.all([Promise.race([connection, delay(2500)]), delay(motionMs(650))]);
+  const startup = $("#startup");
+  const shell = $("#appShell");
+  shell.inert = false;
+  shell.classList.add("is-ready");
+  startup.classList.add("is-leaving");
+  inputEl.focus();
+  await delay(motionMs(300));
+  startup.remove();
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -123,6 +137,29 @@ window.addEventListener("DOMContentLoaded", () => {
   initSessions();
   initSidePane();
   const ideButton = $<HTMLButtonElement>("#ideModeBtn");
+  let ideLoad: Promise<void> | undefined;
+  const ensureIDE = (): Promise<void> => {
+    ideLoad ??= import("./features/ide")
+      .then(({ initIDE }) => {
+        initIDE();
+        ideButton.removeEventListener("click", loadIDE);
+      })
+      .catch((error: unknown) => {
+        ideLoad = undefined;
+        throw error;
+      });
+    return ideLoad;
+  };
+  $("#ideExplorerToggle").addEventListener("click", () => {
+    void ensureIDE()
+      .then(() => {
+        const event = $(".ide-explorer").classList.contains("is-closed")
+          ? "paladin:ide-show-explorer"
+          : "paladin:ide-toggle-explorer";
+        window.dispatchEvent(new Event(event));
+      })
+      .catch((error: unknown) => setStatus(`Could not open Explorer: ${String(error)}`, "error"));
+  });
   // A second press while the IDE module is still loading must toggle the
   // mode instead of being dropped (the busy guard used to swallow it, so
   // pressing the shortcut twice quickly left the IDE open).
@@ -133,15 +170,18 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
     ideButton.setAttribute("aria-busy", "true");
-    void import("./features/ide")
-      .then(({ initIDE }) => {
-        ideButton.removeEventListener("click", loadIDE);
+    void ensureIDE()
+      .then(() => {
         ideButton.removeAttribute("aria-busy");
-        initIDE();
-        ideButton.click();
-        if (ideToggleQueued) {
-          ideToggleQueued = false;
+        ideButton.dataset.ideReplay = "true";
+        try {
           ideButton.click();
+          if (ideToggleQueued) {
+            ideToggleQueued = false;
+            ideButton.click();
+          }
+        } finally {
+          delete ideButton.dataset.ideReplay;
         }
       })
       .catch((error: unknown) => {
@@ -156,15 +196,11 @@ window.addEventListener("DOMContentLoaded", () => {
   void initPluginCards();
   initUndo();
   initLive((id) => void openSession(id));
+  initIDEActivity();
   initUsage();
   initResources();
   initContextBox();
   initShortcuts();
-
-  modelAdvancedBtn.addEventListener("click", () => {
-    closeMenu(modelMenu);
-    openSettings();
-  });
 
   $("#resPill").addEventListener("click", () => {
     openSettings();
@@ -192,7 +228,5 @@ window.addEventListener("DOMContentLoaded", () => {
     closeUsageDashboard();
   });
 
-  void connect();
-
-  inputEl.focus();
+  void revealApp(connect());
 });

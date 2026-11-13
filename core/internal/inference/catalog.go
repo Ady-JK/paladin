@@ -4,8 +4,8 @@
 // with the catalog rather than in a hand-written table, so a provider
 // that adds or reprices a model is picked up by the next refresh.
 //
-// Only OpenCode Go publishes this today. Other providers get ids only,
-// and every reader falls back to the built-in tables then.
+// OpenCode Go and GitHub Copilot publish model capabilities. Other
+// providers get ids only, and readers fall back to built-in tables.
 
 package inference
 

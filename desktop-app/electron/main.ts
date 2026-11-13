@@ -723,6 +723,26 @@ function layoutVisible(): void {
   }
 }
 
+// SNAPSHOT_MAX_WIDTH bounds the still's size: it is a stand-in shown
+// behind an overlay, so full retina resolution would only cost IPC bytes.
+const SNAPSHOT_MAX_WIDTH = 1600;
+
+// snapshotOf freezes a native page to a JPEG data URL. Native views are
+// drawn above every HTML element, so while a menu, drawer or dialog
+// needs that space the renderer swaps the live page for this still.
+async function snapshotOf(view: WebContentsView): Promise<string | null> {
+  try {
+    if (view.webContents.isDestroyed()) return null;
+    let image = await view.webContents.capturePage();
+    if (image.isEmpty()) return null;
+    const { width } = image.getSize();
+    if (width > SNAPSHOT_MAX_WIDTH) image = image.resize({ width: SNAPSHOT_MAX_WIDTH, quality: "good" });
+    return `data:image/jpeg;base64,${image.toJPEG(80).toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 function showOnly(name: string | null): void {
   if (!win || win.isDestroyed()) return;
   if (name && name !== "agent") browsers.show(null);
@@ -1195,6 +1215,10 @@ app
       lastBounds = bounds;
       layoutVisible();
       return true;
+    });
+    handleTrusted("views:snapshot", async () => {
+      const live = visibleView ? views.get(visibleView)?.view : browsers.visibleView();
+      return live ? snapshotOf(live) : null;
     });
     handleTrusted("views:navigate", (_e, name: string, url: unknown) => {
       const entry = views.get(name);

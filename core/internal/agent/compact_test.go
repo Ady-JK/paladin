@@ -339,21 +339,26 @@ func TestReactiveCompactionWithLargeSystemPrompt(t *testing.T) {
 }
 
 func TestCompactThresholdIsPctOfWindow(t *testing.T) {
-	// Auto-compaction fires at 85% of the window, whatever its size.
 	a := &Agent{window: 200_000}
-	if !a.overThreshold(170_000) {
-		t.Fatal("85% of a 200k window should trip")
+	if !a.overThreshold(180_000) || a.overThreshold(179_999) {
+		t.Fatal("default must be 90 percent")
 	}
-	if a.overThreshold(169_999) {
-		t.Fatal("below 85% of a 200k window should not trip")
+	a.compactPct = 80
+	if !a.overThreshold(160_000) || a.overThreshold(159_999) {
+		t.Fatal("custom threshold must apply")
 	}
-	a.window = 1_048_576
-	// Integer division truncates, so probe just above the boundary.
-	if !a.overThreshold(1_048_576*85/100 + 1) {
-		t.Fatal("85% of a 1M window should trip")
+	a.compactPct = 100
+	if a.overThreshold(199_999) || !a.overThreshold(200_000) {
+		t.Fatal("full provider limit must be selectable")
 	}
-	if a.overThreshold(1_048_576*85/100 - 1000) {
-		t.Fatal("below 85% of a 1M window should not trip")
+}
+
+func TestRunningTurnUsesUpdatedContextChoice(t *testing.T) {
+	a := &Agent{window: 328_000, compactPct: 90}
+	a.contextChoice = func() (int64, float64) { return 1_000_000, 90 }
+	a.maybeCompact()
+	if a.window != 1_000_000 || a.overThreshold(350_000) || !a.overThreshold(900_000) {
+		t.Fatalf("updated context choice was not used: window=%d percent=%v", a.window, a.compactPct)
 	}
 }
 

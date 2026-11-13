@@ -25,6 +25,8 @@ async function liveTurn(page: Page): Promise<void> {
       });
   });
   await page.goto("/");
+  // The startup splash keeps the app inert for a moment; clicks inside the frame are dropped until it lifts.
+  await expect(page.locator("#startup")).toHaveCount(0);
   await page.fill("#promptInput", "chart it");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => Boolean((window as any).__h));

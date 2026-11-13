@@ -190,6 +190,13 @@ export class BrowserManager {
     return true;
   }
 
+  // visibleView is the agent browser's page while it is on screen, so the
+  // app can freeze it to a still when an overlay needs to draw over it.
+  visibleView(): WebContentsView | null {
+    const entry = this.visible ? this.entries.get(this.visible) : undefined;
+    return entry?.attached ? entry.view : null;
+  }
+
   setBounds(bounds: BrowserBounds): boolean {
     const valid =
       [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) &&

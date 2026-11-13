@@ -549,7 +549,7 @@ function budgetText(b: BudgetNotice): string {
     return `The ${formatUsd(b.limit)} limit counts tracked cost only, and this provider reports none, so it isn't enforced; the agent keeps going.`;
   }
   if (b.state === "spendIncomplete") {
-    return `This session's usage record was damaged, so tracked spend is at least ${formatUsd(b.spent)} of ${formatUsd(b.limit)}; earlier calls may be missing. The limit is checked against that lower bound, so real spend may be higher.`;
+    return `This session has incomplete usage or pricing records, so tracked spend is at least ${formatUsd(b.spent)} of ${formatUsd(b.limit)}. The limit is checked against that lower bound, so real spend may be higher.`;
   }
   if (b.ended) {
     return `Budget reached: ${formatUsd(b.spent)} of ${formatUsd(b.limit)} tracked spend, so this message was not sent to the model. Raise the budget to continue.`;

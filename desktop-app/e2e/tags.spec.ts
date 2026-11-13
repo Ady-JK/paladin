@@ -59,4 +59,6 @@ test("images show a thumbnail, folders show their kind, and × removes a tag", a
   const submit = await page.evaluate(() => (window as any).__e2eSubmits[0]);
   expect(submit.message).toContain("/home/tester/project/assets/shot.png");
   expect(submit.message).not.toContain("/home/tester/project/src/server");
+  expect(submit.attachmentIds).toEqual(["file-1"]);
+  await expect(page.locator("#messages .session-image-thumb")).toHaveCount(1);
 });

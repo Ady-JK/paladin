@@ -20,6 +20,11 @@ func TestCountersAddKeepsSpendOnlyWhenReported(t *testing.T) {
 	c.Add(Counters{Calls: 1, PromptTokens: 3, TotalTokens: 4, Cost: 0.5, ListCost: 1, HasCost: true})
 	c.Add(Counters{Calls: 2, CompletionTokens: 1, TotalTokens: 1, Cost: 9, ListCost: 9})
 	want := Counters{Calls: 3, PromptTokens: 3, CompletionTokens: 1, TotalTokens: 5, Cost: 0.5, ListCost: 1, HasCost: true}
+	// Unreported spend (the second call's 9) must not leak into the tracked total.
+	if c.TrackedSpend == nil || *c.TrackedSpend != 0.5 {
+		t.Fatalf("tracked spend = %v, want 0.5", c.TrackedSpend)
+	}
+	c.TrackedSpend = nil
 	if c != want {
 		t.Fatalf("got %+v want %+v", c, want)
 	}

@@ -380,6 +380,7 @@ func (s *Store) ForkTo(cwd, sessionID, target string, wt *Worktree) (Session, er
 	}
 	fork.Meta.Title = shorten(title, MaxTitleRunes-7) + " (fork)"
 	fork.Meta.ForkedFrom = src.Meta.SessionID
+	fork.Meta.ContextChoices = src.Meta.ContextChoices
 	fork.Meta.Worktree = wt
 	if err := writeMeta(fork.Dir, fork.Meta); err != nil {
 		_ = os.RemoveAll(fork.Dir)

@@ -112,6 +112,7 @@ if (!process.isMainFrame) {
       show: (name: string) => ipcRenderer.invoke("views:show", name),
       setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
         ipcRenderer.invoke("views:setBounds", bounds),
+      snapshot: (): Promise<string | null> => ipcRenderer.invoke("views:snapshot"),
       navigate: (name: string, url: string) => ipcRenderer.invoke("views:navigate", name, url),
       reload: (name: string) => ipcRenderer.invoke("views:reload", name),
       back: (name: string) => ipcRenderer.invoke("views:back", name),

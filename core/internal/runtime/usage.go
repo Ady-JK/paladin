@@ -43,7 +43,12 @@ func (r *AgentRuntime) windowOf(sess transcript.Session, model string) (int64, b
 	if provider != "" && model != "" {
 		meta = r.store.ModelMeta(provider, model)
 	}
-	return inference.WindowFor(meta, model)
+	_, known := inference.WindowFor(meta, model)
+	requested := r.loadSettings().ContextInputs[provider][model]
+	if choice, ok := sess.Meta.ContextChoices[provider][model]; ok {
+		requested = choice.Window
+	}
+	return selectedContextWindow(meta, model, requested), known
 }
 
 // windowResolver is windowOf for the per-model breakdown, which only
@@ -68,8 +73,9 @@ func (r *AgentRuntime) catalogWindow(provider *string, model *string) int64 {
 	if id == "" {
 		return 0
 	}
-	if meta := r.store.ModelMeta(name, id); meta.ContextWindow > 0 {
-		return meta.ContextWindow
+	if meta := r.store.ModelMeta(name, id); meta.ContextWindow > 0 || meta.MaxInput > 0 {
+		window, _ := inference.WindowFor(meta, id)
+		return window
 	}
 	return 0
 }

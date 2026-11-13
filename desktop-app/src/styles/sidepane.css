@@ -90,7 +90,7 @@
   background: var(--color-slate-800);
 }
 .pane-menu-layout:focus-visible {
-  outline: 2px solid var(--uhc-cta-blue);
+  outline: 2px solid var(--color-accent-500);
   outline-offset: 2px;
 }
 
@@ -119,7 +119,7 @@
 .session-changes-btn:focus-visible,
 .turn-changes:focus-visible,
 .change-file:focus-visible {
-  outline: 2px solid var(--uhc-cta-blue);
+  outline: 2px solid var(--color-accent-500);
   outline-offset: 2px;
 }
 
@@ -168,16 +168,16 @@
    part of the composer stack: drop the chat pane's bottom padding and
    the card's own bottom margin, leaving only the footer's 8px top gap —
    the same gap the Context strip has above the composer. The card can
-   sit directly under #messages or inside a display:contents live root. */
+   sit directly under #messages or inside a display:contents live root,
+   and an empty live root (it renders nothing) may trail it. */
 #chatView:has(#messages > .turn-change-card:last-child),
+#chatView:has(#messages > .turn-change-card:nth-last-child(2) + .live-root:empty),
 #chatView:has(#messages > :last-child > .turn-change-card:last-child) {
   padding-bottom: 0;
 }
-#chatView:has(#messages > .turn-change-card:last-child) > #messages > .turn-change-card:last-child,
-#chatView:has(#messages > :last-child > .turn-change-card:last-child)
-  > #messages
-  > :last-child
-  > .turn-change-card:last-child {
+#messages > .turn-change-card:last-child,
+#messages > .turn-change-card:nth-last-child(2):has(+ .live-root:empty),
+#messages > :last-child > .turn-change-card:last-child {
   margin-bottom: 0;
 }
 .turn-change-heading {
@@ -284,7 +284,7 @@
   display: none;
 }
 #agentView.is-tab-layout .pane-tab.is-active {
-  box-shadow: inset 0 -2px var(--uhc-cta-blue);
+  box-shadow: inset 0 -2px var(--color-accent-500);
 }
 
 .pane-strip {
@@ -417,7 +417,7 @@
   color: var(--color-slate-100);
 }
 .change-scope button {
-  color: var(--uhc-cta-blue);
+  color: var(--color-accent-500);
   font-size: 12px;
   font-weight: 500;
 }
@@ -491,7 +491,7 @@
   color: #be123c;
 }
 .change-hunk {
-  color: var(--uhc-cta-blue);
+  color: var(--color-accent-500);
 }
 .dark .change-add {
   color: #86efac;
@@ -1152,4 +1152,234 @@
 }
 .job-kill:hover {
   background: color-mix(in srgb, var(--color-agent-rose) 10%, transparent);
+}
+
+/* Shared, compact file list and diff surface for both workspace layouts. */
+.change-files {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+  max-height: min(38%, 240px);
+  padding-bottom: 10px;
+}
+.change-file {
+  width: 100%;
+  min-width: 0;
+  border-color: transparent;
+  border-radius: 6px;
+  padding: 7px 9px;
+}
+.change-file span {
+  flex: 1;
+}
+.change-file small {
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+.change-file.is-active {
+  border-color: var(--color-accent-500);
+}
+.change-file:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: -2px;
+}
+.change-diff {
+  padding: 8px 0;
+  border-radius: 8px;
+  line-height: 1.65;
+  tab-size: 4;
+}
+.change-diff > div {
+  min-width: max-content;
+  padding: 0 12px;
+}
+.change-hunk {
+  margin: 4px 0;
+  padding-block: 3px !important;
+  background: rgb(146 134 214 / 0.09);
+  color: var(--color-accent-600);
+}
+.dark .change-hunk {
+  color: var(--color-accent-400);
+}
+
+/* Snapshot diffs adapt to the space available in either changes panel. */
+.change-diff {
+  container-type: inline-size;
+  container-name: changes;
+  padding: 0;
+  white-space: normal;
+}
+.change-diff > .diff-view {
+  min-width: 0;
+  padding: 0;
+}
+.diff-view {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  tab-size: 4;
+}
+.diff-split {
+  display: none;
+}
+.diff-column-head,
+.diff-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.diff-column-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-500);
+  font-family: inherit;
+  font-weight: 600;
+}
+.dark .diff-column-head {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+}
+.diff-column-head span {
+  padding: 7px 12px;
+}
+.diff-column-head span + span,
+.diff-pair > :nth-child(2) {
+  border-left: 1px solid var(--color-slate-200);
+}
+.dark .diff-column-head span + span,
+.dark .diff-pair > :nth-child(2) {
+  border-color: var(--color-slate-800);
+}
+.diff-cell,
+.diff-unified-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+}
+.diff-cell code,
+.diff-unified-row code {
+  min-width: 0;
+  flex: 1;
+  padding-right: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-number {
+  flex: 0 0 3.4em;
+  padding-right: 0.7em;
+  color: var(--color-slate-500);
+  text-align: right;
+  user-select: none;
+}
+.diff-sign {
+  flex: 0 0 1.5em;
+  color: var(--color-slate-500);
+  text-align: center;
+  user-select: none;
+}
+.diff-add {
+  background: rgb(34 197 94 / 0.13);
+}
+.diff-remove {
+  background: rgb(244 63 94 / 0.13);
+}
+.diff-add .diff-sign {
+  color: #16803d;
+}
+.diff-remove .diff-sign {
+  color: #be123c;
+}
+.dark .diff-add .diff-sign {
+  color: #86efac;
+}
+.dark .diff-remove .diff-sign {
+  color: #fda4af;
+}
+.diff-gap {
+  background: repeating-linear-gradient(135deg, transparent 0 4px, rgb(128 128 128 / 0.08) 4px 5px);
+}
+.diff-hunk {
+  padding: 5px 12px;
+  border-block: 1px solid var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-500);
+  white-space: pre-wrap;
+}
+.dark .diff-hunk {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+}
+.diff-fallback,
+.diff-truncated,
+.diff-note {
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-truncated,
+.diff-note {
+  color: var(--color-slate-500);
+}
+.diff-view .tok-keyword,
+.diff-view .tok-modifier,
+.diff-view .tok-operatorKeyword {
+  color: #8b5cb4;
+}
+.diff-view .tok-string,
+.diff-view .tok-regexp {
+  color: #24763f;
+}
+.diff-view .tok-number,
+.diff-view .tok-bool,
+.diff-view .tok-null {
+  color: #a8601a;
+}
+.diff-view .tok-comment {
+  color: #718096;
+  font-style: italic;
+}
+.diff-view .tok-typeName,
+.diff-view .tok-className {
+  color: #247c8b;
+}
+.diff-view .tok-propertyName,
+.diff-view .tok-function {
+  color: #3569ab;
+}
+.dark .diff-view .tok-keyword,
+.dark .diff-view .tok-modifier,
+.dark .diff-view .tok-operatorKeyword {
+  color: #c792dc;
+}
+.dark .diff-view .tok-string,
+.dark .diff-view .tok-regexp {
+  color: #a8d98d;
+}
+.dark .diff-view .tok-number,
+.dark .diff-view .tok-bool,
+.dark .diff-view .tok-null {
+  color: #f0b679;
+}
+.dark .diff-view .tok-comment {
+  color: #91a0ae;
+}
+.dark .diff-view .tok-typeName,
+.dark .diff-view .tok-className {
+  color: #79d2d0;
+}
+.dark .diff-view .tok-propertyName,
+.dark .diff-view .tok-function {
+  color: #89bdf2;
+}
+@container changes (min-width: 720px) {
+  .diff-split {
+    display: block;
+  }
+  .diff-unified {
+    display: none;
+  }
 }

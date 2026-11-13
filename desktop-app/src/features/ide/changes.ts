@@ -6,7 +6,7 @@ import type { ChangesTab } from "../sidePane/types";
 
 // Reuse the same diff renderer as the session Changes tab.
 export function initIDEChanges(showEditor: () => void): void {
-  const button = document.querySelector<HTMLButtonElement>("#ideChangesToggle")!;
+  const button = document.querySelector<HTMLButtonElement>("#sessionChangesBtn")!;
   const panel = document.querySelector<HTMLElement>("#ideChangesPanel")!;
   let tab: ChangesTab | undefined;
   let data: SessionChanges | undefined;
@@ -15,6 +15,12 @@ export function initIDEChanges(showEditor: () => void): void {
 
   const update = (): void => {
     panel.hidden = !open;
+    if (!document.querySelector("#agentSplit")?.classList.contains("ide-mode")) {
+      button.removeAttribute("aria-pressed");
+      button.setAttribute("aria-label", "Session changes");
+      button.title = "Session changes";
+      return;
+    }
     const label = open ? "Hide changes" : "Show changes";
     button.setAttribute("aria-label", label);
     button.setAttribute("title", label);
@@ -46,10 +52,23 @@ export function initIDEChanges(showEditor: () => void): void {
     }
   };
   button.addEventListener("click", () => {
+    if (!document.querySelector("#agentSplit")?.classList.contains("ide-mode")) return;
     open = !open;
     if (open) showEditor();
     update();
     void load();
+  });
+  window.addEventListener("paladin:ide-show-file", () => {
+    if (!open) return;
+    open = false;
+    request++;
+    update();
+  });
+  window.addEventListener("paladin:ide-browser-active", (event) => {
+    if (!(event as CustomEvent<boolean>).detail || !open) return;
+    open = false;
+    request++;
+    update();
   });
   window.addEventListener("paladin:sessions-changed", () => {
     if (open && tab?.sessionId !== state.sessionId) void load();
@@ -66,5 +85,6 @@ export function initIDEChanges(showEditor: () => void): void {
     data = detail.data;
     paintChangesTab(tab, data);
   });
+  window.addEventListener("paladin:ide-mode-changed", update);
   update();
 }

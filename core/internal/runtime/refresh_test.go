@@ -3,11 +3,54 @@ package runtime
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
 )
+
+func TestLiteLLMRefreshUpdatesVisibleModels(t *testing.T) {
+	rt, _ := testRuntime(t)
+	f := &recordingFetcher{models: map[string][]string{config.LiteLLMName: {"old", "new"}}}
+	rt.SetModelFetcher(f.fetch)
+	if _, err := rt.RefreshProvider(config.LiteLLMName); err != nil {
+		t.Fatal(err)
+	}
+	f.models[config.LiteLLMName] = []string{"new", "latest"}
+	result, err := rt.RefreshProvider(config.LiteLLMName)
+	if err != nil || result.Error != "" || result.Count != 2 {
+		t.Fatalf("refresh failed: %+v, %v", result, err)
+	}
+	want := []string{"latest", "new"}
+	if got := rt.store.ModelsFor(config.LiteLLMName); !reflect.DeepEqual(got, want) {
+		t.Fatalf("visible LiteLLM models = %v, want %v", got, want)
+	}
+	for _, provider := range rt.ListProviders() {
+		if provider.Name == config.LiteLLMName && !reflect.DeepEqual(provider.Models, want) {
+			t.Fatalf("picker models = %v, want %v", provider.Models, want)
+		}
+	}
+	if got := f.calls(); !reflect.DeepEqual(got, []string{config.LiteLLMName, config.LiteLLMName}) {
+		t.Fatalf("unexpected providers contacted: %v", got)
+	}
+	f.errs = map[string]error{config.LiteLLMName: errors.New("proxy unavailable")}
+	failed, err := rt.RefreshProvider(config.LiteLLMName)
+	if err != nil || failed.Error == "" {
+		t.Fatalf("expected proxy error, got %+v, %v", failed, err)
+	}
+	if got := rt.store.ModelsFor(config.LiteLLMName); !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed refresh changed catalog: %v", got)
+	}
+	delete(f.errs, config.LiteLLMName)
+	f.models[config.LiteLLMName] = []string{}
+	if _, err := rt.RefreshProvider(config.LiteLLMName); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.store.ModelsFor(config.LiteLLMName); len(got) != 0 {
+		t.Fatalf("empty proxy catalog retained old models: %v", got)
+	}
+}
 
 // recordingFetcher stands in for the network so tests prove which
 // providers would have been contacted without contacting any.

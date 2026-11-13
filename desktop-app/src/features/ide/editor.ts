@@ -1,5 +1,5 @@
 import { basicSetup, EditorView } from "codemirror";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { keymap, type ViewUpdate } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -13,7 +13,7 @@ import { css } from "@codemirror/lang-css";
 
 export const theme = new Compartment();
 
-function language(path: string): Extension {
+export function language(path: string) {
   const lower = path.toLowerCase();
   if (/\.(tsx|jsx|ts|js|mjs|cjs)$/.test(lower))
     return javascript({ typescript: /\.tsx?$/.test(lower), jsx: /\.[jt]sx$/.test(lower) });
@@ -23,7 +23,7 @@ function language(path: string): Extension {
   if (lower.endsWith(".json")) return json();
   if (/\.(html|htm)$/.test(lower)) return html();
   if (lower.endsWith(".css")) return css();
-  return [];
+  return null;
 }
 
 export function createIDEEditorState(
@@ -36,7 +36,7 @@ export function createIDEEditorState(
     extensions: [
       basicSetup,
       keymap.of([indentWithTab]),
-      language(path),
+      language(path) ?? [],
       theme.of(document.documentElement.classList.contains("dark") ? oneDark : []),
       EditorView.contentAttributes.of({ "aria-label": "File editor", spellcheck: "false" }),
       EditorView.updateListener.of(onUpdate),

@@ -118,7 +118,9 @@ export function monitorDiskChanges(
     if (!compare.hidden && snapshot && snapshot.file === current())
       compare.querySelectorAll("pre")[0].textContent = snapshot.file.content;
   });
-  window.setInterval(() => void check(), 1000);
+  // Focus and file events still check immediately; a slower background poll
+  // avoids repeatedly querying the core while the editor is idle.
+  window.setInterval(() => void check(), 3000);
   window.addEventListener("paladin:ide-file-changed", () => {
     serial++;
     clear();

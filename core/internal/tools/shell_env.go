@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -142,11 +143,14 @@ func lookPath(name string) (string, error) {
 }
 
 // userShell resolves the shell model commands run under, mirroring
-// opencode: $SHELL when it names a compatible executable, else
-// /bin/bash, else the first usable entry in /etc/shells, else /bin/sh.
+// the terminal: $SHELL when usable, then zsh on macOS, then bash
+// or the first usable entry in /etc/shells, else /bin/sh.
 func userShell() string {
 	if sh := strings.TrimSpace(os.Getenv("SHELL")); sh != "" && compatibleShell(sh) && isExecutable(sh) {
 		return sh
+	}
+	if runtime.GOOS == "darwin" && isExecutable("/bin/zsh") {
+		return "/bin/zsh"
 	}
 	if isExecutable("/bin/bash") {
 		return "/bin/bash"
@@ -185,14 +189,14 @@ func isExecutable(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0
 }
 
-// loginArgs builds the argv for a model command. It reports whether
-// the shell runs as a login shell: bash/dash/ksh/sh/zsh (like
-// opencode's login list) get -l so profile files assemble the user's
-// real settings even when the sidecar was spawned with a minimal
-// desktop environment.
+// loginArgs builds argv for a model command. Zsh needs interactive mode
+// to load .zshrc, where users commonly configure their terminal environment.
+// Other compatible shells keep their non-interactive login behavior.
 func loginArgs(shell, cmdStr string) ([]string, bool) {
 	switch strings.ToLower(filepath.Base(shell)) {
-	case "bash", "rbash", "dash", "ksh", "sh", "zsh":
+	case "zsh":
+		return []string{"-il", "-c", cmdStr}, true
+	case "bash", "rbash", "dash", "ksh", "sh":
 		return []string{"-l", "-c", cmdStr}, true
 	default:
 		return []string{"-c", cmdStr}, false

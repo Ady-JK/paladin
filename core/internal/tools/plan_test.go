@@ -148,3 +148,23 @@ func TestPlanShellBlocksWrites(t *testing.T) {
 		t.Fatalf("pwd: out=%s err=%v", out, err)
 	}
 }
+
+func TestSedScriptUnsafeComplexPatterns(t *testing.T) {
+	cases := []struct {
+		script string
+		unsafe bool
+	}{
+		{`/foo\\/bar/p`, false},
+		{`s|foo|bar|gi`, false},
+		{`1,3 {p;w out}`, true},
+		{`s/foo/bar/w out`, true},
+		{`s/foo/bar/e`, true},
+		{`/unterminated`, true},
+		{`s/foo`, true},
+	}
+	for _, tc := range cases {
+		if got := sedScriptUnsafe(tc.script); got != tc.unsafe {
+			t.Errorf("script %q: got unsafe=%v, want %v", tc.script, got, tc.unsafe)
+		}
+	}
+}

@@ -27,7 +27,7 @@ import (
 const (
 	// compactThresholdPct is the window fill that triggers proactive
 	// compaction before the next round.
-	compactThresholdPct = 85
+	compactThresholdPct = 90
 	// unknownWindowTokens stands in when no window is known (no catalog
 	// entry and no built-in table row), so a missing listing cannot
 	// silently disable proactive compaction. Same role as opencode's
@@ -238,6 +238,12 @@ func replayRecord(m inference.LlmMessage, now time.Time) transcript.Message {
 // fill most of a known context window. Failure is not fatal: the round
 // runs uncompacted and a real overflow still gets the reactive path.
 func (a *Agent) maybeCompact() {
+	if a.contextChoice != nil {
+		window, pct := a.contextChoice()
+		if window > 0 && pct >= 1 && pct <= 100 {
+			a.window, a.compactPct = window, pct
+		}
+	}
 	if a.window <= 0 || a.compactStreak >= maxUnproductiveCompactions {
 		return
 	}
@@ -250,9 +256,13 @@ func (a *Agent) maybeCompact() {
 	}
 }
 
-// overThreshold reports whether est fills 85% of the window.
+// overThreshold reports whether the configured window fill was reached.
 func (a *Agent) overThreshold(est int64) bool {
-	return a.window > 0 && est*100 >= a.window*compactThresholdPct
+	pct := a.compactPct
+	if pct <= 0 || pct > 100 {
+		pct = compactThresholdPct
+	}
+	return a.window > 0 && float64(est)*100 >= float64(a.window)*pct
 }
 
 // noteRoundSucceeded ends a compaction streak once a round got through
@@ -357,17 +367,18 @@ func (a *Agent) compact(reason string, before int64) error {
 	}
 	now := time.Now().UTC()
 	tail := a.messages[cut:]
+	summaryMsg := inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)}
+	a.messages = append([]inference.LlmMessage{summaryMsg}, tail...)
+	a.promptTokens, a.promptLen = 0, 0
+	after := a.estimateContext()
 	a.records = append(a.records, transcript.Message{
 		Role: transcript.RoleSystem, Content: summary, CreatedAt: now,
-		Compaction: &transcript.Compaction{TokensBefore: before, Reason: reason},
+		Compaction: &transcript.Compaction{TokensBefore: before, TokensAfter: after, Reason: reason},
 	})
 	for _, m := range tail {
 		a.records = append(a.records, replayRecord(m, now))
 	}
-	summaryMsg := inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)}
-	a.messages = append([]inference.LlmMessage{summaryMsg}, tail...)
-	a.promptTokens, a.promptLen = 0, 0
-	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: a.estimateContext(), Summary: summary}})
+	_ = a.emit(ChatChunk{Compaction: &CompactionStatus{Phase: "done", Reason: reason, TokensBefore: before, TokensAfter: after, Summary: summary}})
 	post := a.hookInput(hooks.PostCompact)
 	post.Trigger = trigger
 	a.runHooks(post)

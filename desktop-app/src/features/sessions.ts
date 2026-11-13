@@ -17,7 +17,7 @@ import {
   workspaceInputEl,
   workspaceLabelEl,
 } from "../core/dom";
-import { escapeAttr, escapeHtml, shortPath, splitModel } from "../core/format";
+import { bare, escapeAttr, escapeHtml, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
 import type { AgentInfo, AgentStatus, HistoryPage, MessageInfo, SessionInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
@@ -496,7 +496,7 @@ export async function openSession(id: string): Promise<void> {
       persistModelChoice();
       syncModelSelects();
     } else {
-      modelSelectLabelEl.textContent = session.model || "default";
+      modelSelectLabelEl.textContent = session.model ? bare(splitModel(session.model).short) : "default";
     }
 
     // Attach is atomic: persisted history plus the live turn (if it has

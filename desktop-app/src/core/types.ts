@@ -209,6 +209,8 @@ type UsageModel = {
   contextWindow: number;
   contextKnown: boolean;
   calls: number;
+  unpricedCalls?: number;
+  trackedSpend?: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
@@ -257,6 +259,8 @@ export type SessionUsage = {
   contextWindow: number;
   contextKnown: boolean;
   calls: number;
+  unpricedCalls?: number;
+  trackedSpend?: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
@@ -280,6 +284,8 @@ export type SessionUsage = {
 export type DailyPoint = {
   date: string;
   calls: number;
+  unpricedCalls?: number;
+  trackedSpend?: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
@@ -303,6 +309,8 @@ type OverallSessionEntry = {
   createdAt: number;
   updatedAt: number;
   calls: number;
+  unpricedCalls?: number;
+  trackedSpend?: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
@@ -323,6 +331,8 @@ export type OverallUsage = {
   sessionCount: number;
   sessionsWithUsage: number;
   calls: number;
+  unpricedCalls?: number;
+  trackedSpend?: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
@@ -353,6 +363,7 @@ export type MessageInfo = {
   // divider whose content is the summary; "thinking" is the model's
   // thinking before the assistant message that follows.
   kind?: string;
+  compaction?: { reason: string; tokensBefore: number; tokensAfter?: number };
   // index is a user row's transcript position, the handle for undo.
   index?: number;
   image?: { path: string; mimeType: string; size: number; sha256: string };
@@ -415,6 +426,7 @@ export type RefreshResult = {
   count: number;
   models: string[] | null;
   error?: string;
+  warning?: string;
 };
 
 export type ProviderInfo = {
@@ -433,8 +445,9 @@ export type ProviderInfo = {
 // ModelMeta is a provider's published metadata for one model: the wire
 // dialect serving it, its limits, the thinking levels it accepts and its
 // prices in USD per million tokens.
-export type ModelMeta = {
+type ModelMeta = {
   contextWindow?: number;
+  maxInput?: number;
   maxOutput?: number;
   /** "chat", "responses", "anthropic" or "google". */
   protocol?: string;
@@ -445,6 +458,17 @@ export type ModelMeta = {
   priceOutput?: number;
   priceCacheRead?: number;
   priceCacheWrite?: number;
+  pricing?: {
+    source: string;
+    fetchedAt: number;
+    tiers: Array<{
+      aboveInputTokens?: number;
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+    }>;
+  };
 };
 
 type FsDirectory = {
@@ -465,18 +489,6 @@ export type FsList = {
 };
 
 export type IDEExplorerSettings = { hideIgnored: boolean; hideDotFolders: boolean };
-
-export type GroupedLab = {
-  display: string;
-  models: { provider: string; id: string }[];
-};
-
-export type GroupedProvider = {
-  display: string;
-  infos: ProviderInfo[];
-  isDefault: boolean;
-  labs: GroupedLab[];
-};
 
 // DiffRow is one rendered line of a two-sided text diff.
 // OldNo/newNo are hunk-relative line numbers; one side is null on add/del rows.

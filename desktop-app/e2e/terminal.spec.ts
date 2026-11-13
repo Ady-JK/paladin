@@ -37,6 +37,9 @@ test("selected IDE terminal output can be added to the agent draft", async ({ pa
   await page.locator("#promptInput").press("Enter");
   const row = page.locator("#ideTerminalDock .xterm-rows > div").filter({ hasText: "/home/tester/project" }).first();
   await expect(row).toBeVisible();
+  // The Explorer overlay covers the left of the terminal; close it so the drag reaches the text.
+  await page.locator("#ideExplorerToggle").click();
+  await expect(page.locator(".ide-explorer")).toHaveClass(/is-closed/);
   const box = (await row.boundingBox())!;
   await page.mouse.move(box.x + 3, box.y + box.height / 2);
   await page.mouse.down();
@@ -208,4 +211,15 @@ test("a standalone terminal follows the user when opening an existing chat", asy
   await page.keyboard.type("pwd");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalWrites?.length ?? 0)).toBeGreaterThan(0);
   expect(await page.evaluate(() => (window as any).__e2eTerminalStarts.length)).toBe(1);
+});
+
+test("the shared terminal button reopens the existing terminal in Agent mode", async ({ page }) => {
+  const toggle = page.locator("#rail #ideTerminalToggle");
+  await toggle.click();
+  await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
+  await toggle.click();
+  await expect(page.locator("#sidePane")).toBeHidden();
+  await toggle.click();
+  await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
+  await expect(page.locator("#sidePane .pane-terminal")).toHaveCount(1);
 });

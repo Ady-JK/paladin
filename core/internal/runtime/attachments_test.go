@@ -11,6 +11,36 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
+func TestTaggedImageIsCopiedFromOutsideWorkspace(t *testing.T) {
+	const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII="
+	rt, dir := testRuntime(t)
+	if err := rt.store.Keys.Set("litellm", "test-key"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.OpenSession("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := base64.StdEncoding.DecodeString(pixel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "screenshot.png")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := rt.SaveTaggedImage(sess.SessionID, dir, path)
+	if err != nil || ref == nil || ref.Image == nil || ref.Path == path {
+		t.Fatalf("attachment: %+v, %v", ref, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.SessionAttachment(sess.SessionID, dir, ref.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSessionAttachmentCopiesAndRestrictsImage(t *testing.T) {
 	const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII="
 	rt, dir := testRuntime(t)

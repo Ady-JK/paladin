@@ -22,6 +22,7 @@ import (
 )
 
 const (
+	copilotAPIVersion    = "2026-08-01"
 	DefaultOpenAIModel   = "gpt-4o-mini"
 	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 )
@@ -43,6 +44,25 @@ func init() {
 			return NewOpenAIProviderWithMeta(spec.Name, spec.Model, spec.BaseURL, spec.ApiKey, spec.Meta), nil
 		},
 	})
+	RegisterProviderTemplate(ProviderTemplate{
+		ApiType: config.ApiTypeCopilot,
+		New: func(spec ProviderSpec) (Provider, error) {
+			p := NewOpenAIProviderWithMeta(spec.Name, spec.Model, spec.BaseURL, spec.ApiKey, spec.Meta)
+			client := openai.NewClient(
+				option.WithBaseURL(p.baseURL), option.WithAPIKey(spec.ApiKey), option.WithHTTPClient(providerHTTPClient),
+				option.WithMaxRetries(2), option.WithMiddleware(skipEmptySSEFrames()),
+				option.WithHeader("Copilot-Integration-Id", "vscode-chat"),
+				option.WithHeader("Editor-Version", "vscode/1.95.0"),
+				option.WithHeader("Editor-Plugin-Version", "copilot-chat/0.26.7"),
+				option.WithHeader("User-Agent", "GitHubCopilotChat/0.26.7"),
+				option.WithHeader("Openai-Intent", "conversation-panel"),
+			)
+			p.client = &client
+			p.isCopilot = true
+			p.protocol = copilotProtocol(spec.Model, spec.Meta)
+			return p, nil
+		},
+	})
 }
 
 type OpenAIProvider struct {
@@ -51,6 +71,7 @@ type OpenAIProvider struct {
 	baseURL    string
 	apiKey     string
 	isOpencode bool
+	isCopilot  bool
 	protocol   string
 	// meta is what the provider's model listing said about this model;
 	// the zero value means it said nothing.
@@ -128,6 +149,9 @@ func (p *OpenAIProvider) ApiType() config.ApiType { return config.ApiTypeOpenai 
 func (p *OpenAIProvider) Model() string           { return p.model }
 
 func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
+	if p.isCopilot && sessionID != "catalog" {
+		return []option.RequestOption{option.WithHeader("X-GitHub-Api-Version", copilotAPIVersion)}
+	}
 	if !p.isOpencode {
 		return nil
 	}
@@ -148,6 +172,25 @@ func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
 // never replay a partially streamed round.
 func (p *OpenAIProvider) streamOptions(sessionID string) []option.RequestOption {
 	return append(p.headers(sessionID), option.WithMaxRetries(0))
+}
+
+func (p *OpenAIProvider) copilotOptions(messages []LlmMessage) []option.RequestOption {
+	if !p.isCopilot {
+		return nil
+	}
+	initiator := "user"
+	vision := false
+	for _, message := range messages {
+		if message.Role == "assistant" || message.Role == "tool" {
+			initiator = "agent"
+		}
+		vision = vision || message.Image != nil
+	}
+	opts := []option.RequestOption{option.WithHeader("X-Initiator", initiator)}
+	if vision {
+		opts = append(opts, option.WithHeader("Copilot-Vision-Request", "true"))
+	}
+	return opts
 }
 
 // catalogURL derives the model list endpoint from the configured base.
@@ -314,6 +357,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 	defer cancel()
 	var httpRes *http.Response
 	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
+	opts = append(opts, p.copilotOptions(messages)...)
 	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID, false), opts...)
 	if err != nil {
 		return ToolResponse{}, p.mapError("chat completion", err)
@@ -331,6 +375,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 		})
 	}
 	out.Usage = withHeaderCost(chatUsage(res.Usage, res.RawJSON()), httpRes)
+	p.estimateCopilotUsage(out.Usage, false)
 	return out, nil
 }
 
@@ -346,6 +391,7 @@ func chatUsage(u openai.CompletionUsage, raw string) *Usage {
 		CacheReadTokens:  u.PromptTokensDetails.CachedTokens,
 		TotalTokens:      u.TotalTokens,
 	}
+	captureCacheDetails(out, raw, "prompt_tokens_details")
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.PromptTokens + out.CompletionTokens
 	}
@@ -374,7 +420,8 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	parent := ctx
 	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID, true), p.streamOptions(sessionID)...)
+	opts := append(p.streamOptions(sessionID), p.copilotOptions(messages)...)
+	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID, true), opts...)
 	defer stream.Close()
 	var usage Usage
 	accs := map[int64]*callAcc{}
@@ -484,7 +531,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	if !usage.Empty() {
 		u := usage
 		select {
-		case tx <- Chunk{Usage: &u}:
+		case tx <- Chunk{Usage: p.estimateCopilotUsage(&u, false)}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():
@@ -582,17 +629,40 @@ func (p *OpenAIProvider) ListCatalog(ctx context.Context) ([]string, map[string]
 	}
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
-	page, err := p.client.Models.List(ctx, p.headers("catalog")...)
+	opts := p.headers("catalog")
+	if p.isCopilot {
+		opts = append(opts, option.WithHeader("X-GitHub-Api-Version", copilotAPIVersion))
+	}
+	page, err := p.client.Models.List(ctx, opts...)
+	var apiErr *openai.Error
+	if p.isCopilot && errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+		page, err = p.client.Models.List(ctx, p.headers("catalog")...)
+	}
 	if err != nil {
 		return nil, nil, p.mapError("list models", err)
 	}
 	var ids []string
+	var metadata map[string]CatalogMeta
 	for _, m := range page.Data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
+		if m.ID == "" {
+			continue
 		}
+		if p.isCopilot {
+			meta, include, err := parseCopilotModel(m.ID, m.RawJSON())
+			if err != nil {
+				return nil, nil, RequestError(fmt.Sprintf("%s: invalid Copilot model metadata", p.name))
+			}
+			if !include {
+				continue
+			}
+			if metadata == nil {
+				metadata = make(map[string]CatalogMeta)
+			}
+			metadata[m.ID] = meta
+		}
+		ids = append(ids, m.ID)
 	}
-	return ids, nil, nil
+	return ids, metadata, nil
 }
 
 // listPublicCatalog reads a keyless provider's listing over plain HTTP so

@@ -72,119 +72,142 @@ func CompleteFiles(workspace, query string, limit int) ([]FileEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := strings.ToLower(slash)
-	frag := q
-	dirPart := ""
-	if i := strings.LastIndex(q, "/"); i >= 0 {
-		dirPart, frag = q[:i], q[i+1:]
+	search := completionSearch{workspace: workspace, slash: slash, query: strings.ToLower(slash)}
+	search.fragment = search.query
+	if i := strings.LastIndex(search.query, "/"); i >= 0 {
+		search.directory, search.fragment = search.query[:i], search.query[i+1:]
 	}
-	type ranked struct {
-		entry FileEntry
-		score int
+	search.addExact()
+	search.addFiles(files)
+	search.addDirectories(cachedIgnoreMatcher(anchor))
+	return search.entries(limit), nil
+}
+
+type rankedCompletion struct {
+	entry FileEntry
+	score int
+}
+
+type completionSearch struct {
+	workspace string
+	slash     string
+	query     string
+	directory string
+	fragment  string
+	ranked    []rankedCompletion
+}
+
+func (s *completionSearch) push(abs, chat string, isDir bool, score int) {
+	abs = cleanPath(abs)
+	if isDir {
+		chat = strings.TrimSuffix(chat, "/") + "/"
 	}
-	var out []ranked
-	push := func(abs, chat string, isDir bool, score int) {
-		abs = cleanPath(abs)
-		if isDir {
-			chat = strings.TrimSuffix(chat, "/") + "/"
-		}
-		outside := markScopeOutside(abs, workspace)
-		out = append(out, ranked{
-			entry: FileEntry{
-				Path:         chat,
-				Display:      ChatDisplayShort(chat),
-				ResolvedPath: abs,
-				Outside:      outside,
-				IsDir:        isDir,
-			},
-			score: score,
-		})
+	s.ranked = append(s.ranked, rankedCompletion{
+		entry: FileEntry{
+			Path: chat, Display: ChatDisplayShort(chat), ResolvedPath: abs,
+			Outside: markScopeOutside(abs, s.workspace), IsDir: isDir,
+		},
+		score: score,
+	})
+}
+
+func (s *completionSearch) addExact() {
+	if s.slash == "" {
+		return
 	}
-	// The exact path first: a fully typed @path tags even with no
-	// popup interaction.
-	if slash != "" {
-		if abs, _, err := ResolveChatPath(slash, workspace); err == nil {
-			if info, err := os.Stat(abs); err == nil {
-				chat := ToChatPath(abs, workspace)
-				push(abs, chat, info.IsDir(), minFuzzyScore)
-			}
-		}
+	abs, _, err := ResolveChatPath(s.slash, s.workspace)
+	if err != nil {
+		return
 	}
+	if info, err := os.Stat(abs); err == nil {
+		s.push(abs, ToChatPath(abs, s.workspace), info.IsDir(), minFuzzyScore)
+	}
+}
+
+func (s *completionSearch) addFiles(files []string) {
 	for _, abs := range files {
-		chat := ToChatPath(abs, workspace)
+		chat := ToChatPath(abs, s.workspace)
 		lower := strings.ToLower(chat)
-		score, ok := fuzzyScore(q, lower)
+		score, ok := fuzzyScore(s.query, lower)
 		if !ok {
 			continue
 		}
-		// Basename matches rank better than deep-path ones.
-		if bs, ok := fuzzyScore(q, baseName(lower)); ok && bs < score {
-			score = bs - 2
+		if baseScore, ok := fuzzyScore(s.query, baseName(lower)); ok && baseScore < score {
+			score = baseScore - 2
 		}
-		push(abs, chat, false, score)
+		s.push(abs, chat, false, score)
 	}
-	// Folders: the query's base directory itself plus its immediate
-	// subdirectories, so `@src/` offers the folder to tag.
-	ign := cachedIgnoreMatcher(anchor)
-	baseInput := dirPart
-	if slash == ".." {
-		baseInput = ".."
-		frag = ""
+}
+
+func (s *completionSearch) addDirectories(ignore *ignoreMatcher) {
+	baseInput, fragment := s.directory, s.fragment
+	if s.slash == ".." {
+		baseInput, fragment = "..", ""
 	}
 	if baseInput == "" {
 		baseInput = "."
 	}
-	if baseAbs, _, err := ResolveChatPath(baseInput, workspace); err == nil {
-		if info, err := os.Stat(baseAbs); err == nil && info.IsDir() && !ign.ignored(cleanPath(baseAbs), true) {
-			if dirPart != "" && frag == "" {
-				push(baseAbs, ToChatPath(baseAbs, workspace), true, 0)
-			}
-			if entries, err := os.ReadDir(baseAbs); err == nil {
-				added := 0
-				for _, e := range entries {
-					if !e.IsDir() || added >= completeDirCap {
-						continue
-					}
-					sub := filepath.Join(baseAbs, e.Name())
-					if ign.ignored(cleanPath(sub), true) {
-						continue
-					}
-					lower := strings.ToLower(ToChatPath(sub, workspace))
-					score, ok := fuzzyScore(q, lower)
-					if !ok {
-						continue
-					}
-					if bs, ok := fuzzyScore(q, strings.ToLower(e.Name())); ok && bs < score {
-						score = bs - 2
-					}
-					push(sub, ToChatPath(sub, workspace), true, score)
-					added++
-				}
-			}
-		}
+	baseAbs, _, err := ResolveChatPath(baseInput, s.workspace)
+	if err != nil {
+		return
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].score != out[j].score {
-			return out[i].score < out[j].score
-		}
-		if len(out[i].entry.Path) != len(out[j].entry.Path) {
-			return len(out[i].entry.Path) < len(out[j].entry.Path)
-		}
-		return out[i].entry.Path < out[j].entry.Path
-	})
-	seen := map[string]bool{}
-	entries := make([]FileEntry, 0, len(out))
-	for _, r := range out {
-		if seen[r.entry.Path] {
+	info, err := os.Stat(baseAbs)
+	if err != nil || !info.IsDir() || ignore.ignored(cleanPath(baseAbs), true) {
+		return
+	}
+	if s.directory != "" && fragment == "" {
+		s.push(baseAbs, ToChatPath(baseAbs, s.workspace), true, 0)
+	}
+	entries, err := os.ReadDir(baseAbs)
+	if err != nil {
+		return
+	}
+	added := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || added >= completeDirCap {
 			continue
 		}
-		seen[r.entry.Path] = true
-		entries = append(entries, r.entry)
+		sub := filepath.Join(baseAbs, entry.Name())
+		if ignore.ignored(cleanPath(sub), true) {
+			continue
+		}
+		chat := ToChatPath(sub, s.workspace)
+		score, ok := fuzzyScore(s.query, strings.ToLower(chat))
+		if !ok {
+			continue
+		}
+		if baseScore, ok := fuzzyScore(s.query, strings.ToLower(entry.Name())); ok && baseScore < score {
+			score = baseScore - 2
+		}
+		s.push(sub, chat, true, score)
+		added++
+	}
+}
+
+func (s *completionSearch) entries(limit int) []FileEntry {
+	sort.Slice(s.ranked, func(i, j int) bool {
+		left, right := s.ranked[i], s.ranked[j]
+		if left.score != right.score {
+			return left.score < right.score
+		}
+		if len(left.entry.Path) != len(right.entry.Path) {
+			return len(left.entry.Path) < len(right.entry.Path)
+		}
+		return left.entry.Path < right.entry.Path
+	})
+	seen := map[string]bool{}
+	entries := make([]FileEntry, 0, len(s.ranked))
+	for _, result := range s.ranked {
+		if seen[result.entry.Path] {
+			continue
+		}
+		seen[result.entry.Path] = true
+		entries = append(entries, result.entry)
 		if len(entries) >= limit {
 			break
 		}
 	}
-	return entries, nil
+	return entries
 }
 
 // minFuzzyScore pins the exact-path hit ahead of every fuzzy row.

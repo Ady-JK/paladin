@@ -10,6 +10,7 @@ const ICONS: Record<string, Icon> = {
     d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0ZM12 9v4M12 17h.01",
     line: true,
   },
+  home: { d: "M3 10.5 12 3l9 7.5M5 9.5V20h14V9.5M9 20v-6h6v6", line: true },
   comments: { d: "M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Z" },
   "layout-tabs": {
     d: "M4 5h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm-2 5h20M6 7.5h4m3 0h4",
@@ -24,7 +25,7 @@ const ICONS: Record<string, Icon> = {
   code: { d: "m16 18 6-6-6-6M8 6l-6 6 6 6", line: true },
   expand: { d: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7", line: true },
   folder: { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" },
-  "folder-open": { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H6.5L3 17V7Z" },
+  "folder-open": { d: "M3 19V6a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v2M3 19l3-9h16l-3 9H3Z", line: true },
   "folder-tree": {
     d: "M3 4h5v4H3V4Zm0 12h5v4H3v-4ZM8 6h4m-4 10h4m4-12h5v2h-5V4Zm0 12h5v2h-5v-2Z",
   },

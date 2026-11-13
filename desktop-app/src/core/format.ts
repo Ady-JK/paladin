@@ -388,24 +388,6 @@ export function shortPath(path: string): string {
   return parts.length ? parts[parts.length - 1] : path || "workspace";
 }
 
-export function fuzzyMatch(query: string, text: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) {
-    return true;
-  }
-
-  const t = text.toLowerCase();
-  let at = 0;
-  for (const char of q) {
-    at = t.indexOf(char, at);
-    if (at === -1) {
-      return false;
-    }
-    at++;
-  }
-  return true;
-}
-
 export function bare(text: string): string {
   return text.replace(/^~+/, "");
 }
@@ -426,19 +408,6 @@ export function modelsOf(provider: ProviderInfo | undefined): string[] {
     return provider.models;
   }
   return provider.model ? [provider.model] : [];
-}
-
-export function modelsInLab(provider: ProviderInfo | undefined, lab: string): string[] {
-  if (!provider) {
-    return [];
-  }
-  return modelsOf(provider)
-    .filter((m) => (lab ? splitModel(m).lab === lab : true))
-    .sort((a, b) => a.localeCompare(b));
-}
-
-export function labKey(provider: string, lab: string): string {
-  return `${provider}	${lab}`;
 }
 
 // splitLines splits text into display lines on LF.

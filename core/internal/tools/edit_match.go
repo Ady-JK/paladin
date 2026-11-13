@@ -87,14 +87,7 @@ func lineMatch(content, oldText, newText string, norm func(string) string, reind
 	}
 	var spans []editSpan
 	for i := 0; i+len(want) <= len(lines); i++ {
-		ok := true
-		for k := range want {
-			if norm(lines[i+k]) != want[k] {
-				ok = false
-				break
-			}
-		}
-		if !ok {
+		if !linesMatch(lines[i:i+len(want)], want, norm) {
 			continue
 		}
 		last := i + len(want) - 1
@@ -114,6 +107,15 @@ func lineMatch(content, oldText, newText string, norm func(string) string, reind
 		i = last
 	}
 	return spans
+}
+
+func linesMatch(lines, wanted []string, normalize func(string) string) bool {
+	for index, line := range lines {
+		if normalize(line) != wanted[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func reindentText(text, fileIndent, oldIndent string) string {

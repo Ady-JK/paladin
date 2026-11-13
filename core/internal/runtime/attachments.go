@@ -21,6 +21,27 @@ const maxAttachmentBytes = 10 << 20
 
 var attachmentID = regexp.MustCompile(`^file-[a-zA-Z0-9]+$`)
 
+// SaveTaggedImage copies a user-selected image into the session, including
+// screenshots selected outside the workspace. Non-images remain path tags.
+func (r *AgentRuntime) SaveTaggedImage(sessionID, cwd, path string) (*media.Attachment, error) {
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("tagged image path must be absolute")
+	}
+	image, ok, err := media.ReadIfImage(path)
+	if err != nil || !ok {
+		return nil, err
+	}
+	dataURL, err := image.DataURL()
+	if err != nil {
+		return nil, err
+	}
+	_, data, ok := strings.Cut(dataURL, ",")
+	if !ok {
+		return nil, fmt.Errorf("invalid image data")
+	}
+	return r.SaveAttachment(sessionID, cwd, filepath.Base(path), data)
+}
+
 func (r *AgentRuntime) SaveAttachment(sessionID, cwd, name, encoded string) (*media.Attachment, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(name) == "" || len(name) > 255 || strings.ContainsAny(name, "\r\n\x00") || len(encoded) == 0 || len(encoded) > base64.StdEncoding.EncodedLen(maxAttachmentBytes) {
 		return nil, fmt.Errorf("invalid attachment")

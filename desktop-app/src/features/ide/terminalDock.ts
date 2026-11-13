@@ -192,6 +192,10 @@ export class TerminalDock {
   }
 
   sync(): void {
+    const toggle = document.querySelector<HTMLButtonElement>("#ideTerminalToggle")!;
+    toggle.setAttribute("aria-pressed", String(this.enabled && this.open));
+    toggle.setAttribute("aria-label", this.open ? "Hide terminal" : "Show terminal");
+    toggle.title = this.open ? "Hide terminal" : "Show terminal";
     if (!this.enabled) {
       this.root.hidden = true;
       return;
@@ -205,6 +209,9 @@ export class TerminalDock {
       pair = undefined;
     }
     if (!terminals.length) this.open = false;
+    toggle.setAttribute("aria-pressed", String(this.open));
+    toggle.setAttribute("aria-label", this.open ? "Hide terminal" : "Show terminal");
+    toggle.title = this.open ? "Hide terminal" : "Show terminal";
     this.root.hidden = !this.open;
     this.tabs.innerHTML = terminals
       .map(

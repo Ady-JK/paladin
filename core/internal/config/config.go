@@ -58,13 +58,14 @@ func DataDir() string {
 	return ".paladin"
 }
 
-// ApiType is the provider dialect. Only openai is implemented in v1.
+// ApiType is the provider dialect.
 type ApiType string
 
 const (
 	ApiTypeOpenai    ApiType = "openai"
 	ApiTypeAnthropic ApiType = "anthropic"
 	ApiTypeGoogle    ApiType = "google"
+	ApiTypeCopilot   ApiType = "github-copilot"
 )
 
 func ParseApiType(s string) (ApiType, error) {
@@ -75,8 +76,10 @@ func ParseApiType(s string) (ApiType, error) {
 		return ApiTypeAnthropic, nil
 	case "google":
 		return ApiTypeGoogle, nil
+	case "github-copilot":
+		return ApiTypeCopilot, nil
 	default:
-		return "", fmt.Errorf("unknown api_type %q (want one of openai, anthropic, google)", s)
+		return "", fmt.Errorf("unknown api_type %q (want one of openai, anthropic, google, github-copilot)", s)
 	}
 }
 
@@ -130,6 +133,10 @@ type ProviderModels struct {
 type ModelMeta struct {
 	// ContextWindow is the model's total context window in tokens.
 	ContextWindow int64 `json:"contextWindow,omitempty"`
+	// MaxInput is the provider's maximum input tokens, when distinct from the total.
+	MaxInput             int64 `json:"maxInput,omitempty"`
+	DefaultInput         int64 `json:"defaultInput,omitempty"`
+	LongContextSurcharge bool  `json:"longContextSurcharge,omitempty"`
 	// MaxOutput is the model's output token ceiling.
 	MaxOutput int64 `json:"maxOutput,omitempty"`
 	// Protocol is the wire dialect the gateway documents for the model,
@@ -149,13 +156,30 @@ type ModelMeta struct {
 	PriceOutput     float64 `json:"priceOutput,omitempty"`
 	PriceCacheRead  float64 `json:"priceCacheRead,omitempty"`
 	PriceCacheWrite float64 `json:"priceCacheWrite,omitempty"`
+	// Pricing distinguishes missing prices from a published zero and may
+	// contain higher rates for long-context requests.
+	Pricing *ModelPricing `json:"pricing,omitempty"`
+}
+
+type ModelPricing struct {
+	Source    string      `json:"source"`
+	FetchedAt int64       `json:"fetchedAt"`
+	Tiers     []PriceTier `json:"tiers"`
+}
+
+type PriceTier struct {
+	AboveInputTokens int64    `json:"aboveInputTokens,omitempty"`
+	Input            *float64 `json:"input,omitempty"`
+	Output           *float64 `json:"output,omitempty"`
+	CacheRead        *float64 `json:"cacheRead,omitempty"`
+	CacheWrite       *float64 `json:"cacheWrite,omitempty"`
 }
 
 // Empty reports whether the listing said nothing about the model.
 func (m ModelMeta) Empty() bool {
-	return m.ContextWindow == 0 && m.MaxOutput == 0 && m.Protocol == "" &&
+	return m.ContextWindow == 0 && m.MaxInput == 0 && m.DefaultInput == 0 && !m.LongContextSurcharge && m.MaxOutput == 0 && m.Protocol == "" &&
 		len(m.ThinkingLevels) == 0 && !m.ThinkingKnown && m.PriceInput == 0 && m.PriceOutput == 0 &&
-		m.PriceCacheRead == 0 && m.PriceCacheWrite == 0
+		m.PriceCacheRead == 0 && m.PriceCacheWrite == 0 && m.Pricing == nil
 }
 
 type ModelsFile struct {
@@ -503,6 +527,7 @@ func DefaultProvidersFile() ProvidersFile {
 			{Name: DefaultProviderName, ApiURL: OpencodeBaseURL, ApiType: ApiTypeOpenai},
 			{Name: OpenrouterName, ApiURL: OpenrouterBaseURL, ApiType: ApiTypeOpenai},
 			{Name: LiteLLMName, ApiURL: LiteLLMBaseURL, ApiType: ApiTypeOpenai},
+			{Name: "github-copilot", ApiURL: "https://api.githubcopilot.com", ApiType: ApiTypeCopilot},
 		},
 	}
 }

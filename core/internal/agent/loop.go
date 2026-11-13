@@ -1,6 +1,6 @@
 // loop.go is the per-turn execution loop. It streams one
 // model round, runs any requested tools, appends the results, and
-// repeats until the model stops asking for tools or the round cap is hit.
+// repeats until the model finishes, the user stops it, or an error occurs.
 
 package agent
 
@@ -18,83 +18,31 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
+type roundAction uint8
+
+const (
+	processRound roundAction = iota
+	retryRound
+	finishRound
+)
+
 func (a *Agent) runLoop() error {
 	if len(a.toolDefs) == 0 {
 		return a.runPlain()
 	}
-	// No round cap: like Codex and OpenCode, only the model (a reply
-	// without tool calls), the user, or an unrecoverable error ends a turn.
+	// A productive turn has no fixed round cap.
 	for {
-		a.round++
-		if a.stopRequested() {
-			return turnStop{}
-		}
-		if end, err := a.checkBudget(); end || err != nil {
+		if end, err := a.prepareToolRound(); end {
 			return err
-		}
-		if err := a.drainNotifications(); err != nil {
-			return err
-		}
-		if err := a.drainSteering(); err != nil {
-			return err
-		}
-		a.settleNotices(nil)
-		a.maybeCompact()
-		if a.stopRequested() {
-			return turnStop{}
 		}
 		round := a.streamRound()
-		if a.stopRequested() {
-			return a.stopWithPartial(round.text)
+		action, err := a.resolveToolRound(&round)
+		switch action {
+		case retryRound:
+			continue
+		case finishRound:
+			return err
 		}
-		if err := round.providerErr; err != nil {
-			if inference.IsCancelled(err) || a.stopRequested() {
-				return a.stopWithPartial(round.text)
-			}
-			if a.recoverRound(err, round.empty()) {
-				continue
-			}
-			a.keepPartial(round)
-			return roundFailure(err)
-		}
-		if round.clientGone {
-			return a.stopWithPartial(round.text)
-		}
-		if err := round.streamErr; err != nil {
-			if a.recoverRound(err, round.empty()) {
-				continue
-			}
-			a.keepPartial(round)
-			return roundFailure(err)
-		}
-		a.noteRoundSucceeded()
-		// Empty stream fallback: one buffered completion. A round that
-		// yields neither text nor tool calls is usually a gateway blip, so
-		// retry before believing it; three strikes ends the turn. Ending
-		// silent would fake a READY with nothing done (the "random stop"
-		// that forces another nudge), so a turn with zero progress fails
-		// loudly instead.
-		if round.empty() {
-			if a.emptyRounds >= 2 {
-				if len(a.records) > 0 || a.reply.Len() > 0 {
-					a.finish(phaseDone)
-					return nil
-				}
-				return turnFailed{"model returned an empty response \u2014 try again"}
-			}
-			a.emptyRounds++
-			retry, err := a.completeBuffered(&round)
-			if err != nil {
-				return err
-			}
-			// Still empty after the buffered fallback: retry next round
-			// instead of ending the turn silent (bounded by emptyRounds).
-			if retry || round.empty() {
-				continue
-			}
-		}
-		// The budget wrap-up has no tools; a call it hallucinates anyway
-		// is dropped and its text ends the turn.
 		if len(round.calls) == 0 || a.budgetWrapUp {
 			more, err := a.finishTextRound(round.text)
 			if more {
@@ -104,9 +52,7 @@ func (a *Agent) runLoop() error {
 		}
 		a.emptyRounds = 0
 		a.retries, a.timeoutRetries = 0, 0
-		// A round that ran tools made real progress: the plan reminders
-		// start over, so a long task only ends loudly after three
-		// consecutive stalls with nothing done between them.
+		// A tool round resets plan stalls and retry budgets.
 		a.planNudges = 0
 		canonicalizeCalls(a.tools, round.calls)
 		a.appendAssistant(round.text, round.calls)
@@ -118,6 +64,83 @@ func (a *Agent) runLoop() error {
 			return nil
 		}
 	}
+}
+
+// prepareToolRound processes pending user input before contacting the model.
+func (a *Agent) prepareToolRound() (bool, error) {
+	a.round++
+	if a.stopRequested() {
+		return true, turnStop{}
+	}
+	if end, err := a.checkBudget(); end || err != nil {
+		return true, err
+	}
+	if err := a.drainNotifications(); err != nil {
+		return true, err
+	}
+	if err := a.drainSteering(); err != nil {
+		return true, err
+	}
+	a.settleNotices(nil)
+	a.maybeCompact()
+	if a.stopRequested() {
+		return true, turnStop{}
+	}
+	return false, nil
+}
+
+func (a *Agent) resolveToolRound(round *roundResult) (roundAction, error) {
+	if a.stopRequested() {
+		a.recordStoppedPartial(round.text)
+		return finishRound, turnStop{}
+	}
+	if err := round.providerErr; err != nil {
+		if inference.IsCancelled(err) || a.stopRequested() {
+			a.recordStoppedPartial(round.text)
+			return finishRound, turnStop{}
+		}
+		return a.resolveRoundError(*round, err)
+	}
+	if round.clientGone {
+		a.recordStoppedPartial(round.text)
+		return finishRound, turnStop{}
+	}
+	if round.streamErr != nil {
+		return a.resolveRoundError(*round, round.streamErr)
+	}
+	a.noteRoundSucceeded()
+	if round.empty() {
+		return a.resolveEmptyToolRound(round)
+	}
+	return processRound, nil
+}
+
+func (a *Agent) resolveRoundError(round roundResult, err error) (roundAction, error) {
+	if a.recoverRound(err, round.empty()) {
+		return retryRound, nil
+	}
+	a.keepPartial(round)
+	return finishRound, roundFailure(err)
+}
+
+// Empty model responses get a buffered fallback, then bounded retries.
+func (a *Agent) resolveEmptyToolRound(round *roundResult) (roundAction, error) {
+	if a.emptyRounds >= 2 {
+		if len(a.records) > 0 || a.reply.Len() > 0 {
+			a.finish(phaseDone)
+			return finishRound, nil
+		}
+		return finishRound, turnFailed{"model returned an empty response — try again"}
+	}
+	a.emptyRounds++
+	retry, err := a.completeBuffered(round)
+	if err != nil {
+		return finishRound, err
+	}
+	if retry || round.empty() {
+		return retryRound, nil
+	}
+	return processRound, nil
 }
 
 // roundResult is what one streamed model round produced.
@@ -144,86 +167,114 @@ func (a *Agent) streamRound() roundResult {
 	providerErr := make(chan error, 1)
 	streamCtx, stopStream := context.WithCancel(a.ctx)
 	defer stopStream()
-	go func(msgs []inference.LlmMessage, defs []inference.ToolDefinition, sid string) {
-		defer close(prx)
-		providerErr <- guardProvider(func() error {
-			return a.TimeGen(func() error {
-				return a.provider.StreamTools(streamCtx, a.system, msgs, defs, sid, prx, a.done)
-			})
-		})
-	}(append([]inference.LlmMessage(nil), a.messages...), append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
-	var res roundResult
-	var text strings.Builder
-	lastCheckpoint := time.Time{}
-	checkpointFailed := false
-loop:
+	go a.startToolStream(streamCtx, prx, providerErr,
+		append([]inference.LlmMessage(nil), a.messages...),
+		append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
+	var stream toolRoundStream
+	a.collectToolStream(prx, &stream, stopStream)
+	stream.result.providerErr = <-providerErr
+	if stream.checkpointFailed {
+		stream.result.providerErr = nil
+	}
+	stream.result.text = stream.text.String()
+	return stream.result
+}
+
+func (a *Agent) collectToolStream(chunks <-chan inference.Chunk, stream *toolRoundStream, stopStream context.CancelFunc) {
 	for {
 		select {
-		case chunk, ok := <-prx:
+		case chunk, ok := <-chunks:
 			if !ok {
-				break loop
+				return
 			}
-			if chunk.Err != "" {
-				res.streamErr = errors.New(chunk.Err)
-				break loop
-			}
-			if chunk.Usage != nil {
-				a.noteCallUsage(*chunk.Usage)
-			}
-			if err := a.noteThinking(chunk); err != nil {
-				res.clientGone = true
-				break loop
-			}
-			if notice := chunk.ToolNotice; notice != nil {
-				name := notice.Name
-				if name == "" {
-					name = "tool"
+			if a.consumeToolChunk(stream, chunk) {
+				if stream.checkpointFailed {
+					stopStream()
 				}
-				a.noteNotice(notice.ID, name)
-				if err := a.emit(ChatChunk{Tool: &ToolActivity{
-					ID: notice.ID, Name: name, Arguments: "{}",
-					Status: session.ToolRunning,
-				}}); err != nil {
-					res.clientGone = true
-					break loop
-				}
-			}
-			if chunk.Text != "" {
-				text.WriteString(chunk.Text)
-				a.appendDelta(chunk.Text)
-				if time.Since(lastCheckpoint) >= time.Second {
-					if err := a.checkpoint(text.String()); err != nil {
-						res.streamErr = err
-						checkpointFailed = true
-						stopStream()
-						break loop
-					}
-					lastCheckpoint = time.Now()
-				}
-				if err := a.emit(ChatChunk{Delta: chunk.Text}); err != nil {
-					res.clientGone = true
-					break loop
-				}
-			}
-			if len(chunk.ToolCalls) > 0 {
-				res.calls = chunk.ToolCalls
+				return
 			}
 			if a.stopRequested() {
-				break loop
+				return
 			}
 		case <-a.ctx.Done():
-			break loop
+			return
 		case <-a.done:
-			res.clientGone = true
-			break loop
+			stream.result.clientGone = true
+			return
 		}
 	}
-	res.providerErr = <-providerErr
-	if checkpointFailed {
-		res.providerErr = nil
+}
+
+func (a *Agent) startToolStream(ctx context.Context, chunks chan inference.Chunk, result chan<- error, messages []inference.LlmMessage, tools []inference.ToolDefinition, sessionID string) {
+	defer close(chunks)
+	result <- guardProvider(func() error {
+		return a.TimeGen(func() error {
+			return a.provider.StreamTools(ctx, a.system, messages, tools, sessionID, chunks, a.done)
+		})
+	})
+}
+
+type toolRoundStream struct {
+	result           roundResult
+	text             strings.Builder
+	lastCheckpoint   time.Time
+	checkpointFailed bool
+}
+
+// consumeToolChunk returns true when the stream must stop being consumed.
+func (a *Agent) consumeToolChunk(stream *toolRoundStream, chunk inference.Chunk) bool {
+	if chunk.Err != "" {
+		stream.result.streamErr = errors.New(chunk.Err)
+		return true
 	}
-	res.text = text.String()
-	return res
+	if chunk.Usage != nil {
+		a.noteCallUsage(*chunk.Usage)
+	}
+	if err := a.noteThinking(chunk); err != nil {
+		stream.result.clientGone = true
+		return true
+	}
+	if chunk.ToolNotice != nil && a.emitToolNotice(chunk.ToolNotice) != nil {
+		stream.result.clientGone = true
+		return true
+	}
+	if chunk.Text != "" && a.consumeToolText(stream, chunk.Text) {
+		return true
+	}
+	if len(chunk.ToolCalls) > 0 {
+		stream.result.calls = chunk.ToolCalls
+	}
+	return false
+}
+
+func (a *Agent) emitToolNotice(notice *inference.ToolCall) error {
+	name := notice.Name
+	if name == "" {
+		name = "tool"
+	}
+	a.noteNotice(notice.ID, name)
+	return a.emit(ChatChunk{Tool: &ToolActivity{
+		ID: notice.ID, Name: name, Arguments: "{}",
+		Status: session.ToolRunning,
+	}})
+}
+
+func (a *Agent) consumeToolText(stream *toolRoundStream, text string) bool {
+	stream.text.WriteString(text)
+	a.appendDelta(text)
+	if time.Since(stream.lastCheckpoint) >= time.Second {
+		if err := a.checkpoint(stream.text.String()); err != nil {
+			stream.result.streamErr = err
+			stream.checkpointFailed = true
+			return true
+		}
+		stream.lastCheckpoint = time.Now()
+	}
+	if err := a.emit(ChatChunk{Delta: text}); err != nil {
+		stream.result.clientGone = true
+		return true
+	}
+	return false
 }
 
 // completeBuffered retries an empty streamed round as one buffered
@@ -235,7 +286,8 @@ func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
 	})
 	if err != nil {
 		if a.stopRequested() {
-			return false, a.stopWithPartial(round.text)
+			a.recordStoppedPartial(round.text)
+			return false, turnStop{}
 		}
 		if a.recoverRound(err, true) {
 			return true, nil
@@ -243,7 +295,8 @@ func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
 		return false, roundFailure(err)
 	}
 	if err := a.noteThinking(inference.Chunk{Reasoning: resp.Reasoning}); err != nil {
-		return false, a.stopWithPartial(round.text)
+		a.recordStoppedPartial(round.text)
+		return false, turnStop{}
 	}
 	round.text += resp.Content
 	a.appendDelta(resp.Content)
@@ -253,7 +306,8 @@ func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
 	}
 	if resp.Content != "" {
 		if err := a.emit(ChatChunk{Delta: resp.Content}); err != nil {
-			return false, a.stopWithPartial(round.text)
+			a.recordStoppedPartial(round.text)
+			return false, turnStop{}
 		}
 	}
 	return false, nil
@@ -303,14 +357,13 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 	return false, nil
 }
 
-func (a *Agent) stopWithPartial(roundText string) error {
+func (a *Agent) recordStoppedPartial(roundText string) {
 	if roundText != "" {
 		a.records = append(a.records, transcript.Message{
 			Role: transcript.RoleAssistant, Content: roundText,
 			CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
 		})
 	}
-	return turnStop{}
 }
 
 // keepPartial records text a round streamed before the provider failed,
@@ -406,106 +459,143 @@ func (a *Agent) runPlain() error {
 			return err
 		}
 	}
-	prx := make(chan inference.Chunk, 64)
-	providerErr := make(chan error, 1)
-	streamCtx, stopStream := context.WithCancel(a.ctx)
-	defer stopStream()
-	go func() {
-		defer close(prx)
-		msgs := append([]inference.LlmMessage(nil), a.messages...)
-		providerErr <- guardProvider(func() error {
-			return a.TimeGen(func() error {
-				return a.provider.StreamTools(streamCtx, a.system, msgs, nil, a.session.Meta.SessionID, prx, a.done)
-			})
-		})
-	}()
-	streamed := false
-	lastCheckpoint := time.Time{}
-loop:
-	for {
-		select {
-		case chunk, ok := <-prx:
-			if !ok {
-				break loop
-			}
-			if chunk.Err != "" {
-				if a.stopRequested() {
-					return turnStop{}
-				}
-				if !streamed && a.retryRound(errors.New(chunk.Err), true) {
-					return a.runPlain()
-				}
-				return turnFailed{"provider unavailable: " + chunk.Err}
-			}
-			if err := a.noteThinking(chunk); err != nil {
-				return turnStop{}
-			}
-			if chunk.Text != "" {
-				streamed = true
-				a.appendDelta(chunk.Text)
-				if time.Since(lastCheckpoint) >= time.Second {
-					if err := a.checkpoint(a.reply.String()); err != nil {
-						return err
-					}
-					lastCheckpoint = time.Now()
-				}
-				if err := a.emit(ChatChunk{Delta: chunk.Text}); err != nil {
-					return turnStop{}
-				}
-			}
-			if chunk.Usage != nil {
-				a.noteCallUsage(*chunk.Usage)
-			}
-			if a.stopRequested() {
-				return turnStop{}
-			}
-		case <-a.ctx.Done():
-			return turnStop{}
-		case <-a.done:
-			return turnStop{}
-		}
+	streamed, retry, err := a.streamPlainRound()
+	if retry {
+		return a.runPlain()
 	}
-	if err := <-providerErr; err != nil {
-		if inference.IsCancelled(err) || a.stopRequested() {
-			return turnStop{}
-		}
-		if !streamed && a.retryRound(err, true) {
-			return a.runPlain()
-		}
-		return turnFailed{"provider unavailable: " + err.Error()}
+	if err != nil {
+		return err
 	}
 	if a.stopRequested() {
 		return turnStop{}
 	}
 	if !streamed {
-		resp, err := a.timeGenComplete(func() (inference.ToolResponse, error) {
-			return a.provider.CompleteTools(a.ctx, a.system, a.messages, nil, a.session.Meta.SessionID)
-		})
+		retry, err = a.completePlainRound()
+		if retry {
+			return a.runPlain()
+		}
 		if err != nil {
-			if a.stopRequested() {
-				return turnStop{}
-			}
-			if a.retryRound(err, true) {
-				return a.runPlain()
-			}
-			return turnFailed{"provider unavailable: " + err.Error()}
-		}
-		a.appendDelta(resp.Content)
-		if resp.Usage != nil {
-			a.noteCallUsage(*resp.Usage)
-		}
-		content := a.reply.String()
-		if err := a.emit(ChatChunk{Delta: content}); err != nil {
-			return turnStop{}
+			return err
 		}
 	}
-	// A silent turn would fake READY with nothing said and no error row;
-	// fail loudly like the tool path's empty-round guard instead.
 	if a.reply.Len() == 0 {
 		return turnFailed{"model returned an empty response — try again"}
 	}
 	a.finish(phaseDone)
 	return nil
+}
+
+func (a *Agent) streamPlainRound() (streamed, retry bool, err error) {
+	chunks := make(chan inference.Chunk, 64)
+	providerErr := make(chan error, 1)
+	streamCtx, stopStream := context.WithCancel(a.ctx)
+	defer stopStream()
+	go a.startToolStream(streamCtx, chunks, providerErr,
+		append([]inference.LlmMessage(nil), a.messages...), nil, a.session.Meta.SessionID)
+	streamed, retry, err = a.collectPlainStream(chunks)
+	if retry || err != nil {
+		return streamed, retry, err
+	}
+	if err := <-providerErr; err != nil {
+		if inference.IsCancelled(err) || a.stopRequested() {
+			return streamed, false, turnStop{}
+		}
+		if !streamed && a.retryRound(err, true) {
+			return streamed, true, nil
+		}
+		return streamed, false, turnFailed{"provider unavailable: " + err.Error()}
+	}
+	return streamed, false, nil
+}
+
+type plainStream struct {
+	streamed       bool
+	lastCheckpoint time.Time
+}
+
+func (a *Agent) collectPlainStream(chunks <-chan inference.Chunk) (bool, bool, error) {
+	var stream plainStream
+	for {
+		select {
+		case chunk, ok := <-chunks:
+			if !ok {
+				return stream.streamed, false, nil
+			}
+			retry, err := a.consumePlainChunk(&stream, chunk)
+			if retry || err != nil {
+				return stream.streamed, retry, err
+			}
+		case <-a.ctx.Done():
+			return stream.streamed, false, turnStop{}
+		case <-a.done:
+			return stream.streamed, false, turnStop{}
+		}
+	}
+}
+
+func (a *Agent) consumePlainChunk(stream *plainStream, chunk inference.Chunk) (bool, error) {
+	if chunk.Err != "" {
+		if a.stopRequested() {
+			return false, turnStop{}
+		}
+		if !stream.streamed && a.retryRound(errors.New(chunk.Err), true) {
+			return true, nil
+		}
+		return false, turnFailed{"provider unavailable: " + chunk.Err}
+	}
+	if err := a.noteThinking(chunk); err != nil {
+		return false, turnStop{}
+	}
+	if chunk.Text != "" {
+		if err := a.consumePlainText(stream, chunk.Text); err != nil {
+			return false, err
+		}
+	}
+	if chunk.Usage != nil {
+		a.noteCallUsage(*chunk.Usage)
+	}
+	if a.stopRequested() {
+		return false, turnStop{}
+	}
+	return false, nil
+}
+
+func (a *Agent) consumePlainText(stream *plainStream, text string) error {
+	stream.streamed = true
+	a.appendDelta(text)
+	if time.Since(stream.lastCheckpoint) >= time.Second {
+		if err := a.checkpoint(a.reply.String()); err != nil {
+			return err
+		}
+		stream.lastCheckpoint = time.Now()
+	}
+	if err := a.emit(ChatChunk{Delta: text}); err != nil {
+		return turnStop{}
+	}
+	return nil
+}
+
+func (a *Agent) completePlainRound() (bool, error) {
+	resp, err := a.timeGenComplete(func() (inference.ToolResponse, error) {
+		return a.provider.CompleteTools(a.ctx, a.system, a.messages, nil, a.session.Meta.SessionID)
+	})
+	if err != nil {
+		if a.stopRequested() {
+			return false, turnStop{}
+		}
+		if a.retryRound(err, true) {
+			return true, nil
+		}
+		return false, turnFailed{"provider unavailable: " + err.Error()}
+	}
+	a.appendDelta(resp.Content)
+	if resp.Usage != nil {
+		a.noteCallUsage(*resp.Usage)
+	}
+	if err := a.emit(ChatChunk{Delta: a.reply.String()}); err != nil {
+		return false, turnStop{}
+	}
+	return false, nil
 }
 
 // guardProvider runs a provider call on its own goroutine's behalf: a

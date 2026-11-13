@@ -45,11 +45,10 @@ export function toggleThemeFromKey(): void {
   toggleTheme();
 }
 
-// toggleSidebarFromKey is the agentTab/Agent-button toggle without the
+// toggleSidebarFromKey is the Sessions-button toggle without the
 // pointer, so a shortcut can hide or show the sessions drawer.
 export function toggleSidebarFromKey(): void {
-  state.collapsed = !state.collapsed;
-  paintSideVisibility();
+  setDrawer(state.collapsed);
 }
 
 // paintSideVisibility shows the floating session drawer. The main card
@@ -61,7 +60,8 @@ function paintSideVisibility(): void {
   sidebarEl.inert = !open;
   agentTabEl.setAttribute("aria-expanded", String(open));
   agentTabEl.setAttribute("aria-selected", "true");
-  agentTabEl.title = open ? "Agent: hide the sessions" : "Agent: show the sessions";
+  agentTabEl.setAttribute("aria-label", "Sessions");
+  agentTabEl.title = open ? "Hide sessions" : "Show sessions";
 }
 
 // The sidebar is a floating drawer over the agent view. pickTimer closes
@@ -75,6 +75,7 @@ function setDrawer(open: boolean): void {
     return;
   }
   state.collapsed = !open;
+  if (open) window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
   paintSideVisibility();
 }
 
@@ -82,7 +83,7 @@ function drawerOpen(): boolean {
   return !state.collapsed;
 }
 
-// Clicks on these never dismiss the drawer: the rail (the Agent button
+// Clicks on these never dismiss the drawer: the rail (the Sessions button
 // toggles it itself), and the
 // row menu and modals the drawer opens.
 const KEEP_OPEN = "#sidebar, #rail, #sessionRowMenu, .modal-overlay";
@@ -119,16 +120,21 @@ function wireDrawer(): void {
     const target = event.target as HTMLElement;
     if (target.closest("[data-row-menu], [data-fold], input.session-rename")) return;
     if (target.closest("#newSessionBtn")) {
+      window.dispatchEvent(new Event("paladin:ide-show-agent"));
       setDrawer(false);
     } else if (target.closest("[data-session], [data-recent]")) {
+      window.dispatchEvent(new Event("paladin:ide-show-agent"));
       window.clearTimeout(pickTimer);
       pickTimer = window.setTimeout(() => setDrawer(false), 250);
     }
   });
   sidebarEl.addEventListener("dblclick", () => window.clearTimeout(pickTimer));
-  agentTabEl.addEventListener("click", () => {
-    toggleSidebarFromKey();
+  agentTabEl.addEventListener("click", toggleSidebarFromKey);
+  window.addEventListener("paladin:ide-show-explorer", () => setDrawer(false));
+  document.querySelector<HTMLElement>("#ideModeBtn")?.addEventListener("click", (event) => {
+    if (!(event.currentTarget as HTMLElement).dataset.ideReplay) setDrawer(false);
   });
+  window.addEventListener("paladin:ide-mode-changed", paintSideVisibility);
 }
 
 async function setupWindow(): Promise<void> {

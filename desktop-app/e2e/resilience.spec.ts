@@ -106,7 +106,13 @@ test("history renders a compaction divider with the summary inline", async ({ pa
         return [
           { role: "user", content: "first task", createdAt: at },
           { role: "assistant", content: "Did the first part.", createdAt: at },
-          { role: "system", kind: "compaction", content: "The user asked for X; Y is done.", createdAt: at },
+          {
+            role: "system",
+            kind: "compaction",
+            content: "The user asked for X; Y is done.",
+            createdAt: at,
+            compaction: { reason: "auto", tokensBefore: 350000, tokensAfter: 55000 },
+          },
           { role: "assistant", content: "Continuing after compaction.", createdAt: at },
         ];
       }
@@ -117,7 +123,7 @@ test("history renders a compaction divider with the summary inline", async ({ pa
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("Continuing after compaction.");
   const divider = page.locator('#messages [data-notice="compaction"]');
-  await expect(divider).toContainText("Context compacted");
+  await expect(divider).toContainText("Context compacted · 350k → 55k tokens");
   // No twistie: the summary is part of the divider itself.
   await expect(divider.locator("details")).toHaveCount(0);
   await expect(divider.locator(".chat-divider-summary")).toContainText("The user asked for X; Y is done.");

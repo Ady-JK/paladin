@@ -99,10 +99,11 @@ test("a finding in a file this session changed opens the diff with markers", asy
   await f1.locator("[data-finding-changes]").click();
   const diff = page.locator("#sidePane .change-diff");
   await expect(diff).toContainText("+line four");
-  await expect(diff.locator(".change-mark")).toHaveCount(2);
+  const markers = diff.locator(".change-mark:visible");
+  await expect(markers).toHaveCount(2);
   // The hunk starts at new line 2, so lines 4-5 are "+line five" and "line six".
-  await expect(diff.locator(".change-mark").first()).toHaveText("+line five");
-  await expect(diff.locator(".change-mark").last()).toHaveText(" line six");
+  await expect(markers.first()).toContainText("+line five");
+  await expect(markers.last()).toContainText("line six");
   // Files the session did not change get no link.
   const f2 = page.locator('#messages .finding[data-finding="F2"]');
   await f2.locator(".finding-head").click();

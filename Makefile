@@ -40,7 +40,7 @@ app-dev:
 
 test:
 	cd core && go test ./... && go build -o $(AGENT_HOST) ./cmd/agent-host
-	cd desktop-app && pnpm typecheck && pnpm build:electron && pnpm exec playwright test
+	cd desktop-app && pnpm typecheck && pnpm test:build && pnpm build:electron && pnpm exec playwright test
 
 fmt:
 	cd core && $(GOLANGCI_LINT) fmt ./...

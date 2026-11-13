@@ -17,7 +17,7 @@ import (
 const (
 	BudgetReached     = "reached"
 	BudgetUnknownCost = "unknownCost"
-	// BudgetSpendIncomplete: the session's ledger was corrupt, so the
+	// BudgetSpendIncomplete: the session has missing cost data, so the
 	// spend shown is only a lower bound. The limit is still enforced
 	// against it.
 	BudgetSpendIncomplete = "spendIncomplete"
@@ -46,7 +46,7 @@ func (a *Agent) budgetLimit() float64 {
 
 // spendState is the session's gateway-reported spend as of a check.
 // known is false while no call has reported a cost; incomplete is true
-// when the ledger is (or was) corrupt, so spent is only a lower bound.
+// when the ledger is corrupt or has unpriced calls, so spent is a lower bound.
 type spendState struct {
 	spent             float64
 	known, incomplete bool
@@ -91,7 +91,7 @@ func (a *Agent) checkBudget() (end bool, err error) {
 	st := a.sessionSpend()
 	spent := st.spent
 	if !st.known || spent < limit {
-		if st.incomplete && !a.spendWarned {
+		if st.incomplete && !a.spendWarned && (st.known || !a.costWarned) {
 			a.spendWarned = true
 			if err := a.emit(ChatChunk{Budget: &BudgetNotice{State: BudgetSpendIncomplete, Spent: spent, Limit: limit}}); err != nil {
 				return false, turnStop{}

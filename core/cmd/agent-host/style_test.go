@@ -27,6 +27,7 @@ var snakeAllowed = []string{
 	"internal/session/session.go",        // rebuilds shell tool arguments
 	"internal/hooks/input.go",            // hook stdin is the Claude/Codex contract
 	"internal/runtime/subagent_tools.go", // the agent tools' arguments
+	"internal/runtime/copilot_auth.go",   // GitHub's OAuth response fields
 }
 
 // Paladin-owned JSON (wire payloads, files on disk) is camelCase.

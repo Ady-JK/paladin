@@ -1,13 +1,13 @@
 import { renderMarkdown } from "../../core/format";
 import { state } from "../../core/state";
 import type { MessageInfo, ToolInfo } from "../../core/types";
-import { createCompactionDivider, createTurn, mountLinkCards } from "../chatView";
+import { compactionText, createCompactionDivider, createTurn, mountLinkCards } from "../chatView";
 import { createTurnStats } from "../turnStats";
 import { createThinkingBlock } from "../turnView";
 import { createFindingsCard } from "../findings";
 import { createVisualCard } from "../visuals";
 import { ToolRun } from "../toolRun";
-import { mountImage, registerImage } from "../mediaGallery";
+import { mountImage, mountUserImage, registerImage } from "../mediaGallery";
 import { paintProtection } from "../snapshotProtection";
 import { createPluginCard, hasPluginCard } from "../pluginCards";
 
@@ -94,7 +94,7 @@ export function buildHistory(
       if (message.index !== undefined) turn.wrapper.dataset.turnIndex = String(message.index);
       if (message.protection) paintProtection(turn.wrapper, message.protection);
       for (const attachment of message.attachments ?? []) {
-        if (attachment.image) mountImage(turn.textEl, sessionId, attachment.image.path, attachment.name);
+        if (attachment.image) mountUserImage(turn.wrapper, sessionId, attachment.image.path, attachment.name);
         else {
           const file = document.createElement("div");
           file.className = "session-file-card";
@@ -118,7 +118,8 @@ export function buildHistory(
         openAgent("");
       }
       run = null;
-      agentBody!.append(createCompactionDivider("Context compacted", message.content));
+      const label = message.compaction ? compactionText({ phase: "done", ...message.compaction }) : "Context compacted";
+      agentBody!.append(createCompactionDivider(label, message.content));
     } else if (message.role === "tool") {
       if (message.image) registerImage(sessionId, message.image.path);
       pushAgentTool({

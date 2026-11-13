@@ -85,6 +85,20 @@ async function move(delta: number): Promise<void> {
   await show();
 }
 
+// mountUserImage shows a sent image above the user's message bubble: the
+// thumbnails live in a strip placed before the bubble in the row.
+export function mountUserImage(row: HTMLElement, sessionId: string, path: string, name: string): void {
+  let strip = row.querySelector<HTMLElement>(":scope > .user-images");
+  if (!strip) {
+    strip = document.createElement("div");
+    strip.className = "user-images";
+    const bubble = row.querySelector<HTMLElement>(":scope > .bubble-user");
+    if (bubble) bubble.before(strip);
+    else row.append(strip);
+  }
+  mountImage(strip, sessionId, path, name);
+}
+
 export function mountImage(target: HTMLElement, sessionId: string, path: string, name: string): void {
   registerImage(sessionId, path);
   const button = document.createElement("button");

@@ -69,6 +69,33 @@ func toolInput(arguments string) any {
 }
 
 func toAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefinition) anthropicRequest {
+	return buildAnthropicRequest(system, messages, tools, false)
+}
+
+func (p *OpenAIProvider) anthropicRequest(system string, messages []LlmMessage, tools []ToolDefinition) anthropicRequest {
+	req := buildAnthropicRequest(system, messages, tools, p.isCopilot)
+	if p.isCopilot && p.meta.MaxOutput > 0 && p.meta.MaxOutput < int64(req.MaxTokens) {
+		req.MaxTokens = int(p.meta.MaxOutput)
+	}
+	return req
+}
+
+func anthropicUserBlocks(message LlmMessage, includeImage bool) []anthropicBlock {
+	blocks := []anthropicBlock{{Type: "text", Text: message.Content}}
+	if !includeImage || message.Image == nil {
+		return blocks
+	}
+	url, err := message.Image.DataURL()
+	if err != nil {
+		return append(blocks, anthropicBlock{Type: "text", Text: "Image unavailable: " + err.Error()})
+	}
+	_, data, _ := strings.Cut(url, ",")
+	return append(blocks, anthropicBlock{
+		Type: "image", Source: &anthropicImageSource{Type: "base64", MediaType: message.Image.MIMEType, Data: data},
+	})
+}
+
+func buildAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefinition, includeUserImages bool) anthropicRequest {
 	req := anthropicRequest{
 		MaxTokens: anthropicMaxToken,
 		System:    system,
@@ -119,13 +146,14 @@ func toAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefini
 		case "system":
 			// Instructions live in the top-level system field.
 		default:
+			blocks := anthropicUserBlocks(m, includeUserImages)
 			if len(pendingToolResults) > 0 {
-				pendingToolResults = append(pendingToolResults, anthropicBlock{Type: "text", Text: m.Content})
+				pendingToolResults = append(pendingToolResults, blocks...)
 				flushTools()
 				continue
 			}
 			req.Messages = append(req.Messages, anthropicMessage{
-				Role: "user", Content: []anthropicBlock{{Type: "text", Text: m.Content}},
+				Role: "user", Content: blocks,
 			})
 		}
 	}
@@ -148,8 +176,15 @@ type anthropicUsageBlock struct {
 	OutputTokens             int64 `json:"output_tokens"`
 }
 
+func (p *OpenAIProvider) messagesURL() string {
+	if p.isCopilot {
+		return strings.TrimRight(p.baseURL, "/") + "/v1/messages"
+	}
+	return p.anthropicURL()
+}
+
 func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
-	body := toAnthropicRequest(system, messages, tools)
+	body := p.anthropicRequest(system, messages, tools)
 	body.Model = p.model
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -157,7 +192,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.anthropicURL(), bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.messagesURL(), bytes.NewReader(raw))
 	if err != nil {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
@@ -212,7 +247,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 	}
 	out.Content = text.String()
 	if u := anthropicUsage(wire.Usage); u != nil {
-		out.Usage = u
+		out.Usage = p.estimateCopilotUsage(u, true)
 	}
 	return out, nil
 }
@@ -231,6 +266,8 @@ func anthropicUsage(b anthropicUsageBlock) *Usage {
 	if *out == (Usage{}) {
 		return nil
 	}
+	out.CacheReadKnown = true
+	out.CacheWriteKnown = true
 	return out
 }
 
@@ -243,6 +280,15 @@ func (p *OpenAIProvider) anthropicHeaders(req *http.Request, sessionID string, s
 	}
 	req.Header.Set("anthropic-version", anthropicVersion)
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if p.isCopilot {
+		req.Header.Set("Copilot-Integration-Id", "vscode-chat")
+		req.Header.Set("Editor-Version", "vscode/1.95.0")
+		req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.7")
+		req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
+		req.Header.Set("Openai-Intent", "messages-proxy")
+		req.Header.Set("X-Interaction-Type", "messages-proxy")
+		req.Header.Set("X-Github-Api-Version", copilotAPIVersion)
+	}
 	p.setSessionHeaders(req, sessionID)
 }
 
@@ -257,14 +303,14 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 	parent := ctx
 	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	body := toAnthropicRequest(system, messages, tools)
+	body := p.anthropicRequest(system, messages, tools)
 	body.Model = p.model
 	body.Stream = true
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return RequestError(fmt.Sprintf("%s: anthropic: encode: %v", p.name, err))
 	}
-	req, err := http.NewRequestWithContext(tctx, http.MethodPost, p.anthropicURL(), bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(tctx, http.MethodPost, p.messagesURL(), bytes.NewReader(raw))
 	if err != nil {
 		return RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
@@ -376,7 +422,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 			}
 			if !streamUsage.Empty() {
 				u := streamUsage
-				if err := send(Chunk{Usage: &u}); err != nil {
+				if err := send(Chunk{Usage: p.estimateCopilotUsage(&u, true)}); err != nil {
 					return CancelledError()
 				}
 			}
@@ -421,7 +467,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 	if !streamUsage.Empty() {
 		u := streamUsage
 		select {
-		case tx <- Chunk{Usage: &u}:
+		case tx <- Chunk{Usage: p.estimateCopilotUsage(&u, true)}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():

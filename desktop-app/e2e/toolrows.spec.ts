@@ -99,7 +99,7 @@ test("consecutive tool calls fold into one summarized group", async ({ page }) =
   await first.locator(".tool-run-head").click();
   await expect(first.locator(".tool-row")).toHaveCount(2);
   await expect(first.locator(".tool-row").nth(0)).toBeVisible();
-  await expect(first.locator(".tool-row").nth(0).locator(".tool-chip")).toHaveText("ls src");
+  await expect(first.locator(".tool-row").nth(0).locator(".term-cmd")).toHaveText("ls src");
   await expect(runs(page).nth(1).locator(".tool-run-head")).toHaveText(/Read 1 file, edited 1 file/);
 });
 
@@ -116,7 +116,26 @@ test("text streamed right before a tool call is kept", async ({ page }) => {
   await expect(page.locator("#messages")).not.toContainText("thinking");
 });
 
-test("a lone call is one row: verb, detail and a command chip", async ({ page }) => {
+test("a completed command is one collapsed terminal card", async ({ page }) => {
+  await setup(page);
+  const command = `printf '${"a".repeat(150)}'`;
+  await emit(page, [tool("1", "shell", { command }, "ok", { output: "result", exit_code: 0 })]);
+  await expect(page.locator(".tool-run-head")).toHaveCount(0);
+  const card = page.locator('.tool-row[data-tool="shell"]');
+  const head = card.locator(".term-head");
+  await expect(head.locator(".term-cmd")).toHaveText(command);
+  await expect(head.locator(".term-status")).toHaveText("exit 0");
+  await expect(head).toHaveAttribute("aria-expanded", "false");
+  await expect(card.locator(".term-out")).toHaveCount(0);
+  await head.click();
+  await expect(head).toHaveAttribute("aria-expanded", "true");
+  await expect(card.locator(".term-out")).toHaveText("result");
+  await expect(card.locator(".term-cmd")).toHaveCount(1);
+  await head.click();
+  await expect(card.locator(".tool-body")).toBeHidden();
+});
+
+test("a lone command is a terminal card while a lone read remains a row", async ({ page }) => {
   await setup(page);
   await emit(page, [
     tool("1", "shell", { cmd: "pytest -q" }),
@@ -125,9 +144,7 @@ test("a lone call is one row: verb, detail and a command chip", async ({ page })
   ]);
   await expect(runs(page)).toHaveCount(2);
   await expect(page.locator(".tool-run-head")).toHaveCount(0);
-  const ran = runs(page).nth(0).locator(".tool-row");
-  await expect(ran.locator(".tool-verb")).toHaveText("Ran");
-  await expect(ran.locator(".tool-chip")).toHaveText("pytest -q");
+  await expect(runs(page).nth(0).locator(".term-cmd")).toHaveText("pytest -q");
   const read = runs(page).nth(1).locator(".tool-row");
   await expect(read.locator(".tool-verb")).toHaveText("Read");
   await expect(read.locator(".tool-detail")).toHaveText("src/conf.py");
@@ -141,9 +158,9 @@ test("the command parameter is shown, not the action fallback", async ({ page })
     }),
   ]);
   const row = runs(page).locator(".tool-row");
-  await expect(row.locator(".tool-verb")).toHaveText("Ran");
-  await expect(row.locator(".tool-chip")).toHaveText("go test ./...");
-  await expect(row.locator(".tool-chip")).not.toHaveText("run");
+  await expect(row.locator(".term-cmd")).toHaveText("go test ./...");
+  await expect(row.locator(".term-cmd")).not.toHaveText("run");
+  await expect(row.locator(".term-status")).toHaveText("failed");
 });
 
 test("running calls read in the present tense and settle in place", async ({ page }) => {
@@ -151,11 +168,11 @@ test("running calls read in the present tense and settle in place", async ({ pag
   await emit(page, [tool("1", "shell", { cmd: "make" }, "running", null)]);
   const row = page.locator('.tool-row[data-tool="shell"]');
   await expect(row).toHaveAttribute("data-status", "running");
-  await expect(row.locator(".tool-verb")).toHaveText("Running");
+  await expect(row.locator(".term-status")).toHaveText("running…");
   await emit(page, [tool("2", "shell", { cmd: "make test" }, "running", null)]);
   const head = runs(page).locator(".tool-run-head");
   await expect(head).toHaveText(/Running 2 commands/);
-  await expect(head).toContainText("make test");
+  await expect(head).not.toContainText("make test");
   await emit(page, [tool("1", "shell", { cmd: "make" }), tool("2", "shell", { cmd: "make test" })]);
   await expect(head).toHaveText(/^Ran 2 commands$/);
   await expect(page.locator('.tool-row[data-status="running"]')).toHaveCount(0);
@@ -181,8 +198,8 @@ test("a row expands to its input and output", async ({ page }) => {
   await emit(page, [tool("1", "shell", { cmd: "echo hi" }, "ok", { output: "hi-from-shell" })]);
   const row = page.locator('.tool-row[data-tool="shell"]');
   await expect(row).not.toContainText("hi-from-shell");
-  await row.locator(".tool-row-head").click();
-  await expect(row.locator(".tool-row-head")).toHaveAttribute("aria-expanded", "true");
+  await row.locator(".term-head").click();
+  await expect(row.locator(".term-head")).toHaveAttribute("aria-expanded", "true");
   await expect(row).toContainText("hi-from-shell");
 });
 
@@ -249,7 +266,9 @@ test("history transcripts group calls the same way", async ({ page }) => {
   await expect(page.locator("#messages")).toContainText("All good.");
   await expect(runs(page)).toHaveCount(2);
   await expect(runs(page).nth(0).locator(".tool-run-head")).toHaveText(/Read 3 files/);
-  await expect(runs(page).nth(1).locator(".tool-chip")).toHaveText("go test ./...");
+  await expect(runs(page).nth(1).locator(".tool-run-head")).toHaveCount(0);
+  await expect(runs(page).nth(1).locator(".term-cmd")).toHaveText("go test ./...");
+  await expect(runs(page).nth(1).locator(".term-out")).toHaveCount(0);
 });
 
 test("parallel tool updates keep nodes stable and the group animates shut", async ({ page }) => {
@@ -267,7 +286,7 @@ test("parallel tool updates keep nodes stable and the group animates shut", asyn
     const node = (selector: string) => run.querySelector<HTMLElement & { __tag?: string }>(selector)!;
     node(".tool-run-head .tool-spin").__tag = "head";
     node(".tool-run-head .tool-verb").__tag = "verb";
-    node('.tool-row[data-tool="shell"] .tool-spin').__tag = "row";
+    node('.tool-row[data-tool="shell"] .term-status').__tag = "row";
   });
   await emit(page, [
     tool("p3", "read", { path: "src/a.ts" }, "running", ""),
@@ -280,7 +299,7 @@ test("parallel tool updates keep nodes stable and the group animates shut", asyn
     return {
       head: tagOf(".tool-run-head .tool-spin"),
       verb: tagOf(".tool-run-head .tool-verb"),
-      row: tagOf('.tool-row[data-tool="shell"] .tool-spin'),
+      row: tagOf('.tool-row[data-tool="shell"] .term-status'),
     };
   });
   expect(tags).toEqual({ head: "head", verb: "verb", row: "row" });

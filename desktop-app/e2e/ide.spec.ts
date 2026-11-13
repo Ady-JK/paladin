@@ -6,6 +6,97 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#promptInput")).toBeVisible();
 });
 
+test("IDE panel controls live in the workspace rail", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  const rail = page.locator("#rail");
+  for (const id of ["Explorer", "Problems", "Terminal", "Activity"]) {
+    await expect(rail.locator(`#ide${id}Toggle`)).toBeVisible();
+  }
+  await expect(rail.locator("#agentTab")).toBeVisible();
+  await expect(rail.locator("#sessionChangesBtn")).toBeVisible();
+  await expect(page.locator(".ide-panel-rail")).toHaveCount(0);
+  await expect(page.locator(".ide-editor-bar #ideTerminalToggle")).toHaveCount(0);
+  await rail.locator("#ideExplorerToggle").click();
+  await expect(page.locator(".ide-explorer")).toBeHidden();
+  await rail.locator("#ideExplorerToggle").click();
+  await expect(page.locator(".ide-explorer")).toBeVisible();
+});
+
+test("Explorer floats beside the rail without resizing the editor", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  const explorer = page.locator(".ide-explorer");
+  const sidebar = page.locator("#sidebar");
+  const editor = page.locator(".ide-editor-area");
+  const drawerBounds = (await explorer.boundingBox())!;
+  const sidebarStyle = await sidebar.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { left: style.left, top: style.top, borderRadius: style.borderRadius };
+  });
+  const explorerStyle = await explorer.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { left: style.left, top: style.top, borderRadius: style.borderRadius, position: style.position };
+  });
+  expect(explorerStyle).toEqual({ ...sidebarStyle, position: "absolute" });
+  const before = (await editor.boundingBox())!;
+  expect(drawerBounds.x).toBeLessThan(before.x + before.width);
+  await page.locator("#ideExplorerToggle").click();
+  const after = (await editor.boundingBox())!;
+  expect(after.x).toBe(before.x);
+  expect(after.width).toBe(before.width);
+  await page.locator("#ideExplorerToggle").click();
+  await expect(explorer).toBeVisible();
+  await page.locator("#ideEmpty").click();
+  await expect(explorer).toBeHidden();
+  await page.locator("#ideExplorerToggle").click();
+  await page.locator("#ideChooseFolder").focus();
+  await page.keyboard.press("Escape");
+  await expect(explorer).toBeHidden();
+  await expect(page.locator("#ideExplorerToggle")).toBeFocused();
+});
+
+test("Explorer uses the Sessions drawer transition and remains safe to toggle quickly", async ({ page }) => {
+  await page.locator("#ideExplorerToggle").click();
+  const explorer = page.locator(".ide-explorer");
+  await expect(explorer).toBeVisible();
+  const transitions = await page.evaluate(() => {
+    const sidebar = document.querySelector("#sidebar")!;
+    const wasClosed = sidebar.classList.contains("is-closed");
+    sidebar.classList.remove("is-closed");
+    const get = (selector: string) => {
+      const style = getComputedStyle(document.querySelector(selector)!);
+      return { property: style.transitionProperty, duration: style.transitionDuration };
+    };
+    const values = [get("#sidebar"), get(".ide-explorer")];
+    sidebar.classList.toggle("is-closed", wasClosed);
+    return values;
+  });
+  expect(transitions[1]).toEqual(transitions[0]);
+  await page.locator("#ideExplorerToggle").click();
+  await expect(explorer).toHaveClass(/is-closed/);
+  await expect(explorer).toHaveAttribute("inert", "");
+  await page.locator("#ideExplorerToggle").click();
+  await expect(explorer).toBeVisible();
+  await expect(explorer).not.toHaveAttribute("inert");
+  await page.evaluate(() => document.documentElement.setAttribute("data-motion", "off"));
+  await page.locator("#ideExplorerToggle").click();
+  await expect(explorer).toBeHidden();
+  await expect(explorer).toHaveCSS("transition-duration", "0s");
+});
+
+test("workspace tree heading collapses and restores its contents", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  const heading = page.locator("button.ide-root");
+  await expect(heading).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "README.md", exact: true })).toBeVisible();
+  await heading.click();
+  await expect(heading).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "README.md", exact: true })).toBeHidden();
+  await heading.focus();
+  await page.keyboard.press("Enter");
+  await expect(heading).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "README.md", exact: true })).toBeVisible();
+});
+
 test("IDE opens a workspace file, edits and saves while chat stays usable", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideWorkspace")).toBeVisible();
@@ -24,23 +115,52 @@ test("IDE opens a workspace file, edits and saves while chat stays usable", asyn
   await expect(page.locator("#ideEditor .cm-content")).toHaveText("Edited");
 });
 
-test("IDE changes panel shows the current session diff next to the editor", async ({ page }) => {
+test("IDE changes use the workspace for the file list and diff, then return to the editor", async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__e2eChanges = { available: true, turns: [], files: [{ path: "README.md", status: "modified" }] };
     (window as any).__e2ePatch = "@@ -1 +1 @@\n-before\n+after";
   });
   await page.locator("#ideModeBtn").click();
   await page.locator('#ideSessionList [data-ide-session="sess-notify-1"]').click();
+  await page.locator("#ideExplorerToggle").click();
   await page.getByRole("button", { name: "README.md", exact: true }).click();
   await page.getByRole("button", { name: "Show changes" }).click();
   const panel = page.locator("#ideChangesPanel");
   await expect(panel).toBeVisible();
+  await expect(page.locator("#ideEditorWrap")).toBeHidden();
   await panel.getByRole("button", { name: /README.md/ }).click();
   await expect(panel.locator(".change-diff")).toContainText("+after");
-  await expect(page.locator("#ideEditor .cm-content")).toBeVisible();
-  expect((await panel.boundingBox())!.x).toBeGreaterThan((await page.locator("#ideEditor").boundingBox())!.x);
-  await page.getByRole("button", { name: "Hide changes" }).click();
+  const files = (await panel.locator(".change-files").boundingBox())!;
+  const diff = (await panel.locator(".change-diff").boundingBox())!;
+  expect(diff.x).toBeGreaterThan(files.x + files.width - 1);
+  await page.locator("#ideFileTabs [data-ide-tab]").click();
   await expect(panel).toBeHidden();
+  await expect(page.locator("#ideEditor .cm-content")).toHaveText("Hello from file");
+});
+
+test("IDE changes show edited files without an empty editor", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eChanges = {
+      available: true,
+      turns: [],
+      files: [
+        { path: "src/main.go", status: "modified" },
+        { path: "src/helper.go", status: "created" },
+      ],
+    };
+    (window as any).__e2ePatch = "@@ -1 +1 @@\n-old\n+new";
+  });
+  await page.locator("#ideModeBtn").click();
+  await page.locator('#ideSessionList [data-ide-session="sess-notify-1"]').click();
+  await page.getByRole("button", { name: "Show changes" }).click();
+  const panel = page.locator("#ideChangesPanel");
+  await expect(page.locator("#ideEmpty")).toBeHidden();
+  await expect(panel.locator(".change-files")).toContainText("src/main.go");
+  await expect(panel.locator(".change-files")).toContainText("src/helper.go");
+  await panel.getByRole("button", { name: /src\/helper.go/ }).click();
+  await expect(panel.locator(".change-diff")).toContainText("+new");
+  await page.getByRole("button", { name: "Hide changes" }).click();
+  await expect(page.locator("#ideEmpty")).toBeVisible();
 });
 
 test("IDE Problems shows diagnostics for unsaved text and jumps to the error", async ({ page }) => {
@@ -132,7 +252,13 @@ test("IDE activity opens a session waiting for approval", async ({ page }) => {
       event: "turn/start",
       sessionId: "sess-notify-1",
       turnId: "activity-turn",
-      turn: { turnId: "activity-turn", sessionId: "sess-notify-1", state: "running" },
+      turn: {
+        turnId: "activity-turn",
+        sessionId: "sess-notify-1",
+        cwd: "/home/tester/project",
+        message: "run the slow job",
+        state: "running",
+      },
     });
     hub.emit({
       event: "chat/approval",
@@ -245,7 +371,7 @@ test("IDE retains edits on save conflict and when switching views", async ({ pag
   await page.evaluate(() => ((window as any).__e2eIDEConflict = true));
   await page.locator("#ideSaveBtn").click();
   await expect(page.locator("#ideStatus")).toContainText("changed on disk");
-  await page.locator("#ideCloseBtn").click();
+  await page.locator("#ideModeBtn").click();
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideEditor .cm-content")).toHaveText("unsaved");
 });
@@ -253,6 +379,7 @@ test("IDE retains edits on save conflict and when switching views", async ({ pag
 test("an externally changed background file is marked and shows a notice when opened", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   await page.getByRole("button", { name: "README.md", exact: true }).click();
+  await page.locator("#ideExplorerToggle").click();
   await page.getByRole("button", { name: ".env", exact: true }).click();
   await page.evaluate(() => {
     const path = "/home/tester/project/README.md";
@@ -274,6 +401,7 @@ test("file tabs preserve separate unsaved edits and undo history", async ({ page
   await page.getByRole("button", { name: "README.md", exact: true }).click();
   const editor = page.locator("#ideEditor .cm-content");
   await editor.fill("first draft");
+  await page.locator("#ideExplorerToggle").click();
   await page.getByRole("button", { name: ".env", exact: true }).click();
   await editor.fill("second draft");
   await page.locator("#ideTabs .ide-tab-select").filter({ hasText: "README.md" }).click();
@@ -305,7 +433,7 @@ test("editor preserves Windows line endings and asks before discarding edits", a
 
 test("the folder picker and session switcher stay in the IDE", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
-  await page.locator("#ideChooseFolder").click();
+  await page.getByRole("button", { name: "Switch workspace" }).click();
   await expect(page.locator("#sessionModal")).toBeVisible();
   await expect(page.locator("#sessionDialogTitle")).toHaveText("Open folder");
   await page.locator("#sessionCancelBtn").click();
@@ -313,6 +441,19 @@ test("the folder picker and session switcher stay in the IDE", async ({ page }) 
   await page.locator('#ideSessionList [data-ide-session="sess-notify-1"]').click();
   await expect(page.locator("#messages")).toContainText("run the slow job");
   await expect(page.locator("#ideWorkspace")).toBeVisible();
+});
+
+test("reopening the current workspace keeps the active conversation and draft", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await page.locator('#ideSessionList [data-ide-session="sess-notify-1"]').click();
+  await expect(page.locator("#messages")).toContainText("run the slow job");
+  await page.locator("#promptInput").fill("unfinished message");
+  await page.locator("#ideExplorerToggle").click();
+  await page.getByRole("button", { name: "Switch workspace" }).click();
+  await page.locator("#sessionStartBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await expect(page.locator("#messages")).toContainText("run the slow job");
+  await expect(page.locator("#promptInput")).toHaveValue("unfinished message");
 });
 
 test("IDE keeps the editor and chat visible in tab layout when a terminal opens", async ({ page }) => {
@@ -330,6 +471,7 @@ test("choosing a folder updates the explorer and preserves the old draft", async
   await page.locator("#ideModeBtn").click();
   await page.getByRole("button", { name: "README.md", exact: true }).click();
   await page.locator("#ideEditor .cm-content").fill("old workspace draft");
+  await page.locator("#ideExplorerToggle").click();
   await page.locator("#ideChooseFolder").click();
   await page.locator('#newSessionList button[data-fb-select$="/project"]').first().click();
   await page.locator("#sessionStartBtn").click();
@@ -361,15 +503,15 @@ test("IDE explorer and agent panes collapse independently and reopen", async ({ 
   await page.getByRole("button", { name: "Hide explorer" }).click();
   await expect(page.locator(".ide-explorer")).toBeHidden();
   await expect(page.locator("#ideExplorerResize")).toBeHidden();
-  await page.getByRole("button", { name: "Hide agent" }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("paladin:ide-toggle-agent")));
   await expect(page.locator("#agentMain")).toBeHidden();
   await expect(page.locator("#ideChatResize")).toBeHidden();
-  await page.locator("#ideCloseBtn").click();
+  await page.locator("#ideModeBtn").click();
   await expect(page.locator("#agentMain")).toBeVisible();
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#agentMain")).toBeHidden();
   await page.getByRole("button", { name: "Show explorer" }).click();
-  await page.getByRole("button", { name: "Show agent" }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event("paladin:ide-toggle-agent")));
   await expect(page.locator(".ide-explorer")).toBeVisible();
   await expect(page.locator("#agentMain")).toBeVisible();
   await page.locator("#ideTerminalToggle").click();
@@ -381,7 +523,8 @@ test("IDE explorer and agent panes collapse independently and reopen", async ({ 
 });
 
 test("IDE starts with workspace sessions and opens a selected chat", async ({ page }) => {
-  await expect(page.locator("#titleBar #ideModeBtn")).toBeVisible();
+  await expect(page.locator("#rail #ideModeBtn")).toBeVisible();
+  await expect(page.locator("#titleBar #ideModeBtn")).toHaveCount(0);
   await expect(page.locator("#sidebar #ideModeBtn")).toHaveCount(0);
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideSessionList")).toBeVisible();
@@ -638,11 +781,16 @@ test("personal browser moves into and out of the IDE editor with its native view
   await expect(page.locator("#sidePane .pane-web")).toBeVisible();
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideBrowserArea .pane-web")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewShown)).toBeTruthy();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewShown)).toBe("web:t1");
   const bounds = await page.evaluate(() => (window as any).__e2eViewBounds);
   const surface = await page.locator("#ideBrowserArea .web-surface").boundingBox();
   expect(Math.abs(bounds.x - surface!.x)).toBeLessThan(2);
   expect(Math.abs(bounds.width - surface!.width)).toBeLessThan(2);
+  await page.locator("#ideExplorerToggle").click();
+  await expect(page.locator(".ide-explorer")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewShown)).toBe("agent");
+  await page.locator("#ideExplorerToggle").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewShown)).toBe("web:t1");
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#sidePane .pane-web")).toBeVisible();
   await expect(page.locator("#sidePane .web-url")).toHaveValue("https://example.com/");
@@ -665,6 +813,7 @@ test("a command finishing in another workspace does not interrupt the selected t
   await page.locator("#promptInput").fill("!! pwd");
   await page.locator("#promptInput").press("Enter");
   await expect.poll(() => page.evaluate(() => typeof (window as any).__finishTerminalRun)).toBe("function");
+  if (await page.locator(".ide-explorer.is-closed").count()) await page.locator("#ideExplorerToggle").click();
   await page.locator("#ideChooseFolder").click();
   await page.locator('#newSessionList button[data-fb-select$="/project"]').first().click();
   await page.locator("#sessionStartBtn").click();
@@ -677,9 +826,181 @@ test("a command finishing in another workspace does not interrupt the selected t
     (window as any).__finishTerminalRun({ output: "old-workspace-output", exitCode: 0, truncated: false }),
   );
   await expect(page.getByRole("tab", { name: "Terminal 2" })).toHaveAttribute("aria-selected", "true");
+  if (await page.locator(".ide-explorer.is-closed").count()) await page.locator("#ideExplorerToggle").click();
   await page.locator("#ideChooseFolder").click();
   await page.locator('#newSessionCrumbs button[data-fb-crumb="/home/tester/project"]').click();
   await expect(page.locator("#newSessionPath")).toHaveText("/home/tester/project");
   await page.locator("#sessionStartBtn").click();
   await expect(page.locator("#ideTerminalDock .xterm-rows")).toContainText("old-workspace-output");
+});
+
+test("composer controls fit inside a narrow IDE chat pane", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 650 });
+  await page.locator("#ideModeBtn").click();
+  await page.locator('#ideSessionList [data-ide-session="sess-notify-1"]').click();
+  const composer = page.locator(".composer-float");
+  const bounds = await composer.boundingBox();
+  expect(bounds).not.toBeNull();
+  for (const selector of ["#modelSelectBtn", "#toolsChip", "#budgetChip", "#sendBtn"]) {
+    const control = page.locator(selector);
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box!.width).toBeGreaterThan(selector === "#modelSelectBtn" ? 55 : 10);
+    expect(box!.x).toBeGreaterThanOrEqual(bounds!.x - 1);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
+  }
+});
+
+test("the rail keeps shared controls in place and exposes activity in Agent mode", async ({ page }) => {
+  const rail = page.locator("#rail");
+  await expect(rail.locator("#ideExplorerToggle")).toBeVisible();
+  await expect(rail.locator("#ideProblemsToggle")).toBeHidden();
+  await rail.locator("#ideActivityToggle").click();
+  await expect(page.locator("#ideActivityList")).toBeVisible();
+  await page.keyboard.press("Escape");
+  const modePosition = (await rail.locator("#ideModeBtn").boundingBox())!.y;
+  await rail.locator("#ideModeBtn").click();
+  await expect(rail.locator("#ideProblemsToggle")).toBeVisible();
+  expect((await rail.locator("#ideModeBtn").boundingBox())!.y).toBe(modePosition);
+  expect((await rail.locator("#ideProblemsToggle").boundingBox())!.y).toBeGreaterThan(modePosition);
+  await rail.locator("#ideModeBtn").click();
+  await expect(rail.locator("#ideActivityToggle")).toBeVisible();
+  await expect(rail.locator("#ideTerminalToggle")).toBeVisible();
+  await expect(rail.locator("#sessionChangesBtn")).toBeVisible();
+  await rail.locator("#ideTerminalToggle").click();
+  await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
+});
+
+test("Files stays in Agent mode and only the IDE mode toggle stays highlighted", async ({ page }) => {
+  const rail = page.locator("#rail");
+  await rail.locator("#ideExplorerToggle").click();
+  await expect(rail.locator("#ideModeBtn")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "README.md", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "README.md", exact: true }).click();
+  await expect(rail.locator("#ideModeBtn")).toHaveAttribute("aria-pressed", "false");
+  await rail.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await expect(page.locator("#ideEditor .cm-content")).toHaveText("Hello from file");
+  await rail.locator("#ideActivityToggle").click();
+  await page.mouse.move(500, 500);
+  const background = (id: string) => rail.locator(id).evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(await background("#ideActivityToggle")).toBe("rgba(0, 0, 0, 0)");
+  expect(await background("#ideModeBtn")).not.toBe("rgba(0, 0, 0, 0)");
+});
+
+test("shared rail actions do not switch to IDE mode", async ({ page }) => {
+  const rail = page.locator("#rail");
+  const mode = rail.locator("#ideModeBtn");
+  for (const id of ["#agentTab", "#sessionChangesBtn", "#ideTerminalToggle", "#ideActivityToggle"]) {
+    await rail.locator(id).click();
+    await expect(mode).toHaveAttribute("aria-pressed", "false");
+  }
+});
+
+test("IDE changes selection does not remain active in Agent mode", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  const changes = page.locator("#sessionChangesBtn");
+  await changes.click();
+  await expect(changes).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#ideModeBtn").click();
+  await expect(changes).not.toHaveAttribute("aria-pressed", "true");
+  await expect(changes).toHaveAttribute("aria-label", "Session changes");
+});
+
+test("IDE palette commands use the shared rail controls", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  const palette = page.getByRole("dialog", { name: "Quick open" });
+  const shortcut = process.platform === "darwin" ? "Meta+Shift+p" : "Control+Shift+p";
+  await page.keyboard.press(shortcut);
+  await palette.getByRole("textbox").fill(">toggle agent");
+  await palette.getByRole("textbox").press("Enter");
+  await expect(page.locator("#agentMain")).toBeHidden();
+  await page.keyboard.press(shortcut);
+  await palette.getByRole("textbox").fill(">show or hide changes");
+  await palette.getByRole("textbox").press("Enter");
+  await expect(page.locator("#ideChangesPanel")).toBeVisible();
+});
+
+test("sessions lead the rail and both drawers fit narrow windows", async ({ page }) => {
+  const buttons = page.locator("#railPanels > div button, #railPanels > button");
+  await expect(buttons.nth(0)).toHaveId("agentTab");
+  await expect(buttons.nth(0)).toHaveAccessibleName("Sessions");
+  await expect(buttons.nth(0).locator('[data-icon="home"]')).toHaveCount(1);
+  await expect(buttons.nth(1)).toHaveId("ideExplorerToggle");
+  await page.locator("#ideExplorerToggle").click();
+  const explorer = page.locator(".ide-explorer");
+  await expect(explorer).toBeVisible();
+  await expect(explorer.getByText("Files", { exact: true })).toBeVisible();
+  expect((await explorer.boundingBox())!.width).toBeGreaterThan(300);
+  await page.locator("#agentTab").click();
+  const sidebar = page.locator("#sidebar");
+  await expect(sidebar).toBeVisible();
+  expect((await sidebar.boundingBox())!.width).toBeGreaterThan(300);
+  await page.setViewportSize({ width: 375, height: 700 });
+  const bounds = (await sidebar.boundingBox())!;
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(375);
+});
+
+test("Sessions and Files open the same floating drawers in IDE mode", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#agentMain")).toBeVisible();
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await expect(page.locator("#agentMain")).toBeVisible();
+  await expect(page.locator(".ide-explorer")).toBeHidden();
+  await page.locator("#ideExplorerToggle").click();
+  await expect(page.locator(".ide-explorer")).toBeVisible();
+  await expect(page.locator("#sidebar")).toBeHidden();
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await expect(page.locator(".ide-explorer")).toBeHidden();
+  await expect(page.locator("#ideModeBtn")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("opening Sessions wins over a pending IDE layout restore", async ({ page }) => {
+  await page.evaluate(() => {
+    const w = window as any;
+    const original = w.__paladinBaseInvoke;
+    w.__paladinBaseInvoke = (method: string, params: unknown) => {
+      if (method === "ideLayoutGet")
+        return new Promise((resolve) => {
+          w.__releaseIdeLayout = () => resolve({ explorerVisible: true, agentVisible: true, files: [], expanded: [] });
+        });
+      return original(method, params);
+    };
+  });
+  await page.locator("#ideModeBtn").click();
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__releaseIdeLayout)).toBe("function");
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await page.evaluate(async () => {
+    (window as any).__releaseIdeLayout();
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  await expect(page.locator(".ide-explorer")).toBeHidden();
+  await expect(page.locator("#sidebar")).toBeVisible();
+});
+
+test("Sessions stays open when the IDE loads slowly", async ({ page }) => {
+  let release!: () => void;
+  let requested = false;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/\/src\/features\/ide\.ts(?:\?|$)/, async (route) => {
+    requested = true;
+    await ready;
+    await route.continue();
+  });
+  await page.locator("#ideModeBtn").click();
+  await expect.poll(() => requested).toBe(true);
+  await page.locator("#agentTab").click();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  release();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await expect(page.locator(".ide-explorer")).toBeHidden();
 });

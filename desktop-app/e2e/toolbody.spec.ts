@@ -34,10 +34,17 @@ async function setup(page: Page): Promise<void> {
 async function open(page: Page, t: Tool) {
   await page.evaluate((t) => (window as any).__h.onTool(t), t);
   const row = page.locator(`#messages .tool-row[data-tool="${t.name}"]`).last();
-  await row.locator(".tool-row-head").click();
+  const group = row.locator("xpath=ancestor::*[@data-tool-run]").locator(".tool-run-head");
+  if (await group.count()) await group.click();
+  await row.locator(".tool-row-head, .term-head").click();
   const body = row.locator(".tool-body");
   await expect(body).toBeVisible();
   return body;
+}
+
+// card_ is the terminal card that owns an opened shell body.
+function card_(body: ReturnType<Page["locator"]>) {
+  return body.locator("xpath=ancestor::*[contains(@class,'tool-row')][1]");
 }
 
 async function noRawJson(body: ReturnType<Page["locator"]>): Promise<void> {
@@ -54,10 +61,11 @@ test("shell shows a terminal: prompt, output and exit status", async ({ page }) 
     tool("1", "shell", { command: "ls -la src" }, "ok", { status: "done", exit_code: 0, output: "main.go\nutil.go\n" }),
   );
   const term = body.locator('[data-body="shell"]');
-  await expect(term.locator(".term-cmd")).toHaveText("ls -la src");
+  const card = card_(body);
+  await expect(card.locator(".term-cmd")).toHaveText("ls -la src");
   await expect(term.locator(".term-out")).toHaveText("main.go\nutil.go");
-  await expect(term.locator(".term-status")).toHaveText("exit 0");
-  await expect(term.locator(".term-status")).toHaveClass(/is-ok/);
+  await expect(card.locator(".term-status")).toHaveText("exit 0");
+  await expect(card.locator(".term-status")).toHaveClass(/is-ok/);
   await noRawJson(body);
 });
 
@@ -72,8 +80,8 @@ test("a failing command flags its exit code and truncation", async ({ page }) =>
       truncated: true,
     }),
   );
-  await expect(body.locator(".term-status")).toHaveText("exit 2");
-  await expect(body.locator(".term-status")).toHaveClass(/is-bad/);
+  await expect(card_(body).locator(".term-status")).toHaveText("exit 2");
+  await expect(card_(body).locator(".term-status")).toHaveClass(/is-bad/);
   await expect(body.locator(".term-note")).toContainText("truncated");
 });
 
@@ -87,7 +95,7 @@ test("a background job shows its id and log instead of output", async ({ page })
       log: "/tmp/job-7.log",
     }),
   );
-  await expect(body.locator(".term-status")).toHaveText("running in background");
+  await expect(card_(body).locator(".term-status")).toHaveText("running in background");
   await expect(body).toContainText("job-7");
   await expect(body).toContainText("/tmp/job-7.log");
   await noRawJson(body);
@@ -104,7 +112,7 @@ test("a shell status check reads as a job, not a command", async ({ page }) => {
       output: "ready",
     }),
   );
-  await expect(body.locator(".term-cmd")).toHaveText("status job-7");
+  await expect(card_(body).locator(".term-cmd")).toHaveText("status job-7");
   await expect(body.locator(".term-out")).toHaveText("ready");
 });
 
@@ -242,13 +250,13 @@ test("plain-text results show as text", async ({ page }) => {
 test("an open body follows the call from running to done", async ({ page }) => {
   await setup(page);
   const body = await open(page, tool("1", "shell", { cmd: "make" }, "running", ""));
-  await expect(body.locator(".term-status")).toHaveText("running…");
+  await expect(card_(body).locator(".term-status")).toHaveText("running…");
   await page.evaluate(
     (t) => (window as any).__h.onTool(t),
     tool("1", "shell", { cmd: "make" }, "ok", { status: "done", exit_code: 0, output: "built" }),
   );
   await expect(body.locator(".term-out")).toHaveText("built");
-  await expect(body.locator(".term-status")).toHaveText("exit 0");
+  await expect(card_(body).locator(".term-status")).toHaveText("exit 0");
 });
 
 test("grep, glob and list read as searches with their results", async ({ page }) => {

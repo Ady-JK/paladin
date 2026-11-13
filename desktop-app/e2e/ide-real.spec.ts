@@ -115,6 +115,9 @@ process.stdin.on('data', chunk => {
   try {
     await page.goto("/");
     await expect(page.locator("#workspaceLabel")).not.toHaveText("workspace");
+    await page.locator("#ideExplorerToggle").click();
+    await expect(page.locator("#ideModeBtn")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("button", { name: "example.go", exact: true })).toBeVisible();
     await page.locator("#ideModeBtn").click();
     await expect(page.locator("#ideSessionList")).toContainText("No sessions in this workspace");
     await expect(page.getByRole("button", { name: ".hidden", exact: true })).toBeVisible();
@@ -147,6 +150,7 @@ process.stdin.on('data', chunk => {
     await workspaceSearch.getByRole("button", { name: "Search", exact: true }).click();
     await workspaceSearch.getByRole("button", { name: /example.go:1/ }).click();
     await expect(page.locator("#ideEditor .cm-content")).toContainText("package main");
+    await page.locator("#ideExplorerToggle").click();
     await page.locator("#ideTree").getByRole("button", { name: "problems.fake", exact: true }).click();
     await page.locator("#ideFileTabs .ide-tab-select").filter({ hasText: "example.go" }).click();
     await writeFile(problemFile, "external background edit\n");

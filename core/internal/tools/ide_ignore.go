@@ -26,37 +26,8 @@ func IDEIgnoreFallback(root, dir string, entries []os.DirEntry) (map[string]bool
 		if part != "" {
 			current = filepath.Join(current, part)
 		}
-		ignorePath := filepath.Join(current, ".gitignore")
-		info, err := os.Lstat(ignorePath)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+		if err := appendIDEIgnoreRules(m, current); err != nil {
 			return nil, err
-		}
-		if !info.Mode().IsRegular() {
-			continue
-		}
-		file, err := os.Open(ignorePath)
-		if err != nil {
-			return nil, err
-		}
-		data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-		closeErr := file.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		if len(data) > 1<<20 {
-			return nil, fmt.Errorf("ignore file %q exceeds 1 MiB", ignorePath)
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			pattern, dirOnly, anchored, neg, ok := parseIgnoreLine(line)
-			if ok {
-				m.rules = append(m.rules, ignoreRule{dir: cleanPath(current), pattern: pattern, dirOnly: dirOnly, anchored: anchored, neg: neg})
-			}
 		}
 	}
 	ignored := make(map[string]bool)
@@ -66,4 +37,41 @@ func IDEIgnoreFallback(root, dir string, entries []os.DirEntry) (map[string]bool
 		}
 	}
 	return ignored, nil
+}
+
+// appendIDEIgnoreRules reads one regular ignore file, subject to the size limit.
+func appendIDEIgnoreRules(matcher *ignoreMatcher, directory string) error {
+	ignorePath := filepath.Join(directory, ".gitignore")
+	info, err := os.Lstat(ignorePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	file, err := os.Open(ignorePath)
+	if err != nil {
+		return err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if len(data) > 1<<20 {
+		return fmt.Errorf("ignore file %q exceeds 1 MiB", ignorePath)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		pattern, dirOnly, anchored, neg, ok := parseIgnoreLine(line)
+		if ok {
+			matcher.rules = append(matcher.rules, ignoreRule{dir: cleanPath(directory), pattern: pattern, dirOnly: dirOnly, anchored: anchored, neg: neg})
+		}
+	}
+	return nil
 }

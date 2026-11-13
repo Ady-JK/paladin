@@ -44,19 +44,20 @@ var methodClass = map[string]runClass{
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
 	"sessionHistoryPage": runRead, "sessionImages": runRead,
 	"sessionImage": runRead,
-	"sessionTodos": runRead, "sessionUsage": runRead, "budgetGet": runRead, "thinkingGet": runRead,
+	"sessionTodos": runRead, "sessionUsage": runRead, "budgetGet": runRead, "thinkingGet": runRead, "compactionGet": runRead,
 	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "fileExcerpt": runRead, "filePreview": runRead, "pluginViews": runRead, "worktreeStatus": runRead, "attach": runRead,
 	"permissionsGet": runRead, "listAgents": runRead, "interruptAgent": runRead,
 	"listSideChats": runRead, "loadSideChat": runRead, "hooksList": runRead, "mcpList": runRead,
 	"mcpConfig": runRead, "mcpParse": runRead, "toolsList": runRead, "customList": runRead, "customGet": runRead,
 
 	"submitChat": runSession, "steerChat": runSession, "openSession": runSession,
-	"pluginInvoke":   runSession,
-	"saveAttachment": runSession,
-	"terminalStart":  runSession,
-	"renameSession":  runSession, "forkSession": runSession, "deleteSession": runSession,
+	"pluginInvoke":    runSession,
+	"saveAttachment":  runSession,
+	"saveTaggedImage": runSession,
+	"terminalStart":   runSession,
+	"renameSession":   runSession, "forkSession": runSession, "deleteSession": runSession,
 	"revertSession": runSession, "recoveryAvailable": runSession, "recoveryPreview": runSession, "recoverLatest": runSession, "worktreeMerge": runSession,
-	"budgetSet": runSession, "thinkingSet": runSession, "memoryRefreshSnapshot": runSession,
+	"budgetSet": runSession, "thinkingSet": runSession, "compactionSet": runSession, "memoryRefreshSnapshot": runSession,
 	"memorySnapshotStatus": runSession,
 	"deleteSideChat":       runSession,
 
@@ -72,6 +73,7 @@ var methodClass = map[string]runClass{
 	"customSet":   runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
 
 	"refreshProviders": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
+	"copilotSignInStart": runLong, "copilotSignInPoll": runLong, "copilotSignInCancel": runLong,
 }
 
 // startsTurn marks the requests a later stopChat for the same session

@@ -4,7 +4,7 @@
 import { tryParseJson } from "../core/format";
 import type { ToolInfo, ToolView } from "../core/types";
 import { icon, type IconName } from "../icons";
-import { relPath, toolBodyHtml } from "./toolBodies";
+import { relPath, shellHead, toolBodyHtml } from "./toolBodies";
 import { changedLines, richEditHtml, richWriteHtml } from "./toolCards/file";
 import { createLineDiffer, type LineDiffer } from "./toolCards/lineDiff";
 
@@ -26,7 +26,7 @@ function toolSummary(name: string, raw: string): string {
     if (name === "shell") {
       const command = typeof args.command === "string" ? args.command : typeof args.cmd === "string" ? args.cmd : "";
       if (command.trim()) {
-        return short(command.trim());
+        return command.trim();
       }
       const action = typeof args.action === "string" && args.action ? args.action : "run";
       const job = typeof args.job_id === "string" && args.job_id ? ` ${args.job_id}` : "";
@@ -234,6 +234,21 @@ function toolIcon(name: string): IconName {
   return kindOf(name).icon;
 }
 
+// paintShellHead redraws a terminal card's head: command and status badge.
+function paintShellHead(row: HTMLElement, head: HTMLElement, tool: ToolInfo): void {
+  row.dataset.status = tool.status;
+  const { cmd, text, tone } = shellHead(tool);
+  const cmdEl = head.querySelector<HTMLElement>(".term-cmd")!;
+  if (cmdEl.textContent !== cmd) {
+    cmdEl.textContent = cmd;
+  }
+  const status = head.querySelector<HTMLElement>(".term-status")!;
+  status.className = `term-status ${tone}`;
+  if (status.textContent !== text) {
+    status.textContent = text;
+  }
+}
+
 // paintToolHead redraws the one-line head of a call row in place.
 function paintToolHead(row: HTMLElement, head: HTMLElement, tool: ToolInfo, lineDiff: LineDiffer): void {
   const label = toolLabel(tool);
@@ -286,7 +301,23 @@ export function createToolActivity(tool: ToolInfo): ToolView {
   toggle.innerHTML =
     '<span class="tool-ico"></span><span class="tool-verb"></span><span class="tool-server"></span><span class="tool-detail"></span>' +
     '<code class="tool-chip"></code><span class="tool-add"></span><span class="tool-del"></span><span class="tool-fail"></span>';
-  paintToolHead(box, toggle, current, lineDiff);
+  const isShell = current.name === "shell";
+  if (isShell) {
+    // A command is one terminal card: "$ cmd" is the toggle, output folds below.
+    box.classList.add("term-card");
+    toggle.className = "term-head";
+    toggle.innerHTML =
+      '<span class="term-prompt">$</span><code class="term-cmd"></code><span class="term-status"></span>' +
+      `<span class="tool-caret">${icon("chevron-right", "h-3 w-3")}</span>`;
+  }
+  const paintHead = (): void => {
+    if (isShell) {
+      paintShellHead(box, toggle, current);
+    } else {
+      paintToolHead(box, toggle, current, lineDiff);
+    }
+  };
+  paintHead();
 
   const details = document.createElement("div");
   details.className = "tool-body hidden";
@@ -342,7 +373,7 @@ export function createToolActivity(tool: ToolInfo): ToolView {
 
   const update = (next: ToolInfo) => {
     current = next;
-    paintToolHead(box, toggle, current, lineDiff);
+    paintHead();
     paintOpen();
     render();
   };

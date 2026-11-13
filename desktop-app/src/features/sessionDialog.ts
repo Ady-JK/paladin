@@ -34,6 +34,7 @@ let selection: PickerSelection | null = null;
 let query = "";
 let showHidden = false;
 let browseGeneration = 0;
+let choosingFolder = false;
 
 // modelHint mirrors the composer label so the dialog states which model
 // the new session will use before it starts.
@@ -115,6 +116,7 @@ async function browseNewSession(path?: string): Promise<void> {
 }
 
 export async function openNewSession(options?: { chooseFolder?: boolean }): Promise<void> {
+  choosingFolder = !!options?.chooseFolder;
   $("#sessionDialogTitle").textContent = options?.chooseFolder ? "Open folder" : "New Session";
   $("#sessionStartBtn").textContent = options?.chooseFolder ? "Open folder" : "Start";
   newSessionModelHintEl.hidden = !!options?.chooseFolder;
@@ -139,6 +141,10 @@ export function closeNewSession(): void {
 }
 
 function startNewSession(): void {
+  if (choosingFolder && state.pendingWorkspace.trim() === state.cwd) {
+    closeNewSession();
+    return;
+  }
   if (state.pendingWorkspace.trim()) {
     state.cwd = state.pendingWorkspace.trim();
     workspaceLabelEl.textContent = shortPath(state.cwd);

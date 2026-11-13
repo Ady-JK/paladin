@@ -22,17 +22,9 @@ export const state = {
   pendingDelete: "",
   dark: true,
   collapsed: true,
-  highlightedModel: "",
-  treeFilter: null as { provider: string; lab: string } | null,
   customSites: [] as { name: string; url: string }[],
   pendingWorkspace: "",
   // onProvidersChanged repaints the settings provider tab after a background
   // catalog refresh; the settings module assigns it at init.
   onProvidersChanged: (() => {}) as () => void,
 };
-
-// collapsedProviders tracks collapsed provider groups in the model picker.
-export const collapsedProviders = new Set<string>();
-
-// collapsedLabs tracks collapsed labs in the model picker.
-export const collapsedLabs = new Set<string>();

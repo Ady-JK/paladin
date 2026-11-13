@@ -1,5 +1,5 @@
 // template.go is the composition layer. A Template is a
-// reusable blueprint (prompt, tool set, round cap); Build resolves it
+// reusable blueprint (prompt and tool set); Build resolves it
 // against runtime dependencies into a ready-to-run Agent.
 
 package agent
@@ -23,7 +23,7 @@ import (
 
 // Template is the reusable blueprint for one kind of agent. The zero
 // value is valid: it uses the runtime's default prompt, all registered
-// tools, and the runtime round cap.
+// tools.
 //
 // The prompt itself is not part of the template: the agent core reads
 // SYSTEM_PROMPT.md and TOOL_GUIDANCE.md from the config dir at turn
@@ -120,31 +120,17 @@ type Deps struct {
 	// Live, when set, receives a copy of the conversation before each
 	// model round (see Agent.live).
 	Live func([]inference.LlmMessage)
+	// ContextChoice supplies changes made while a turn is running.
+	ContextChoice func() (int64, float64)
 }
 
 // Build resolves a Template into an Agent. Everything the loop needs
 // (session, history, provider, tool subset, prompt, limits) is fixed
 // here, before any model call happens.
 func (t Template) Build(d Deps, req Request) (*Agent, error) {
-	if strings.TrimSpace(req.SessionID) == "" {
-		return nil, fmt.Errorf("sessionId is required: create one with openSession first")
-	}
-	command := strings.TrimSpace(strVal(req.Command))
-	if strings.TrimSpace(req.Message) == "" && !req.Resume && !req.Compact && command == "" {
-		return nil, fmt.Errorf("message is required")
-	}
-	mode := strings.TrimSpace(req.Mode)
-	if mode != "" && mode != ModeBuild && mode != ModePlan {
-		return nil, fmt.Errorf("mode must be %q or %q, got %q", ModeBuild, ModePlan, mode)
-	}
-	if req.Compact && (req.Resume || command != "" || strVal(req.Skill) != "") {
-		return nil, fmt.Errorf("compact cannot be combined with resume, a command or a skill")
-	}
-	if d.Sessions == nil || d.Providers == nil || d.Prompts == nil {
-		return nil, fmt.Errorf("agent template %q: missing runtime dependencies", t.Name)
-	}
-	if d.Tools == nil {
-		return nil, fmt.Errorf("agent template %q: tool registry is required", t.Name)
+	command, mode, err := t.validateBuild(d, req)
+	if err != nil {
+		return nil, err
 	}
 
 	sess, err := d.Sessions.LoadSession(req.Cwd, req.SessionID)
@@ -160,136 +146,196 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		return nil, err
 	}
 
-	message := req.Message
-	display := req.Display
-	var commandTools []string
-	if command != "" {
-		if req.Resume {
-			return nil, fmt.Errorf("command %q cannot be used with resume", command)
-		}
-		if d.Commands == nil {
-			return nil, fmt.Errorf("command %q is not available: the runtime has no command source", command)
-		}
-		cmd, err := d.Commands.LoadCommand(sess.Meta.Cwd, sess.Meta.SessionID, command, strings.TrimSpace(req.Message))
-		if err != nil {
-			return nil, err
-		}
-		if display == "" {
-			display = strings.TrimSpace("/" + cmd.Name + " " + strings.TrimSpace(req.Message))
-		}
-		message = cmd.Prompt
-		if cmd.Mode != "" && mode == "" {
-			mode = cmd.Mode
-		}
-		for _, name := range cmd.Tools {
-			if _, ok := tools.CommandTool(name); !ok {
-				return nil, fmt.Errorf("command /%s asks for unknown tool %q", cmd.Name, name)
-			}
-		}
-		commandTools = cmd.Tools
+	input := buildInput{message: req.Message, display: req.Display, mode: mode}
+	if err := input.applyCommand(d.Commands, sess, req, command); err != nil {
+		return nil, err
 	}
-	if name := strings.TrimSpace(strVal(req.Skill)); name != "" {
-		if req.Resume {
-			return nil, fmt.Errorf("skill %q cannot be used with resume", name)
-		}
-		if d.Skills == nil {
-			return nil, fmt.Errorf("skill %q is not available: the runtime has no skill source", name)
-		}
-		var skill Skill
-		var err error
-		if contextual, ok := d.Skills.(interface {
-			LoadSkillForSession(cwd, sessionID, name string) (Skill, error)
-		}); ok {
-			skill, err = contextual.LoadSkillForSession(sess.Meta.Cwd, sess.Meta.SessionID, name)
-		} else {
-			skill, err = d.Skills.LoadSkill(sess.Meta.Cwd, name)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if display == "" {
-			display = req.Message
-		}
-		message = FormatSkillMessage(message, skill.Name, skill.Content)
+	if err := input.applySkill(d.Skills, sess, req); err != nil {
+		return nil, err
 	}
 
 	system := ComposeSystem(d.Prompts.SystemPrompt(strVal(req.SystemPrompt)), sess, d.Sections)
-
-	registry := d.Tools
-	shell := d.Shell
-	if len(t.Tools) > 0 {
-		subset, err := d.Tools.Subset(t.Tools)
-		if err != nil {
-			return nil, fmt.Errorf("agent template %q: %w", t.Name, err)
-		}
-		registry = subset
-		shell = nil
-		if raw, ok := subset.Get("shell"); ok {
-			shell, _ = raw.(*tools.ShellTool)
-		}
+	registry, shell, err := t.buildRegistry(d, input.commandTools)
+	if err != nil {
+		return nil, err
 	}
-	for _, name := range commandTools {
-		t, _ := tools.CommandTool(name)
-		registry = registry.With(t)
-	}
-
-	gate := d.Gate
-	// The session may always read its own folder (spilled output, job
-	// logs, screenshots); the copy keeps the caller's gate untouched.
-	if g, ok := gate.(*permission.Gate); ok && g != nil && sess.Dir != "" {
-		owned := *g
-		owned.Readable = append(slices.Clip(g.Readable), sess.Dir)
-		gate = &owned
-	}
-	if mode == ModePlan || t.ReadOnly {
+	gate := sessionGate(d.Gate, sess)
+	if input.mode == ModePlan || t.ReadOnly {
 		registry, shell = planRegistry(registry, shell)
 		if !t.ReadOnly {
 			system += "\n\n" + custom.Text("prompt.plan-mode")
 		}
-		if g, ok := gate.(*permission.Gate); ok && g != nil {
-			planned := *g
-			planned.Plan = true
-			gate = &planned
-		}
+		gate = planGate(gate)
 	}
 	if role := strings.TrimSpace(t.Prompt); role != "" {
 		system += "\n\n" + role
 	}
 
 	return newAgent(runConfig{
-		session:     sess,
-		provider:    provider,
-		window:      req.ContextWindow,
-		tools:       registry,
-		shell:       shell,
-		toolDefs:    toolDefinitions(registry),
-		history:     history,
-		system:      system,
-		ctx:         d.Context,
-		cancel:      d.Cancel,
-		tx:          d.Tx,
-		done:        d.Done,
-		persistGate: d.PersistGate,
-		gate:        gate,
-		steer:       req.Steer,
-		budget:      req.Budget,
-		notices:     req.Notices,
-		format:      req.FormatOnWrite,
-		web:         req.Web,
-		diagnose:    req.Diagnose,
-		warm:        req.Warm,
-		ledgers:     req.SpendLedgers,
-		message:     message,
-		display:     display,
-		attachments: req.Attachments,
-		resume:      req.Resume,
-		compactOnly: req.Compact,
+		session:       sess,
+		provider:      provider,
+		window:        req.ContextWindow,
+		compactPct:    req.CompactPercent,
+		contextChoice: d.ContextChoice,
+		tools:         registry,
+		shell:         shell,
+		toolDefs:      toolDefinitions(registry),
+		history:       history,
+		system:        system,
+		ctx:           d.Context,
+		cancel:        d.Cancel,
+		tx:            d.Tx,
+		done:          d.Done,
+		persistGate:   d.PersistGate,
+		gate:          gate,
+		steer:         req.Steer,
+		budget:        req.Budget,
+		notices:       req.Notices,
+		format:        req.FormatOnWrite,
+		web:           req.Web,
+		diagnose:      req.Diagnose,
+		warm:          req.Warm,
+		ledgers:       req.SpendLedgers,
+		message:       input.message,
+		display:       input.display,
+		attachments:   req.Attachments,
+		resume:        req.Resume,
+		compactOnly:   req.Compact,
 
 		hooks:          d.Hooks,
 		sessionStart:   d.SessionStart,
 		live:           d.Live,
 		permissionMode: req.Permissions,
 	}), nil
+}
+
+func (t Template) validateBuild(d Deps, req Request) (command, mode string, err error) {
+	if strings.TrimSpace(req.SessionID) == "" {
+		return "", "", fmt.Errorf("sessionId is required: create one with openSession first")
+	}
+	command = strings.TrimSpace(strVal(req.Command))
+	if strings.TrimSpace(req.Message) == "" && !req.Resume && !req.Compact && command == "" {
+		return "", "", fmt.Errorf("message is required")
+	}
+	mode = strings.TrimSpace(req.Mode)
+	if mode != "" && mode != ModeBuild && mode != ModePlan {
+		return "", "", fmt.Errorf("mode must be %q or %q, got %q", ModeBuild, ModePlan, mode)
+	}
+	if req.Compact && (req.Resume || command != "" || strVal(req.Skill) != "") {
+		return "", "", fmt.Errorf("compact cannot be combined with resume, a command or a skill")
+	}
+	if d.Sessions == nil || d.Providers == nil || d.Prompts == nil {
+		return "", "", fmt.Errorf("agent template %q: missing runtime dependencies", t.Name)
+	}
+	if d.Tools == nil {
+		return "", "", fmt.Errorf("agent template %q: tool registry is required", t.Name)
+	}
+	return command, mode, nil
+}
+
+type buildInput struct {
+	message      string
+	display      string
+	mode         string
+	commandTools []string
+}
+
+func (input *buildInput) applyCommand(source CommandSource, sess transcript.Session, req Request, command string) error {
+	if command == "" {
+		return nil
+	}
+	if req.Resume {
+		return fmt.Errorf("command %q cannot be used with resume", command)
+	}
+	if source == nil {
+		return fmt.Errorf("command %q is not available: the runtime has no command source", command)
+	}
+	cmd, err := source.LoadCommand(sess.Meta.Cwd, sess.Meta.SessionID, command, strings.TrimSpace(req.Message))
+	if err != nil {
+		return err
+	}
+	if input.display == "" {
+		input.display = strings.TrimSpace("/" + cmd.Name + " " + strings.TrimSpace(req.Message))
+	}
+	input.message = cmd.Prompt
+	if cmd.Mode != "" && input.mode == "" {
+		input.mode = cmd.Mode
+	}
+	for _, name := range cmd.Tools {
+		if _, ok := tools.CommandTool(name); !ok {
+			return fmt.Errorf("command /%s asks for unknown tool %q", cmd.Name, name)
+		}
+	}
+	input.commandTools = cmd.Tools
+	return nil
+}
+
+func (input *buildInput) applySkill(source SkillSource, sess transcript.Session, req Request) error {
+	name := strings.TrimSpace(strVal(req.Skill))
+	if name == "" {
+		return nil
+	}
+	if req.Resume {
+		return fmt.Errorf("skill %q cannot be used with resume", name)
+	}
+	if source == nil {
+		return fmt.Errorf("skill %q is not available: the runtime has no skill source", name)
+	}
+	var skill Skill
+	var err error
+	if contextual, ok := source.(interface {
+		LoadSkillForSession(cwd, sessionID, name string) (Skill, error)
+	}); ok {
+		skill, err = contextual.LoadSkillForSession(sess.Meta.Cwd, sess.Meta.SessionID, name)
+	} else {
+		skill, err = source.LoadSkill(sess.Meta.Cwd, name)
+	}
+	if err != nil {
+		return err
+	}
+	if input.display == "" {
+		input.display = req.Message
+	}
+	input.message = FormatSkillMessage(input.message, skill.Name, skill.Content)
+	return nil
+}
+
+func (t Template) buildRegistry(d Deps, commandTools []string) (*tools.Registry, *tools.ShellTool, error) {
+	registry, shell := d.Tools, d.Shell
+	if len(t.Tools) > 0 {
+		subset, err := d.Tools.Subset(t.Tools)
+		if err != nil {
+			return nil, nil, fmt.Errorf("agent template %q: %w", t.Name, err)
+		}
+		registry, shell = subset, nil
+		if raw, ok := subset.Get("shell"); ok {
+			shell, _ = raw.(*tools.ShellTool)
+		}
+	}
+	for _, name := range commandTools {
+		tool, _ := tools.CommandTool(name)
+		registry = registry.With(tool)
+	}
+	return registry, shell, nil
+}
+
+func sessionGate(gate ToolGate, sess transcript.Session) ToolGate {
+	// The session may read its own folder without mutating the caller's gate.
+	if original, ok := gate.(*permission.Gate); ok && original != nil && sess.Dir != "" {
+		owned := *original
+		owned.Readable = append(slices.Clip(original.Readable), sess.Dir)
+		return &owned
+	}
+	return gate
+}
+
+func planGate(gate ToolGate) ToolGate {
+	if original, ok := gate.(*permission.Gate); ok && original != nil {
+		planned := *original
+		planned.Plan = true
+		return &planned
+	}
+	return gate
 }
 
 // Skill is the injected skill content for a turn: the name the

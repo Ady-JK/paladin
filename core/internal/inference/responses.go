@@ -166,6 +166,7 @@ func responsesUsage(u responses.ResponseUsage, raw string) *Usage {
 		ReasoningTokens:  u.OutputTokensDetails.ReasoningTokens,
 		TotalTokens:      u.TotalTokens,
 	}
+	captureCacheDetails(out, raw, "input_tokens_details")
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.PromptTokens + out.CompletionTokens
 	}
@@ -189,6 +190,7 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 	defer cancel()
 	var httpRes *http.Response
 	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
+	opts = append(opts, p.copilotOptions(messages)...)
 	res, err := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), opts...)
 	if err != nil {
 		// One immediate retry for transport blips (EOF/reset before
@@ -210,6 +212,7 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 	}
 	out := parseResponsesOutput(res)
 	out.Usage = withHeaderCost(responsesUsage(res.Usage, res.RawJSON()), httpRes)
+	p.estimateCopilotUsage(out.Usage, false)
 	return out, nil
 }
 
@@ -235,7 +238,8 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 	parent := ctx
 	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	stream := p.client.Responses.NewStreaming(tctx, p.newResponsesParams(system, messages, tools, sessionID), p.streamOptions(sessionID)...)
+	opts := append(p.streamOptions(sessionID), p.copilotOptions(messages)...)
+	stream := p.client.Responses.NewStreaming(tctx, p.newResponsesParams(system, messages, tools, sessionID), opts...)
 	defer stream.Close()
 
 	send := func(c Chunk) error {
@@ -330,6 +334,7 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 			// The completed envelope carries the turn's usage; bill it
 			// even when the model made no tool calls.
 			if u := responsesUsage(ev.Response.Usage, ev.Response.RawJSON()); u != nil {
+				p.estimateCopilotUsage(u, false)
 				if err := send(Chunk{Usage: u}); err != nil {
 					return CancelledError()
 				}

@@ -41,6 +41,8 @@ test("the toggle above the composer shows the current level and opens the slider
   const card = page.locator("#thinkingMenu");
   await expect(card).toBeVisible();
   await expect(card.locator(".think-level")).toHaveText("Default");
+  await expect(card.locator(".think-sparkles span")).toHaveCount(12);
+  await expect(card.locator(".think-flow")).toHaveCSS("animation-name", "think-track-flow");
   await expect(card.locator(".think-model")).toContainText("claude-3-opus");
   const slider = card.locator('input[type="range"]');
   await expect(slider).toHaveAttribute("aria-valuetext", "Default");
@@ -67,6 +69,20 @@ test("the toggle above the composer shows the current level and opens the slider
 
   await page.keyboard.press("Escape");
   await expect(card).toBeHidden();
+});
+
+test("thinking track respects reduced and disabled motion", async ({ page }) => {
+  await pickModel(page, "claude-3-opus");
+  await page.click("#thinkingMore");
+  const flow = page.locator("#thinkingMenu .think-flow");
+  const sparkle = page.locator("#thinkingMenu .think-sparkles span").first();
+  for (const level of ["reduced", "off"]) {
+    await page.evaluate((value) => (document.documentElement.dataset.motion = value), level);
+    await expect(flow).toHaveCSS("animation-name", "none");
+    await expect(sparkle).toHaveCSS("animation-name", "none");
+  }
+  await page.evaluate(() => (document.documentElement.dataset.motion = "full"));
+  await expect(flow).toHaveCSS("animation-name", "think-track-flow");
 });
 
 test("the toggle says n/a for a model with no adjustable thinking", async ({ page }) => {
@@ -214,4 +230,22 @@ test("saved thinking shows as a folded block from history", async ({ page }) => 
   await expect(block.locator(".think-body")).toContainText("Weighing the options.");
   const text = (await page.locator("#messages").textContent()) ?? "";
   expect(text.indexOf("Weighing")).toBeLessThan(text.indexOf("Because."));
+});
+
+test("the thinking colour runs from blue at low levels to purple at max", async ({ page }) => {
+  await pickModel(page, "claude-3-opus");
+  await page.click("#thinkingMore");
+  const slider = page.locator('#thinkingMenu input[type="range"]');
+  const root = page.locator("html");
+  await slider.focus();
+  await page.keyboard.press("Home");
+  await expect(root).toHaveAttribute("data-think-level", "default");
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--think-lvl")))
+    .toBe("0.000");
+  await page.keyboard.press("End");
+  await expect(root).toHaveAttribute("data-think-level", "max");
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--think-lvl")))
+    .toBe("1.000");
 });

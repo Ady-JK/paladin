@@ -19,7 +19,7 @@ test("opening a session adopts and persists its last-used model", async ({ page 
   });
   await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
-  await expect(page.locator("#modelSelectLabel")).toHaveText("openrouter/gpt-4o");
+  await expect(page.locator("#modelSelectLabel")).toHaveText("gpt-4o");
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("paladin.model") || "{}"));
   expect(saved).toMatchObject({ provider: "openrouter", model: "openai/gpt-4o" });
 });

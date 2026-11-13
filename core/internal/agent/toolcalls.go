@@ -31,32 +31,38 @@ func canonicalizeCalls(reg *tools.Registry, calls []inference.ToolCall) {
 }
 
 func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
-	// Record all requested calls before executing any of them. If the
-	// process dies, recovery treats calls without results as uncertain.
+	// Journal every request before executing any of them.
 	if err := a.checkpoint(""); err != nil {
 		a.settleAborted(calls)
 		return err
 	}
 	if a.noteReadOnlyRound(calls) {
-		// Refuse the whole round: many consecutive rounds only searched
-		// or read without acting. History still needs a result for every
-		// call, so refused rows go through the normal record+emit path
-		// and the turn continues — the model must act, ask, or answer.
-		for i := range calls {
-			result := tools.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, IsError: true,
-				Content: readOnlyRefusal(a.readOnlyRounds)}
-			a.appendToolResult(&calls[i], &result)
-			if err := a.checkpoint(""); err != nil {
-				a.settleAborted(calls[i+1:])
-				return err
-			}
-			if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
-				return turnStop{}
-			}
-		}
-		return nil
+		return a.refuseReadOnlyCalls(calls)
 	}
 	a.settleNotices(calls)
+	if err := a.announceToolCalls(calls); err != nil {
+		return err
+	}
+	return a.runToolBatches(calls)
+}
+
+func (a *Agent) refuseReadOnlyCalls(calls []inference.ToolCall) error {
+	for i := range calls {
+		result := tools.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, IsError: true,
+			Content: readOnlyRefusal(a.readOnlyRounds)}
+		a.appendToolResult(&calls[i], &result)
+		if err := a.checkpoint(""); err != nil {
+			a.settleAborted(calls[i+1:])
+			return err
+		}
+		if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
+			return turnStop{}
+		}
+	}
+	return nil
+}
+
+func (a *Agent) announceToolCalls(calls []inference.ToolCall) error {
 	for i, call := range calls {
 		if err := a.emit(ChatChunk{Tool: &ToolActivity{
 			ID: call.ID, Name: call.Name, Arguments: call.Arguments,
@@ -66,42 +72,56 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 			return turnStop{}
 		}
 	}
-	for i := 0; i < len(calls); {
+	return nil
+}
+
+func (a *Agent) runToolBatches(calls []inference.ToolCall) error {
+	for start := 0; start < len(calls); {
 		if a.stopRequested() {
-			a.settleAborted(calls[i:])
+			a.settleAborted(calls[start:])
 			return turnStop{}
 		}
-		j := a.batchEnd(calls, i)
-		results, journalErr := a.execBatch(calls[i:j])
-		for k := i; k < j; k++ {
-			call := calls[k]
-			a.noteEditResult(&call, &results[k-i])
-			result := results[k-i]
-			if result.IsError {
-				a.logErrorf("tool:"+result.Name, "%s %s\n%s", call.ID, call.Arguments, result.Content)
-			}
-			a.appendToolResult(&call, &result)
-		}
+		end := a.batchEnd(calls, start)
+		results, journalErr := a.execBatch(calls[start:end])
+		a.recordToolBatch(calls[start:end], results)
 		if journalErr != nil {
-			a.settleAborted(calls[j:])
+			a.settleAborted(calls[end:])
 			return journalErr
 		}
 		if err := a.checkpoint(""); err != nil {
-			a.settleAborted(calls[j:])
+			a.settleAborted(calls[end:])
 			return err
 		}
-		for k := i; k < j; k++ {
-			call, result := calls[k], results[k-i]
-			if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
-				a.settleAborted(calls[j:])
-				return turnStop{}
-			}
-			if a.noteDenial(&result) {
-				a.settleAborted(calls[j:])
-				return turnFailed{msg: "stopped after 3 consecutive denied tool calls — the approach needs approval that is not coming; change approach or ask the user what they want instead"}
-			}
+		if err := a.emitToolBatch(calls[start:end], results, calls[end:]); err != nil {
+			return err
 		}
-		i = j
+		start = end
+	}
+	return nil
+}
+
+func (a *Agent) recordToolBatch(calls []inference.ToolCall, results []tools.ToolResult) {
+	for i, call := range calls {
+		a.noteEditResult(&call, &results[i])
+		result := results[i]
+		if result.IsError {
+			a.logErrorf("tool:"+result.Name, "%s %s\n%s", call.ID, call.Arguments, result.Content)
+		}
+		a.appendToolResult(&call, &result)
+	}
+}
+
+func (a *Agent) emitToolBatch(calls []inference.ToolCall, results []tools.ToolResult, remaining []inference.ToolCall) error {
+	for i, call := range calls {
+		result := results[i]
+		if err := a.emit(ChatChunk{Tool: toolActivity(&call, &result)}); err != nil {
+			a.settleAborted(remaining)
+			return turnStop{}
+		}
+		if a.noteDenial(&result) {
+			a.settleAborted(remaining)
+			return turnFailed{msg: "stopped after 3 consecutive denied tool calls — the approach needs approval that is not coming; change approach or ask the user what they want instead"}
+		}
 	}
 	return nil
 }
@@ -145,36 +165,46 @@ func (a *Agent) execBatch(batch []inference.ToolCall) ([]tools.ToolResult, error
 		return results, nil
 	}
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	completed := make([]bool, len(batch))
-	var journalErr error
+	journal := batchJournal{agent: a, results: results, completed: make([]bool, len(batch))}
 	for i := range batch {
 		if run[i] {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
 				exec(i)
-				mu.Lock()
-				defer mu.Unlock()
-				completed[i] = true
-				if journalErr != nil {
-					return
-				}
-				var extra []transcript.Message
-				for n, done := range completed {
-					if !done {
-						continue
-					}
-					result := results[n]
-					id, name := result.CallID, result.Name
-					extra = append(extra, transcript.Message{Role: transcript.RoleTool, Content: result.Content, Image: result.Image, ToolCallID: &id, Name: &name, IsError: result.IsError})
-				}
-				journalErr = a.checkpointWithResults("", extra)
+				journal.complete(i)
 			}(i)
 		}
 	}
 	wg.Wait()
-	return results, journalErr
+	return results, journal.err
+}
+
+type batchJournal struct {
+	mu        sync.Mutex
+	agent     *Agent
+	results   []tools.ToolResult
+	completed []bool
+	err       error
+}
+
+func (j *batchJournal) complete(index int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.completed[index] = true
+	if j.err != nil {
+		return
+	}
+	var extra []transcript.Message
+	for i, done := range j.completed {
+		if !done {
+			continue
+		}
+		result := j.results[i]
+		id, name := result.CallID, result.Name
+		extra = append(extra, transcript.Message{Role: transcript.RoleTool, Content: result.Content, Image: result.Image, ToolCallID: &id, Name: &name, IsError: result.IsError})
+	}
+	j.err = j.agent.checkpointWithResults("", extra)
 }
 
 // callGated runs one call through the permission gate (after a hold for

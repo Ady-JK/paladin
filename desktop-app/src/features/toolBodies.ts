@@ -94,15 +94,23 @@ function shellStatus(tool: ToolInfo, args: Obj, result: unknown): { text: string
   return { text: status || "done", tone: "is-ok" };
 }
 
-function shellHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null): string {
+// shellHead is what the terminal card shows while collapsed: the command
+// line and its status badge.
+export function shellHead(tool: ToolInfo): { cmd: string; text: string; tone: string } {
+  const rawArgs = parse(tool.arguments);
+  const args = isObj(rawArgs) ? rawArgs : {};
+  const result = tool.status === "running" ? null : parse(tool.result);
+  const err = tool.status === "running" ? null : errorOf(tool, result);
   const action = str(args.action) || "run";
   const cmd =
     str(args.command).trim() || str(args.cmd).trim() || `${action}${str(args.job_id) ? ` ${str(args.job_id)}` : ""}`;
   const st = err ? { text: "failed", tone: "is-bad" } : shellStatus(tool, args, result);
-  let html =
-    `<div data-body="shell" class="term">` +
-    `<div class="term-head"><span class="term-prompt">$</span><code class="term-cmd">${escapeHtml(cmd)}</code>` +
-    `<span class="term-status ${st.tone}">${escapeHtml(st.text)}</span></div>`;
+  return { cmd, ...st };
+}
+
+// shellHtml is the card's output: the command and badge live in its head.
+function shellHtml(tool: ToolInfo, result: unknown, err: string | null): string {
+  let html = `<div data-body="shell" class="term">`;
   if (err) {
     return `${html}${errBlock(err)}</div>`;
   }
@@ -433,7 +441,7 @@ export function toolBodyHtml(tool: ToolInfo, rich: string | null = null): string
   const err = tool.status === "running" ? null : errorOf(tool, result);
   switch (tool.name) {
     case "shell":
-      return shellHtml(tool, args, result, err);
+      return shellHtml(tool, result, err);
     case "read":
       return readHtml(tool, args, result, err);
     case "grep":

@@ -313,6 +313,18 @@ export function listProviders(): Promise<ProviderInfo[]> {
   return invoke<ProviderInfo[]>("listProviders");
 }
 
+export function startCopilotSignIn(): Promise<{ userCode: string; interval: number; expiresIn: number }> {
+  return invoke("copilotSignInStart");
+}
+
+export function pollCopilotSignIn(): Promise<"pending" | "connected"> {
+  return invoke("copilotSignInPoll");
+}
+
+export function cancelCopilotSignIn(): Promise<boolean> {
+  return invoke("copilotSignInCancel");
+}
+
 // refreshProvider fetches one provider's model list and contacts no other.
 export function refreshProvider(name: string): Promise<RefreshResult> {
   return invoke<RefreshResult>("refreshProviders", { name });
@@ -457,6 +469,10 @@ export type SessionAttachment = {
 
 export function saveAttachment(sessionId: string, cwd: string, name: string, data: string): Promise<SessionAttachment> {
   return invoke<SessionAttachment>("saveAttachment", { sessionId, cwd, name, data });
+}
+
+export function saveTaggedImage(sessionId: string, cwd: string, path: string): Promise<SessionAttachment | null> {
+  return invoke<SessionAttachment | null>("saveTaggedImage", { sessionId, cwd, path });
 }
 
 export function sessionImage(sessionId: string, path: string): Promise<string> {
@@ -743,6 +759,12 @@ export function hideExternalPage(): Promise<unknown> {
   return bridge().views.show("agent");
 }
 
+// snapshotExternalPage freezes the page on screen (a web tab or the agent
+// browser) to a still image, or null when none is up or it cannot be read.
+export function snapshotExternalPage(): Promise<string | null> {
+  return bridge().views.snapshot();
+}
+
 export function moveExternalPage(rect: { x: number; y: number; width: number; height: number }): Promise<unknown> {
   return bridge().views.setBounds(rect);
 }
@@ -839,4 +861,26 @@ export function deleteSideChat(sessionId: string, cwd: string | null, chatId: st
 // interruptAgent stops a subagent's running turn and its queued work.
 export function interruptAgent(sessionId: string, agentId: string): Promise<AgentInfo> {
   return invoke<AgentInfo>("interruptAgent", { sessionId, agentId });
+}
+
+export type CompactionView = {
+  provider: string;
+  model: string;
+  window: number;
+  totalWindow?: number;
+  options?: Array<{ window: number; totalWindow?: number; surcharge?: boolean }>;
+  known: boolean;
+  percent: number;
+};
+export function compactionGet(provider: string, model: string, sessionId?: string): Promise<CompactionView> {
+  return invoke<CompactionView>("compactionGet", { provider, model, sessionId });
+}
+export function compactionSet(
+  provider: string,
+  model: string,
+  percent: number,
+  window?: number,
+  sessionId?: string,
+): Promise<CompactionView> {
+  return invoke<CompactionView>("compactionSet", { provider, model, percent, window, sessionId });
 }
