@@ -105,3 +105,71 @@ test("wide tables scroll sideways and tall tables scroll vertically", async ({ p
   expect(tallSize.tall).toBe(true);
   expect(tallSize.scrollHeight).toBeGreaterThan(tallSize.clientHeight);
 });
+
+// A commit hash or a `/command` in a table cell stays whole. The
+// transcript sets overflow-wrap: anywhere so prose can break a long
+// path, which used to let the browser squeeze a column to a sliver and
+// split "61b12f2" into "61b12f" + "2" on the next line.
+test("a token inside a table cell never splits mid-word", async ({ page }) => {
+  await page.evaluate(() => {
+    const prev = (window as any).__e2eRunTurn;
+    (window as any).__e2eRunTurn = async (params: any, handlers: any) => {
+      const out = await prev(params, handlers);
+      const table = [
+        "| Commit | Version | Change |",
+        "|---|---|---|",
+        "| `61b12f2` | 0.10.53 | MCP servers start as soon as their config appears, so the new-tools popup no longer waits for a message |",
+        "| `2eabb79` | 0.10.54 | Claude Code and Agent Skills directories are read, appearing in the `/` palette with origin badges (`Claude`, `Claude · project`); Paladin's own skills always win a name |",
+      ].join("\n");
+      return { ...out, reply: table };
+    };
+  });
+  await page.fill("#promptInput", "show the table");
+  await page.click("#sendBtn");
+
+  const cells = page.locator("#messages .turn-row").nth(1).locator(".md-td");
+  await expect(cells).toHaveCount(6);
+
+  // Every inline-code span renders on one line: a wrapped token would
+  // report two client rects.
+  const codeLines = await cells.locator(".md-code").evaluateAll((els) =>
+    els.map((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return { text: el.textContent, lines: range.getClientRects().length };
+    }),
+  );
+  expect(codeLines.length).toBeGreaterThan(0);
+  for (const code of codeLines) {
+    expect(code.lines, `"${code.text}" must not break across lines`).toBe(1);
+  }
+
+  // The hash cell stays on one line as text too, and the commit column
+  // is wide enough for the whole word. A range over the cell reports two
+  // rects whatever happens (the text node plus the inline element), and
+  // the cell's computed line-height is not its glyph height, so compare
+  // the cell against a known single-line cell of the same table.
+  const hash = cells.nth(0);
+  await expect(hash).toHaveText("61b12f2");
+  const box = await hash.evaluate((el) => {
+    const code = el.querySelector(".md-code") as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    // A one-line reference: the version cell holds plain text on one line.
+    const ref = document.querySelector("#messages .md-td:nth-of-type(2)") as HTMLElement | null;
+    const oneLine = Math.min(
+      el.getBoundingClientRect().height,
+      ref?.getBoundingClientRect().height ?? el.getBoundingClientRect().height,
+    );
+    return {
+      codeRects: range.getClientRects().length,
+      cellHeight: el.getBoundingClientRect().height,
+      oneLine,
+      cellWidth: el.getBoundingClientRect().width,
+    };
+  });
+  expect(box.codeRects).toBe(1);
+  // A wrapped cell is taller than the one-line reference cell.
+  expect(box.cellHeight).toBeLessThanOrEqual(box.oneLine + 1);
+  expect(box.cellWidth).toBeGreaterThan(40);
+});

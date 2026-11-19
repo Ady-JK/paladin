@@ -301,6 +301,22 @@
     padding: 0.375rem 0.625rem;
     text-align: left;
     vertical-align: top;
+    /* The transcript sets overflow-wrap: anywhere so prose can break a
+       long path. In a table that lets the browser shrink a column to a
+       sliver and split a token like a commit hash mid-word. break-word
+       keeps break opportunities out of the column's minimum width, so
+       the cell stays wide enough for its longest word and a wide table
+       scrolls sideways instead of mangling it. */
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+  /* An identifier keeps its shape: a hash or a `/command` never splits
+     across lines, the column simply widens. */
+  .md .md-th .md-code,
+  .md .md-td .md-code {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
   }
   .md .md-th {
     font-weight: 650;
