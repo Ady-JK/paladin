@@ -8,7 +8,6 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
-	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
@@ -36,30 +35,11 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 		a.settleAborted(calls)
 		return err
 	}
-	if a.noteReadOnlyRound(calls) {
-		return a.refuseReadOnlyCalls(calls)
-	}
 	a.settleNotices(calls)
 	if err := a.announceToolCalls(calls); err != nil {
 		return err
 	}
 	return a.runToolBatches(calls)
-}
-
-func (a *Agent) refuseReadOnlyCalls(calls []inference.ToolCall) error {
-	for i := range calls {
-		result := tools.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, IsError: true,
-			Content: readOnlyRefusal(a.readOnlyRounds)}
-		a.appendToolResult(&calls[i], &result)
-		if err := a.checkpoint(""); err != nil {
-			a.settleAborted(calls[i+1:])
-			return err
-		}
-		if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
-			return turnStop{}
-		}
-	}
-	return nil
 }
 
 func (a *Agent) announceToolCalls(calls []inference.ToolCall) error {
@@ -141,17 +121,11 @@ func (a *Agent) batchEnd(calls []inference.ToolCall, i int) int {
 	return j
 }
 
-// execBatch runs one batch and returns results in call order. Doom
-// checks stay sequential so their counting matches the call order.
+// execBatch runs one batch and returns results in call order.
 func (a *Agent) execBatch(batch []inference.ToolCall) ([]tools.ToolResult, error) {
 	results := make([]tools.ToolResult, len(batch))
 	run := make([]bool, len(batch))
-	for i, call := range batch {
-		if refusal := a.doom.check(call.Name, a.tools.WithoutReason(call.Name, call.Arguments)); refusal != "" {
-			results[i] = tools.ToolResult{CallID: call.ID, Name: call.Name, IsError: true,
-				Content: string(jsonx.MustMarshal(map[string]string{"error": refusal}))}
-			continue
-		}
+	for i := range batch {
 		run[i] = true
 	}
 	exec := func(i int) {

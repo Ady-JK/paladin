@@ -123,7 +123,7 @@ type request struct {
 func parseRequest(raw json.RawMessage) (request, error) {
 	var top map[string]any
 	if err := json.Unmarshal(raw, &top); err != nil {
-		return request{}, fmt.Errorf("the arguments are not a JSON object: %v", err)
+		return request{}, fmt.Errorf("the arguments are not a JSON object: %w", err)
 	}
 	rawTarget := strings.TrimSpace(firstString(top, targetKeys...))
 	rawOps, hasOps := firstValue(top, opsKeys...)
@@ -228,7 +228,7 @@ func asOpMaps(v any) ([]map[string]any, error) {
 		}
 		var inner any
 		if err := json.Unmarshal([]byte(x), &inner); err != nil {
-			return nil, fmt.Errorf("operations was sent as a string that is not JSON: %v", err)
+			return nil, fmt.Errorf("operations was sent as a string that is not JSON: %w", err)
 		}
 		return asOpMaps(inner)
 	}

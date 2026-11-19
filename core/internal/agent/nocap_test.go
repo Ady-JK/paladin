@@ -1,8 +1,8 @@
 // nocap_test.go pins the absence of a per-turn tool-call cap. Like
 // Codex and OpenCode, a turn runs until the model answers without
-// asking for a tool, the user stops it, or a guard (doom loop, denial
-// breaker, read-only spiral, compaction) breaks the loop. No fixed
-// call count ends a productive turn.
+// asking for a tool, the user stops it, or a guard (denial breaker,
+// compaction) breaks the loop. No fixed call count ends a productive
+// turn.
 
 package agent
 
@@ -32,9 +32,7 @@ func drainTx(t *testing.T, tx chan ChatChunk) {
 }
 
 // TestLongTurnHasNoToolCallCap runs far past the old 200-call limit and
-// must still finish normally. The calls vary, so the doom guard stays
-// out of the way, and todo is not read-only, so the search spiral
-// guard does not either.
+// must still finish normally. The calls vary and nothing refuses them.
 func TestLongTurnHasNoToolCallCap(t *testing.T) {
 	prov := &mockProvider{}
 	a, _, tx, done := testAgent(t, prov)
