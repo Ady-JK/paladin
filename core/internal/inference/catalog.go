@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
 )
@@ -50,14 +51,73 @@ type catalogCost struct {
 		Input *struct {
 			Price float64 `json:"price"`
 			Cache *struct {
-				Read  float64 `json:"read"`
-				Write float64 `json:"write"`
+				Read  catalogPrice `json:"read"`
+				Write catalogPrice `json:"write"`
 			} `json:"cache"`
 		} `json:"input"`
 		Output *struct {
 			Price float64 `json:"price"`
 		} `json:"output"`
 	} `json:"text"`
+}
+
+// catalogPrice is a price the listing may publish two ways: a plain
+// number, or a map keyed by how long the price buys ("5m", "30m", "12h",
+// ...). The map collapses to the shortest-lived bucket, the one a
+// request pays unless it explicitly asks for a longer write; the longer
+// buckets cost more, never less. A key the code cannot read as a
+// duration falls back to the cheapest bucket, so an unknown scheme
+// still yields a conservative price instead of failing the refresh.
+type catalogPrice struct {
+	value float64
+}
+
+func (p *catalogPrice) UnmarshalJSON(body []byte) error {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "null" {
+		return nil
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var buckets map[string]float64
+		if err := json.Unmarshal(body, &buckets); err != nil {
+			return err
+		}
+		p.value = shortestBucket(buckets)
+		return nil
+	}
+	return json.Unmarshal(body, &p.value)
+}
+
+func (p catalogPrice) float() float64 {
+	return p.value
+}
+
+// shortestBucket picks the price of the shortest-lived bucket.
+func shortestBucket(buckets map[string]float64) float64 {
+	best := 0.0
+	var bestAt time.Duration
+	found := false
+	for key, price := range buckets {
+		life, err := time.ParseDuration(key)
+		if err != nil {
+			continue
+		}
+		if !found || life < bestAt {
+			found, best, bestAt = true, price, life
+		}
+	}
+	if found {
+		return best
+	}
+	// No readable duration: take the cheapest bucket rather than one at
+	// random, so the estimate never reads high just because of the key
+	// scheme.
+	for _, price := range buckets {
+		if !found || price < best {
+			found, best = true, price
+		}
+	}
+	return best
 }
 
 // The price accessors read the envelope defensively: a listing may omit
@@ -80,14 +140,14 @@ func (c catalogCost) cacheRead() float64 {
 	if c.Text == nil || c.Text.Input == nil || c.Text.Input.Cache == nil {
 		return 0
 	}
-	return c.Text.Input.Cache.Read
+	return c.Text.Input.Cache.Read.float()
 }
 
 func (c catalogCost) cacheWrite() float64 {
 	if c.Text == nil || c.Text.Input == nil || c.Text.Input.Cache == nil {
 		return 0
 	}
-	return c.Text.Input.Cache.Write
+	return c.Text.Input.Cache.Write.float()
 }
 
 // catalogProtocol maps the key an entry documents its endpoint under to

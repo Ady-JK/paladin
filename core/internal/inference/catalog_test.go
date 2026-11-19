@@ -122,6 +122,35 @@ func TestParseCatalogReasoningUnsupported(t *testing.T) {
 	}
 }
 
+// The gateway may price a cache write per how long the write lasts, as a
+// map instead of a number. It must fold to the shortest-lived bucket —
+// what a request pays without asking for a longer write — and an
+// unreadable key scheme must still price conservatively, not fail the
+// whole refresh (one odd model used to abort the entire listing).
+func TestParseCatalogCacheWriteBuckets(t *testing.T) {
+	_, meta, err := ParseCatalog([]byte(`{"data":[{"id":"m-luna","cost":{"text":{"input":{"price":0.1,"cache":{"read":0.01,"write":{"30m":0.125,"12h":0.25}}},"output":{"price":0.5}}}},{"id":"m-qwen","cost":{"text":{"input":{"price":1.5,"cache":{"read":0.075,"write":{"1h":3,"5m":1.875}}},"output":{"price":4.5}}}},{"id":"m-flat","cost":{"text":{"input":{"price":0.1,"cache":{"read":0.01,"write":0.125}},"output":{"price":0.5}}}},{"id":"m-odd","cost":{"text":{"input":{"price":1,"cache":{"read":0.1,"write":{"prompt":9,"fast":3,"slow":12}}},"output":{"price":2}}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		id    string
+		write float64
+	}{
+		{"m-luna", 0.125},
+		{"m-qwen", 1.875},
+		{"m-flat", 0.125},
+		{"m-odd", 3},
+	}
+	for _, c := range cases {
+		if got := meta[c.id].PriceCacheWrite; got != c.write {
+			t.Errorf("%s: cache write %v want %v", c.id, got, c.write)
+		}
+	}
+	if got := meta["m-luna"].PriceCacheRead; got != 0.01 {
+		t.Errorf("m-luna: cache read %v want 0.01", got)
+	}
+}
+
 // Levels come back weakest first whatever order the listing used, since
 // the slider's position is the level.
 func TestParseCatalogSortsLevels(t *testing.T) {
