@@ -1,11 +1,13 @@
 import { showSidebar } from "./drawer";
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 
-// scroll-position.spec.ts covers where the transcript sits after the view
-// loses and regains layout. The tabs layout hides #agentMain (holding
-// #chatView) while a side tab shows, and a display:none subtree has no
-// layout: scrollHeight reads 0, so a scroll-to-bottom asked for then would
-// land the conversation at its first message once the tab closes.
+// scroll-position.spec.ts covers where the transcript sits when the view
+// regains layout or its rows grow after the scroll. The tabs layout hides
+// #agentMain (holding #chatView) while a side tab shows, and a display:none
+// subtree has no layout, so scrollHeight reads 0; and a page of Markdown
+// lays out its tables and code blocks only after the rows are inserted.
+// Both used to leave the conversation above its newest row.
 
 async function setup(page: Page) {
   await page.addInitScript(() => {
@@ -130,4 +132,49 @@ test("rewinding the conversation still lands on the newest row", async ({ page }
   });
   console.log("AFTER_UNDO:", JSON.stringify(after));
   expect(after.fromBottom, "after a rewind the newest row must be in view").toBeLessThan(40);
+});
+
+// Heavy rows are the common case in a real session: a page of tables and
+// code blocks can grow the transcript by thousands of pixels on the frame
+// after the scroll, because the Markdown is laid out after the rows are
+// inserted. The conversation must end at its newest row, not part-way up
+// the page (the reported bug: 1734px short).
+test("a page of heavy markdown still opens at the newest row", async ({ page }) => {
+  const history = JSON.parse(readFileSync("e2e/rendering-history.json", "utf8"));
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript((hist) => {
+    const w = window as any;
+    const base = w.__paladinBaseInvoke;
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "listSessions")
+        return [
+          {
+            sessionId: "sess-heavy",
+            cwd: "/home/tester/project",
+            createdAt: 1,
+            provider: "p",
+            model: "m",
+            messageCount: hist.total,
+            title: "heavy",
+          },
+        ];
+      if (cmd === "sessionHistoryPage") return hist;
+      if (cmd === "sessionHistory") return hist.messages;
+      if (cmd === "sessionChanges") return { available: false, turns: [], files: [] };
+      if (cmd === "sessionImages") return { latestUser: -1, images: [] };
+      return base(cmd, args);
+    };
+  }, history);
+  await page.goto("/");
+  await showSidebar(page);
+  await page.click('[data-session="sess-heavy"]');
+  await page.waitForTimeout(2500);
+
+  const pos = await page.evaluate(() => {
+    const el = document.querySelector("#chatView") as HTMLElement;
+    return { fromBottom: Math.round(el.scrollHeight - el.scrollTop - el.clientHeight), height: el.scrollHeight };
+  });
+  console.log("HEAVY_POS:", JSON.stringify(pos));
+  expect(pos.height, "the fixture must be tall enough to matter").toBeGreaterThan(1500);
+  expect(pos.fromBottom, "must open at the newest row").toBeLessThan(40);
 });

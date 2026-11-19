@@ -8,46 +8,54 @@ import * as api from "../core/api";
 import { toast } from "../ui/toast";
 import { openLocalBrowserURL, openWebTab } from "./sidePane";
 
-// scrollToBottom puts the newest row in view. A view with no layout (the
-// tabs layout hides #agentMain while a side tab shows, and startup hides
-// the shell) reports scrollHeight 0, so the assignment would silently land
-// the conversation at its first message once the view is laid out. Hold
-// the intent and finish it when the view gets a height.
+// scrollToBottom puts the newest row in view. The rows it just built may
+// not be laid out yet: heavy Markdown (tables, code blocks) can grow the
+// transcript by thousands of pixels on the frame after this runs, and a
+// view with no layout at all (the tabs layout hides #agentMain while a
+// side tab shows, startup hides the shell) reports scrollHeight 0. Either
+// way the assignment alone lands the conversation above its newest row, so
+// follow the view while it is still growing and keep it at the end.
 export function scrollToBottom(): void {
   chatViewEl.scrollTop = chatViewEl.scrollHeight;
-  if (chatViewEl.clientHeight === 0 || chatViewEl.scrollHeight === 0) {
-    watchBottomLayout();
-  }
+  watchBottomLayout();
 }
 
-// bottomObserver finishes a scroll whose view had no layout when it was
-// asked. It watches the view's own size, which is what changes when a
-// side tab closes or the shell is revealed, with a bounded timer as a
-// fallback for a change no observer reports.
+// bottomObserver follows the transcript while it grows. It watches the
+// view's own size — which changes both when rows finish laying out and
+// when the view regains layout (a side tab closing, the shell being
+// revealed) — and re-pins the end on each change until the height has
+// been quiet for a moment.
+const BOTTOM_SETTLE_MS = 300;
+const BOTTOM_MAX_MS = 4000;
 let bottomObserver: ResizeObserver | null = null;
-let bottomTimer = 0;
+let bottomSettleTimer = 0;
+let bottomDeadline = 0;
 
 function watchBottomLayout(): void {
-  if (bottomObserver) return;
-  const settle = (): boolean => {
-    if (chatViewEl.clientHeight === 0 || chatViewEl.scrollHeight === 0) return false;
-    stopBottomWatch();
-    chatViewEl.scrollTop = chatViewEl.scrollHeight;
-    return true;
-  };
-  if (typeof ResizeObserver !== "undefined") {
-    bottomObserver = new ResizeObserver(() => void settle());
+  const now = Date.now();
+  if (!bottomObserver) {
+    if (typeof ResizeObserver === "undefined") return;
+    bottomObserver = new ResizeObserver(() => {
+      if (chatViewEl.scrollHeight === 0) return;
+      chatViewEl.scrollTop = chatViewEl.scrollHeight;
+      scheduleBottomSettle();
+    });
     bottomObserver.observe(chatViewEl);
+    // The observed element is the scroll container: its own box does not
+    // change when its content grows, so watch the content box too.
+    bottomObserver.observe(messagesEl);
+    bottomDeadline = now + BOTTOM_MAX_MS;
   }
-  let tries = 0;
-  const tick = (): void => {
-    if (settle() || tries++ > 60) {
-      stopBottomWatch();
-      return;
-    }
-    bottomTimer = window.setTimeout(tick, 50);
-  };
-  bottomTimer = window.setTimeout(tick, 50);
+  scheduleBottomSettle();
+}
+
+// scheduleBottomSettle releases the follow after the height stops
+// changing, bounded by BOTTOM_MAX_MS so a streaming turn cannot hold it
+// forever (the turn's own followTail keeps that case working).
+function scheduleBottomSettle(): void {
+  window.clearTimeout(bottomSettleTimer);
+  const left = bottomDeadline - Date.now();
+  bottomSettleTimer = window.setTimeout(stopBottomWatch, Math.max(0, Math.min(BOTTOM_SETTLE_MS, left)));
 }
 
 function stopBottomWatch(): void {
@@ -55,8 +63,9 @@ function stopBottomWatch(): void {
     bottomObserver.disconnect();
     bottomObserver = null;
   }
-  window.clearTimeout(bottomTimer);
-  bottomTimer = 0;
+  window.clearTimeout(bottomSettleTimer);
+  bottomSettleTimer = 0;
+  bottomDeadline = 0;
 }
 
 // STARTERS are the hero suggestion chips on an empty conversation.
