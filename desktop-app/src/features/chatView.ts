@@ -8,8 +8,55 @@ import * as api from "../core/api";
 import { toast } from "../ui/toast";
 import { openLocalBrowserURL, openWebTab } from "./sidePane";
 
+// scrollToBottom puts the newest row in view. A view with no layout (the
+// tabs layout hides #agentMain while a side tab shows, and startup hides
+// the shell) reports scrollHeight 0, so the assignment would silently land
+// the conversation at its first message once the view is laid out. Hold
+// the intent and finish it when the view gets a height.
 export function scrollToBottom(): void {
   chatViewEl.scrollTop = chatViewEl.scrollHeight;
+  if (chatViewEl.clientHeight === 0 || chatViewEl.scrollHeight === 0) {
+    watchBottomLayout();
+  }
+}
+
+// bottomObserver finishes a scroll whose view had no layout when it was
+// asked. It watches the view's own size, which is what changes when a
+// side tab closes or the shell is revealed, with a bounded timer as a
+// fallback for a change no observer reports.
+let bottomObserver: ResizeObserver | null = null;
+let bottomTimer = 0;
+
+function watchBottomLayout(): void {
+  if (bottomObserver) return;
+  const settle = (): boolean => {
+    if (chatViewEl.clientHeight === 0 || chatViewEl.scrollHeight === 0) return false;
+    stopBottomWatch();
+    chatViewEl.scrollTop = chatViewEl.scrollHeight;
+    return true;
+  };
+  if (typeof ResizeObserver !== "undefined") {
+    bottomObserver = new ResizeObserver(() => void settle());
+    bottomObserver.observe(chatViewEl);
+  }
+  let tries = 0;
+  const tick = (): void => {
+    if (settle() || tries++ > 60) {
+      stopBottomWatch();
+      return;
+    }
+    bottomTimer = window.setTimeout(tick, 50);
+  };
+  bottomTimer = window.setTimeout(tick, 50);
+}
+
+function stopBottomWatch(): void {
+  if (bottomObserver) {
+    bottomObserver.disconnect();
+    bottomObserver = null;
+  }
+  window.clearTimeout(bottomTimer);
+  bottomTimer = 0;
 }
 
 // STARTERS are the hero suggestion chips on an empty conversation.
