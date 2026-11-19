@@ -42,6 +42,13 @@
 }
 #headerStatusActions {
   order: 3;
+  /* Stretch to the title bar's height so the window buttons fill the
+     top-right corner (they grow by their negative margins). The Plugins
+     menu button used to give this row its height; with it gone the row
+     must take it from the title bar itself. */
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
 }
 /* The readings change width as a turn runs (session id, context fill,
    process load). Pinning them to the left of the header keeps the icon

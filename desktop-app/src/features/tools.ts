@@ -231,7 +231,7 @@ export function runLabel(tools: ToolInfo[]): string {
 
 // toolReason is the one-line note the model gave for a call (the
 // required `reason` argument); "" when a call carries none (older
-// transcripts, MCP and plugin tools).
+// transcripts and MCP tools).
 export function toolReason(tool: ToolInfo): string {
   const reason = parseArgs(tool.arguments).reason;
   return typeof reason === "string" ? reason.trim() : "";

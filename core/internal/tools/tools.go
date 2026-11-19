@@ -301,51 +301,6 @@ func (r *Registry) MCPInfo(name string) (MCPInfo, bool) {
 	return m.MCPInfo(), true
 }
 
-// ExtensionTool marks a tool loaded from the user's extensions: local
-// code the permission gate asks about, and plan mode and the read-only
-// preset leave out.
-type ExtensionTool interface {
-	Extension() bool
-}
-
-// ExtensionInfo names the plugin an extension tool belongs to and the
-// tool's own name, so permission rules can say "plugin" or
-// "plugin/tool".
-type ExtensionInfo struct {
-	Plugin string
-	Tool   string
-}
-
-// ExtensionToolInfo is implemented by extension tools that know their
-// plugin.
-type ExtensionToolInfo interface {
-	ExtensionInfo() ExtensionInfo
-}
-
-// ExtensionOf reports the plugin and plugin-side tool name of an
-// extension tool; ok is false for anything else.
-func (r *Registry) ExtensionOf(name string) (ExtensionInfo, bool) {
-	resolved, ok := r.resolveName(name)
-	if !ok {
-		return ExtensionInfo{}, false
-	}
-	info, ok := r.tools[resolved].(ExtensionToolInfo)
-	if !ok {
-		return ExtensionInfo{}, false
-	}
-	return info.ExtensionInfo(), true
-}
-
-// IsExtension reports whether the named tool is an extension.
-func (r *Registry) IsExtension(name string) bool {
-	resolved, ok := r.resolveName(name)
-	if !ok {
-		return false
-	}
-	e, ok := r.tools[resolved].(ExtensionTool)
-	return ok && e.Extension()
-}
-
 // With returns a copy of the registry plus extra tools, sharing the
 // existing instances. An extra never replaces a tool already present.
 func (r *Registry) With(extra ...Tool) *Registry {

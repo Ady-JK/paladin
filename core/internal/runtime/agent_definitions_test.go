@@ -113,15 +113,6 @@ func (t agentTestTool) Definition() tools.ToolDefinition                     { r
 func (t agentTestTool) Call(json.RawMessage, *tools.ToolCtx) (string, error) { return "ok", nil }
 func (t agentTestTool) MCPInfo() tools.MCPInfo                               { return *t.info }
 
-type agentTestExtension struct{ name string }
-
-func (t agentTestExtension) Name() string { return t.name }
-func (t agentTestExtension) Definition() tools.ToolDefinition {
-	return tools.ToolDefinition{Name: t.name}
-}
-func (t agentTestExtension) Call(json.RawMessage, *tools.ToolCtx) (string, error) { return "ok", nil }
-func (agentTestExtension) Extension() bool                                        { return true }
-
 func TestFileSubagentsAreDiscoveredAndReloaded(t *testing.T) {
 	rt, data := testRuntime(t)
 	root := filepath.Join(data, "agents")
@@ -202,9 +193,8 @@ func TestConfiguredSubagentToolSelectionAndParentSwitches(t *testing.T) {
 	child := transcript.Session{Meta: transcript.Meta{Cwd: ws, Subagent: &transcript.Subagent{ParentID: parent.Meta.SessionID}}}
 	read := agentTestTool{name: "mcp__local__lookup", info: &tools.MCPInfo{Server: "local", Tool: "lookup", ReadOnly: true}}
 	write := agentTestTool{name: "mcp__local__change", info: &tools.MCPInfo{Server: "local", Tool: "change"}}
-	ext := agentTestExtension{name: "extension__sample__run"}
-	all := rt.tools.With(read, write, ext)
-	kind := subagentKind{Name: "custom", ReadWrite: true, Tools: []string{"read", "edit", "browser", "memory", ext.name, "spawn_agent"}, MCP: map[string][]string{"local": {"lookup", "change"}}}
+	all := rt.tools.With(read, write)
+	kind := subagentKind{Name: "custom", ReadWrite: true, Tools: []string{"read", "edit", "browser", "memory", "spawn_agent"}, MCP: map[string][]string{"local": {"lookup", "change"}}}
 	check := func(reg *tools.Registry, name string, want bool) {
 		t.Helper()
 		_, got := reg.Get(name)
@@ -213,13 +203,13 @@ func TestConfiguredSubagentToolSelectionAndParentSwitches(t *testing.T) {
 		}
 	}
 	reg := rt.childToolsFrom(child, kind, all)
-	for _, name := range []string{"read", "edit", ext.name, read.name, write.name} {
+	for _, name := range []string{"read", "edit", read.name, write.name} {
 		check(reg, name, true)
 	}
 	check(reg, "spawn_agent", false)
 	kind.ReadWrite = false
 	reg = rt.childToolsFrom(child, kind, all)
-	for _, name := range []string{"edit", "browser", "memory", ext.name, write.name} {
+	for _, name := range []string{"edit", "browser", "memory", write.name} {
 		check(reg, name, false)
 	}
 	check(reg, read.name, true)
@@ -241,7 +231,6 @@ func TestConfiguredSubagentToolSelectionAndParentSwitches(t *testing.T) {
 	}
 	reg = rt.childToolsFrom(child, kind, all)
 	check(reg, "read", true)
-	check(reg, ext.name, false)
 	check(reg, write.name, false)
 	child.Meta.Subagent.ParentID = "missing-parent"
 	if got := rt.childToolsFrom(child, kind, all).Len(); got != 0 {
@@ -251,20 +240,6 @@ func TestConfiguredSubagentToolSelectionAndParentSwitches(t *testing.T) {
 
 func TestCreateAgentSkillAndCommandReceiveCompactCapabilities(t *testing.T) {
 	rt, ws := testRuntime(t)
-	pluginDir := filepath.Join(rt.dataDir, "config", "extensions", "example")
-	if err := os.MkdirAll(pluginDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(rt.dataDir, "config", "extensions.json"), []byte(`{"enabled":["example"]}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	manifest := `{"entry":"index.js","tools":[{"name":"hello","description":"Says hello. Long details must be omitted.","parameters":{"type":"object"}}]}`
-	if err := os.WriteFile(filepath.Join(pluginDir, "paladin-plugin.json"), []byte(manifest), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "index.js"), []byte(`export default {tools:[]}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	parent, err := rt.transcripts.Create(ws, "local", "test")
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +253,7 @@ func TestCreateAgentSkillAndCommandReceiveCompactCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, content := range []string{skill.Content, command.Prompt} {
-		for _, want := range []string{"Agent definitions directory:", "builtin read", "extension__example__hello", "permissions", "make"} {
+		for _, want := range []string{"Agent definitions directory:", "builtin read", "permissions", "make"} {
 			if want == "make" && content == skill.Content {
 				continue
 			}

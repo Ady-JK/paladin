@@ -1,5 +1,5 @@
 // Small, pure checks for values that arrive over IPC from a renderer or a
-// plugin panel. Nothing here touches Electron, so the rules run in plain
+// untrusted frame. Nothing here touches Electron, so the rules run in plain
 // Node under Playwright.
 import path from "node:path";
 
@@ -31,7 +31,7 @@ const SECRET_EXTENSIONS = new Set([".pem", ".key", ".p12", ".pfx", ".p8", ".jks"
 const ENV_SAFE_SUFFIX = /\.(example|sample|template|dist)$/;
 
 // secretPath flags a workspace-relative path that usually holds credentials
-// or version-control internals. A plugin panel with readFile gets the
+// or version-control internals. A frame with readFile gets the
 // workspace, not the secrets in it.
 export function secretPath(rel: string): boolean {
   const parts = rel

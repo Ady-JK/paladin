@@ -9,7 +9,6 @@ import { createVisualCard } from "../visuals";
 import { ToolRun } from "../toolRun";
 import { mountImage, mountUserAttachments, registerImage } from "../mediaGallery";
 import { paintProtection } from "../snapshotProtection";
-import { createPluginCard, hasPluginCard } from "../pluginCards";
 import { createQuestionCard } from "../../adapters/agentQuestion";
 
 // buildHistory appends a persisted transcript's rows to container.
@@ -51,11 +50,6 @@ export function buildHistory(
   const pushAgentTool = (tool: ToolInfo): void => {
     if (!agentBody) {
       openAgent("");
-    }
-    if (hasPluginCard(tool.name)) {
-      agentBody!.append(createPluginCard(sessionId, tool));
-      run = null;
-      return;
     }
     if (tool.name === "agent_question") {
       agentBody!.append(createQuestionCard(sessionId, tool));

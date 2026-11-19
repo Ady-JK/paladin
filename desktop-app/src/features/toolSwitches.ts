@@ -93,8 +93,6 @@ function groups(list: ToolSwitch[]): Group[] {
   const out: Group[] = [];
   const builtin = list.filter((t) => t.source === "builtin");
   if (builtin.length) out.push({ id: "builtin", label: "Built-in", tools: builtin });
-  const extensions = list.filter((t) => t.source === "extension");
-  if (extensions.length) out.push({ id: "extension", label: "Extension tools", tools: extensions });
   const servers = new Map<string, ToolSwitch[]>();
   for (const t of list) {
     if (t.source !== "mcp") continue;
@@ -172,62 +170,6 @@ function serversHtml(servers: LanguageServer[] | undefined): string {
   );
 }
 
-// PERMISSION_LABEL names a declared capability for the UI.
-const PERMISSION_LABEL: Record<string, string> = {
-  network: "uses the network",
-  spawn: "runs other programs",
-  "fs-outside-workspace": "reads or writes outside the workspace",
-};
-
-// pluginsHtml is the Local extensions section: one row per enabled
-// plugin, with its node process, its declared capabilities and its error.
-function pluginsHtml(v: ToolsOverview): string {
-  const plugins = v.extensions ?? [];
-  const runners = new Map((v.runners ?? []).map((r) => [r.plugin, r]));
-  const errors = v.extensionErrors ?? [];
-  if (!plugins.length && !errors.length) return "";
-  const rows = plugins
-    .map((p) => {
-      const runner = runners.get(p.name);
-      const where =
-        p.kind === "file"
-          ? "single file (legacy)"
-          : p.permissions?.length
-            ? `Declared: ${p.permissions.map((x) => PERMISSION_LABEL[x] ?? x).join(", ")}`
-            : "folder plugin";
-      const state = p.error
-        ? `<span class="tsw-ext-state is-error" title="${escapeHtml(p.error)}">failed</span>`
-        : runner
-          ? `<span class="tsw-ext-state is-warm" title="${escapeHtml(
-              `pid ${runner.pid ?? "?"} on ${runner.electron ? "Electron's Node" : (runner.node ?? "node")}`,
-            )}">running${runner.inflight ? ` · ${runner.inflight} call${runner.inflight === 1 ? "" : "s"}` : ""}</span>`
-          : `<span class="tsw-ext-state" title="It starts on its first call">idle</span>`;
-      return (
-        `<li class="tsw-row tsw-ext" data-plugin="${escapeHtml(p.name)}" data-kind="${escapeHtml(p.kind)}" data-error="${p.error ? "true" : "false"}" title="${escapeHtml(p.path)}">` +
-        `<div class="tsw-text"><div class="tsw-line"><span class="tsw-name">${escapeHtml(p.name)}</span>${state}` +
-        `<span class="tsw-badge is-ro">${escapeHtml(p.kind === "file" ? "legacy file" : "plugin")}</span></div>` +
-        `<div class="tsw-desc">${escapeHtml(where)}${p.tools?.length ? ` · ${p.tools.length} tool${p.tools.length === 1 ? "" : "s"}` : ""}</div>` +
-        (p.error ? `<div class="tsw-desc tsw-ext-error">${escapeHtml(p.error)}</div>` : "") +
-        `</div></li>`
-      );
-    })
-    .join("");
-  const errorRows = errors
-    .filter((e) => !plugins.some((p) => p.error && e.includes(p.error)))
-    .map(
-      (e) =>
-        `<li class="tsw-row"><div class="tsw-text"><div class="tsw-desc tsw-ext-error">${escapeHtml(e)}</div></div></li>`,
-    )
-    .join("");
-  return (
-    `<section class="tsw-group" data-group="plugins">` +
-    `<div class="tsw-group-head"><span class="tsw-group-ico">${icon("sl-plug", "h-3.5 w-3.5")}</span>` +
-    `<span class="tsw-group-name">Extensions</span></div>` +
-    `<p class="tsw-desc">Extension code can run when loaded and has your account’s filesystem, network, and process access. Declared permissions are informational.</p>` +
-    `<ul class="tsw-list">${rows}${errorRows}</ul></section>`
-  );
-}
-
 function behaviorHtml(b: ToolBehavior | undefined, servers?: LanguageServer[]): string {
   if (!b) return "";
   const rows = BEHAVIORS.map((x) => {
@@ -249,25 +191,6 @@ function behaviorHtml(b: ToolBehavior | undefined, servers?: LanguageServer[]): 
   );
 }
 
-// reloadPlugins re-reads extensions.json and every plugin, which also
-// stops their warm node processes; the new tool set applies from the next
-// turn.
-async function reloadPlugins(): Promise<void> {
-  try {
-    apply(await api.toolsReload(state.cwd || null, state.sessionId || null));
-    const count = overview?.extensions?.length ?? 0;
-    const failed = (overview?.extensions ?? []).filter((p) => p.error).length;
-    toast(
-      failed
-        ? `Reloaded ${count} extension${count === 1 ? "" : "s"}; ${failed} could not load`
-        : `Reloaded ${count} extension${count === 1 ? "" : "s"} — they apply from the next turn`,
-      failed ? "error" : "ok",
-    );
-  } catch (error) {
-    toast(`Could not reload extensions: ${String(error)}`, "error");
-  }
-}
-
 async function setBehavior(key: keyof ToolBehavior, on: boolean): Promise<void> {
   try {
     apply(await api.toolBehaviorSet(key, on, state.cwd || null, state.sessionId || null));
@@ -282,7 +205,6 @@ function paintPane(): void {
       `<div class="tsw-pane">` +
       `<div class="mem-intro"><span>Switch tools off everywhere. A session can switch them back on (or off) from the composer's Tools menu; its switch wins.</span>` +
       `<button type="button" class="mem-refresh" data-tsw-refresh title="Re-read the list">${icon("repeat", "h-3.5 w-3.5")}Refresh</button>` +
-      `<button type="button" class="mem-refresh" data-tsw-reload title="Re-read extensions.json and every plugin; the new tools apply from the next turn">${icon("sl-plug", "h-3.5 w-3.5")}Reload plugins</button>` +
       `</div>` +
       `<label class="tsw-search">${icon("search", "h-3.5 w-3.5")}<input id="toolsSearch" type="search" placeholder="Filter tools" spellcheck="false" autocomplete="off" /></label>` +
       `<div class="tsw-groups"></div>` +
@@ -294,7 +216,6 @@ function paintPane(): void {
     return;
   }
   host.innerHTML =
-    pluginsHtml(overview) +
     behaviorHtml(overview.behavior, overview.languageServers) +
     (groups(overview.tools)
       .map((g) => {
@@ -340,19 +261,8 @@ function filterPane(): void {
   toolsBodyEl.querySelectorAll<HTMLElement>('.tsw-group:not([data-group="behavior"])').forEach((g) => {
     let any = false;
     g.querySelectorAll<HTMLElement>(".tsw-row").forEach((row) => {
-      // A plugin row is not a tool: it matches on its name, path and
-      // capabilities instead.
-      const plugin = overview?.extensions?.find((x) => x.name === row.dataset.plugin);
-      const t = plugin ? undefined : overview?.tools.find((x) => x.name === row.dataset.tool);
-      const hay = plugin
-        ? matches(
-            {
-              name: plugin.name,
-              description: [plugin.path, ...(plugin.permissions ?? []), plugin.error ?? ""].join(" "),
-            } as ToolSwitch,
-            query,
-          )
-        : !!t && matches(t, query);
+      const t = overview?.tools.find((x) => x.name === row.dataset.tool);
+      const hay = !!t && matches(t, query);
       row.hidden = !hay;
       any ||= hay;
     });
@@ -372,10 +282,6 @@ function onPaneClick(event: MouseEvent): void {
   const t = event.target as HTMLElement;
   if (t.closest("[data-tsw-refresh]")) {
     void loadTools();
-    return;
-  }
-  if (t.closest("[data-tsw-reload]")) {
-    void reloadPlugins();
     return;
   }
   const behavior = t.closest<HTMLElement>("[data-tsw-behavior]");

@@ -11,10 +11,6 @@ type mcpProbe struct{ echoTool }
 
 func (mcpProbe) MCPInfo() MCPInfo { return MCPInfo{Server: "s", Tool: "t"} }
 
-type extProbe struct{ echoTool }
-
-func (extProbe) Extension() bool { return true }
-
 func TestEveryBuiltinToolRequiresAReason(t *testing.T) {
 	reg := BuiltinRegistry()
 	defs := reg.Definitions()
@@ -73,16 +69,15 @@ func TestCallStripsTheReasonBeforeTheTool(t *testing.T) {
 	}
 }
 
-func TestMCPAndExtensionToolsTakeNoReason(t *testing.T) {
+func TestMCPToolsTakeNoReason(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(mcpProbe{echoTool{name: "mcp__s__t"}})
-	reg.Register(extProbe{echoTool{name: "extension__p__t"}})
 	for _, def := range reg.Definitions() {
 		if props, _ := def.Parameters.(map[string]any)["properties"].(map[string]any); props != nil && props[ReasonParam] != nil {
 			t.Errorf("%s got a reason property", def.Name)
 		}
 	}
-	for _, name := range []string{"mcp__s__t", "extension__p__t"} {
+	for _, name := range []string{"mcp__s__t"} {
 		if res := reg.Call(&ToolCall{ID: "c", Name: name, Arguments: `{"a":1}`}, &ToolCtx{}); res.IsError {
 			t.Errorf("%s: %s", name, res.Content)
 		}

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +18,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/codex"
 	"github.com/Ady-JK/paladin/core/internal/config"
-	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/lsp"
@@ -34,8 +32,6 @@ import (
 )
 
 type Settings struct {
-	// CreatorMode enables Paladin's extension creation and editor workflow.
-	CreatorMode bool `json:"creatorMode,omitempty"`
 	// MaxConcurrentTurns caps turns running at once across sessions;
 	// extra turns wait in the hub queue. 0 means the default.
 	MaxConcurrentTurns uint32 `json:"maxConcurrentTurns,omitempty"`
@@ -141,12 +137,9 @@ type AgentRuntime struct {
 	cacheMu       sync.Mutex
 	mcp           *mcp.Manager
 	mcpSink       atomic.Pointer[mcpSink]
-	// extensions owns the enabled plugins and their warm runners.
-	extensions *extension.Registry
-	toolsMu    sync.Mutex
-	toolsSink  atomic.Pointer[toolsSink]
-	pluginSink atomic.Pointer[pluginSink]
-	hooks      *hooks.Manager
+	toolsMu       sync.Mutex
+	toolsSink     atomic.Pointer[toolsSink]
+	hooks         *hooks.Manager
 	// started holds sessions whose SessionStart hooks ran in this process.
 	started   map[string]bool
 	startedMu sync.Mutex
@@ -215,8 +208,6 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		shellTool.Observe(r.jobs)
 	}
 	r.mcp = newMCPManager(dataDir, &r.mcpSink)
-	r.extensions = extension.NewRegistry(dataDir)
-	r.extensions.Start()
 	r.lsp = lsp.NewManager(dataDir)
 	r.editorLsp = lsp.NewManager(dataDir)
 	r.registerKnowledgeTools()
@@ -233,18 +224,6 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		r.jobs.afterTurn(info)
 	})
 	return r
-}
-
-// extensionRef tells the permission gate which plugin an extension tool
-// belongs to, so its rules can name the plugin or one of its tools.
-func extensionRef(registry *tools.Registry) func(string) (permission.ExtensionRef, bool) {
-	return func(name string) (permission.ExtensionRef, bool) {
-		if !registry.IsExtension(name) {
-			return permission.ExtensionRef{}, false
-		}
-		info, _ := registry.ExtensionOf(name)
-		return permission.ExtensionRef{Plugin: info.Plugin, Tool: info.Tool}, true
-	}
 }
 
 func (r *AgentRuntime) settingsPath() string {
@@ -360,26 +339,9 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		if len(child.MCP) > 0 {
 			extra = r.mcpTools(ctx, project)
 		}
-		wantsExtension := slices.ContainsFunc(child.Tools, func(name string) bool { return strings.HasPrefix(name, "extension__") })
-		if child.ReadWrite && wantsExtension && preset != permission.ReadOnly {
-			extensionTools, extensionErrors := r.extensions.Load(ctx)
-			for _, e := range extensionErrors {
-				fmt.Fprintf(os.Stderr, "extension: %v\n", e)
-			}
-			extra = append(extra, extensionTools...)
-		}
 		registry = r.childToolsFrom(sess, *child, r.tools.With(extra...))
 	} else {
 		extra := r.mcpTools(ctx, project)
-		extensionTools, extensionErrors := r.extensions.Load(ctx)
-		for _, err := range extensionErrors {
-			fmt.Fprintf(os.Stderr, "extension: %v\n", err)
-		}
-		// The read-only preset leaves extension tools out: they run local
-		// code that could change anything.
-		if preset != permission.ReadOnly {
-			extra = append(extra, extensionTools...)
-		}
 		registry = r.turnTools(req.Cwd, req.SessionID, r.tools.With(extra...))
 		req.Notices = withRecall(r.memoryRecall(req, req.Cwd, sess.Dir),
 			r.jobs.withNotices(req.SessionID, r.subagents.notices(req.SessionID, req.Cwd)))
@@ -466,8 +428,7 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			Store:     r.perms,
 			Broker:    r.broker,
 
-			MCP:       registry.MCPInfo,
-			Extension: extensionRef(registry),
+			MCP: registry.MCPInfo,
 		},
 	}, req)
 	if err != nil {

@@ -19,16 +19,11 @@ test("only the app main frame may invoke privileged IPC", () => {
   expect(isMainWindowFrame(contents, mainFrame, null, mainFrame)).toBe(false);
 });
 
-const knownPlugin = (host: string): boolean => host === "inspector";
-
 test("frames in the app window may only load the visual frame page", () => {
   for (const app of ["http://localhost:5173", "http://localhost:5173/", "file:///app/dist/index.html"]) {
     const frame = new URL("visual-frame.html", app).href;
-    expect(appFrameNavigationAllowed(app, frame, knownPlugin)).toBe(true);
-    expect(appFrameNavigationAllowed(app, "about:blank", knownPlugin)).toBe(true);
-    expect(appFrameNavigationAllowed(app, "plugin://inspector/dashboard/ui/index.html?panel=abc", knownPlugin)).toBe(
-      true,
-    );
+    expect(appFrameNavigationAllowed(app, frame)).toBe(true);
+    expect(appFrameNavigationAllowed(app, "about:blank")).toBe(true);
     for (const url of [
       `${frame}?x=1`,
       new URL("other.html", app).href,
@@ -37,11 +32,7 @@ test("frames in the app window may only load the visual frame page", () => {
       "data:text/html,hi",
       "javascript:alert(1)",
     ]) {
-      expect(appFrameNavigationAllowed(app, url, knownPlugin)).toBe(false);
-    }
-    // plugin:// is allowed only for a plugin that is loaded.
-    for (const url of ["plugin://stranger/x/ui/index.html", "plugin://inspector@evil/x", "plugin://:pw@inspector/x"]) {
-      expect(appFrameNavigationAllowed(app, url, knownPlugin), url).toBe(false);
+      expect(appFrameNavigationAllowed(app, url)).toBe(false);
     }
   }
 });
@@ -54,7 +45,6 @@ test("the app page has a strict content security policy", async ({ page }) => {
   expect(csp).toContain("script-src 'self'");
   expect(csp).not.toContain("unsafe-eval");
   expect(csp).toMatch(/object-src 'none'/);
-  expect(csp).toMatch(/frame-src [^;]*plugin:/);
   // An injected handler does not run, even if markup gets through.
   await page.evaluate(() => {
     const div = document.createElement("div");

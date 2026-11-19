@@ -4,14 +4,6 @@
 
 async function __paladinBaseInvoke(cmd, args) {
   switch (cmd) {
-    case "creatorModeGet":
-      return !!window.__e2eCreatorMode;
-    case "creatorModeSet":
-      window.__e2eCreatorMode = !!args.enabled;
-      return true;
-    case "creatorWorkspace":
-      if (!window.__e2eCreatorMode) throw new Error("enable Creator mode");
-      return "/home/creator";
     case "saveTaggedImage": {
       if (!/\.(png|jpe?g|gif|webp)$/i.test(args.path)) return null;
       return window.__paladinBaseInvoke("saveAttachment", {
@@ -255,9 +247,6 @@ async function __paladinBaseInvoke(cmd, args) {
     case "toolsReload":
     case "toolBehaviorSet":
       return window.__e2eToolsInvoke(cmd, args || {});
-    case "pluginViews":
-      window.__e2ePluginViewsLoaded = true;
-      return window.__e2ePluginViews || { views: [], cards: [], errors: [] };
     case "customList":
     case "customGet":
     case "customSet":
@@ -1086,9 +1075,6 @@ async function __paladinBaseInvoke(cmd, args) {
     case "resources":
       return window.__e2eRes || { at: 0, supported: false, self: { cpu: 0, rss: 0, procs: 0 }, sessions: {} };
     default:
-      if (String(cmd).startsWith("plugin:")) {
-        return 1;
-      }
       throw new Error(`e2e stub: unhandled command ${cmd}`);
   }
 }
@@ -1236,9 +1222,6 @@ window.__e2eToolsInvoke = (cmd, args) => {
         return { ...x, global: g, session: s, enabled: on, pending: pending.includes(x.name) || undefined };
       }),
       pending,
-      extensionErrors: t.extensionErrors || [],
-      extensions: t.extensions || [],
-      runners: t.runners || [],
       behavior: { formatOnWrite: true, lspDiagnostics: true, ...(t.behavior || {}) },
       languageServers: t.languageServers || [],
     };
@@ -1260,11 +1243,6 @@ window.__e2eToolsInvoke = (cmd, args) => {
     case "toolBehaviorSet":
       t.behavior = { ...(t.behavior || {}), [args.key]: !!args.enabled };
       return overview();
-    case "toolsReload": {
-      // A reload re-reads the plugins and drops their warm runners.
-      if (t.dropsRunners) t.runners = [];
-      return overview();
-    }
     case "toolsAccept": {
       const names = args.names && args.names.length ? args.names : t.pending[sid] || [];
       t.pending[sid] = (t.pending[sid] || []).filter((n) => !names.includes(n));
@@ -1630,68 +1608,6 @@ window.paladin = {
       return true;
     },
     setTheme: async () => true,
-  },
-  plugins: {
-    onPrompt: (cb) => {
-      window.__e2ePluginPrompt = cb;
-      return () => {
-        window.__e2ePluginPrompt = undefined;
-      };
-    },
-    sendPrompt: async () => ({ ok: true }),
-    history: async () => ({ ok: true, history: { messages: [], hasMore: false } }),
-    open: async (plugin, view, sessionId, workspace) => {
-      window.__e2ePluginOpens = (window.__e2ePluginOpens || []).concat([{ plugin, view, sessionId, workspace }]);
-      window.__e2ePluginContext = { sessionId, workspace, plugin, view, theme: "dark" };
-      const id = `panel-${window.__e2ePluginOpens.length}`;
-      return {
-        id,
-        title: (window.__e2ePluginTitles || {})[`${plugin}/${view}`] || view,
-        url: `plugin://${plugin}/${view}/ui/${view}.html?panel=${id}`,
-      };
-    },
-    close: async (id) => {
-      window.__e2ePluginCloses = (window.__e2ePluginCloses || []).concat([id]);
-      return true;
-    },
-    prepareReload: async () => true,
-    getContext: async () => window.__e2ePluginContext || null,
-    invokeTool: async (tool, args) => {
-      window.__e2ePluginInvokes = (window.__e2ePluginInvokes || []).concat([{ tool, args }]);
-      if (window.__e2ePluginInvoke) return window.__e2ePluginInvoke(tool, args);
-      return { ok: true, result: { tool, args } };
-    },
-    readFile: async (rel) => {
-      window.__e2ePluginReads = (window.__e2ePluginReads || []).concat([rel]);
-      if (window.__e2ePluginRead) return window.__e2ePluginRead(rel);
-      return { ok: true, text: "hello" };
-    },
-    readStore: async (key) => (window.__e2ePluginStore || {})[key] ?? null,
-    writeStore: async (key, value) => {
-      window.__e2ePluginStore = window.__e2ePluginStore || {};
-      window.__e2ePluginStore[key] = value;
-      return { ok: true };
-    },
-    openExternal: async (url) => {
-      window.__e2ePluginOpensExternal = (window.__e2ePluginOpensExternal || []).concat([url]);
-      return { ok: true };
-    },
-    subscribe: async (filter) => {
-      window.__e2ePluginSubs = (window.__e2ePluginSubs || []).concat([filter]);
-      return `sub-${window.__e2ePluginSubs.length}`;
-    },
-    unsubscribe: async (id) => {
-      window.__e2ePluginUnsubs = (window.__e2ePluginUnsubs || []).concat([id]);
-      return true;
-    },
-    onEvent: (cb) => {
-      window.__e2ePluginListeners = window.__e2ePluginListeners || new Set();
-      window.__e2ePluginListeners.add(cb);
-      window.__e2ePluginEmit = (msg) => {
-        for (const fn of window.__e2ePluginListeners) fn(msg);
-      };
-      return () => window.__e2ePluginListeners.delete(cb);
-    },
   },
   browser: {
     open: async (sessionId, url) => {

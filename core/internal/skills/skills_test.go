@@ -29,6 +29,8 @@ func userSkills(all []Skill) []Skill {
 }
 
 func TestListFindsGlobalAndWorkspaceSkills(t *testing.T) {
+	isolateHome(t)
+
 	dataDir := t.TempDir()
 	ws := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "reviewer", "---\ndescription: Reviews code\n---\n# Reviewer\nDo reviews.")
@@ -58,6 +60,8 @@ func TestListFindsGlobalAndWorkspaceSkills(t *testing.T) {
 }
 
 func TestWorkspaceShadowsGlobal(t *testing.T) {
+	isolateHome(t)
+
 	dataDir := t.TempDir()
 	ws := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "helper", "global body")
@@ -80,6 +84,8 @@ func TestWorkspaceShadowsGlobal(t *testing.T) {
 }
 
 func TestListSkipsNonSkills(t *testing.T) {
+	isolateHome(t)
+
 	dataDir := t.TempDir()
 	root := filepath.Join(dataDir, "config", "skills")
 	// Not a directory.
@@ -110,12 +116,16 @@ func TestListSkipsNonSkills(t *testing.T) {
 }
 
 func TestListMissingRoots(t *testing.T) {
+	isolateHome(t)
+
 	if got := userSkills(List(t.TempDir(), "")); len(got) != 0 {
 		t.Fatalf("got %+v", got)
 	}
 }
 
 func TestLoad(t *testing.T) {
+	isolateHome(t)
+
 	dataDir := t.TempDir()
 	ws := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "reviewer", "do a review")
@@ -129,6 +139,8 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadMissingAndInvalid(t *testing.T) {
+	isolateHome(t)
+
 	dataDir := t.TempDir()
 	if _, err := Load(dataDir, "", "nope"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("want not-found, got %v", err)
@@ -161,6 +173,8 @@ func TestInject(t *testing.T) {
 }
 
 func TestListSkipsOversizeSkills(t *testing.T) {
+	isolateHome(t)
+
 	dataDir := t.TempDir()
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "huge", strings.Repeat("x", MaxContentBytes+1))
 	writeSkill(t, filepath.Join(dataDir, "config", "skills"), "tiny", "# Tiny\nsmall")
@@ -174,6 +188,8 @@ func TestListSkipsOversizeSkills(t *testing.T) {
 }
 
 func TestBuiltinSkillsShipAndCanBeReplacedOrTurnedOff(t *testing.T) {
+	isolateHome(t)
+
 	dataDir, ws := t.TempDir(), t.TempDir()
 	byName := map[string]Skill{}
 	for _, s := range List(dataDir, ws) {
@@ -214,45 +230,4 @@ func TestBuiltinSkillsShipAndCanBeReplacedOrTurnedOff(t *testing.T) {
 	if !Disabled(dataDir)["web-research"] {
 		t.Fatal("Disabled is case-insensitive")
 	}
-}
-
-func TestCreatorSkillsAreOnlyAvailableInCreatorWorkspace(t *testing.T) {
-	dataDir, ws := t.TempDir(), t.TempDir()
-	root := filepath.Join(t.TempDir(), "creator")
-	t.Setenv("PALADIN_CREATOR_DIR", root)
-	if err := os.MkdirAll(filepath.Join(dataDir, "config"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// An override of a reserved Creator skill follows the same mode rule.
-	writeSkill(t, GlobalDir(dataDir), "writing-an-extension", "# Custom extension guidance")
-	names := []string{"writing-an-extension", "writing-a-plugin-ui", "creating-paladin-ui"}
-	check := func(cwd string, available bool) {
-		t.Helper()
-		listed := map[string]bool{}
-		for _, s := range List(dataDir, cwd) {
-			listed[strings.ToLower(s.Name)] = true
-		}
-		for _, name := range names {
-			if listed[name] != available {
-				t.Fatalf("%s listed in %s = %v, want %v", name, cwd, listed[name], available)
-			}
-			_, err := Load(dataDir, cwd, strings.ToUpper(name))
-			if (err == nil) != available {
-				t.Fatalf("load %s in %s: %v", name, cwd, err)
-			}
-		}
-		if _, err := Load(dataDir, cwd, "debugging"); err != nil {
-			t.Fatalf("normal skill unavailable: %v", err)
-		}
-	}
-	check(root, false)
-	if err := os.WriteFile(filepath.Join(dataDir, "config", "settings.json"), []byte(`{"creatorMode":true}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	check(root, true)
-	check(ws, false)
-	if err := os.WriteFile(filepath.Join(dataDir, "config", "settings.json"), []byte(`{"creatorMode":false}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	check(root, false)
 }

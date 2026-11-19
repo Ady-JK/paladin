@@ -28,35 +28,10 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/errlog"
-	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 )
 
 func main() {
-	if len(os.Args) > 2 && os.Args[1] == "extensions" && os.Args[2] == "init" {
-		example := false
-		for _, arg := range os.Args[3:] {
-			switch arg {
-			case "--example-plugin":
-				example = true
-			default:
-				fmt.Fprintf(os.Stderr, "unknown option %q for extensions init\n", arg)
-				os.Exit(2)
-			}
-		}
-		dir, err := extension.Init(config.DataDir(), example)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println(dir)
-		return
-	}
-	if len(os.Args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: agent-host [extensions init [--example-plugin]] "+
-			"(without arguments, speak JSONL on stdin/stdout)")
-		os.Exit(2)
-	}
 	dataDir := config.DataDir()
 	initLogging(dataDir)
 	rt := runtime.New(dataDir, config.NewConfig(dataDir))
@@ -64,7 +39,6 @@ func main() {
 	installTurnSink(rt)
 	installMCPSink(rt)
 	installToolsSink(rt)
-	installPluginSink(rt)
 	installAgentsSink(rt)
 	installBrowserSink(rt)
 	rt.StartMCP()

@@ -39,19 +39,17 @@ var methodClass = map[string]runClass{
 
 	"listProviders": runRead, "codexStatus": runRead, "ideReadFile": runRead, "ideFileStatuses": runRead, "ideList": runRead, "ideSearch": runRead, "ideLayoutGet": runRead, "ideExplorerSettingsGet": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
 	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead, "memoryConfig": runRead,
-	"creatorModeGet": runRead,
 	"contextSources": runRead,
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
 	"sessionHistoryPage": runRead, "sessionImages": runRead,
 	"sessionImage": runRead,
 	"sessionTodos": runRead, "sessionUsage": runRead, "budgetGet": runRead, "thinkingGet": runRead, "compactionGet": runRead,
-	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "fileExcerpt": runRead, "filePreview": runRead, "pluginViews": runRead, "worktreeStatus": runRead, "attach": runRead,
+	"overallUsage": runRead, "revertPreview": runRead, "sessionChanges": runRead, "sessionDiff": runRead, "fileExcerpt": runRead, "filePreview": runRead, "worktreeStatus": runRead, "attach": runRead,
 	"permissionsGet": runRead, "listAgents": runRead, "interruptAgent": runRead,
 	"listSideChats": runRead, "loadSideChat": runRead, "hooksList": runRead, "mcpList": runRead,
 	"mcpConfig": runRead, "mcpParse": runRead, "toolsList": runRead, "customList": runRead, "customGet": runRead,
 
 	"submitChat": runSession, "steerChat": runSession, "answerQuestion": runSession, "openSession": runSession,
-	"pluginInvoke":    runSession,
 	"saveAttachment":  runSession,
 	"saveTaggedImage": runSession,
 	"terminalStart":   runSession,
@@ -62,15 +60,12 @@ var methodClass = map[string]runClass{
 	"deleteSideChat":       runSession,
 
 	"setDefaultProvider": runGlobal, "addProvider": runGlobal, "updateProvider": runGlobal,
-	"creatorModeSet": runGlobal, "creatorWorkspace": runGlobal,
 	"ideSaveFile": runGlobal, "ideLayoutSet": runGlobal, "ideExplorerSettingsSet": runGlobal, "setWorkspace": runGlobal, "setPrompt": runGlobal, "resetPrompt": runGlobal,
 	"memorySet": runGlobal, "permissionsSet": runGlobal, "hooksSetConfig": runGlobal,
 	"hooksTrust": runGlobal, "hooksToggle": runGlobal, "mcpSetConfig": runGlobal,
 	"mcpSetEnabled": runGlobal, "mcpRestart": runGlobal, "mcpRemove": runGlobal, "mcpTrust": runGlobal,
 	"mcpAdd": runGlobal, "toolsSet": runGlobal, "toolsAccept": runGlobal, "toolBehaviorSet": runGlobal,
-	// Reload stops the warm plugin runners, so it is a global mutation.
-	"toolsReload": runGlobal,
-	"customSet":   runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
+	"customSet": runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
 
 	"refreshProviders": runLong, "codexThreads": runLong, "deleteCodexThread": runLong, "codexSkills": runLong, "importCodexThread": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
 	"copilotSignInStart": runLong, "copilotSignInPoll": runLong, "copilotSignInCancel": runLong,

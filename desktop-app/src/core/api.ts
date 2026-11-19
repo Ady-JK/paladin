@@ -11,7 +11,6 @@ import type {
   CustomState,
   FileExcerpt,
   FilePreview,
-  PluginUI,
   ToolBehavior,
   ThinkingView,
   HookScope,
@@ -95,18 +94,6 @@ export function resolveWorkspace(cwd: string | null): Promise<string> {
 
 export function setWorkspace(path: string): Promise<string> {
   return invoke<string>("setWorkspace", { path });
-}
-
-export function creatorModeGet(): Promise<boolean> {
-  return invoke<boolean>("creatorModeGet");
-}
-
-export function creatorModeSet(enabled: boolean): Promise<boolean> {
-  return invoke<boolean>("creatorModeSet", { enabled });
-}
-
-export function creatorWorkspace(): Promise<string> {
-  return invoke<string>("creatorWorkspace");
 }
 
 export type IDEFile = { path: string; content: string; version: string };
@@ -719,12 +706,6 @@ export function filePreview(cwd: string | null, path: string): Promise<FilePrevi
   return invoke<FilePreview>("filePreview", { cwd, path });
 }
 
-// pluginViews lists the side-pane panels and result cards extensions
-// ship. Reading manifests starts no plugin process.
-export function pluginViews(): Promise<PluginUI> {
-  return invoke<PluginUI>("pluginViews", {});
-}
-
 // customList lists every editable built-in (prompts, tool guidance,
 // reminders, commands, skills, settings files).
 export function customList(): Promise<CustomItem[]> {
@@ -770,12 +751,6 @@ export function toolsSet(
   enabled: boolean | null,
 ): Promise<ToolsOverview> {
   return invoke<ToolsOverview>("toolsSet", { scope, cwd, sessionId, names, enabled });
-}
-
-// toolsReload re-reads the enabled extensions and drops their warm
-// runners; the new tool set applies from the next turn.
-export function toolsReload(cwd: string | null, sessionId: string | null): Promise<ToolsOverview> {
-  return invoke<ToolsOverview>("toolsReload", { cwd, sessionId });
 }
 
 // toolsAccept lets the session use pending tools (all when names is

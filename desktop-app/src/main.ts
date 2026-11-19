@@ -25,9 +25,6 @@ import { initModelPicker, loadProviders, refreshDefaultCatalog, resetDefaultRefr
 import { syncPermChip } from "./features/permissions";
 import { closeConfirm, initSessions, openSession, refreshSessions } from "./features/sessions";
 import { initSidePane } from "./features/sidePane";
-import { initPluginPanels } from "./features/pluginPanels";
-import { initPluginCards } from "./features/pluginCards";
-import { initCreatorMode } from "./features/creatorMode";
 import { initCodexAdapter } from "./adapters/codex";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
 import { closeNewSite, initWeb } from "./features/web";
@@ -193,9 +190,6 @@ window.addEventListener("DOMContentLoaded", () => {
       });
   };
   ideButton.addEventListener("click", loadIDE);
-  initPluginPanels();
-  initCreatorMode();
-  void initPluginCards();
   initUndo();
   initLive((id) => void openSession(id));
   initIDEActivity();

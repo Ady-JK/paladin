@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { app, shell, utilityProcess, type UtilityProcess } from "electron";
-import { paladinDataDir } from "./pluginHost";
+import { paladinDataDir } from "./sidecar";
 
 export type VoiceModel = {
   id: string;

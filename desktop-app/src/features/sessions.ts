@@ -2,7 +2,6 @@
 // It renders the sidebar and loads history. No event stream in v1;
 
 import * as api from "../core/api";
-import { pluginCardsReady } from "./pluginCards";
 import {
   chatViewEl,
   confirmModalEl,
@@ -594,7 +593,6 @@ export async function openSession(id: string): Promise<void> {
       abortAttach(session.sessionId);
       return;
     }
-    await pluginCardsReady();
     if (generation !== openGeneration || state.sessionId !== session.sessionId) {
       abortAttach(session.sessionId);
       return;
@@ -672,7 +670,6 @@ function prefetchEarlierHistory(sessionId: string): void {
 export async function loadHistory(id: string): Promise<void> {
   const generation = openGeneration;
   const cwd = state.cwd || null;
-  await pluginCardsReady();
   const page = await api.sessionHistoryPage(id, cwd, HISTORY_PAGE, 0);
   if (generation === openGeneration && id === state.sessionId) renderHistory(page);
 }

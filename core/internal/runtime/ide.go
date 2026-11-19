@@ -67,7 +67,13 @@ func IDEReadFile(cwd, path string) (IDEFile, error) {
 	return IDEFile{Path: resolved, Content: string(data), Version: hex.EncodeToString(sum[:])}, nil
 }
 
-func IDESaveFile(cwd, path, content, version string) (IDEFile, error) {
+// IDESaveFile saves one IDE editor file, with optimistic concurrency on
+// the version the editor last read.
+func (r *AgentRuntime) IDESaveFile(cwd, path, content, version string) (IDEFile, error) {
+	return ideSaveFile(cwd, path, content, version)
+}
+
+func ideSaveFile(cwd, path, content, version string) (IDEFile, error) {
 	if len(content) > ideMaxFileBytes || !utf8.ValidString(content) || bytes.IndexByte([]byte(content), 0) >= 0 {
 		return IDEFile{}, fmt.Errorf("content must be UTF-8 text no larger than 2 MiB")
 	}

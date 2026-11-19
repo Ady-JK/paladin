@@ -19,8 +19,6 @@ const (
 	KindWeb         = "web"
 	// KindProject asks whether a tool the workspace ships may run.
 	KindProject = "project"
-	// KindExtension is a call to an extension tool.
-	KindExtension = "extension"
 )
 
 // maxCardArgs caps the arguments an approval card shows.
@@ -65,25 +63,9 @@ type Request struct {
 	Server  string
 	MCPTool string
 	Args    string
-	// ExtensionPlugin and ExtensionTool describe an extension call: the
-	// plugin folder (empty for a legacy loose file) and the plugin's own
-	// tool name, so rules can name "plugin" or "plugin/tool".
-	ExtensionPlugin string
-	ExtensionTool   string
 	// Host and URL describe a web request (web_fetch, browser open).
 	Host string
 	URL  string
-}
-
-// classifyExtension is a call to an extension tool, with its arguments
-// for the card.
-func classifyExtension(req Request, raw json.RawMessage) Request {
-	args := strings.TrimSpace(string(raw))
-	if len(args) > maxCardArgs {
-		args = args[:maxCardArgs] + "…"
-	}
-	req.Kind, req.Args = KindExtension, args
-	return req
 }
 
 // ClassifyMCP describes a call to a tool proxied from an MCP server.

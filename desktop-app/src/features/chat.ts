@@ -1,7 +1,6 @@
 // chat.ts sends messages and streams the agent reply.
 
 import * as api from "../core/api";
-import { bridge, hasBridge } from "../core/bridge";
 import {
   attachBtnEl,
   inputEl,
@@ -102,7 +101,6 @@ async function ensureSession(title: string): Promise<void> {
 }
 
 let bangBusy = false;
-let pluginPromptBusy = false;
 
 async function runBang(line: string): Promise<void> {
   if (bangBusy) return;
@@ -344,33 +342,7 @@ export function initChat(): void {
       }
     });
   });
-  if (hasBridge()) {
-    bridge().plugins?.onPrompt((request) => {
-      if (pluginPromptBusy) {
-        toast("A plugin message is already being sent", "error");
-        return;
-      }
-      if (request.workspace !== state.cwd || (request.sessionId && request.sessionId !== state.sessionId)) {
-        toast("The plugin's conversation is no longer active", "error");
-        return;
-      }
-      if (hasAttachments() || hasTags()) {
-        toast("Send or remove the current attachments before using this plugin", "error");
-        return;
-      }
-      const draft = inputEl.value;
-      pluginPromptBusy = true;
-      inputEl.value = request.text;
-      void send().finally(() => {
-        pluginPromptBusy = false;
-        if (draft) {
-          const current = inputEl.value;
-          inputEl.value = !current || current === request.text ? draft : `${draft}\n${current}`;
-          autosizeComposer();
-        }
-      });
-    });
-  }
+
   attachBtnEl.addEventListener("click", () => {
     openFilePicker();
   });

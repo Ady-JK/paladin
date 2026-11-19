@@ -284,32 +284,3 @@ test("a project-tools card asks once for the folder", async ({ page }) => {
   const answers = await page.evaluate(() => (window as any).__e2eApprovalAnswers);
   expect(answers).toEqual([{ sessionId: "sess-notify-1", callId: "w1", decision: "folder" }]);
 });
-
-test("an extension tool call asks with its arguments", async ({ page }) => {
-  await script(page, [
-    {
-      event: "chat/tool",
-      tool: { id: "x1", name: "jira_lookup", arguments: JSON.stringify({ q: "PAL-1" }), result: "", status: "running" },
-    },
-    {
-      event: "chat/approval",
-      approval: {
-        id: "x1",
-        tool: "jira_lookup",
-        kind: "extension",
-        args: JSON.stringify({ q: "PAL-1" }),
-        reasons: ["extension tool: it runs local code"],
-        choices: ["once", "session", "folder", "global", "deny"],
-        remember: [{ tool: "extension", pattern: "jira_lookup", action: "allow" }],
-        state: "pending",
-      },
-    },
-  ]);
-  await send(page, "look it up");
-  const card = page.locator('.approval-card[data-approval="x1"]');
-  await expect(card).toContainText("Run this extension tool?");
-  await expect(card.locator(".approval-mcp-tool")).toHaveText("jira_lookup");
-  await expect(card.locator(".approval-args")).toContainText("PAL-1");
-  await card.locator('[data-approve="once"]').click();
-  await expect(card).toHaveClass(/is-resolved/);
-});

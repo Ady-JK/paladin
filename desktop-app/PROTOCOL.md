@@ -6,7 +6,7 @@ Electron main spawns it with piped stdio:
 The same process can run headlessly from any JSONL client. In remote mode
 Electron carries these streams over `ssh -T` to an `agent-host` process on the
 remote machine; no protocol method or TCP listener changes. SSH uses batch
-authentication and strict host-key checking. `agent-host extensions init` is a
+authentication and strict host-key checking.
 separate setup command, not a JSONL method.
 
 - stdin: requests, one JSON object per line
@@ -113,7 +113,7 @@ separate setup command, not a JSONL method.
 | `cancelAsk` | `{sessionId,callId}` | `bool` |
 | `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder`, `global` or `deny` (must be one of the card's `choices`); unknown calls fail |
 | `permissionsGet` | `{cwd?,sessionId?}` | `{global: Rule[], folder: Rule[], session: Rule[], folders: [{cwd,rules}], presets}`; presets are `read-only` and `full-access` |
-| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp\|web\|project\|extension, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`, web patterns a domain (`example.com`, covering its subdomains), extension patterns a plugin (`jira`), one of its tools (`jira/lookup`) or everything (`jira/*`); `*` matches all |
+| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp\|web\|project, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`, web patterns a domain (`example.com`, covering its subdomains); `*` matches all |
 | `mcpList` | `{cwd?}` | `MCPOverview`: `{servers: ServerStatus[], globalPath, folderPath?, hasFolderConfig, trusted, errors?: {global?, folder?}}` — global servers plus `cwd`'s own (see MCP servers) |
 | `mcpConfig` | `{scope,cwd?}` | `{path, text, exists}`: one `mcp.json` for editing (`scope` `global` or `folder`; a missing file returns a starter `text`) |
 | `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
@@ -133,7 +133,7 @@ separate setup command, not a JSONL method.
 | `hooksSetConfig` | `{scope,cwd?,text}` | `HooksOverview`; validates and writes the global or folder `hooks.json` (blank `text` deletes it). A folder file saved here is trusted |
 | `hooksTrust` | `{cwd,path,trust,fingerprint}` | `HooksOverview`; approves (or revokes) one of the folder's hooks files; `fingerprint` is the listed source's, and trust fails if the file changed since |
 | `hooksToggle` | `{cwd?,key,enabled}` | `HooksOverview`; turns one handler on or off |
-| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[], extensionErrors?: string[], extensions?: PluginInfo[], runners?: RunnerInfo[], behavior: {formatOnWrite, lspDiagnostics, webPrivateNetwork}, languageServers: {id,root,state,pid?,error?}[]}` (see Tool switches and Local extensions) |
+| `toolsList` | `{cwd?,sessionId?}` | `ToolsOverview`: `{tools: ToolInfo[], pending: string[], behavior: {formatOnWrite, lspDiagnostics, webPrivateNetwork}, languageServers: {id,root,state,pid?,error?}[]}` (see Tool switches) |
 | `toolsSet` | `{scope,cwd?,sessionId?,names,enabled}` | `ToolsOverview`; `scope` `global` or `session`; `enabled` `true`/`false`, or `null` to clear the switch |
 | `toolBehaviorSet` | `{key,enabled,cwd?,sessionId?}` | `ToolsOverview`; app-wide tool behavior saved in `settings.json`; `key` `formatOnWrite`, `lspDiagnostics` or `webPrivateNetwork` (off by default: lets web tools reach private addresses) |
 | `customList` | `{}` | `CustomItem[]`: every editable built-in, by group (System prompt, Tool guidance, Tool descriptions, Modes, Reminders, Subagents, Compaction, Commands, Skills, Settings files): `{id, group, title, description, kind: text\|command\|skill\|json, vars?, customized, enabled?}` (`enabled` for skills) |
@@ -142,12 +142,6 @@ separate setup command, not a JSONL method.
 | `customReset` | `{id}` | `CustomState`; deletes the override so the default applies (for `settings.json`: every setting returns to its default) |
 | `skillEnabledSet` | `{name,enabled}` | `true`; turns a skill on or off by name (`settings.json` `disabledSkills`), whatever its source |
 | `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
-| `toolsReload` | `{cwd?,sessionId?}` | `ToolsOverview`; re-reads `extensions.json` and every enabled plugin, drops the warm plugin runners and returns the refreshed view. A running turn keeps the tools it started with: the new set applies from the next turn |
-| `pluginViews` | `{}` | `{views: [{plugin,view,title,mount,permissions,destructive?}], cards: [{plugin,tool,exposed}], errors?: string[]}`: side-pane, overlay and card contributions. Reads manifests and checks files only; starts no plugin process |
-| `creatorModeGet` | `{}` | Whether Creator mode is enabled |
-| `creatorModeSet` | `{enabled}` | Enable or disable Creator mode |
-| `creatorWorkspace` | `{}` | Create and return the Creator workspace when Creator mode is enabled |
-| `pluginInvoke` | `{sessionId,cwd?,plugin,view,tool,args?,destructive?}` | `{content,isError}`: runs one tool for a plugin panel through the normal permission gate. An approval publishes `plugin/approval` and waits for `answerApproval`; the view's `invokeTool`/`invokeToolDestructive` check happens in Electron main |
 | `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?,attachmentIds?,taggedPaths?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only` (default) or `full-access`; legacy `auto` migrates to `read-only` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
@@ -386,24 +380,6 @@ Streaming (between `turn/start` and `turn/done`):
 {"event": "chat/protection", "seq": 12, "sessionId": "...", "turnId": "t1-3", "protection": {"turn": 0, "state": "protected"}}
 ```
 
-A plugin panel's `invokeTool` may need approval. That request is not part
-of a turn, so it arrives as a `plugin/approval` event with an
-`approval` payload and no `turnId`:
-
-```json
-{"event": "plugin/approval", "sessionId": "...", "approval": {"id": "plugin-...", "kind": "extension", "state": "pending", ...}}
-```
-
-The client answers it with `answerApproval(sessionId, approval.id, decision)`.
-`pluginInvoke` then returns the tool result or the denial.
-
-`plugin/updated` has no session and no payload: plugin manifests were
-re-read (a `toolsReload`), so an open panel should offer to reload.
-
-```json
-{"event": "plugin/updated"}
-```
-
 Events are written to stdout in `seq` order by one writer that never
 holds up the agent. If the client stops reading, the writer buffers up
 to about 20,000 events or 8 MB; past that it drops streaming chunks
@@ -501,13 +477,13 @@ with ", ").
 
 Paladin does not install an OS sandbox around native tools, shell jobs or
 formatters. Approved processes run with the user's ordinary account privileges.
-Browser, Electron and plugin-frame isolation are separate and remain enabled.
+Browser and Electron isolation are separate and remain enabled.
 
 Selectable session presets:
 
 - `read-only` (default): reads and inspection-only shell commands are permitted.
   File writes/edits, non-inspection shell commands, browser actions, visual
-  generation, MCP tools and extension tools are refused. Saved allow rules and
+  generation and MCP tools are refused. Saved allow rules and
   hook `allow` verdicts cannot bypass these refusals. Switch to Full Access to
   perform those actions. Project-supplied executables are not trusted in this mode.
 - `full-access`: tools execute without permission prompts, subject to explicit
@@ -524,10 +500,9 @@ is application-level enforcement, not a guarantee that a permitted executable
 has no side effects. A rule on a built-in file tool does not confine shell code.
 
 Reads outside the workspace and web visits can ask for approval in Read-Only.
-Plugin-panel tool invocations use the internal rule-based review policy:
-recognized safe operations run, and calls needing approval offer once, session,
+Recognized safe operations run, and calls needing approval offer once, session,
 folder, global (where appropriate), or deny. Full Access does not implicitly
-trust arbitrary calls from a plugin panel. Pending approvals are persisted and
+trust arbitrary calls. Pending approvals are persisted and
 replayed at their latest state by `attach`.
 
 ```json
@@ -592,13 +567,8 @@ the folder, and the choices are session/folder/deny. A `project` rule
 (an absolute folder) remembers the answer; a refusal is kept for the
 session. Without it, Paladin uses a copy installed outside the
 workspace, or skips the tool. Writes into `.git`, `.paladin`, `.claude`,
-`node_modules` or a virtualenv are blocked in Read-Only; plugin-panel
+`node_modules` or a virtualenv are blocked in Read-Only; tool
 review can ask once/session/deny, while Full Access permits them.
-
-Extension tools (local tools from `config/extensions`) are unavailable in
-Read-Only and Plan mode. Full Access permits them subject to deny rules.
-Plugin-panel calls use the internal review policy and can emit extension
-approval cards with `tool`, `args` and scoped allow/deny choices.
 
 MCP calls pass the gate as `kind: "mcp"` cards with `server`, `mcpTool`
 and `args`. Tool annotations come from the server and are not trusted:
@@ -623,7 +593,7 @@ Server instructions join the system prompt.
 Every tool (built-in and MCP) is on unless switched off. A session's
 switch beats the global one (`config/tools.json`); session switches and
 the tools a session has seen live in its `meta.json` under `tools`.
-`ToolInfo` is `{name, description?, source: builtin|mcp|extension, server?, tool?,
+`ToolInfo` is `{name, description?, source: builtin|mcp, server?, tool?,
 readOnly?, destructive?, global?, session?, enabled, pending?}`; MCP
 tools are listed while their server is ready. When built-in tools are
 off, the system prompt says so.
@@ -640,96 +610,6 @@ prompt cache: the turn runs without them and emits
 `toolsAccept` (or switching the tool on for the session) lets the next
 turn use them. Tools that disappear are simply dropped. New sessions
 never have pending tools.
-
-### Local extensions
-
-Tools the user writes themselves live in `<data>/config/extensions`.
-`extensions.json` lists what is enabled, and each entry is either a
-plugin folder or a legacy loose file:
-
-```jsonc
-{"enabled": ["my-plugin", "legacy.ts"]}
-```
-
-A **plugin folder** is `config/extensions/<name>/` with an `index.ts` (or
-`index.js`), an optional `package.json` plus `node_modules` of its own,
-and an optional `paladin-plugin.json`:
-
-```jsonc
-{
-  "entry": "index.ts",         // relative to the folder; default index.ts then index.js
-  "tools": null,               // static declarations; null asks the plugin instead
-  "timeoutMs": 120000,         // per call, clamped to 1000..300000
-  "idleMs": 300000,            // reap the warm process after this idle; 0 = never
-  "env": {"FOO": "bar"},       // extra environment; PATH is refused
-  "node": "/opt/node/bin/node",// absolute path, this plugin only
-  "permissions": ["network"],  // "network" | "spawn" | "fs-outside-workspace"
-  "views": [                   // optional side-pane panels, max 4
-    {"id": "board", "title": "Ticket Board", "entry": "ui/board.html",
-     "mount": "side-pane", "permissions": ["invokeTool", "events"]}
-  ],
-  "cards": [                   // optional inline result renderers, max 16
-    {"tool": "lookup", "entry": "ui/card.js", "inline": true}
-  ]
-}
-```
-
-The module's default export is `{tools: [{name, description,
-parameters, execute(args, ctx)}], onActivate?(ctx),
-onDeactivate?()}`. Every tool of a plugin folder runs on one long-lived
-Node process (one per plugin), started on first use and reused across
-turns and tool calls; it is reaped when idle, restarted after a crash,
-and asked to shut down when the app exits. `ctx` is `{pluginDir, pid,
-workspace}`. A plugin's tools are exposed as
-`extension__<folder>__<tool>`; a loose file `legacy.ts` keeps
-`extension__legacy__<tool>`, so moving `legacy.ts` into `legacy/`
-does not change the names the model learned.
-
-Runners resolve Node in this order: the plugin's own `node`, the
-Electron binary the app passes down (`ELECTRON_NODE`, i.e. Electron's
-bundled Node 24 via `ELECTRON_RUN_AS_NODE`), `PALADIN_NODE`, then `node`
-on `PATH` (24 or newer). A setting that is present but broken fails that
-plugin loudly instead of falling through.
-
-Calls are gated like MCP tools: each asks until a rule allows the plugin,
-one of its tools or everything. Approval cards offer `once`, `session`,
-`folder`, `global` and `deny`, and the saved rule reads `jira`,
-`jira/lookup`, `jira/*` or `*`. A loose file counts as the plugin of the
-same name (`legacy.ts` → `legacy/…`), so a rule keeps working when the
-file moves into a folder; rules that name an exposed tool
-(`extension__jira__lookup`) were refused by the validator before this
-grammar, so none are stored. Extension tools are left out of read-only
-and plan mode.
-
-`extensions` in `ToolsOverview` reports each enabled plugin (`kind`,
-`path`, declared `permissions`, its `tools`, or an `error`), `runners`
-reports the warm processes (`plugin`, `pid`, `node`, `lastUsed`,
-`inflight`, `generation`, a `stderr` tail), and `toolsReload` re-reads
-everything and drops the warm runners.
-
-### Plugin UI
-
-`pluginViews` lists the panels and cards the enabled plugins ship;
-`pluginInvoke` runs one tool for a panel through the normal gate (see
-the method table). The desktop app serves panel files over a private
-`plugin://` scheme: `plugin://<plugin>/<view>/<path>` where `<path>` is
-under the plugin's `ui/` folder. Frames are sandboxed with
-`allow-scripts` only (opaque origin, no storage, no network) and get a
-`window.paladin.plugins` bridge instead of the raw `agent:invoke`:
-
-| Call | Permission | Notes |
-|---|---|---|
-| `getContext()` | — | `{sessionId, workspace, plugin, view, theme}` |
-| `invokeTool(tool,args)` | `invokeTool` | own tools + `read`/`grep`/`glob`/`list`; other tools need `invokeToolDestructive`; 60/min |
-| `readFile(rel)` | `readFile` | relative to the panel's workspace, ≤1 MiB text; 120/min |
-| `readStore(key)` / `writeStore(key,value)` | — | per-plugin JSON store, 100 KiB per key / 1 MiB total |
-| `openExternal(url)` | `openExternal` | `https:` only; 3/min |
-| `subscribe(filter)` / `unsubscribe(id)` / `onEvent(cb)` | `events` | chat/delta, chat/tool, turn/start, turn/done, browser/navigated, plugin/updated; own session only; 240 events/min |
-| `card.js` | — | no bridge; a card is a pure renderer |
-
-A tool call that needs approval publishes `plugin/approval` and waits for
-`answerApproval`; the card is rendered by the host, never by the panel.
-The plugin UI guide is `docs/PLUGIN-UI.md`.
 
 ### Subagents
 
@@ -757,9 +637,9 @@ and MCP servers to help create definitions. For example:
 ```
 
 `permissions` is `read-only` or `read-write`; `tools` selects exact builtin
-or extension names, and `mcp` maps server names to tool names (`*` selects
+names, and `mcp` maps server names to tool names (`*` selects
 the server's tools). Read-only agents do not get mutating builtins, the
-browser, memory writes or extensions, and receive MCP tools only when the server marks them read-only;
+browser or memory writes, and receive MCP tools only when the server marks them read-only;
 MCP hints are not a guarantee. Child tools are further narrowed by the
 parent's accepted tools, switches, permission preset and plan mode. Agent
 management tools remain unavailable to children. Changes apply to newly

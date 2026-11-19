@@ -17,7 +17,7 @@ func TestIDEReadSaveAndConflicts(t *testing.T) {
 	if err != nil || view.Content != "old\n" {
 		t.Fatalf("read: %+v %v", view, err)
 	}
-	saved, err := IDESaveFile(dir, file, "new\n", view.Version)
+	saved, err := ideSaveFile(dir, file, "new\n", view.Version)
 	if err != nil || saved.Version == view.Version {
 		t.Fatalf("save: %+v %v", saved, err)
 	}
@@ -28,7 +28,7 @@ func TestIDEReadSaveAndConflicts(t *testing.T) {
 	if err := os.WriteFile(file, []byte("external\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := IDESaveFile(dir, file, "my changes\n", saved.Version); err == nil || !strings.Contains(err.Error(), "changed") {
+	if _, err := ideSaveFile(dir, file, "my changes\n", saved.Version); err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("expected conflict, got %v", err)
 	}
 	contents, _ := os.ReadFile(file)

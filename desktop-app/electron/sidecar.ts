@@ -10,6 +10,8 @@
 // imports, so it unit-tests in plain Node.
 
 import { spawn, type ChildProcess } from "node:child_process";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { HostEvent } from "./turnNotify";
 
 // HostMessage is one line from the host: a reply ({id, ok,
@@ -91,7 +93,6 @@ const READ_METHODS = new Set([
   "ideList",
   "ideExplorerSettingsGet",
   "ideReadFile",
-  "creatorModeGet",
   "ideFileStatuses",
   "ideSearch",
   "ideLayoutGet",
@@ -119,7 +120,6 @@ const READ_METHODS = new Set([
   "sessionDiff",
   "fileExcerpt",
   "filePreview",
-  "pluginViews",
   "worktreeStatus",
   "attach",
   "permissionsGet",
@@ -134,7 +134,7 @@ const READ_METHODS = new Set([
   "customList",
   "customGet",
 ]);
-const LONG_METHODS = new Set(["refreshProviders", "sideQuestion", "pluginInvoke"]);
+const LONG_METHODS = new Set(["refreshProviders", "sideQuestion"]);
 
 export function isReadMethod(method: string): boolean {
   return READ_METHODS.has(method);
@@ -440,4 +440,22 @@ function errorText(error: unknown): string {
     return (error as { message: string }).message;
   }
   return "agent error";
+}
+
+// paladinDataDir mirrors config.DataDir in the Go core, so Electron main
+// can find the same data directory (voice models, settings) without an
+// RPC.
+export function paladinDataDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home: string = os.homedir(),
+): string {
+  const override = (env.PALADIN_DATA_DIR ?? "").trim();
+  if (override) return override;
+  if (platform === "win32") {
+    const base = env.APPDATA || path.join(home, "AppData", "Roaming");
+    return path.join(base, "paladin");
+  }
+  if (platform === "darwin") return path.join(home, "Library", "Application Support", "paladin");
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "paladin");
 }

@@ -24,7 +24,6 @@ import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget, scheduleBudgetRefresh } from "./budget";
 import { showContextBox } from "./contextBox";
 import { hideLiveChanges, noteToolChange, refreshChanges } from "./sidePane";
-import { handlePluginApproval } from "./pluginApproval";
 import { createTurnStats } from "./turnStats";
 import { paintProtection } from "./snapshotProtection";
 import { PHASE_TEXT, formatElapsed, workingLabel, workingStatus, type WorkingPhase } from "./workingBar";
@@ -345,10 +344,6 @@ function firstQueued(e: Entry): HTMLElement | null {
 
 function apply(e: Entry, ev: TurnEvent): void {
   const turn = ev.turn;
-  if (ev.event === "plugin/approval") {
-    handlePluginApproval(ev.sessionId, ev.approval);
-    return;
-  }
   switch (ev.event) {
     case "turn/queued": {
       if (!turn || e.finished.has(turn.turnId) || e.running?.turnId === turn.turnId) return;

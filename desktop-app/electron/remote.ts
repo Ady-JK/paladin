@@ -26,7 +26,7 @@ function shellQuote(value: string): string {
 
 // hostEnv is the environment the sidecar runs under. Local cores get
 // ELECTRON_NODE: this binary doubles as Node 24 under
-// ELECTRON_RUN_AS_NODE, so extension plugins run on a machine without a
+// ELECTRON_RUN_AS_NODE, so Node child processes run on a machine without a
 // separate Node install. A remote core sets its own.
 export function hostEnv(
   connection: CoreConnection,
@@ -35,7 +35,7 @@ export function hostEnv(
 ) {
   const env: NodeJS.ProcessEnv = { ...base };
   // Electron's own runtime variables would leak into the sidecar, and
-  // NODE_OPTIONS would load code into every Node child it starts (plugins,
+  // NODE_OPTIONS would load code into every Node child it starts (hooks,
   // MCP servers). Provider keys and the rest of the environment pass through.
   for (const name of Object.keys(env)) if (name.startsWith("ELECTRON_")) delete env[name];
   delete env.NODE_OPTIONS;

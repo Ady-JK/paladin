@@ -10,7 +10,6 @@ test.beforeEach(async ({ page }) => {
 test("header menu opens side chats and preserves layout controls", async ({ page }) => {
   const actions = page.locator("#titleBar #paneActions");
   await expect(actions).toBeVisible();
-  await expect(page.locator("#panePluginsBtn")).toBeVisible();
   await expect(actions.locator("#paneLayoutBtn")).toBeVisible();
   await actions.locator("#paneNewChatBtn").click();
   await page.getByRole("menuitem", { name: "New side chat" }).click();

@@ -85,20 +85,5 @@ export type JobsTab = {
   body: HTMLElement;
 };
 
-export type PluginTab = {
-  kind: "plugin";
-  key: string;
-  sessionId: string;
-  panelId: string;
-  plugin: string;
-  view: string;
-  title: string;
-  workspace: string;
-  body: HTMLElement;
-  iframe: HTMLIFrameElement;
-  openedAt: number;
-  stale: boolean;
-};
-
-export type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | JobsTab | PluginTab | TerminalTab | WebTab;
+export type Tab = ChatTab | AgentTab | BrowserTab | ChangesTab | JobsTab | TerminalTab | WebTab;
 export type TabSet = { tabs: Tab[]; active: string };

@@ -101,9 +101,6 @@ func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) {
 	r.codex.Close()
 	r.lsp.Close()
 	r.editorLsp.Close()
-	// Plugins get a shutdown line and a short grace; nothing may keep the
-	// app from exiting.
-	r.extensions.Close()
 }
 
 // ListAgents lists a session's subagents with their live status.

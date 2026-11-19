@@ -17,15 +17,15 @@ WebSocket. `README.md`, `core/README.md` and `desktop-app/README.md` describe th
 | `core/internal/inference/` | Model providers and streaming |
 | `core/internal/permission/`, `redact/` | Tool-level permission gate and stored-key masking |
 | `core/internal/transcript/`, `session/`, `memory/`, `atomicfile/` | Persistence |
-| `core/internal/{hooks,lsp,mcp,skills,extension,commands,prompt}/` | Plug-in surfaces |
+| `core/internal/{hooks,lsp,mcp,skills,commands,prompt}/` | Plug-in surfaces |
 | `core/internal/harness/`, `core/internal/codex/` | External coding agents: the adapter contract and the Codex adapter (`harness/codexadapter`, pure translation), and Codex's app-server client |
 | `desktop-app/src/adapters/` | Agent UI: the shared question card and one folder per agent (`codex/`); see `docs/AGENT-ADAPTERS.md` |
-| `desktop-app/electron/` | Electron main + preload: spawns the sidecar, IPC bridge, `WebContentsView`s (web tabs + local browser), sandboxed `plugin://` host |
+| `desktop-app/electron/` | Electron main + preload: spawns the sidecar, IPC bridge, `WebContentsView`s (web tabs + local browser) |
 | `desktop-app/src/core/` | `api.ts` (the single bridge seam), `state.ts`, `dom.ts`, `format.ts`, `types.ts` |
-| `desktop-app/src/features/` | 50 feature modules, one concern each (`chat`, `live`, `turnView`, `sessions`, `sidePane`, `web`, `pluginPanels`, …) |
+| `desktop-app/src/features/` | 50 feature modules, one concern each (`chat`, `live`, `turnView`, `sessions`, `sidePane`, `web`, …) |
 | `desktop-app/src/styles/` | Tailwind v4 theme (`base.css`) + one sheet per feature |
 | `desktop-app/e2e/` | 60 Playwright specs + `paladin-stub.js` (a fake `window.paladin`) |
-| `docs/PLUGIN-UI.md` | Plugin panel/card guide; the READMEs describe the architecture; `desktop-app/PROTOCOL.md` is the wire spec |
+| `desktop-app/PROTOCOL.md` | The wire spec; the READMEs describe the architecture |
 | `core/bin/`, `desktop-app/{dist,dist-electron,release}/` | Build output — never committed |
 
 No CI config exists in the repo; `make test` and `make lint` are the only gates.
@@ -137,8 +137,7 @@ links open the local browser. The local browser has no remote-debugging port: Pl
 agent-browser page's `webContents.debugger` and answers the browser-level calls itself.
 Only registered agent-browser pages exist for it; never re-add `remote-debugging-port`
 (it would expose the privileged main window to any local process). `make app-dev` users
-can check it with `electron . --smoke-browser`. Plugin panels and tool-result cards are sandboxed
-`plugin://` iframes, not `WebContentsView`s.
+can check it with `electron . --smoke-browser`.
 
 **Styling.** Tailwind v4 with CSS-first `@theme` tokens in `src/styles/base.css`. New
 sheets must be imported into `src/styles.css` — cascade order is load-bearing (later
@@ -177,10 +176,6 @@ serial. Playwright specs drive the real renderer with the fake bridge from
 - **Web tabs belong to a session.** Opening the Web menu with no open session shows a toast;
   open tabs are not restored across app restarts (the saved site list and logins are). Web
   tabs accept only `https:`; `localhost` and local apps stay in the separate local browser.
-- **Plugin UI is local-only.** Panels and cards read local plugin files over `plugin://`; a
-  remote SSH core shows an explanatory message instead of the Plugins menu. Panel
-  `invokeTool` calls go through the normal permission gate, and the approval card is
-  rendered by the host, never by the plugin.
 - **Agent shell commands run as jobs.** Each command streams its output to `<session>/tmp/<job>.log`;
   a foreground call waits 120 s and then hands a still-running command to the background with a job id.
   There is no `wait` action (it was removed because the model re-waited in a loop, one LLM call per round):
@@ -204,7 +199,7 @@ serial. Playwright specs drive the real renderer with the fake bridge from
 - **Tool permissions**: native execution has no OS sandbox. Session presets are Read-Only
   (blocks modifying tools/commands) and Full Access (ordinary user privileges, explicit deny
   rules still apply). Legacy Auto selections migrate to Read-Only. External agents retain
-  their own managed execution policy. Browser and plugin isolation remain separate.
+  their own managed execution policy. Browser isolation remains separate.
 - **Never commit** `core/bin/`, `core/agent-host`, `desktop-app/{node_modules,dist,dist-electron,release}/`,
   `test-results/`, `playwright-report/`, `.vite/`, or `tmp/`. Root `.gitignore` covers `core/bin/`,
   `tmp/`, `.idea/`; `desktop-app/.gitignore` covers the rest.

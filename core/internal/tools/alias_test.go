@@ -154,9 +154,6 @@ func TestAliasedCallKeepsSafetyClass(t *testing.T) {
 		if !reg.ParallelSafe(name) {
 			t.Fatalf("%q should be reported parallel-safe, like shell", name)
 		}
-		if reg.IsExtension(name) {
-			t.Fatalf("%q must not look like an extension tool", name)
-		}
 		if _, isMCP := reg.MCPInfo(name); isMCP {
 			t.Fatalf("%q must not look like an MCP tool", name)
 		}

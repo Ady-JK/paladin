@@ -761,7 +761,7 @@ export type PermissionPreset = "read-only" | "full-access";
 export type ApprovalDecision = "once" | "session" | "folder" | "global" | "deny";
 
 export type PermissionRule = {
-  tool: "shell" | "write" | "read" | "mcp" | "web" | "project" | "extension";
+  tool: "shell" | "write" | "read" | "mcp" | "web" | "project";
   pattern: string;
   action: "allow" | "deny";
 };
@@ -769,7 +769,7 @@ export type PermissionRule = {
 export type Approval = {
   id: string;
   tool: string;
-  kind: "shell" | "write" | "read" | "permissions" | "mcp" | "web" | "project" | "extension" | string;
+  kind: "shell" | "write" | "read" | "permissions" | "mcp" | "web" | "project" | string;
   command?: string;
   path?: string;
   // MCP calls: the server, its own tool name and the JSON arguments.
@@ -907,7 +907,7 @@ export type MCPNamedServer = { name: string; config: MCPServerConfig };
 export type ToolSwitch = {
   name: string;
   description?: string;
-  source: "builtin" | "mcp" | "extension";
+  source: "builtin" | "mcp";
   server?: string;
   tool?: string;
   readOnly?: boolean;
@@ -932,58 +932,14 @@ export type LanguageServer = {
   pid?: number;
   error?: string;
 };
-// PluginInfo is one enabled local extension: a plugin folder or a legacy
-// loose file. error explains why it is not usable.
-type PluginInfo = {
-  name: string;
-  kind: "plugin" | "file";
-  path: string;
-  permissions?: string[];
-  tools?: string[];
-  error?: string;
-};
 
-// RunnerInfo is a plugin with a live Node process behind it.
-type RunnerInfo = {
-  plugin: string;
-  warm: boolean;
-  pid?: number;
-  node?: string;
-  electron?: boolean;
-  lastUsed?: string;
-  inflight?: number;
-  generation?: number;
-  stderr?: string;
-};
-
+// ToolsOverview is what toolsList reports: every tool with its switches,
+// the pending ones, tool behavior and language-server status.
 export type ToolsOverview = {
   tools: ToolSwitch[];
   pending: string[];
-  extensionErrors?: string[];
-  extensions?: PluginInfo[];
-  runners?: RunnerInfo[];
   behavior?: ToolBehavior;
   languageServers?: LanguageServer[];
-};
-
-// PluginView is one side-pane panel an extension ships (pluginViews).
-export type PluginView = {
-  plugin: string;
-  view: string;
-  title: string;
-  mount: "side-pane" | "overlay";
-  permissions: string[];
-  destructive?: boolean;
-};
-
-// PluginCard is one inline tool-result renderer an extension ships.
-export type PluginCard = { plugin: string; tool: string; exposed: string };
-
-// PluginUI is the pluginViews result.
-export type PluginUI = {
-  views: PluginView[];
-  cards: PluginCard[];
-  errors?: string[];
 };
 
 // Finding is one issue a /review recorded with report_findings.

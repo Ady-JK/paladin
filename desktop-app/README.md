@@ -11,7 +11,6 @@ flowchart LR
   Main -->|"sidecar.ts: JSONL"| Host["local or SSH agent-host"]
   Main --> Browser["WebContentsViews and agent browser"]
   Main --> Voice["voice utility process"]
-  Main --> Plugin["plugin:// iframe host"]
   UI -->|"turns and events"| Chat["live.ts / turnView.ts"]
 ```
 
@@ -25,7 +24,7 @@ flowchart LR
 | `src/styles.css`, `src/styles/` | Tailwind entry, theme tokens and feature stylesheets. Import order affects the cascade. |
 | `electron/main.ts`, `preload.ts` | Window, trusted IPC, lifecycle and the context-isolated renderer bridge. |
 | `electron/sidecar.ts`, `remote.ts` | Local or SSH host startup, JSONL requests, event delivery and reconnection. |
-| `electron/browser*.ts`, `plugin*.ts`, `voice.ts` | Native browser, plugin and on-device voice boundaries. |
+| `electron/browser*.ts`, `voice.ts` | Native browser and on-device voice boundaries. |
 | `e2e/` | Playwright tests, renderer stub and opt-in live tests. |
 
 There is no React framework or client-side router. Features manipulate DOM and shared state directly. The application uses one main window; the agent conversation and side surfaces are views within it.
@@ -70,11 +69,9 @@ Native views render above HTML, so ordinary CSS z-index cannot put a renderer me
 
 Conversation links route to the appropriate browser surface according to their URL. Browser screenshots are stored under the session and can be sent to a vision-capable model. `build:electron` copies the lockfile-resolved `playwright-core` client into `dist-electron/vendor/`; Electron supplies Chromium, so a separate browser download is not needed for the agent browser.
 
-## Terminals and plugins
+## Terminals
 
 Interactive terminal tabs use a Go-hosted PTY in the chosen workspace. The renderer uses xterm and loads the terminal implementation when needed. These shells run with the user's OS permissions and are distinct from the agent's permission-gated shell tool. In the composer, `!` runs a command and shares its result with a subsequent agent turn; `!!` runs it without adding an agent turn.
-
-Plugin panels and result cards are sandboxed `plugin://` iframes, not native web views. A panel receives a limited plugin bridge; tool calls still go through the host permission gate. Cards have a narrower surface. Plugin UI is local-only when the core is remote. See [PLUGIN-UI.md](../docs/PLUGIN-UI.md) and the [extension reference](../core/internal/extension/README.md).
 
 ## On-device voice
 
@@ -86,7 +83,7 @@ The renderer captures microphone audio and sends mono float32 chunks through pre
 
 The Vite build emits the renderer with relative asset paths so it can load from the packaged `file:` URL. TypeScript compiles the Electron main and preload files into `dist-electron/`; the packaging helper adds the Playwright client used for browser automation. `electron-builder.json` packages those outputs with the sidecar binary and prepared voice resources. The core protocol remains the same in a packaged build.
 
-The main renderer uses a content security policy and a context-isolated preload. Plugin frames receive a different, restricted bridge; remote websites do not gain the host's renderer privileges. Browser site isolation and tool-level permission checks address different boundaries. Native tools and approved shell commands run without an OS sandbox.
+The main renderer uses a content security policy and a context-isolated preload. Remote websites do not gain the host's renderer privileges. Browser site isolation and tool-level permission checks address different boundaries. Native tools and approved shell commands run without an OS sandbox.
 
 ## Build and test flow
 

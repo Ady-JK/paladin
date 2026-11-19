@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/custom"
-	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/lsp"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
@@ -49,24 +47,11 @@ type ToolInfo struct {
 
 // ToolsOverview lists every tool a folder (and session) can see.
 type ToolsOverview struct {
-	Tools           []ToolInfo `json:"tools"`
-	Pending         []string   `json:"pending"`
-	ExtensionErrors []string   `json:"extensionErrors,omitempty"`
-	// Extensions are the enabled local plugins and their tools.
-	Extensions []extension.PluginInfo `json:"extensions,omitempty"`
-	// Runners are the plugins with a warm Node process right now.
-	Runners  []extension.RunnerInfo `json:"runners,omitempty"`
-	Behavior ToolBehavior           `json:"behavior"`
+	Tools    []ToolInfo   `json:"tools"`
+	Pending  []string     `json:"pending"`
+	Behavior ToolBehavior `json:"behavior"`
 	// LanguageServers are the running (or recently failed) servers.
 	LanguageServers []lsp.ServerStatus `json:"languageServers"`
-}
-
-// ToolsReload re-reads the enabled extensions, drops their warm runners
-// and returns the refreshed overview. A running turn keeps the tools it
-// started with; the next turn sees the new set.
-func (r *AgentRuntime) ToolsReload(cwd, sessionID string) (ToolsOverview, error) {
-	r.extensions.Reload()
-	return r.ToolsList(cwd, sessionID)
 }
 
 // ToolBehavior is how the built-in tools act, app-wide.
@@ -193,10 +178,6 @@ func (r *AgentRuntime) ToolsList(cwd, sessionID string) (ToolsOverview, error) {
 			})
 		}
 	}
-	added, extensionErrors := r.extensions.Load(context.Background())
-	for _, tool := range added {
-		list = append(list, ToolInfo{Name: tool.Name(), Description: tool.Definition().Description, Source: "extension"})
-	}
 	sort.SliceStable(list, func(i, j int) bool {
 		if list[i].Source != list[j].Source {
 			return list[i].Source == "builtin"
@@ -232,11 +213,7 @@ func (r *AgentRuntime) ToolsList(cwd, sessionID string) (ToolsOverview, error) {
 	if pending == nil {
 		pending = []string{}
 	}
-	view := ToolsOverview{Tools: list, Pending: pending, Behavior: r.toolBehavior(),
-		Extensions: r.extensions.PluginList(), Runners: r.extensions.Runners(), LanguageServers: r.lsp.Status()}
-	for _, err := range extensionErrors {
-		view.ExtensionErrors = append(view.ExtensionErrors, err.Error())
-	}
+	view := ToolsOverview{Tools: list, Pending: pending, Behavior: r.toolBehavior(), LanguageServers: r.lsp.Status()}
 	return view, nil
 }
 
@@ -390,7 +367,7 @@ func (r *AgentRuntime) childToolsFrom(child transcript.Session, kind subagentKin
 			selected := kind.MCP[info.Server]
 			allowed = (slices.Contains(selected, info.Tool) || slices.Contains(selected, "*")) && (kind.ReadWrite || info.ReadOnly)
 		}
-		if !kind.ReadWrite && (all.IsExtension(name) || name == "browser" || (name == "memory" && kind.Name != "memory-review") || (name != "shell" && all.Mutates(name))) {
+		if !kind.ReadWrite && (name == "browser" || (name == "memory" && kind.Name != "memory-review") || (name != "shell" && all.Mutates(name))) {
 			return false
 		}
 		_, parentAllows := slices.BinarySearch(parentEnabled, name)

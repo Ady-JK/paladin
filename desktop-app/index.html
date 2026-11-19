@@ -14,7 +14,7 @@
          build loads from file://, where 'self' matches nothing. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' file: plugin:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob:; connect-src 'self'; frame-src 'self' file:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>paladin</title>
     <style>
@@ -306,15 +306,6 @@
               </button>
               <div id="paneHistoryItems"></div>
             </div>
-            <button
-              id="creatorModeBtn"
-              type="button"
-              class="pane-btn creator-mode-btn"
-              aria-pressed="false"
-              title="Open Creator mode"
-            >
-              Creator
-            </button>
             <button
               id="paneLayoutBtn"
               type="button"

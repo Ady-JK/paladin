@@ -238,28 +238,3 @@ func TestBuildAddsTheCommandsOwnTools(t *testing.T) {
 		t.Fatalf("an unknown command tool fails loudly: %v", err)
 	}
 }
-
-// extProbe is an extension tool.
-type extProbe struct{ trustProbe }
-
-func (extProbe) Name() string    { return "jira_lookup" }
-func (extProbe) Extension() bool { return true }
-func (extProbe) Definition() tools.ToolDefinition {
-	return tools.ToolDefinition{Name: "jira_lookup", Parameters: map[string]any{"type": "object"}}
-}
-
-// Plan mode leaves extension tools out: they run local code that may
-// change anything.
-func TestPlanModeDropsExtensionTools(t *testing.T) {
-	r := tools.BuiltinRegistry().With(&extProbe{})
-	if !r.IsExtension("jira_lookup") || r.IsExtension("read") {
-		t.Fatal("IsExtension")
-	}
-	planned, _ := planRegistry(r, nil)
-	if _, ok := planned.Get("jira_lookup"); ok {
-		t.Fatal("plan mode kept an extension tool")
-	}
-	if _, ok := planned.Get("read"); !ok {
-		t.Fatal("plan mode lost read")
-	}
-}

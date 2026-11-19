@@ -23,19 +23,10 @@ function title(ap: Approval): string {
   if (ap.kind === "mcp") return ap.destructive ? "Call a destructive MCP tool?" : "Call this MCP tool?";
   if (ap.kind === "web") return ap.tool === "browser" ? "Open this site in the browser?" : "Fetch from this site?";
   if (ap.kind === "project") return "Run this project's own tool?";
-  if (ap.kind === "extension") return "Run this extension tool?";
   if (ap.destructive) return "Run a destructive command?";
   if (ap.tool === "shell") return "Run this command?";
   if (ap.kind === "read") return "Read this file?";
   return ap.tool === "edit" ? "Edit this file?" : "Write this file?";
-}
-
-// extensionName splits an extension tool's exposed name
-// (extension__<plugin>__<tool>) for the card; a legacy name is shown as
-// written.
-function extensionName(ap: Approval): { plugin: string; tool: string } {
-  const match = /^extension__(.+)__(.+)$/.exec(ap.tool);
-  return match ? { plugin: match[1], tool: match[2] } : { plugin: "extension", tool: ap.tool };
 }
 
 function subject(ap: Approval): string {
@@ -104,7 +95,7 @@ function pendingHtml(ap: Approval): string {
   const kindIcon =
     ap.destructive || ap.kind === "permissions"
       ? "sl-shield-off"
-      : ap.kind === "mcp" || ap.kind === "extension"
+      : ap.kind === "mcp"
         ? "sl-plug"
         : ap.kind === "web"
           ? "globe"
@@ -114,20 +105,11 @@ function pendingHtml(ap: Approval): string {
       ? `<div class="approval-mcp"><span class="approval-mcp-server">${escapeHtml(ap.server ?? "")}</span>` +
         `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(ap.mcpTool || ap.tool)}</span></div>` +
         `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
-      : ap.kind === "extension"
-        ? (() => {
-            const name = extensionName(ap);
-            return (
-              `<div class="approval-mcp"><span class="approval-mcp-server">${escapeHtml(name.plugin)}</span>` +
-              `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(name.tool)}</span></div>` +
-              `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
-            );
-          })()
-        : ap.kind === "web"
-          ? `<div class="approval-web"><span class="approval-web-host">${escapeHtml(ap.host ?? "")}</span>` +
-            `<span class="approval-web-url" title="${escapeHtml(ap.url ?? "")}">${revealHidden(escapeHtml(ap.url ?? ""))}</span>` +
-            `<span class="approval-web-note">Page content is treated as untrusted data.</span></div>`
-          : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>`;
+      : ap.kind === "web"
+        ? `<div class="approval-web"><span class="approval-web-host">${escapeHtml(ap.host ?? "")}</span>` +
+          `<span class="approval-web-url" title="${escapeHtml(ap.url ?? "")}">${revealHidden(escapeHtml(ap.url ?? ""))}</span>` +
+          `<span class="approval-web-note">Page content is treated as untrusted data.</span></div>`
+        : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>`;
   return (
     `<div class="approval-head">` +
     `<span class="approval-ico">${icon(kindIcon, "h-4 w-4")}</span>` +

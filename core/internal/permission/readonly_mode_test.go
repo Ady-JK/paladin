@@ -13,10 +13,7 @@ func TestReadOnlyBlocksChangingToolsDespiteGrantsAndHooks(t *testing.T) {
 	g.MCP = func(name string) (tools.MCPInfo, bool) {
 		return tools.MCPInfo{Server: "test", Tool: "change", ReadOnly: true}, name == "mcp__test__change"
 	}
-	g.Extension = func(name string) (ExtensionRef, bool) {
-		return ExtensionRef{Plugin: "test", Tool: "change"}, name == "extension__test__change"
-	}
-	for _, tool := range []string{ToolWrite, ToolShell, ToolMCP, ToolExtension} {
+	for _, tool := range []string{ToolWrite, ToolShell, ToolMCP} {
 		if err := g.Store.Add(ScopeGlobal, "", "", Rule{Tool: tool, Pattern: "*", Action: ActionAllow}); err != nil {
 			t.Fatal(err)
 		}
@@ -29,7 +26,6 @@ func TestReadOnlyBlocksChangingToolsDespiteGrantsAndHooks(t *testing.T) {
 		{"browser", `{"action":"click","selector":"button"}`},
 		{"visual", `{"action":"generate","prompt":"test"}`},
 		{"mcp__test__change", `{}`},
-		{"extension__test__change", `{}`},
 	} {
 		rec := &recorder{}
 		auth := g.Authorize(WithHookVerdict(context.Background(), HookAllow), "call", call.tool, []byte(call.input), rec.notify)

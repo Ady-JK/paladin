@@ -32,9 +32,6 @@ func (r *Registry) takesReason(resolved string) bool {
 	if _, mcp := t.(MCPTool); mcp {
 		return false
 	}
-	if e, ok := t.(ExtensionTool); ok && e.Extension() {
-		return false
-	}
 	return true
 }
 

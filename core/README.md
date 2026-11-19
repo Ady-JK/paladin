@@ -15,11 +15,10 @@ JSONL request → dispatcher → methods.go → AgentRuntime → result
                                       └→ turn hub → background turn → events
 ```
 
-The host also handles an `extensions init` executable mode; it is not an additional RPC transport.
 
 ## Runtime and turn scheduling
 
-`internal/runtime/` connects providers, sessions, tools, permissions, MCP, LSP, extensions, memory, snapshots and the hub. `SubmitTurn` resolves session attachments, validates the request and hands it to the hub. The hub permits one active turn per session, queues further turns for that session, and allows turns in different sessions to run concurrently. The default concurrency is four, configurable up to 16. Steers go to a running turn; queued turns and running turns can be cancelled separately.
+`internal/runtime/` connects providers, sessions, tools, permissions, MCP, LSP, memory, snapshots and the hub. `SubmitTurn` resolves session attachments, validates the request and hands it to the hub. The hub permits one active turn per session, queues further turns for that session, and allows turns in different sessions to run concurrently. The default concurrency is four, configurable up to 16. Steers go to a running turn; queued turns and running turns can be cancelled separately.
 
 The hub publishes globally sequenced lifecycle and `chat/*` events. `attach` returns a consistent snapshot of the newest history page, live turn, queued turns, buffered events and sequence position. A client can render the snapshot and ignore events already represented in it. Older history is obtained with `sessionHistoryPage`. Background turns continue when a different session is selected. On shutdown the runtime stops turns and closes its managed services; Electron handles sidecar restart and reconnection.
 
@@ -66,7 +65,7 @@ Prompt material comes from the configured system prompt, built-in guidance, work
 
 ## Tools and policy
 
-`internal/tools/` registers built-in file, search, shell, planning, browser, web, memory and other tools. The runtime combines them with enabled MCP and extension tools, filters the set for the session and mode, and gives schemas to the provider. A tool request is normalized, checked against permission rules and routed to its implementation. The permission broker publishes approval events and waits for a response without blocking other sessions.
+`internal/tools/` registers built-in file, search, shell, planning, browser, web, memory and other tools. The runtime combines them with enabled MCP tools, filters the set for the session and mode, and gives schemas to the provider. A tool request is normalized, checked against permission rules and routed to its implementation. The permission broker publishes approval events and waits for a response without blocking other sessions.
 
 The two session presets, Read-Only and Full Access, and saved rules live in `internal/permission/`. Native execution uses tool-level checks without Seatbelt, Landlock or an OS sandbox helper. Read-Only refuses changing tools; Full Access runs tools with ordinary user privileges, subject to explicit deny rules. External agents retain their own enforcement.
 
@@ -75,11 +74,11 @@ The agent shell tool manages jobs. Output is written to session job logs, and a 
 A turn's tool definitions and policies connect several layers:
 
 1. Tool settings and session acceptance determine which registered tools are visible to the model; plan mode can further restrict them.
-2. The agent decodes and normalizes arguments and groups compatible calls. The registry resolves the name to a built-in, MCP or extension tool.
+2. The agent decodes and normalizes arguments and groups compatible calls. The registry resolves the name to a built-in or MCP tool.
 3. The gate evaluates the action and applicable rules; a pending approval is sent as an event and resolved by a later RPC. An approval pauses that request, not every session.
 4. The approved tool runs with the user account permissions or its external agent execution policy. Its output becomes a model-facing tool result and a renderer-facing activity event. Long output can be retained on disk with a shortened inline result.
 
-`internal/mcp/` owns server discovery and lifecycle; `internal/extension/` owns local plugin loading and warm Node runners. Both provide tools through the normal registry and permission gate. Hooks run at defined lifecycle points. LSP services provide diagnostics to editing flows. Skills, commands, custom prompt text and workspace instructions add context or change turn behavior. Subagents have their own sessions and turns, controlled through the parent. Undo snapshots and worktrees are implemented by `internal/snapshot/` and `internal/worktree/` with runtime coordination.
+`internal/mcp/` owns server discovery and lifecycle, and provides tools through the normal registry and permission gate. Hooks run at defined lifecycle points. LSP services provide diagnostics to editing flows. Skills, commands, custom prompt text and workspace instructions add context or change turn behavior. Subagents have their own sessions and turns, controlled through the parent. Undo snapshots and worktrees are implemented by `internal/snapshot/` and `internal/worktree/` with runtime coordination.
 
 ## Storage and recovery
 
@@ -87,7 +86,7 @@ The data root is `PALADIN_DATA_DIR` when set, otherwise the OS configuration dir
 
 ```text
 <data>/
-  config/                 provider metadata, settings, prompts, MCP and extension config
+  config/                 provider metadata, settings, prompts and MCP config
   permissions/            global and folder permission rules
   sessions/<workspace>/<session>/
     meta.json             session identity and settings

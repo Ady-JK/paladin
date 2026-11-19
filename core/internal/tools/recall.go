@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -89,16 +88,6 @@ func SkillCatalog(dataDir, cwd string, max int) string {
 	if len(list) == 0 {
 		return ""
 	}
-	// Keep Creator guidance visible even when a large skill catalog is capped.
-	slices.SortStableFunc(list, func(a, b skills.Skill) int {
-		if skills.IsCreatorSkill(a.Name) && !skills.IsCreatorSkill(b.Name) {
-			return -1
-		}
-		if !skills.IsCreatorSkill(a.Name) && skills.IsCreatorSkill(b.Name) {
-			return 1
-		}
-		return 0
-	})
 	var b strings.Builder
 	b.WriteString("Skills (load one with the skill tool when the task matches its description):\n")
 	for i, s := range list {

@@ -2,7 +2,7 @@
 
 Paladin is a desktop coding agent. The Electron application provides chat, an IDE, terminals, browser surfaces and settings; a Go process called `agent-host` owns sessions, model requests, tools and persistence. The two halves communicate through a JSON-lines protocol. The desktop can start the core locally or run the same core over SSH.
 
-This README maps the system as a whole. The [core README](core/README.md) explains the Go runtime; the [desktop README](desktop-app/README.md) covers Electron and the renderer. [PROTOCOL.md](desktop-app/PROTOCOL.md) is the authoritative request, response and event reference. The [extension](core/internal/extension/README.md) and [plugin UI](docs/PLUGIN-UI.md) documents describe those interfaces in detail.
+This README maps the system as a whole. The [core README](core/README.md) explains the Go runtime; the [desktop README](desktop-app/README.md) covers Electron and the renderer. [PROTOCOL.md](desktop-app/PROTOCOL.md) is the authoritative request, response and event reference. 
 
 ## System boundaries
 
@@ -14,7 +14,7 @@ flowchart LR
   Main -->|"JSONL over stdio or SSH"| Host["Go agent-host"]
   Host --> Hub["Turn hub and agent loop"]
   Hub --> Providers["Model providers / LiteLLM"]
-  Hub --> Tools["Tools, MCP, extensions"]
+  Hub --> Tools["Tools, MCP"]
   Host --> Data[("Session and configuration data")]
   Main --> Views["Native browser views and terminals"]
   Main --> Voice["Local voice worker"]
@@ -45,7 +45,7 @@ See [turn execution](core/README.md#turn-execution) and [renderer state](desktop
 | `core/internal/inference/` | Provider interfaces, catalogs, dialect routing, streaming and usage. |
 | `core/internal/tools/` | Built-in tool registry and implementations. |
 | `core/internal/transcript/`, `session/`, `memory/` | Session files, history views, usage and memory. |
-| `desktop-app/electron/` | Electron main and preload, sidecar/SSH transport, browser views, plugin host and voice process. |
+| `desktop-app/electron/` | Electron main and preload, sidecar/SSH transport, browser views and voice process. |
 | `desktop-app/src/core/` | Renderer API boundary, shared state, DOM references and types. |
 | `desktop-app/src/features/` | Chat, sessions, model picker, IDE, browser, settings and other UI features. |
 | `desktop-app/src/styles/` | Feature CSS and shared theme tokens, imported in order by `src/styles.css`. |
@@ -55,7 +55,7 @@ See [turn execution](core/README.md#turn-execution) and [renderer state](desktop
 
 Provider definitions and model catalogs belong to the core. The renderer asks for a provider and model; the core resolves their configuration and protocol. LiteLLM is an OpenAI-compatible provider configured with a URL and key; Paladin does not run the proxy. GitHub Copilot uses its own authentication and catalog, including endpoint information used for model routing. Provider limits, token usage, pricing and context choices feed the model picker, compaction and usage views. Catalog refresh is scoped to the selected/default provider, not a refresh of every provider. Details and limitations are in the [core README](core/README.md#providers-and-models).
 
-The agent can use built-in tools, MCP servers and enabled extension plugins. Calls go through the registry and permission system before execution; plan mode restricts available tools. The interactive user terminal is a separate PTY and runs directly with user account permissions, as do approved agent commands. Browser tabs for the user, the agent-controlled browser, and plugin iframes are distinct surfaces with different storage and permissions.
+The agent can use built-in tools and MCP servers. Calls go through the registry and permission system before execution; plan mode restricts available tools. The interactive user terminal is a separate PTY and runs directly with user account permissions, as do approved agent commands. Browser tabs for the user and the agent-controlled browser are distinct surfaces with different storage and permissions.
 
 Sessions contain a workspace, transcript, settings and usage. The core's data directory defaults to the OS configuration directory plus `paladin`; `PALADIN_DATA_DIR` overrides it. Provider secrets normally use the OS keychain; tests can use `PALADIN_KEYSTORE=memory`. Session history and configuration live under the data directory, not in the source checkout. See [storage and recovery](core/README.md#storage-and-recovery).
 

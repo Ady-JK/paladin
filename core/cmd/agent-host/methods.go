@@ -178,13 +178,8 @@ var methods = map[string]handler{
 		if params.Content == nil {
 			return nil, tools.ArgsError("IDE save requires text content")
 		}
-		return rt.CreatorSaveIDEFile(params.Cwd, params.Path, *params.Content, params.Version)
+		return rt.IDESaveFile(params.Cwd, params.Path, *params.Content, params.Version)
 	},
-	"creatorModeGet": func(rt *runtime.AgentRuntime, _ args) (any, error) { return rt.CreatorMode(), nil },
-	"creatorModeSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return true, rt.SetCreatorMode(a.flag("enabled"))
-	},
-	"creatorWorkspace": func(rt *runtime.AgentRuntime, _ args) (any, error) { return rt.CreatorWorkspace() },
 	"fileComplete": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.FileComplete(a.str("query"), a.str("cwd"), a.num("limit", 20))
 	},
@@ -582,27 +577,6 @@ var methods = map[string]handler{
 	},
 	"toolBehaviorSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.ToolBehaviorSet(a.str("key"), a.flag("enabled"), a.str("cwd"), a.str("sessionId"))
-	},
-	"toolsReload": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.ToolsReload(a.str("cwd"), a.str("sessionId"))
-	},
-	"pluginViews": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		return rt.PluginViews(), nil
-	},
-	"pluginInvoke": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		var p struct {
-			SessionID   string          `json:"sessionId"`
-			Cwd         string          `json:"cwd"`
-			Plugin      string          `json:"plugin"`
-			View        string          `json:"view"`
-			Tool        string          `json:"tool"`
-			Args        json.RawMessage `json:"args"`
-			Destructive bool            `json:"destructive"`
-		}
-		if err := a.decode(&p); err != nil {
-			return nil, err
-		}
-		return rt.PluginInvoke(p.SessionID, p.Cwd, p.Plugin, p.View, p.Tool, p.Args, p.Destructive)
 	},
 	"toolsAccept": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var p struct {

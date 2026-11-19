@@ -33,14 +33,13 @@ import {
   turnTotal,
 } from "./sidePane/changeMarkers";
 
-export type { PluginTab, WebTab } from "./sidePane/types";
+export type { WebTab } from "./sidePane/types";
 import type {
   AgentTab,
   BrowserTab,
   ChangesTab,
   ChatTab,
   JobsTab,
-  PluginTab,
   Tab,
   TabSet,
   TerminalTab,
@@ -661,7 +660,6 @@ export function closeWebTabsForUrl(url: string): void {
 }
 
 function modalCoveringPage(): boolean {
-  if (document.querySelector(".plugin-overlay")) return true;
   const explorer = document.querySelector<HTMLElement>(".ide-explorer");
   if (explorer && getComputedStyle(explorer).visibility !== "hidden") return true;
   return ["settingsModal", "sessionModal", "confirmModal", "siteModal", "askModal"].some((id) => {
@@ -887,119 +885,6 @@ function syncNativeSurfaces(): void {
   void browserBridge.show(browser.sessionId);
 }
 
-// ---- plugin panels ----
-
-export type PluginTabSpec = {
-  sessionId: string;
-  panelId: string;
-  plugin: string;
-  view: string;
-  title: string;
-  url: string;
-  workspace: string;
-};
-
-// preparePluginPanel closes the oldest plugin panels until there is room
-// for one more. Main enforces the same caps; closing here avoids an open
-// that main would refuse.
-export function preparePluginPanel(sessionId: string): void {
-  const set = sets.get(sessionId);
-  const mine = set?.tabs.filter((t): t is PluginTab => t.kind === "plugin") ?? [];
-  if (mine.length >= 2) {
-    const oldest = [...mine].sort((a, b) => a.openedAt - b.openedAt)[0];
-    if (oldest) closeTab(oldest.key, true, sessionId);
-  }
-  const all: PluginTab[] = [];
-  for (const s of sets.values()) {
-    for (const tab of s.tabs) if (tab.kind === "plugin") all.push(tab);
-  }
-  if (all.length >= 4) {
-    const oldest = all.sort((a, b) => a.openedAt - b.openedAt)[0];
-    if (oldest) closeTab(oldest.key, true, oldest.sessionId);
-  }
-}
-
-export function pluginTabList(): PluginTab[] {
-  const out: PluginTab[] = [];
-  for (const set of sets.values()) {
-    for (const tab of set.tabs) if (tab.kind === "plugin") out.push(tab);
-  }
-  return out;
-}
-
-export function openPluginTab(spec: PluginTabSpec): PluginTab {
-  const set = browserSet(spec.sessionId);
-  const existing = set.tabs.find((t): t is PluginTab => t.kind === "plugin" && t.panelId === spec.panelId);
-  if (existing) {
-    set.active = existing.key;
-    if (visibleSessionId() === spec.sessionId) showPane();
-    return existing;
-  }
-  const body = document.createElement("div");
-  body.className = "pane-plugin";
-  const iframe = document.createElement("iframe");
-  iframe.className = "plugin-frame";
-  iframe.setAttribute("sandbox", "allow-scripts");
-  iframe.setAttribute("referrerpolicy", "no-referrer");
-  iframe.setAttribute("title", spec.title);
-  iframe.src = spec.url;
-  const status = document.createElement("div");
-  status.className = "plugin-panel-status";
-  status.textContent = "Loading plugin panel…";
-  body.append(status, iframe);
-  const tab: PluginTab = {
-    kind: "plugin",
-    key: `t${++nextKey}`,
-    sessionId: spec.sessionId,
-    panelId: spec.panelId,
-    plugin: spec.plugin,
-    view: spec.view,
-    title: spec.title,
-    workspace: spec.workspace,
-    body,
-    iframe,
-    openedAt: Date.now(),
-    stale: false,
-  };
-  const timer = window.setTimeout(() => {
-    status.textContent = "Plugin UI failed to load: no response";
-  }, 10_000);
-  iframe.addEventListener("load", () => {
-    window.clearTimeout(timer);
-    status.remove();
-  });
-  set.tabs.push(tab);
-  set.active = tab.key;
-  if (visibleSessionId() === spec.sessionId) showPane();
-  return tab;
-}
-
-// markPluginUpdated puts a reload banner on a panel whose plugin files
-// changed; reload reopens the frame with the new entry.
-export function markPluginUpdated(tab: PluginTab, reload: () => void): void {
-  if (tab.stale) return;
-  tab.stale = true;
-  const banner = document.createElement("div");
-  banner.className = "plugin-stale";
-  banner.setAttribute("role", "status");
-  banner.innerHTML = `<span>Plugin updated</span><button type="button">Reload</button>`;
-  banner.querySelector("button")!.addEventListener("click", () => {
-    banner.remove();
-    reload();
-  });
-  tab.body.prepend(banner);
-}
-
-export function closePluginTab(panelId: string): void {
-  for (const [id, set] of sets) {
-    const tab = set.tabs.find((t): t is PluginTab => t.kind === "plugin" && t.panelId === panelId);
-    if (tab) {
-      closeTab(tab.key, true, id);
-      return;
-    }
-  }
-}
-
 function activeTab(set: TabSet): Tab | undefined {
   return set.tabs.find((t) => t.key === set.active);
 }
@@ -1138,9 +1023,7 @@ function tabHtml(tab: Tab, active: boolean): string {
               ? icon("terminal", "h-3 w-3")
               : tab.kind === "changes"
                 ? icon("tl-file", "h-3 w-3")
-                : tab.kind === "plugin"
-                  ? icon("sl-plug", "h-3 w-3")
-                  : icon("comments", "h-3 w-3");
+                : icon("comments", "h-3 w-3");
   const data =
     tab.kind === "agent"
       ? ` data-agent="${escapeAttr(tab.agentId)}"`
@@ -1150,9 +1033,7 @@ function tabHtml(tab: Tab, active: boolean): string {
           ? ` data-web="${escapeAttr(tab.viewName)}"`
           : tab.kind === "chat" && tab.chatId
             ? ` data-chat="${escapeAttr(tab.chatId)}"`
-            : tab.kind === "plugin"
-              ? ` data-plugin="${escapeAttr(tab.plugin)}/${escapeAttr(tab.view)}"`
-              : "";
+            : "";
   const busy = tab.kind === "chat" ? tab.busy : tab.kind === "agent" && liveBadge(tab.agentId) === "running";
   return (
     `<div class="pane-tab${active ? " is-active" : ""}" data-key="${tab.key}"${data}>` +
@@ -1344,11 +1225,6 @@ function closeTab(key: string, dropBrowser = true, sessionId = visibleSessionId(
     if (removed.terminalId) void api.terminalClose(removed.sessionId, removed.terminalId).catch(() => undefined);
     removed.term?.dispose();
   }
-  if (removed.kind === "plugin") {
-    removed.iframe.src = "about:blank";
-    removed.iframe.remove();
-    if (hasBridge()) void bridge().plugins?.close(removed.panelId);
-  }
   if (set.tabs.length === 0) {
     if (sessionId === STANDALONE_PANE_SESSION) sets.delete(sessionId);
     if (sessionId === visibleSessionId()) {
@@ -1386,11 +1262,6 @@ export function disposeSidePanes(ids: string[]): void {
       tab.closed = true;
       if (tab.terminalId) void api.terminalClose(tab.sessionId, tab.terminalId).catch(() => undefined);
       tab.term?.dispose();
-    }
-    if (tab.kind === "plugin") {
-      tab.iframe.src = "about:blank";
-      tab.iframe.remove();
-      if (hasBridge()) void bridge().plugins?.close(tab.panelId);
     }
     tab.body.remove();
   };
@@ -1545,7 +1416,6 @@ export function initSidePane(): void {
   observer.observe(sidePaneEl);
   observer.observe(bodyEl);
   window.addEventListener("resize", syncNativeSurfaces);
-  window.addEventListener("paladin:plugin-overlay-changed", syncNativeSurfaces);
   watchOverlays();
   for (const id of ["settingsModal", "sessionModal", "confirmModal", "siteModal"]) {
     const el = document.getElementById(id);

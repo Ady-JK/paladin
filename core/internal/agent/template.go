@@ -439,7 +439,7 @@ var planWriteTools = map[string]bool{"write": true, "edit": true}
 func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *tools.ShellTool) {
 	out := tools.NewRegistry()
 	for _, name := range r.Names() {
-		if planWriteTools[name] || r.IsExtension(name) {
+		if planWriteTools[name] {
 			continue
 		}
 		t, _ := r.Get(name)
