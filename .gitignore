@@ -5,3 +5,6 @@ core/agent-host
 tmp/
 .idea/
 .config/
+
+# knowledge graph output (large generated artifacts)
+graphify-out/
