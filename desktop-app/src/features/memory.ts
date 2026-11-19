@@ -1,9 +1,9 @@
 // memory.ts is the settings Memory pane: what Paladin remembers, in
-// three stores — about you (user), across every folder (global), and
-// per folder (project). The model writes them through its memory tool;
-// here the user reviews, edits, adds and removes entries. Sessions read
-// a frozen snapshot at their first turn, so edits reach a running
-// session only after "Refresh snapshot".
+// three modes — User Preferences (user), Global Rules (global), and
+// Workspace Rules (project, per folder). The model writes them through
+// its memory tool; here the user reviews, edits, adds and removes
+// entries. Sessions read a frozen snapshot at their first turn, so edits
+// reach a running session only after "Refresh snapshot".
 
 import * as api from "../core/api";
 import { memoryBodyEl } from "../core/dom";
@@ -13,11 +13,19 @@ import type { MemoryConfigView, MemoryProject, MemorySnapshotState, MemoryTarget
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 
+// BLURB is the pane's label for each mode: the title, then what belongs
+// there so the user knows which one to edit.
 const BLURB: Record<MemoryTarget, [string, string]> = {
-  user: ["About you", "Who you are and how you like to work — every session sees it."],
-  global: ["Everywhere", "Conventions and facts that hold across all folders."],
-  project: ["This folder", "What Paladin learned about this folder, shared by its sessions."],
+  user: [
+    "User Preferences",
+    "Who you are: your style, language, tone, and how you want to be worked with. Every session sees this.",
+  ],
+  global: ["Global Rules", "Overall rules and environment facts that hold in every workspace."],
+  project: ["Workspace Rules", "Rules for this folder — build and test commands, conventions, architecture, gotchas."],
 };
+
+// MODE_ORDER keeps the pane reading broadest to narrowest.
+const MODE_ORDER: MemoryTarget[] = ["user", "global", "project"];
 
 type Section = { view: MemoryView; key: string };
 
@@ -47,6 +55,9 @@ export async function loadMemory(cwd?: string): Promise<void> {
       ["global", ""],
     ];
     if (projectCwd) targets.push(["project", projectCwd]);
+    // Broadest to narrowest, so the pane reads as one rule set refining
+    // the next rather than an arbitrary order.
+    targets.sort((a, b) => MODE_ORDER.indexOf(a[0]) - MODE_ORDER.indexOf(b[0]));
     const [views, list, snap, cfg] = await Promise.all([
       Promise.all(targets.map(([t, c]) => api.memoryGet(t, c || null))),
       api.memoryProjects().catch(() => [] as MemoryProject[]),
@@ -79,8 +90,7 @@ function usage(view: MemoryView): string {
 
 // describeChanged names the stores that moved, for the staleness banner.
 function describeChanged(changed: string[]): string {
-  const names: Record<string, string> = { user: "About you", global: "Everywhere", project: "This folder" };
-  const known = changed.map((c) => names[c] ?? c).filter((n, i, all) => all.indexOf(n) === i);
+  const known = changed.map((c) => BLURB[c as MemoryTarget]?.[0] ?? c).filter((n, i, all) => all.indexOf(n) === i);
   const what = known.length ? known.join(", ") : "Memory";
   return `${what} changed outside this session`;
 }

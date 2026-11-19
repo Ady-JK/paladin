@@ -169,7 +169,7 @@ test("the memory pane says when a store moved past the session's snapshot", asyn
   await expect(pane).toBeVisible();
   const stale = pane.locator("[data-mem-stale]");
   await expect(stale).toBeVisible();
-  await expect(stale).toContainText("Everywhere");
+  await expect(stale).toContainText("Global Rules");
   await expect(stale).toContainText("still sees the memory it started with");
   await stale.locator("[data-mem-refresh]").click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eSnapshotRefreshes || 0)).toBe(1);

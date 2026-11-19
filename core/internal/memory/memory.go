@@ -592,9 +592,9 @@ func (b *Bank) RenderSections(cwd string) (string, []Section) {
 		target Target
 		title  string
 	}{
-		{TargetUser, "USER PROFILE (who the user is)"},
-		{TargetGlobal, "MEMORY (your notes, shared by every folder)"},
-		{TargetProject, "FOLDER MEMORY (notes for " + cwd + ")"},
+		{TargetUser, "USER PREFERENCES (who the user is, their style and language)"},
+		{TargetGlobal, "GLOBAL RULES (overall rules for every workspace)"},
+		{TargetProject, "WORKSPACE RULES (rules for " + cwd + ")"},
 	}
 	var out strings.Builder
 	summary := []Section{}

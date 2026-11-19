@@ -385,7 +385,7 @@ func TestConfigOverridesLimitsAndDisablesTargets(t *testing.T) {
 		t.Fatal("write to a disabled target must be refused")
 	}
 	block := b.Render("/w")
-	if strings.Contains(block, "FOLDER MEMORY") {
+	if strings.Contains(block, "WORKSPACE RULES") {
 		t.Fatalf("disabled scope rendered:\n%s", block)
 	}
 }

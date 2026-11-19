@@ -166,7 +166,7 @@ func TestBankScopesAndSnapshot(t *testing.T) {
 	mustApply(t, b, TargetProject, cwdB, "b is a python repo")
 
 	snapA := b.Render(cwdA)
-	for _, want := range []string{"USER PROFILE", "prefers terse answers", "litellm runs on :4000", "a uses go 1.27"} {
+	for _, want := range []string{"USER PREFERENCES", "prefers terse answers", "litellm runs on :4000", "a uses go 1.27"} {
 		if !strings.Contains(snapA, want) {
 			t.Fatalf("snapshot A missing %q:\n%s", want, snapA)
 		}
