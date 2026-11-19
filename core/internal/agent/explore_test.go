@@ -1,8 +1,9 @@
-// explore_test.go pins the guarantee the doom loop and the search-spiral
-// guard used to break: reading, grepping, listing and searching can run
-// for as long as the task needs — hundreds of rounds — without any
-// round being refused, on any arguments, identical or varied. Huge
-// codebases legitimately take a lot of exploring.
+// explore_test.go pins the free-exploration guarantee: reading,
+// grepping, listing and searching can run for as long as the task
+// needs — hundreds of rounds — without any round being refused, on any
+// arguments, varied or repeated-with-changes-between. The one narrow
+// exception is reread.go's identical back-to-back repeat (see
+// reread_test.go). Huge codebases legitimately take a lot of exploring.
 
 package agent
 
@@ -50,32 +51,32 @@ func TestLongExplorationIsNeverRefused(t *testing.T) {
 	}
 }
 
-// TestIdenticalReadsAreNotRefused pins the other half of the guarantee:
-// even the exact same read, called back to back many times, runs every
-// time. The old doom guard refused the third identical call; a model
-// comparing a file before and after a write, or one that simply wants
-// the content again after compaction trimmed it away, must get it.
-func TestIdenticalReadsAreNotRefused(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{
-		callRound("c1", "read", `{"path":"x.txt"}`),
-		callRound("c2", "read", `{"path":"x.txt"}`),
-		callRound("c3", "read", `{"path":"x.txt"}`),
-		callRound("c4", "read", `{"path":"x.txt"}`),
-		textRound("done re-reading"),
-	}}
-	a, _, _, done := testAgent(t, prov)
-	defer close(done)
+// TestIdenticalReadsWithChangeBetweenRuns pins the other half of the
+// guarantee: the identical-read guard never refuses a re-read when
+// something happened in between that could make the result different.
+// A read → edit → read cycle runs every call, however many times it
+// repeats, because checking a file after changing it is correct.
+func TestIdenticalReadsWithChangeBetweenRuns(t *testing.T) {
+	prov := &mockProvider{}
+	a, _, tx, done := testAgent(t, prov)
+	t.Cleanup(func() { close(done) })
+	drainTx(t, tx)
+	var scripts []streamScript
+	for i := 0; i < 6; i++ {
+		scripts = append(scripts,
+			callRound("r", "read", `{"path":"x.txt"}`),
+			callRound("e", "edit", `{"path":"x.txt"}`),
+		)
+	}
+	scripts = append(scripts, textRound("done"))
+	prov.streams = scripts
 
 	if _, err := a.Run(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("read-edit cycles must not fail the turn: %v", err)
 	}
-	results := toolResultsByID(t, a)
-	if len(results) != 4 {
-		t.Fatalf("all four identical reads must run, got %d results", len(results))
-	}
-	for id, content := range results {
+	for id, content := range toolResultsByID(t, a) {
 		if strings.Contains(content, "refused") {
-			t.Fatalf("identical read %s was refused: %s", id, content)
+			t.Fatalf("call %s was refused: %s", id, content)
 		}
 	}
 }

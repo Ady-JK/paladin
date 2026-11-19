@@ -268,6 +268,7 @@ type Agent struct {
 	provider inference.Provider
 	tools    *tools.Registry
 	shell    *tools.ShellTool
+	reread   rereadGuard
 	cancel   context.CancelFunc
 	ctx      context.Context
 	toolCtx  *tools.ToolCtx

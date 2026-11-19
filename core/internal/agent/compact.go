@@ -369,6 +369,9 @@ func (a *Agent) compact(reason string, before int64) error {
 	summaryMsg := inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)}
 	a.messages = append([]inference.LlmMessage{summaryMsg}, tail...)
 	a.promptTokens, a.promptLen = 0, 0
+	// The model's window was rebuilt: it can no longer see the results
+	// an in-flight identical-read streak refers to, so the streak ends.
+	a.reread.noteCompaction()
 	// The summary replaces the messages that held recalled memory, but the
 	// kept tail still holds its own reminders: those entries stay recalled,
 	// so they are not appended a second time.

@@ -446,6 +446,8 @@ func (a *Agent) drainSteering() error {
 			continue
 		}
 		a.messages = append(a.messages, inference.LlmMessage{Role: "user", Content: msg.Message})
+		// The conversation changed: any identical-read streak is over.
+		a.reread.noteUserMessage()
 		rec := transcript.UserMessage(msg.Message)
 		if d := strings.TrimSpace(msg.Display); d != "" && d != strings.TrimSpace(msg.Message) {
 			rec.Display = msg.Display

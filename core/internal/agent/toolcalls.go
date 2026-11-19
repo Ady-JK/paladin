@@ -35,11 +35,33 @@ func (a *Agent) runToolsStreaming(calls []inference.ToolCall) error {
 		a.settleAborted(calls)
 		return err
 	}
+	if a.reread.noteRound(calls) {
+		return a.refuseRereadCalls(calls)
+	}
 	a.settleNotices(calls)
 	if err := a.announceToolCalls(calls); err != nil {
 		return err
 	}
 	return a.runToolBatches(calls)
+}
+
+// refuseRereadCalls settles a refused round the same way a denied tool
+// result is: the model gets the refusal as each call's result and must
+// adapt — the turn itself continues.
+func (a *Agent) refuseRereadCalls(calls []inference.ToolCall) error {
+	for i := range calls {
+		result := tools.ToolResult{CallID: calls[i].ID, Name: calls[i].Name, IsError: true,
+			Content: rereadRefusal()}
+		a.appendToolResult(&calls[i], &result)
+		if err := a.checkpoint(""); err != nil {
+			a.settleAborted(calls[i+1:])
+			return err
+		}
+		if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
+			return turnStop{}
+		}
+	}
+	return nil
 }
 
 func (a *Agent) announceToolCalls(calls []inference.ToolCall) error {
