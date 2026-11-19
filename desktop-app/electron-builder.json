@@ -1,7 +1,6 @@
 {
   "appId": "com.paladin.app",
   "productName": "paladin",
-  "afterPack": "scripts/after-pack.mjs",
   "directories": {
     "output": "release"
   },
