@@ -33,6 +33,7 @@ type Item = {
   args: Args;
   chevron: boolean;
   tag: string;
+  origin?: string;
 };
 
 let popup: HTMLElement | null = null;
@@ -88,9 +89,30 @@ function items(): Item[] {
       args: "optional",
       chevron: false,
       tag: s.source,
+      origin: skillOrigin(s.source),
     });
   }
   return out;
+}
+
+// skillOrigin labels a skill that Paladin did not install itself, so the
+// palette can show where it came from: a Claude Code skill directory, a
+// Claude plugin, or the cross-framework Agent Skills root. Paladin's own
+// skills carry no badge.
+function skillOrigin(source: string): string {
+  switch (source) {
+    case "claude":
+      return "Claude";
+    case "claude-project":
+      return "Claude · project";
+    case "claude-plugin":
+      return "Claude plugin";
+    case "agents":
+    case "agents-project":
+      return "Agent Skills";
+    default:
+      return "";
+  }
 }
 
 // score ranks a row for the filter; -1 hides it. Name prefix beats a
@@ -186,6 +208,7 @@ function rowHtml(it: Item, i: number): string {
     `<span class="slash-text"><span class="slash-label">${escapeHtml(it.label)}</span>` +
     `<span class="slash-desc">${escapeHtml(it.desc)}</span></span>` +
     `<span class="slash-tag">${escapeHtml(it.kind === "skill" ? it.tag : `/${it.name}`)}</span>` +
+    (it.origin ? `<span class="slash-origin">${escapeHtml(it.origin)}</span>` : "") +
     (it.chevron ? `<span class="slash-chev">${icon("rl-chevron", "h-3.5 w-3.5")}</span>` : "") +
     `</button>`
   );

@@ -74,18 +74,31 @@ func WorkspaceDir(cwd string) string {
 }
 
 // ValidName reports whether name is usable as a skill lookup: a bare
-// directory name, never a path.
+// directory name, never a path. A plugin skill's `plugin:<plugin>:<skill>`
+// form is allowed, since it addresses two directory levels rather than a
+// path traversal.
 func ValidName(name string) bool {
 	if name == "" || name == "." || name == ".." {
 		return false
 	}
-	return !strings.ContainsAny(name, "/\\")
+	if strings.ContainsAny(name, "/\\") {
+		return false
+	}
+	if strings.Contains(name, ":") {
+		_, _, ok := splitPluginSkillName(name)
+		return ok
+	}
+	return true
 }
 
 // List discovers the built-in skills and both roots. A global skill
 // shadows a built-in and a workspace skill shadows both
 // (case-insensitively); turned-off skills are left out. Results sort by
 // name.
+//
+// Skills installed for Claude Code or the Agent Skills spec are listed
+// after Paladin's own: they only fill a name Paladin's roots leave free,
+// so a Paladin skill of the same name always wins.
 func List(dataDir, cwd string) []Skill {
 	byName := map[string]Skill{}
 	for _, s := range builtins() {
@@ -110,8 +123,25 @@ func List(dataDir, cwd string) []Skill {
 			byName[key] = s
 		}
 	}
-	off := Disabled(dataDir)
+	for _, r := range claudeRoots(cwd) {
+		var found []Skill
+		if r.source == SourceClaudePlugin {
+			found = scanPluginRoot(r.dir)
+		} else {
+			found = scanRoot(r.dir, r.source)
+		}
+		for _, s := range found {
+			key := strings.ToLower(s.Name)
+			if _, taken := byName[key]; taken {
+				// Paladin's own roots and higher-priority external roots
+				// already own this name.
+				continue
+			}
+			byName[key] = s
+		}
+	}
 	creatorAvailable := creatorSkillsAvailable(dataDir, cwd)
+	off := Disabled(dataDir)
 	out := make([]Skill, 0, len(byName))
 	for key, s := range byName {
 		if !off[key] && (!IsCreatorSkill(key) || creatorAvailable) {
@@ -156,6 +186,36 @@ func Load(dataDir, cwd, name string) (Skill, error) {
 	}
 	if b, ok := Builtin(name); ok {
 		return b, nil
+	}
+	// Claude Code and Agent Skills roots, in the same order List uses.
+	// Paladin's own roots were searched first, so a name they define
+	// never reaches here.
+	for _, r := range claudeRoots(cwd) {
+		if r.source == SourceClaudePlugin {
+			plugin, short, ok := splitPluginSkillName(name)
+			if !ok {
+				continue
+			}
+			skill, found, err := loadFrom(r.dir, short, r.source)
+			if err != nil {
+				return Skill{}, err
+			}
+			if found && strings.EqualFold(filepath.Base(filepath.Dir(r.dir)), plugin) {
+				skill.Name = name
+				return skill, nil
+			}
+			continue
+		}
+		skill, ok, err := loadFrom(r.dir, name, r.source)
+		if err != nil {
+			return Skill{}, err
+		}
+		if ok {
+			return skill, nil
+		}
+	}
+	if _, _, ok := splitPluginSkillName(name); ok {
+		return Skill{}, fmt.Errorf("not found: skill %q is not installed by any Claude plugin", name)
 	}
 	return Skill{}, fmt.Errorf("not found: skill %q not found (add %s/SKILL.md under config/skills/ or .paladin/skills/)", name, name)
 }

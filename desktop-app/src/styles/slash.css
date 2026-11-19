@@ -134,6 +134,23 @@
 .slash-row.is-active .slash-tag {
   opacity: 1;
 }
+/* Marks a skill Paladin did not install: a Claude Code skill or plugin.
+   Always visible, unlike the tag, so the source is clear at a glance. */
+.slash-origin {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--color-slate-300);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--color-slate-500);
+}
+.dark .slash-origin {
+  border-color: var(--color-slate-600);
+  color: var(--color-slate-400);
+}
 .slash-chev {
   display: flex;
   flex-shrink: 0;

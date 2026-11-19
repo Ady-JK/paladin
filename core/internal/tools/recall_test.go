@@ -15,6 +15,9 @@ import (
 )
 
 func TestSkillToolLoadsAndListsOnMiss(t *testing.T) {
+	// Claude Code skills installed on the machine would join the catalog,
+	// which the empty-catalog case below deliberately rules out.
+	t.Setenv("HOME", t.TempDir())
 	data := t.TempDir()
 	dir := filepath.Join(data, "config", "skills", "deploy")
 	_ = os.MkdirAll(dir, 0o755)

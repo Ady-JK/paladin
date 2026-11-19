@@ -1343,6 +1343,7 @@ func TestFileCompleteMentions(t *testing.T) {
 }
 
 func TestListSkills(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	rt, dir := testRuntime(t)
 	ws := t.TempDir()
 	write := func(root, name, content string) {

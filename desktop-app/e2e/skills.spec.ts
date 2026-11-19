@@ -36,6 +36,23 @@ test("the /skill picker lists skills and attaches one to the turn", async ({ pag
   await expect(rows.first()).toContainText("ship it");
 });
 
+test("the / palette tags skills that came from Claude Code", async ({ page }) => {
+  await page.fill("#promptInput", "/");
+  const popup = page.locator("#slashPopup");
+  await expect(popup).toBeVisible();
+
+  // A Claude user skill carries a visible origin badge; Paladin's own
+  // skills carry none.
+  const graphify = popup.locator('.slash-row[data-name="graphify"]');
+  await expect(graphify).toBeVisible();
+  await expect(graphify.locator(".slash-origin")).toHaveText("Claude");
+
+  const lint = popup.locator('.slash-row[data-name="lint"]');
+  await expect(lint.locator(".slash-origin")).toHaveText("Claude · project");
+
+  await expect(popup.locator('.slash-row[data-name="reviewer"] .slash-origin')).toHaveCount(0);
+});
+
 test("a bare /skill hints usage instead of reaching the agent", async ({ page }) => {
   await page.fill("#promptInput", "/skill");
   await page.click("#sendBtn");

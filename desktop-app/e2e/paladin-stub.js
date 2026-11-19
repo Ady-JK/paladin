@@ -120,6 +120,18 @@ async function __paladinBaseInvoke(cmd, args) {
           source: "workspace",
           path: "/home/tester/project/.paladin/skills/deployer/SKILL.md",
         },
+        {
+          name: "graphify",
+          description: "Maps a codebase into a knowledge graph",
+          source: "claude",
+          path: "/home/tester/.claude/skills/graphify/SKILL.md",
+        },
+        {
+          name: "lint",
+          description: "Project lint rules",
+          source: "claude-project",
+          path: "/home/tester/project/.claude/skills/lint/SKILL.md",
+        },
       ];
     case "listCommands":
       return [
