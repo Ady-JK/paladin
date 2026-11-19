@@ -339,6 +339,21 @@ func TestManagerSetConfig(t *testing.T) {
 	}
 }
 
+// TestManagerSetConfigStartsServer pins the eager start: a server
+// written through SetConfig reaches ready on its own, without a turn
+// asking for tools, so its tools can surface the moment it is added.
+func TestManagerSetConfigStartsServer(t *testing.T) {
+	m, _, _ := newTestManager(t, nil)
+	text := fmt.Sprintf(`{"mcpServers":{"dummy":{"command":%q}}}`, mcptest.Dummy(t))
+	if err := m.SetConfig(ScopeGlobal, "", text); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(func() bool { return statusOf(m, "", ScopeGlobal, "dummy").State == StateReady })
+	if st := statusOf(m, "", ScopeGlobal, "dummy"); st.State != StateReady {
+		t.Fatalf("server never became ready without a turn: %+v", st)
+	}
+}
+
 func TestManagerPicksUpListChanged(t *testing.T) {
 	m, _, _ := newTestManager(t, map[string]ServerConfig{"dummy": dummyCfg(t)})
 	if _, err := runTool(t, find(t, m.Tools(toolsCtx(), ""), "mcp__dummy__grow"), `{}`); err != nil {

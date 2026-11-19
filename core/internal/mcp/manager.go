@@ -475,6 +475,12 @@ func (m *Manager) syncScope(scope, folder string) {
 	}
 	for _, s := range fresh {
 		m.publish(s.status())
+		// A fresh server starts immediately rather than waiting for a
+		// turn: its tools can surface (and the new-tools banner appear)
+		// without the user having to send a message first.
+		if s.runnable() {
+			s.ensure()
+		}
 	}
 }
 
