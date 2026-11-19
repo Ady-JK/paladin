@@ -23,6 +23,9 @@ type LlmMessage struct {
 	ToolCalls  []ToolCall
 	ToolCallID *string
 	Name       *string
+	// Thinking is the reasoning behind an assistant message; the provider
+	// decides whether it goes back natively or as readable text.
+	Thinking *Thinking
 }
 
 // ToolCall is one model-requested function invocation.
@@ -50,6 +53,8 @@ type ToolResponse struct {
 	Usage *Usage
 	// Reasoning is the model's visible thinking, when it sends any.
 	Reasoning string
+	// Thinking is the reasoning in replayable form, when there is any.
+	Thinking *Thinking
 }
 
 // Chunk is one streamed piece: text, a tool-call notice (name arrived,
@@ -58,6 +63,9 @@ type Chunk struct {
 	Text string
 	// Reasoning is a piece of the model's thinking; never answer text.
 	Reasoning string
+	// Thinking arrives once, when the round's reasoning is complete: the
+	// state to send back with the assistant message the round produces.
+	Thinking *Thinking
 	// EffortDropped names a thinking level the provider rejected; the
 	// call was retried without it, as are later calls.
 	EffortDropped string

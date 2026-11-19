@@ -7,6 +7,7 @@ import type {
   Approval,
   BudgetNotice,
   HookNote,
+  TurnNotice,
   CompactionInfo,
   RetryInfo,
   SteerInfo,
@@ -28,6 +29,7 @@ import {
 import { createFindingsCard, paintFindings } from "./findings";
 import { createPluginCard, hasPluginCard, paintPluginCard } from "./pluginCards";
 import { createVisualCard, updateVisualCard } from "./visuals";
+import { createQuestionCard, paintQuestionCard } from "../adapters/agentQuestion";
 
 // CARD_TOOLS draw their call as a card of its own in the flow instead
 // of a row in the tool group.
@@ -37,6 +39,8 @@ const CARD_TOOLS: Record<
 > = {
   report_findings: { create: createFindingsCard, paint: paintFindings },
   visual: { create: (_sessionId, tool) => createVisualCard(tool), paint: updateVisualCard },
+  // A question the agent asked without stopping its work: a form, not a row.
+  agent_question: { create: createQuestionCard, paint: paintQuestionCard },
 };
 import { ToolRun } from "./toolRun";
 import { createApprovalCard, focusApproval, paintApproval } from "./approvals";
@@ -132,6 +136,9 @@ export class TurnView {
         break;
       case "chat/hook":
         if (ev.hook) this.hook(ev.hook);
+        break;
+      case "chat/notice":
+        if (ev.notice) this.notice(ev.notice);
         break;
       default:
         return false;
@@ -433,6 +440,16 @@ export class TurnView {
       `<span class="hook-ico">${icon("zap", "h-3 w-3")}</span>` +
       `<span class="hook-label">${escapeHtml(note.event)} hook ${escapeHtml(HOOK_VERB[note.outcome] ?? note.outcome)}</span>` +
       (note.message ? `<span class="hook-msg">${escapeHtml(note.message)}</span>` : "");
+    this.insertBlock(el);
+  }
+
+  private notice(note: TurnNotice): void {
+    const el = document.createElement("div");
+    el.className = "notice-row";
+    el.dataset.kind = note.kind;
+    el.innerHTML =
+      `<span class="notice-ico">${icon(note.kind === "info" ? "zap" : "warning", "h-3 w-3")}</span>` +
+      `<span class="notice-text">${escapeHtml(note.text)}</span>`;
     this.insertBlock(el);
   }
 

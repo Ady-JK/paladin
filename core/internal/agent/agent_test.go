@@ -30,6 +30,8 @@ type mockProvider struct {
 	streamDefs   [][]inference.ToolDefinition
 	// afterChunks runs once a stream's scripted chunks are delivered.
 	afterChunks func(idx int)
+	// metas records the call metadata each call carried on its context.
+	metas []inference.CallMeta
 }
 
 type streamScript struct {
@@ -44,6 +46,7 @@ func (m *mockProvider) ListModels(context.Context) ([]string, error) { return ni
 
 func (m *mockProvider) CompleteTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string) (inference.ToolResponse, error) {
 	m.sessionIDs = append(m.sessionIDs, sessionID)
+	m.metas = append(m.metas, inference.CallMetaFrom(ctx))
 	m.completeMsgs = append(m.completeMsgs, append([]inference.LlmMessage(nil), messages...))
 	m.completeSys = append(m.completeSys, system)
 	return m.complete, m.completeErr
@@ -51,6 +54,7 @@ func (m *mockProvider) CompleteTools(ctx context.Context, system string, message
 
 func (m *mockProvider) StreamTools(ctx context.Context, system string, messages []inference.LlmMessage, defs []inference.ToolDefinition, sessionID string, tx chan<- inference.Chunk, done <-chan struct{}) error {
 	m.sessionIDs = append(m.sessionIDs, sessionID)
+	m.metas = append(m.metas, inference.CallMetaFrom(ctx))
 	m.streamMsgs = append(m.streamMsgs, append([]inference.LlmMessage(nil), messages...))
 	m.streamDefs = append(m.streamDefs, defs)
 	idx := m.calls

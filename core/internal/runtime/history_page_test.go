@@ -79,6 +79,38 @@ func TestSessionHistoryPageSlicesAndKeepsOlderPagesStable(t *testing.T) {
 	}
 }
 
+func TestHistoryPageCacheInvalidatesOnAppendAndTruncate(t *testing.T) {
+	rt, dir := testRuntime(t)
+	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.OpenSession("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedTurns(t, rt, dir, sess.SessionID, 3)
+	first, err := rt.SessionHistoryPage(sess.SessionID, dir, 20, 0)
+	if err != nil || first.Total != 6 {
+		t.Fatalf("first page: %+v, %v", first, err)
+	}
+	seedTurns(t, rt, dir, sess.SessionID, 1)
+	second, err := rt.SessionHistoryPage(sess.SessionID, dir, 20, 0)
+	if err != nil || second.Total != 8 {
+		t.Fatalf("appended page: %+v, %v", second, err)
+	}
+	stored, err := rt.transcripts.Load(dir, sess.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stored.Truncate(2); err != nil {
+		t.Fatal(err)
+	}
+	third, err := rt.SessionHistoryPage(sess.SessionID, dir, 20, 0)
+	if err != nil || third.Total != 2 {
+		t.Fatalf("truncated page: %+v, %v", third, err)
+	}
+}
+
 func TestSessionImagesReportsOnlyImageRows(t *testing.T) {
 	rt, dir := testRuntime(t)
 	if err := rt.store.Keys.Set("openrouter", "sk-test"); err != nil {

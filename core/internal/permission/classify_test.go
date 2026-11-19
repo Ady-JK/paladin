@@ -80,7 +80,7 @@ func TestSuggestedPrefix(t *testing.T) {
 		"pytest tests/ -q":        "pytest",
 		"FOO=1 go build ./...":    "go build",
 		"/usr/local/bin/make all": "make all",
-		"python scripts/x.py":     "python",
+		"python scripts/x.py":     "python scripts/x.py", // an interpreter is never remembered bare
 	}
 	for cmd, want := range cases {
 		segs, err := splitCommand(cmd)

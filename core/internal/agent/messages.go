@@ -13,6 +13,22 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
+// toTranscriptThinking and fromTranscriptThinking convert a round's
+// replayable reasoning to and from its on-disk form.
+func toTranscriptThinking(t *inference.Thinking) *transcript.Thinking {
+	if t == nil {
+		return nil
+	}
+	return &transcript.Thinking{Text: t.Text, Provider: t.Provider, Model: t.Model, Format: t.Format, Opaque: t.Opaque, Raw: t.Raw}
+}
+
+func fromTranscriptThinking(t *transcript.Thinking) *inference.Thinking {
+	if t == nil {
+		return nil
+	}
+	return &inference.Thinking{Text: t.Text, Provider: t.Provider, Model: t.Model, Format: t.Format, Opaque: t.Opaque, Raw: t.Raw}
+}
+
 func (a *Agent) modelMessages(message string, resume bool) []inference.LlmMessage {
 	withTools := len(a.toolDefs) > 0
 	messages := LlmMessages(a.history, withTools)
@@ -115,7 +131,7 @@ func (b *messageBuilder) addAssistant(msg transcript.Message) {
 	if strings.TrimSpace(msg.Content) == "" && len(calls) == 0 {
 		return
 	}
-	b.out = append(b.out, inference.LlmMessage{Role: "assistant", Content: msg.Content, ToolCalls: calls})
+	b.out = append(b.out, inference.LlmMessage{Role: "assistant", Content: msg.Content, ToolCalls: calls, Thinking: fromTranscriptThinking(msg.Thinking)})
 	if len(calls) > 0 {
 		b.open, b.order, b.answered = true, calls, seen
 	}

@@ -1,13 +1,13 @@
 // Session-scoped local browser views controlled by the Playwright CDP client.
 // Hidden views stay alive and automatable while other sessions are visible.
-import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { app, BrowserWindow, session, WebContentsView } from "electron";
+import { BrowserWindow, session, WebContentsView } from "electron";
 import type { Browser, Locator, Page } from "@playwright/test";
 import { navigationAllowed, requestAllowed, siteKey, webBrowserUrl } from "./browserPolicy";
 import { EgressGuard, type Resolved } from "./browserEgress";
+import { DebuggerHub, type CdpTransport } from "./cdpBridge";
 import { renderBrowserAnnotationOverlay, type BrowserAnnotation } from "./browserAnnotationOverlay";
 
 export type BrowserRequest = {
@@ -63,7 +63,7 @@ type Entry = {
 // EgressSetup replaces name resolution for the smoke (see main.ts).
 export type EgressSetup = { lookup?: (host: string) => Promise<Resolved[]>; trusted?: ReadonlySet<string> };
 type RouteHandler = Parameters<Page["route"]>[1];
-type PlaywrightCore = { chromium: { connectOverCDP(endpoint: string): Promise<Browser> } };
+type PlaywrightCore = { chromium: { connectOverCDP(transport: CdpTransport): Promise<Browser> } };
 
 const sessionName = /^[A-Za-z0-9_-]{1,128}$/;
 const maxImageBytes = 4 << 20;
@@ -81,7 +81,9 @@ export class BrowserManager {
   private bounds: BrowserBounds | null = null;
   private browser: Browser | null = null;
   private connecting: Promise<Browser> | null = null;
-  private debuggingPort = 0;
+  // Playwright reaches the agent's pages through Electron's debugger, not a
+  // debugging port (cdpBridge.ts).
+  private readonly hub = new DebuggerHub();
   private readonly picks = new Map<
     string,
     { page: Page; cancelEvent: string; done?: Promise<BrowserElement | null> }
@@ -212,11 +214,12 @@ export class BrowserManager {
     const entry = this.visible ? this.entries.get(this.visible) : undefined;
     if (!entry || !this.bounds) return;
     const b = this.bounds;
+    const zoom = this.window()?.webContents.getZoomFactor() ?? 1;
     entry.view.setBounds({
-      x: Math.round(b.x),
-      y: Math.round(b.y),
-      width: Math.max(1, Math.round(b.width)),
-      height: Math.max(1, Math.round(b.height)),
+      x: Math.round(b.x * zoom),
+      y: Math.round(b.y * zoom),
+      width: Math.max(1, Math.round(b.width * zoom)),
+      height: Math.max(1, Math.round(b.height * zoom)),
     });
   }
 
@@ -230,6 +233,7 @@ export class BrowserManager {
     }
     void this.cancelPick(sessionId);
     if (this.visible === sessionId) this.show(null);
+    this.hub.unregister(entry.view.webContents);
     try {
       (entry.view.webContents as { destroy?: () => void }).destroy?.();
     } catch {
@@ -488,7 +492,7 @@ export class BrowserManager {
       // loads from scripts would otherwise take minutes to finish.
       if (!entry.page) {
         if (!entry.view.webContents.getURL()) await entry.view.webContents.loadURL("about:blank");
-        entry.targetId = await this.targetId(entry.view);
+        entry.targetId = await this.hub.register(entry.view.webContents);
         entry.page = await this.findPage(entry.targetId);
       }
       await this.guardNavigation(entry);
@@ -677,7 +681,6 @@ export class BrowserManager {
       allowPrivate: () => this.privateNetwork,
       lookup: this.egress.lookup,
       trusted: this.egress.trusted,
-      protectedPort: () => this.debuggingPort,
     });
     const network = egress.listen().then((port) =>
       jar.setProxy({
@@ -776,17 +779,6 @@ export class BrowserManager {
     return entry;
   }
 
-  private async targetId(view: WebContentsView): Promise<string> {
-    const debuggerSession = view.webContents.debugger;
-    debuggerSession.attach("1.3");
-    try {
-      const data = (await debuggerSession.sendCommand("Target.getTargetInfo")) as { targetInfo: { targetId: string } };
-      return data.targetInfo.targetId;
-    } finally {
-      debuggerSession.detach();
-    }
-  }
-
   private connect(): Promise<Browser> {
     if (this.browser?.isConnected()) return Promise.resolve(this.browser);
     if (!this.connecting) {
@@ -803,22 +795,8 @@ export class BrowserManager {
   }
 
   private async connectFresh(): Promise<Browser> {
-    const activePort = path.join(app.getPath("userData"), "DevToolsActivePort");
-    let port = 0;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      try {
-        port = Number((await readFile(activePort, "utf8")).split("\n")[0]);
-      } catch {
-        /* starting */
-      }
-      if (Number.isInteger(port) && port > 0 && port <= 65535) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    if (!Number.isInteger(port) || port < 1 || port > 65535)
-      throw new Error("Chromium debugging endpoint is unavailable");
-    this.debuggingPort = port;
     const client = createRequire(__filename)(path.join(__dirname, "vendor", "playwright-core")) as PlaywrightCore;
-    return client.chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    return client.chromium.connectOverCDP(this.hub.transport());
   }
 
   private async findPage(targetId: string): Promise<Page> {

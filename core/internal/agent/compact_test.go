@@ -48,7 +48,7 @@ func compactionChunks(chunks []ChatChunk) []CompactionStatus {
 
 func TestLlmMessagesStartFromLastCompaction(t *testing.T) {
 	now := time.Now().UTC()
-	calls := []transcript.ToolCall{{ID: "c1", Name: "read", Arguments: `{}`}}
+	calls := []transcript.ToolCall{{ID: "c1", Name: "read", Arguments: `{"reason":"test"}`}}
 	id := "c1"
 	name := "read"
 	history := []transcript.Message{
@@ -265,7 +265,7 @@ func bigReadRounds(t *testing.T, cwd string, n int) []streamScript {
 		if err := writeTestFile(name, strings.Repeat("y", 2000)); err != nil {
 			t.Fatal(err)
 		}
-		streams = append(streams, callRound(fmt.Sprintf("c%d", i), "read", fmt.Sprintf(`{"path":%q}`, name)))
+		streams = append(streams, callRound(fmt.Sprintf("c%d", i), "read", fmt.Sprintf(`{"reason":"test","path":%q}`, name)))
 	}
 	return append(streams, streamScript{chunks: []inference.Chunk{inference.TextChunk("ok")}})
 }

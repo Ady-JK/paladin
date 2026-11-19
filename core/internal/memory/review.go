@@ -153,9 +153,7 @@ func MarkReviewed(sessionDir string, turn int) error {
 }
 
 // DueForNudge reports whether a store has gone reviewTurns turns without
-// a write, and returns the paragraph to append to the prompt when so.
-// An empty string means "nothing to say", which keeps the prompt
-// byte-stable and cacheable across turns that do not need the reminder.
+// a write, and returns a reminder to append to the conversation when so.
 func (b *Bank) DueForNudge(sessionDir string) string {
 	threshold := b.cfg.ReviewTurns
 	if threshold <= 0 {
@@ -165,12 +163,13 @@ func (b *Bank) DueForNudge(sessionDir string) string {
 	if st.TurnsSinceWrite < threshold {
 		return ""
 	}
-	return fmt.Sprintf(reviewNudge, st.TurnsSinceWrite)
+	// The text names the threshold rather than the running count.
+	return fmt.Sprintf(reviewNudge, threshold)
 }
 
 // reviewNudge is the reminder text. It names the threshold so the model
 // can weigh it, and the three targets so no wrapper text is needed.
-const reviewNudge = `MEMORY REVIEW: %d turns have passed since anything was saved to memory.
+const reviewNudge = `MEMORY REVIEW: at least %d turns have passed since anything was saved to memory.
 Before you finish, consider whether this conversation produced something durable:
 a preference, a convention, a build/test command, an architecture fact, a gotcha
 the next session would otherwise rediscover. If it did, call the memory tool and

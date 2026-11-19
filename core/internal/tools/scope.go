@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -111,9 +112,16 @@ func escapes(cleaned, workspace string) bool {
 	return true
 }
 
+// caseBlindFS: macOS and Windows file systems ignore case by default, so
+// two spellings of a path are the same place.
+var caseBlindFS = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
 func within(target, root string) bool {
 	if root == "" {
 		return false
+	}
+	if caseBlindFS {
+		target, root = strings.ToLower(target), strings.ToLower(root)
 	}
 	rel, err := filepath.Rel(root, target)
 	if err != nil {

@@ -18,7 +18,7 @@ import {
 } from "../core/dom";
 import { escapeHtml } from "../core/format";
 import { state } from "../core/state";
-import type { DailyPoint, SessionUsage } from "../core/types";
+import type { DailyPoint, SessionUsage, UsageLimit } from "../core/types";
 import { icon } from "../icons";
 import { closeModal, isModalOpen, openModal } from "../ui/anim";
 
@@ -81,15 +81,32 @@ export function trimNum(n: number): string {
   return `${n}`.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
-// cacheHitRate is cache-read share of total input: cache reads hit
-// against the input tokens the calls consumed. Zero when nothing was
-// read.
-export function cacheHitRate(usage: { promptTokens: number; cacheReadTokens: number }): number {
-  const denom = usage.promptTokens;
-  if (denom <= 0) {
-    return 0;
+// cacheHitRate is the average, over the calls that reported their cache, of
+// each call's own share: cache-read tokens over that call's whole prompt. Every
+// call weighs the same, so one huge cached prompt cannot hide cold ones. It is
+// null when no call reported a cache, which reads "no data", never 0%.
+function cacheHitRate(usage: { cacheHitSum?: number; cacheHitCalls?: number }): number | null {
+  const calls = usage.cacheHitCalls ?? 0;
+  if (calls <= 0) {
+    return null;
   }
-  return (usage.cacheReadTokens / denom) * 100;
+  return Math.min(100, Math.max(0, ((usage.cacheHitSum ?? 0) / calls) * 100));
+}
+
+// cacheHitText is the rate as shown, to the given number of decimals.
+export function cacheHitText(usage: { cacheHitSum?: number; cacheHitCalls?: number }, digits = 1): string {
+  const rate = cacheHitRate(usage);
+  return rate === null ? "—" : `${trimNum(roundTo(rate, digits))}%`;
+}
+
+// uncachedInput is the input that went to the model at full price: a call's
+// prompt counts everything sent, cache reads and writes included.
+export function uncachedInput(usage: {
+  promptTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}): number {
+  return Math.max(0, usage.promptTokens - usage.cacheReadTokens - usage.cacheWriteTokens);
 }
 
 // pillText is the compact pill body. With a known window it leads with
@@ -103,12 +120,29 @@ function pillText(usage: SessionUsage): string {
   return `${compactTokens(usage.totalTokens)} tok${spend}`;
 }
 
+// resetsIn words the time until a unix-seconds instant: "2h 5m", "3d 4h", "9m".
+function resetsIn(at: number): string {
+  const minutes = Math.max(0, Math.round((at * 1000 - Date.now()) / 60_000));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes % 60}m`;
+  return `${minutes}m`;
+}
+
+// limitText is one plan window in the hover: "Session: 42% used, resets in 2h 5m".
+function limitText(limit: UsageLimit): string {
+  const used = `${limit.label}: ${trimNum(roundTo(limit.usedPercent, 0))}% used`;
+  return limit.resetsAt && limit.resetsAt * 1000 > Date.now() ? `${used}, resets in ${resetsIn(limit.resetsAt)}` : used;
+}
+
 // pillTitle is the hover breakdown: model, last-call input/window,
 // spend, calls. It never shows a percentage for unknown windows.
 function pillTitle(usage: SessionUsage): string {
   const parts = [usage.model || "unknown model"];
-  const input = usage.lastInputTokens ?? usage.totalTokens;
-  const tokens = `${input.toLocaleString()} input tokens`;
+  const held = usage.contextTokens;
+  const input = held || (usage.lastInputTokens ?? usage.totalTokens);
+  const tokens = `${input.toLocaleString()} ${held ? "context" : "input"} tokens`;
   if (usage.contextKnown) {
     const pct = usage.fillPercent !== undefined ? ` (${trimNum(roundTo(usage.fillPercent, 1))}%)` : "";
     parts.push(`${tokens} / ${usage.contextWindow.toLocaleString()}${pct}`);
@@ -121,6 +155,7 @@ function pillTitle(usage: SessionUsage): string {
     parts.push("spend unknown");
   }
   if (usage.unpricedCalls) parts.push(`${usage.unpricedCalls} call(s) have unknown cost`);
+  for (const limit of usage.limits ?? []) parts.push(limitText(limit));
   parts.push(`${usage.calls} call${usage.calls === 1 ? "" : "s"}`);
   return parts.join(" · ");
 }
@@ -312,7 +347,7 @@ function tokenBanner(usage: SessionUsage): string {
       <div class="mt-0.5 font-mono text-[10px] text-slate-400">${sub}</div>
     </div>`;
   return `<div class="glass-panel grid grid-cols-2 gap-3 rounded-2xl p-4 font-mono sm:grid-cols-3 lg:grid-cols-5">
-    ${cell(NEON.blue, "Input tokens", usage.promptTokens.toLocaleString(), `${share(usage.promptTokens)} of total`)}
+    ${cell(NEON.blue, "Input tokens", uncachedInput(usage).toLocaleString(), `${share(uncachedInput(usage))} · not cached`)}
     ${cell(NEON.purple, "Output tokens", usage.completionTokens.toLocaleString(), `${share(usage.completionTokens)} of total`)}
     ${cell(NEON.rose, "Reasoning tokens", usage.reasoningTokens.toLocaleString(), usage.reasoningTokens > 0 ? `${share(usage.reasoningTokens)} · thinking models` : "no thinking billed")}
     ${cell(NEON.emerald, "Cache read tokens", usage.cacheReadTokens.toLocaleString(), usage.cacheReadTokens > 0 ? `${share(usage.cacheReadTokens)} · 90% off` : "no cache hits", usage.cacheReadTokens > 0 ? "text-emerald-500" : "")}
@@ -376,9 +411,11 @@ function donutCard(
 function tokenMixCard(usage: SessionUsage): string {
   return donutCard(
     "Token mix",
-    "input vs output vs reasoning",
+    "input, cache, output and reasoning",
     [
-      { label: "Input", value: usage.promptTokens, color: NEON.blue },
+      { label: "Input", value: uncachedInput(usage), color: NEON.blue },
+      { label: "Cache read", value: usage.cacheReadTokens, color: NEON.cyan },
+      { label: "Cache write", value: usage.cacheWriteTokens, color: NEON.amber },
       { label: "Output", value: usage.completionTokens, color: NEON.emerald },
       { label: "Reasoning", value: usage.reasoningTokens, color: NEON.purple },
     ],
@@ -555,6 +592,7 @@ export function stackedComposition(
     completionTokens: number;
     reasoningTokens: number;
     cacheReadTokens: number;
+    cacheWriteTokens: number;
   }>,
   title = "Token composition by model",
 ): string {
@@ -564,7 +602,8 @@ export function stackedComposition(
   const rows = models
     .slice(0, 5)
     .map((m) => {
-      const total = m.promptTokens + m.completionTokens + m.reasoningTokens + m.cacheReadTokens || 1;
+      const input = uncachedInput(m);
+      const total = input + m.cacheReadTokens + m.cacheWriteTokens + m.completionTokens + m.reasoningTokens || 1;
       const seg = (v: number, color: string, label: string): string =>
         v > 0
           ? `<div class="h-full" style="width:${((v / total) * 100).toFixed(2)}%;background:${color}" title="${label}: ${v.toLocaleString()}"></div>`
@@ -572,9 +611,9 @@ export function stackedComposition(
       return `<div>
       <div class="mb-1 flex items-baseline justify-between gap-2 font-mono text-[11px]">
         <span class="truncate font-medium text-slate-700 dark:text-slate-300">${escapeHtml(m.model)}</span>
-        <span class="flex-shrink-0 text-slate-400">${(m.promptTokens + m.completionTokens + m.reasoningTokens + m.cacheReadTokens).toLocaleString()} tok</span>
+        <span class="flex-shrink-0 text-slate-400">${total.toLocaleString()} tok</span>
       </div>
-      <div class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">${seg(m.promptTokens, NEON.blue, "Input")}${seg(m.completionTokens, NEON.purple, "Output")}${seg(m.reasoningTokens, NEON.rose, "Reasoning")}${seg(m.cacheReadTokens, NEON.emerald, "Cache read")}</div>
+      <div class="flex h-2.5 w-full gap-px overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">${seg(input, NEON.blue, "Input")}${seg(m.completionTokens, NEON.purple, "Output")}${seg(m.reasoningTokens, NEON.rose, "Reasoning")}${seg(m.cacheReadTokens, NEON.emerald, "Cache read")}${seg(m.cacheWriteTokens, NEON.amber, "Cache write")}</div>
     </div>`;
     })
     .join("");
@@ -585,6 +624,7 @@ export function stackedComposition(
       <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" style="background:${NEON.purple}"></span>Output</span>
       <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" style="background:${NEON.rose}"></span>Reasoning</span>
       <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" style="background:${NEON.emerald}"></span>Cache read tokens</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" style="background:${NEON.amber}"></span>Cache write tokens</span>
     </div>
     <div class="space-y-2.5">${rows}</div>
   </div>`;
@@ -593,7 +633,6 @@ export function stackedComposition(
 function overviewHtml(usage: SessionUsage): string {
   const spend = estimatedSpend(usage);
   const avgCost = usage.calls > 0 && usage.hasCost ? spend / usage.calls : 0;
-  const hit = cacheHitRate(usage);
   const heroes = [
     heroCard({
       label: isEstimatedSpend(usage) ? "Est. total cost" : "Total cost",
@@ -628,11 +667,11 @@ function overviewHtml(usage: SessionUsage): string {
     }),
     heroCard({
       label: "Prompt cache hit",
-      value: `${trimNum(roundTo(hit, 1))}%`,
+      value: cacheHitText(usage),
       sub:
-        usage.cacheReadTokens > 0
-          ? `${usage.cacheReadTokens.toLocaleString()} read at 90% off`
-          : "no cache hits recorded",
+        (usage.cacheHitCalls ?? 0) > 0
+          ? `average over ${usage.cacheHitCalls} call${usage.cacheHitCalls === 1 ? "" : "s"} · ${compactTokens(usage.cacheReadTokens)} read`
+          : "no cache data",
       iconName: "zap",
       iconBox: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
       glow: "amber",
@@ -664,7 +703,7 @@ function modelsHtml(usage: SessionUsage): string {
           ? `<div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"><div class="h-full rounded-full" style="width:${Math.min(100, m.fillPercent).toFixed(2)}%;background:linear-gradient(90deg,#3b82f6,#a855f7)"></div></div>`
           : "";
       const spend = m.hasCost ? formatCost(estimatedSpend(m)) : "—";
-      const hit = cacheHitRate(m);
+      const input = uncachedInput(m);
       return `<div class="glass-panel rounded-2xl p-4">
         <div class="flex items-baseline justify-between gap-3">
           <div class="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">${escapeHtml(m.model)}</div>
@@ -673,16 +712,18 @@ function modelsHtml(usage: SessionUsage): string {
         <div class="mt-1 font-mono text-[11px] text-slate-400">${m.contextKnown ? `window ${m.contextWindow.toLocaleString()} · fill ${formatPct(m.fillPercent)}` : "window size not listed for this model"}</div>
         ${bar ? `<div class="mt-2">${bar}</div>` : ""}
         <div class="mt-2 flex h-2 w-full gap-px overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-          ${m.promptTokens > 0 ? `<div class="h-full" style="width:${((m.promptTokens / (m.totalTokens || 1)) * 100).toFixed(2)}%;background:${NEON.blue}"></div>` : ""}
+          ${input > 0 ? `<div class="h-full" style="width:${((input / (m.totalTokens || 1)) * 100).toFixed(2)}%;background:${NEON.blue}"></div>` : ""}
+          ${m.cacheReadTokens > 0 ? `<div class="h-full" style="width:${((m.cacheReadTokens / (m.totalTokens || 1)) * 100).toFixed(2)}%;background:${NEON.cyan}"></div>` : ""}
+          ${m.cacheWriteTokens > 0 ? `<div class="h-full" style="width:${((m.cacheWriteTokens / (m.totalTokens || 1)) * 100).toFixed(2)}%;background:${NEON.amber}"></div>` : ""}
           ${m.completionTokens > 0 ? `<div class="h-full" style="width:${((m.completionTokens / (m.totalTokens || 1)) * 100).toFixed(2)}%;background:${NEON.emerald}"></div>` : ""}
           ${m.reasoningTokens > 0 ? `<div class="h-full" style="width:${((m.reasoningTokens / (m.totalTokens || 1)) * 100).toFixed(2)}%;background:${NEON.purple}"></div>` : ""}
         </div>
         <div class="mt-3 grid grid-cols-2 gap-2 font-mono sm:grid-cols-5">
           <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Total</div><div class="text-sm font-semibold">${m.totalTokens.toLocaleString()}</div></div>
-          <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Input</div><div class="text-sm font-semibold">${m.promptTokens.toLocaleString()}</div></div>
+          <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Input</div><div class="text-sm font-semibold">${input.toLocaleString()}</div></div>
           <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Output</div><div class="text-sm font-semibold">${m.completionTokens.toLocaleString()}</div></div>
           <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Reasoning</div><div class="text-sm font-semibold">${m.reasoningTokens.toLocaleString()}</div></div>
-          <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Cache hit</div><div class="text-sm font-semibold">${trimNum(roundTo(hit, 1))}%</div></div>
+          <div><div class="text-[10px] uppercase tracking-wider text-slate-400">Cache hit</div><div class="text-sm font-semibold">${cacheHitText(m)}</div></div>
         </div>
       </div>`;
     })

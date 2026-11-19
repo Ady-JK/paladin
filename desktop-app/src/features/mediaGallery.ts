@@ -1,4 +1,5 @@
 import * as api from "../core/api";
+import type { MessageInfo } from "../core/types";
 import { toast } from "../ui/toast";
 
 const images = new Map<string, string[]>();
@@ -85,6 +86,43 @@ async function move(delta: number): Promise<void> {
   await show();
 }
 
+// mountUserAttachments renders the same cards for live turns and history.
+export function mountUserAttachments(
+  row: HTMLElement,
+  sessionId: string,
+  attachments: MessageInfo["attachments"],
+): void {
+  for (const attachment of attachments ?? []) {
+    if (attachment.image) {
+      if (
+        !Array.from(row.querySelectorAll<HTMLElement>("[data-image-path]")).some(
+          (el) => el.dataset.imagePath === attachment.image!.path,
+        )
+      )
+        mountUserImage(row, sessionId, attachment.image.path, attachment.name);
+      continue;
+    }
+    if (
+      Array.from(row.querySelectorAll<HTMLElement>("[data-file-path]")).some(
+        (el) => el.dataset.filePath === attachment.path,
+      )
+    )
+      continue;
+    let strip = row.querySelector<HTMLElement>(":scope > .user-images");
+    if (!strip) {
+      strip = document.createElement("div");
+      strip.className = "user-images";
+      row.querySelector<HTMLElement>(":scope > .bubble-user")?.before(strip);
+    }
+    const card = document.createElement("div");
+    card.className = "session-file-card";
+    card.dataset.filePath = attachment.path;
+    card.title = attachment.path;
+    card.textContent = attachment.name;
+    strip.append(card);
+  }
+}
+
 // mountUserImage shows a sent image above the user's message bubble: the
 // thumbnails live in a strip placed before the bubble in the row.
 export function mountUserImage(row: HTMLElement, sessionId: string, path: string, name: string): void {
@@ -97,6 +135,23 @@ export function mountUserImage(row: HTMLElement, sessionId: string, path: string
     else row.append(strip);
   }
   mountImage(strip, sessionId, path, name);
+  updateImageStrip(strip);
+}
+
+function updateImageStrip(strip: HTMLElement): void {
+  const thumbnails = Array.from(strip.querySelectorAll<HTMLButtonElement>(":scope > .session-image-thumb"));
+  const collapsed = thumbnails.length > 3;
+  for (const [index, thumbnail] of thumbnails.entries()) thumbnail.hidden = collapsed && index > 0;
+  const first = thumbnails[0];
+  if (!first) return;
+  first.querySelector(".user-image-count")?.remove();
+  first.setAttribute("aria-label", `Open ${first.querySelector("img")?.alt ?? "image"}`);
+  if (!collapsed) return;
+  const count = document.createElement("span");
+  count.className = "user-image-count";
+  count.textContent = `+${thumbnails.length - 1}`;
+  first.append(count);
+  first.setAttribute("aria-label", `Open ${thumbnails.length} images`);
 }
 
 export function mountImage(target: HTMLElement, sessionId: string, path: string, name: string): void {
@@ -122,9 +177,10 @@ export function mountImage(target: HTMLElement, sessionId: string, path: string,
       .sessionImage(sessionId, path)
       .then((data) => {
         cacheImage(path, data);
-        if (button.isConnected) image.src = data;
+        image.src = data;
       })
       .catch(() => {
         button.remove();
+        if (target.classList.contains("user-images")) updateImageStrip(target);
       });
 }

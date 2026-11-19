@@ -1,7 +1,7 @@
 // Real Electron + Playwright smoke, using only an ephemeral loopback server
 // (web-site names are mapped to it, see main.ts).
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { app, BrowserWindow, session } from "electron";
@@ -131,20 +131,14 @@ export async function runBrowserSmoke(
     ]);
     if (Date.now() - started > 15_000)
       throw new Error(`the first hidden pages took ${Date.now() - started} ms to open`);
-    const debugPort = Number(
-      readFileSync(path.join(app.getPath("userData"), "DevToolsActivePort"), "utf8").split("\n")[0],
-    );
-    const protectedReply = await browsers.execute({
-      event: "browser/request",
-      id: "debug-test",
-      sessionId: "smoke-protected",
-      action: "open",
-      url: `http://127.0.0.1:${debugPort}/json/version`,
-    });
-    if (protectedReply.ok || !protectedReply.error?.includes("debugging endpoint")) {
-      throw new Error(`agent browser reached the debugging endpoint: ${JSON.stringify(protectedReply)}`);
+    // Playwright reaches the pages through Electron's debugger: no
+    // debugging port exists for a local process or a page to find.
+    if (app.commandLine.hasSwitch("remote-debugging-port") || app.commandLine.hasSwitch("remote-debugging-pipe")) {
+      throw new Error("the app was started with a Chromium debugging endpoint");
     }
-    browsers.drop("smoke-protected");
+    if (existsSync(path.join(app.getPath("userData"), "DevToolsActivePort"))) {
+      throw new Error("DevToolsActivePort exists, so a debugging port is open");
+    }
     for (const id of ["smoke-a", "smoke-b"]) {
       if (browsers.routedLoads(id)[0] !== `http://127.0.0.1:${port}/`) {
         throw new Error(

@@ -16,6 +16,7 @@ import { state } from "../core/state";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
 import { addTurn, dismissGreeting, initMessageLinks } from "./chatView";
+import { handleCodexSkillKey } from "../adapters/codex/skills";
 import { handleMentionKey, expandMentions } from "./mentions";
 import { openFilePicker } from "./filePicker";
 import { renderSessions } from "./sessions";
@@ -25,7 +26,8 @@ import { initMode, setMode, toggleMode } from "./mode";
 import { currentPreset, initPermissions, keepDraftFor } from "./permissions";
 import { dropFinishedPanel } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
-import { isBusy, noteSubmitted, showSentImages, syncComposer } from "./live";
+import { isBusy, noteSubmitted, showSentAttachments, syncComposer } from "./live";
+import { hideRecovery } from "./undo";
 import { setWorktree, takeWorktreeRequest } from "./worktrees";
 import { shortPath } from "../core/format";
 import { syncMcp } from "./mcp";
@@ -34,7 +36,7 @@ import { applyBudgetDraft, syncBudget } from "./budget";
 import { reloadContextSources } from "./contextBox";
 import { showTerminalResult, STANDALONE_PANE_SESSION, syncSidePane } from "./sidePane";
 import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
-import { clearTags, hasTags, initTags, tagPaths, tagsLabel, uploadTaggedImages, withTagLabels } from "./tags";
+import { clearTags, hasTags, initTags, tagPaths, tagsLabel, uploadTaggedItems, withTagLabels } from "./tags";
 
 // TurnPlan is what a composer line resolves to before it is sent.
 interface TurnPlan {
@@ -75,7 +77,8 @@ async function ensureSession(title: string): Promise<void> {
   if (state.sessionId) {
     return;
   }
-  const opened = await api.openSession(null, state.cwd, takeWorktreeRequest(title));
+  const harness = state.harness ? { harness: state.harness, model: state.selectedModel } : {};
+  const opened = await api.openSession(null, state.cwd, { ...takeWorktreeRequest(title), ...harness });
   state.sessionId = opened.sessionId;
   window.dispatchEvent(new Event("paladin:session-selected"));
   syncSidePane();
@@ -147,6 +150,7 @@ async function runBang(line: string): Promise<void> {
       mode,
       permissions,
     });
+    hideRecovery();
     noteSubmitted(info);
   } catch (error) {
     if (!inputEl.value && state.sessionId === targetSession) inputEl.value = line;
@@ -216,7 +220,7 @@ async function send(): Promise<void> {
     const sessionId = state.sessionId;
     const cwd = state.cwd;
     const attachmentBatch = await uploadAttachments(sessionId, cwd);
-    const taggedImages = await uploadTaggedImages(sessionId, cwd);
+    const taggedImages = await uploadTaggedItems(sessionId, cwd);
     dismissGreeting();
     // Fire and forget: the turn runs (or queues) in the sidecar and its
     // progress arrives as events for this session, even if the user
@@ -233,12 +237,15 @@ async function send(): Promise<void> {
       compact: !!route?.compact,
       mode: turnMode(route),
       permissions: currentPreset(),
-      attachmentIds: [...attachmentBatch.ids, ...taggedImages.map((image) => image.id)],
+      attachmentIds: [...attachmentBatch.ids, ...taggedImages.images.map((image) => image.id)],
+      taggedPaths: taggedImages.paths,
     });
     attachmentBatch.consume();
     clearTags();
+    // A compaction is not a new message: the undo stays recoverable.
+    if (!route?.compact) hideRecovery();
     noteSubmitted(info);
-    showSentImages(info, [...attachmentBatch.images, ...taggedImages]);
+    showSentAttachments(info, [...attachmentBatch.attachments, ...taggedImages.images], taggedImages.paths);
   } catch (error) {
     if (!inputEl.value && !route?.compact) {
       inputEl.value = message;
@@ -377,6 +384,9 @@ export function initChat(): void {
       return;
     }
     if (handleSlashKey(event)) {
+      return;
+    }
+    if (handleCodexSkillKey(event)) {
       return;
     }
     if (handleMentionKey(event)) {

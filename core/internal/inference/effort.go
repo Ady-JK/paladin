@@ -115,6 +115,9 @@ func ValidEffort(levels []string, effort string) error {
 // EffortLevels is the provider's model's level list.
 func (p *OpenAIProvider) EffortLevels() []string {
 	if p.meta.ThinkingKnown {
+		if p.isCopilot {
+			return CopilotEffortLevels(p.protocol, p.meta.ThinkingLevels)
+		}
 		return EffortLevelsFor(p.protocol, p.meta.ThinkingLevels)
 	}
 	return EffortLevels(p.protocol, p.model)
@@ -139,17 +142,22 @@ func WithEffort(p Provider, effort string) (Provider, error) {
 }
 
 // deltaReasoning pulls thinking text out of a chat message or delta:
-// LiteLLM and DeepSeek name it reasoning_content, OpenRouter reasoning.
+// Copilot names it reasoning_text, LiteLLM and DeepSeek reasoning_content,
+// OpenRouter reasoning.
 func deltaReasoning(raw string) string {
 	if !strings.Contains(raw, `"reasoning`) {
 		return ""
 	}
 	var d struct {
+		ReasoningText    *string `json:"reasoning_text"`
 		ReasoningContent *string `json:"reasoning_content"`
 		Reasoning        *string `json:"reasoning"`
 	}
 	if json.Unmarshal([]byte(raw), &d) != nil {
 		return ""
+	}
+	if d.ReasoningText != nil && *d.ReasoningText != "" {
+		return *d.ReasoningText
 	}
 	if d.ReasoningContent != nil && *d.ReasoningContent != "" {
 		return *d.ReasoningContent
@@ -164,6 +172,15 @@ func deltaReasoning(raw string) string {
 // level the provider rejects is dropped (see effortRejected) and the
 // call retried once without it.
 func (p *OpenAIProvider) CompleteTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
+	res, err := p.completeEffort(ctx, system, messages, tools, sessionID)
+	if errors.Is(err, errReadableFiltered) {
+		p.blockReadable()
+		return p.completeEffort(ctx, system, messages, tools, sessionID)
+	}
+	return res, err
+}
+
+func (p *OpenAIProvider) completeEffort(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	q := p.live()
 	res, err := q.completeVia(ctx, system, messages, tools, sessionID)
 	if q.effort != "" && effortRejected(err) {
@@ -176,6 +193,16 @@ func (p *OpenAIProvider) CompleteTools(ctx context.Context, system string, messa
 // StreamTools is the streaming counterpart of CompleteTools. A rejected
 // level fails before anything streams, so the retry starts clean.
 func (p *OpenAIProvider) StreamTools(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
+	err := p.streamEffort(ctx, system, messages, tools, sessionID, tx, done)
+	if errors.Is(err, errReadableFiltered) {
+		// Nothing was streamed, so the retry starts clean.
+		p.blockReadable()
+		return p.streamEffort(ctx, system, messages, tools, sessionID, tx, done)
+	}
+	return err
+}
+
+func (p *OpenAIProvider) streamEffort(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
 	q := p.live()
 	err := q.streamVia(ctx, system, messages, tools, sessionID, tx, done)
 	if q.effort == "" || !effortRejected(err) {
@@ -233,7 +260,7 @@ func ModelEffortLevels(apiType config.ApiType, baseURL, model string, meta confi
 		if !meta.ThinkingKnown {
 			return nil
 		}
-		return EffortLevelsFor(copilotProtocol(model, meta), meta.ThinkingLevels)
+		return CopilotEffortLevels(copilotProtocol(model, meta), meta.ThinkingLevels)
 	}
 	if apiType != config.ApiTypeOpenai {
 		return nil
@@ -245,6 +272,15 @@ func ModelEffortLevels(apiType config.ApiType, baseURL, model string, meta confi
 		return EffortLevelsFor(protocol, meta.ThinkingLevels)
 	}
 	return EffortLevels(protocol, model)
+}
+
+// CopilotEffortLevels is EffortLevelsFor for Copilot, whose Messages endpoint
+// carries an effort too (output_config.effort).
+func CopilotEffortLevels(protocol string, levels []string) []string {
+	if len(levels) == 0 || (protocol != protocolChat && protocol != protocolResponses && protocol != protocolAnthropic) {
+		return nil
+	}
+	return append([]string(nil), levels...)
 }
 
 // EffortLevelsFor is EffortLevels when the levels are already known: it

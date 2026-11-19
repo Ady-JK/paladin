@@ -36,7 +36,7 @@ func (r *AgentRuntime) afterTurn(info TurnInfo) {
 	}
 	// A child session's turns are not the user's work; only top-level
 	// sessions carry the review counter.
-	if sess.Meta.Subagent != nil {
+	if sess.Meta.Subagent != nil || sess.Meta.Harness != nil {
 		return
 	}
 	if _, err := memory.EndTurn(sess.Dir); err != nil {
@@ -88,7 +88,12 @@ func (r *AgentRuntime) maybeForkReview(sess transcript.Session, info TurnInfo) {
 // message the user actually typed (a resume, a compaction, or a tool-only
 // continuation recalls nothing). That keeps the prompt byte-stable for the
 // common case and keeps the reminder meaningful when it does appear.
-func (r *AgentRuntime) memoryRecall(req agent.Request, cwd string) []agent.Notice {
+//
+// An entry joins a conversation once. Its hash is kept beside the
+// transcript (memory.RecalledFile) when the reminder is appended, and a
+// later message matching the same entry only tells the user it was
+// skipped; compaction and undo clear the hashes along with the messages.
+func (r *AgentRuntime) memoryRecall(req agent.Request, cwd, sessionDir string) []agent.Notice {
 	if r.memory == nil || req.Resume || req.Compact || strings.TrimSpace(req.Message) == "" {
 		return nil
 	}
@@ -96,16 +101,56 @@ func (r *AgentRuntime) memoryRecall(req agent.Request, cwd string) []agent.Notic
 	if !ok {
 		return nil
 	}
+	hash := memory.RecallHash(target, entry)
+	if memory.IsRecalled(sessionDir, hash) {
+		return []agent.Notice{{
+			CallID:    "memory-recall-skipped-" + hash,
+			Name:      "memory",
+			Transient: true,
+			Content:   "Skipped recalling " + string(target) + " memory: this entry is already in the conversation.",
+		}}
+	}
 	args, err := jsonx.Marshal(map[string]string{"action": "recall", "target": string(target)})
 	if err != nil {
 		return nil
 	}
 	return []agent.Notice{{
-		CallID:    "memory-recall-" + string(target),
+		CallID:    "memory-recall-" + hash,
 		Name:      "memory",
 		Arguments: string(args),
-		Content:   "Recalled from " + string(target) + " memory — this request looks related:\n" + entry,
+		Content:   memory.RecallNote(target, entry),
+		Appended: func() {
+			if err := memory.MarkRecalled(sessionDir, hash); err != nil {
+				log.Printf("memory: record recalled entry: %v", err)
+			}
+		},
 	}}
+}
+
+// syncRecalled makes the recalled-entry record match a transcript that was
+// truncated or restored: an entry stays recalled only if its reminder is
+// still in the part of the conversation the model sees (after the last
+// compaction). Anything unreadable errs towards recalling again.
+func syncRecalled(sess transcript.Session) {
+	var kept []string
+	if msgs, err := sess.History(); err == nil {
+		start := 0
+		for i, m := range msgs {
+			if m.Compaction != nil {
+				start = i
+			}
+		}
+		for _, m := range msgs[start:] {
+			if m.Role == transcript.RoleUser || (m.Role == transcript.RoleTool && m.IsNotify) {
+				kept = append(kept, m.Content)
+			}
+		}
+	} else {
+		log.Printf("memory: read %s to rebuild its recalled entries: %v", sess.Meta.SessionID, err)
+	}
+	if err := memory.ResetRecalled(sess.Dir, memory.RecalledIn(kept)); err != nil {
+		log.Printf("memory: reset recalled entries for %s: %v", sess.Meta.SessionID, err)
+	}
 }
 
 // withRecall chains the recall reminder in front of the subagent mailbox,

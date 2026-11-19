@@ -199,3 +199,46 @@ func TestUsageTotalsDaily(t *testing.T) {
 		t.Fatalf("daily view %+v", view.Daily)
 	}
 }
+
+// A harness reports how full its own context is, and the window it really runs
+// with; the gauge reads those, not the call's input over a table value.
+func TestUsageViewPrefersTheContextTheProviderReported(t *testing.T) {
+	var totals UsageTotals
+	addCall(&totals, "gpt-5.6-luna", 18295, 5, 0, 0, 0, 18300, 0, 0, false, 1790880000)
+	totals.SetContext("gpt-5.6-luna", ContextReading{Tokens: 18300, Window: 258400})
+
+	view := totals.View("s", 1050000, true, func(string) (int64, bool) { return 1050000, true })
+	if view.ContextWindow != 258400 || !view.ContextKnown {
+		t.Fatalf("window %d known %v, want the reported 258400", view.ContextWindow, view.ContextKnown)
+	}
+	if view.FillPercent == nil || *view.FillPercent < 7.08 || *view.FillPercent > 7.09 {
+		t.Fatalf("fill %v, want 18300/258400", view.FillPercent)
+	}
+	if len(view.Models) != 1 || view.Models[0].ContextWindow != 258400 || view.Models[0].FillPercent == nil {
+		t.Fatalf("model breakdown %+v", view.Models)
+	}
+}
+
+func TestUsageViewKeepsInputFillWithoutAReport(t *testing.T) {
+	var totals UsageTotals
+	addCall(&totals, "m", 1000, 5, 0, 0, 0, 1005, 0, 0, false, 1790880000)
+	view := totals.View("s", 10000, true, nil)
+	if view.FillPercent == nil || *view.FillPercent != 10 {
+		t.Fatalf("fill %v", view.FillPercent)
+	}
+}
+
+func TestContextReadingSurvivesTheLedger(t *testing.T) {
+	path := t.TempDir() + "/usage.json"
+	RecordCallWithContext(path, "s", "m", Counters{PromptTokens: 10, TotalTokens: 12}, ContextReading{Tokens: 12, Window: 100})
+	totals, err := ReadLedger(path)
+	if err != nil || totals.ContextTokens != 12 || totals.ContextWindow != 100 || totals.Models["m"].ContextWindow != 100 {
+		t.Fatalf("ledger %+v err %v", totals, err)
+	}
+	// A report without a window (Codex sometimes sends none) keeps the last known one.
+	RecordCallWithContext(path, "s", "m", Counters{PromptTokens: 20, TotalTokens: 25}, ContextReading{Tokens: 25})
+	totals, _ = ReadLedger(path)
+	if totals.ContextTokens != 25 || totals.ContextWindow != 100 {
+		t.Fatalf("ledger %+v", totals)
+	}
+}

@@ -97,6 +97,16 @@ func readRecovery(dir string) (recoverySnapshot, error) {
 	return s, nil
 }
 
+// clearRecovery discards a session's recovery snapshot. Recovery lasts
+// until the user's next message after an undo; the snapshot's files are
+// then free for the retention sweep to collect.
+func clearRecovery(dir string) error {
+	if err := os.Remove(filepath.Join(dir, recoveryFile)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (r *AgentRuntime) RecoveryAvailable(sessionID, cwd string) (bool, error) {
 	r.undoMu.Lock()
 	defer r.undoMu.Unlock()
@@ -278,6 +288,7 @@ func (r *AgentRuntime) RecoverLatestChecked(sessionID, cwd, version string) (Rev
 	if err := writeTurnSnapshots(sess.Dir, saved.Turns); err != nil {
 		return out, err
 	}
+	syncRecalled(sess)
 	floor, err := json.Marshal(struct {
 		Index int `json:"index"`
 	}{saved.Floor})

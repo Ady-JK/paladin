@@ -22,7 +22,7 @@ func TestStdioRecoversKilledTurnAndContinues(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		switch calls.Add(1) {
 		case 1:
-			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"job1","function":{"name":"shell","arguments":"{\"cmd\":\"echo completed >> marker.txt\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
+			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"job1","function":{"name":"shell","arguments":"{\"reason\":\"test\",\"cmd\":\"echo completed >> marker.txt\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
 		case 2:
 			close(secondRound)
 			w.(http.Flusher).Flush()
@@ -82,7 +82,7 @@ func TestStdioRecoversKilledTurnAndContinues(t *testing.T) {
 func TestStdioMarksInterruptedToolAsUnknown(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"job1","function":{"name":"shell","arguments":"{\"cmd\":\"echo started > marker.txt; sleep 2\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"job1","function":{"name":"shell","arguments":"{\"reason\":\"test\",\"cmd\":\"echo started > marker.txt; sleep 2\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	bin, dataDir, cwd := buildHost(t), t.TempDir(), t.TempDir()
@@ -120,7 +120,7 @@ func TestStdioMarksInterruptedToolAsUnknown(t *testing.T) {
 func TestStdioRecoversCompletedParallelToolBeforeBatchFinishes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fast","function":{"name":"shell","arguments":"{\"cmd\":\"echo fast-complete\"}"}},{"index":1,"id":"slow","function":{"name":"shell","arguments":"{\"cmd\":\"echo started > marker.txt; sleep 3\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fast","function":{"name":"shell","arguments":"{\"reason\":\"test\",\"cmd\":\"echo fast-complete\"}"}},{"index":1,"id":"slow","function":{"name":"shell","arguments":"{\"reason\":\"test\",\"cmd\":\"echo started > marker.txt; sleep 3\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	bin, dataDir, cwd := buildHost(t), t.TempDir(), t.TempDir()

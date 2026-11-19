@@ -151,14 +151,19 @@ export function withTagLabels(text: string): string {
 
 // Tagged images are copied to the session so they survive changes to
 // the original file and are available to both the model and the viewer.
-export async function uploadTaggedImages(sessionId: string, cwd: string): Promise<api.SessionAttachment[]> {
+export async function uploadTaggedItems(
+  sessionId: string,
+  cwd: string,
+): Promise<{ images: api.SessionAttachment[]; paths: string[] }> {
   const tagged = items.filter((item) => !item.isDir);
   const saved: api.SessionAttachment[] = [];
+  const paths = items.filter((item) => item.isDir).map((item) => item.path);
   for (const item of tagged) {
     const image = await api.saveTaggedImage(sessionId, cwd, item.path);
     if (image) saved.push(image);
+    else paths.push(item.path);
   }
-  return saved;
+  return { images: saved, paths };
 }
 
 // clearTags empties the strip after a send.

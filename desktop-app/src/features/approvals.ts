@@ -19,7 +19,7 @@ function patterns(rules: PermissionRule[] | undefined): string {
 }
 
 function title(ap: Approval): string {
-  if (ap.kind === "escalate") return ap.path ? "The sandbox blocked a write" : "Run without the sandbox?";
+  if (ap.kind === "permissions") return "Grant additional permissions?";
   if (ap.kind === "mcp") return ap.destructive ? "Call a destructive MCP tool?" : "Call this MCP tool?";
   if (ap.kind === "web") return ap.tool === "browser" ? "Open this site in the browser?" : "Fetch from this site?";
   if (ap.kind === "project") return "Run this project's own tool?";
@@ -44,19 +44,8 @@ function subject(ap: Approval): string {
   return ap.command || ap.path || ap.tool;
 }
 
-// GRANT_LABEL keeps a sandbox-block card's buttons short: the folder is
-// named once, in the line above them.
-const GRANT_LABEL: Record<ApprovalDecision, string> = {
-  session: "Allow for this session",
-  folder: "Always allow for this project",
-  global: "Always allow everywhere",
-  once: "Rerun without the sandbox",
-  deny: "Deny",
-};
-
 // choiceLabel names each reply with the rule it would save.
 function choiceLabel(ap: Approval, choice: ApprovalDecision): string {
-  if (ap.kind === "escalate" && ap.path) return GRANT_LABEL[choice];
   const what = patterns(ap.remember);
   const ruleTool = ap.remember?.[0]?.tool;
   const prefix =
@@ -68,7 +57,7 @@ function choiceLabel(ap: Approval, choice: ApprovalDecision): string {
   }
   switch (choice) {
     case "once":
-      return ap.kind === "escalate" ? "Rerun without the sandbox" : "Allow once";
+      return "Allow once";
     case "session":
       return what ? `Allow ${prefix}${what} for this session` : "Allow for this session";
     case "folder":
@@ -102,30 +91,6 @@ function receipt(ap: Approval): string {
   );
 }
 
-// grantHtml names the folder a sandbox-block card would open; granting
-// it reruns the command still sandboxed, with just that folder added.
-function grantHtml(ap: Approval): string {
-  if (ap.kind !== "escalate" || !ap.path) return "";
-  return (
-    `<div class="approval-grant">${icon("rl-folder", "h-3.5 w-3.5")}` +
-    `<span>Needs to write in ${code(ap.path)} — allow it and the command reruns, still sandboxed.</span></div>`
-  );
-}
-
-function sandboxHtml(ap: Approval): string {
-  if (ap.kind !== "shell" || !ap.sandbox) return "";
-  const scope: Record<NonNullable<Approval["sandbox"]>, string> = {
-    "workspace-write":
-      "Writes are allowed in the workspace, temporary folders and development caches, plus previously granted folders. Network access remains available.",
-    "read-only":
-      "Writes are limited to temporary folders and previously granted folders. Network access remains available.",
-    unavailable: "No OS sandbox is available. This command will run without OS sandbox restrictions.",
-    none: "This command will run without OS sandbox restrictions.",
-  };
-  const text = scope[ap.sandbox];
-  return text ? `<div class="approval-scope">${escapeHtml(text)}</div>` : "";
-}
-
 function pendingHtml(ap: Approval): string {
   const choices = ap.choices?.length ? ap.choices : (["once", "deny"] as ApprovalDecision[]);
   const reasons = (ap.reasons ?? []).map((r) => `<span class="approval-reason">${escapeHtml(r)}</span>`).join("");
@@ -137,7 +102,7 @@ function pendingHtml(ap: Approval): string {
     })
     .join("");
   const kindIcon =
-    ap.destructive || ap.kind === "escalate"
+    ap.destructive || ap.kind === "permissions"
       ? "sl-shield-off"
       : ap.kind === "mcp" || ap.kind === "extension"
         ? "sl-plug"
@@ -162,8 +127,7 @@ function pendingHtml(ap: Approval): string {
           ? `<div class="approval-web"><span class="approval-web-host">${escapeHtml(ap.host ?? "")}</span>` +
             `<span class="approval-web-url" title="${escapeHtml(ap.url ?? "")}">${revealHidden(escapeHtml(ap.url ?? ""))}</span>` +
             `<span class="approval-web-note">Page content is treated as untrusted data.</span></div>`
-          : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>` +
-            grantHtml(ap);
+          : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>`;
   return (
     `<div class="approval-head">` +
     `<span class="approval-ico">${icon(kindIcon, "h-4 w-4")}</span>` +
@@ -171,7 +135,6 @@ function pendingHtml(ap: Approval): string {
     `<span class="approval-reasons">${reasons}</span>` +
     `</div>` +
     body +
-    sandboxHtml(ap) +
     `<div class="approval-actions">${buttons}</div>`
   );
 }
@@ -181,10 +144,8 @@ export function paintApproval(el: HTMLElement, ap: Approval): void {
   const was = el.dataset.state;
   el.dataset.approval = ap.id;
   el.dataset.state = ap.state;
-  el.classList.toggle("is-destructive", !!ap.destructive);
-  el.classList.toggle("is-escalate", ap.kind === "escalate");
+  el.classList.toggle("is-destructive", !!ap.destructive || ap.kind === "permissions");
   el.classList.toggle("is-mcp", ap.kind === "mcp");
-  el.classList.toggle("is-web", ap.kind === "web");
   el.classList.toggle("is-resolved", ap.state !== "pending");
   if (ap.state === "pending") {
     if (was !== "pending") el.innerHTML = pendingHtml(ap);

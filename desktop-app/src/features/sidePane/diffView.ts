@@ -1,6 +1,6 @@
 import { classHighlighter, highlightTree } from "@lezer/highlight";
 import { escapeHtml } from "../../core/format";
-import { language } from "../ide/editor";
+import { language } from "../ide/language";
 
 type DiffLine = {
   kind: "context" | "add" | "remove" | "note";

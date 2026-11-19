@@ -22,6 +22,75 @@ test("IDE panel controls live in the workspace rail", async ({ page }) => {
   await expect(page.locator(".ide-explorer")).toBeVisible();
 });
 
+test("the agent pane can be hidden and restored from the editor", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await page.getByRole("button", { name: "Hide agent" }).click();
+  await expect(page.locator("#agentMain")).toBeHidden();
+  await page.getByRole("button", { name: "Show agent" }).click();
+  await expect(page.locator("#agentMain")).toBeVisible();
+});
+
+test("the open idle session appears in workspace activity", async ({ page }) => {
+  await page.locator("#agentTab").click();
+  await page.locator('#sessionList [data-session="sess-notify-1"]').click();
+  await page.locator("#ideModeBtn").click();
+  await page.getByRole("button", { name: /Activity/ }).click();
+  await expect(page.locator('#ideActivityList [data-activity-session="sess-notify-1"]')).toContainText(
+    "Current session",
+  );
+  await page.evaluate(async () => {
+    const modulePath = "/src/core/state.ts";
+    const { state } = await import(modulePath);
+    state.sessions = [];
+    window.dispatchEvent(new Event("paladin:sessions-changed"));
+  });
+  await expect(page.locator('#ideActivityList [data-activity-session="sess-notify-1"]')).toContainText(
+    "Current session",
+  );
+});
+
+test("a deleted restored folder is forgotten without an error", async ({ page }) => {
+  await page.evaluate(() => {
+    const w = window as any;
+    const root = "/home/tester/project";
+    w.__e2eIDELayouts = {
+      [root]: {
+        files: [],
+        activePath: "",
+        expanded: [`${root}/missing`],
+        explorerVisible: true,
+        agentVisible: true,
+        terminalHeight: 0,
+        sessionId: "",
+      },
+    };
+    const invoke = w.paladin.invoke;
+    w.paladin.invoke = (method: string, args: any) => {
+      if (method === "ideList" && args.path === `${root}/missing`)
+        return Promise.reject(new Error("path does not exist"));
+      return invoke(method, args);
+    };
+  });
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await expect(page.locator("#ideStatus")).not.toContainText("Could not open folder");
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e2eIDELayouts["/home/tester/project"].expanded))
+    .not.toContain("/home/tester/project/missing");
+});
+
+test("editor find opens a readable search panel", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await page.getByRole("button", { name: "README.md", exact: true }).click();
+  await page.locator("#ideEditor .cm-content").click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+f" : "Control+f");
+  const search = page.locator("#ideEditor .cm-search");
+  await expect(search).toBeVisible();
+  expect((await search.boundingBox())!.width).toBeGreaterThan(300);
+  await search.locator('input[name="search"]').pressSequentially("Hello");
+  await expect(page.locator("#ideEditor .cm-searchMatch").first()).toBeVisible();
+});
+
 test("Explorer floats beside the rail without resizing the editor", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   const explorer = page.locator(".ide-explorer");

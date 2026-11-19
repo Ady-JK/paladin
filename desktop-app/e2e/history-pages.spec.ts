@@ -17,6 +17,7 @@ async function setup(page: Page): Promise<void> {
       ...(i % 2 ? {} : { index: i }),
     }));
     w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "sessionHistoryPage") w.__pageCalls = [...(w.__pageCalls || []), args];
       if (cmd === "listSessions") {
         return [
           {
@@ -51,6 +52,9 @@ test("a long transcript paints the newest page and loads older ones", async ({ p
 
   const earlier = page.locator(".history-earlier-btn");
   await expect(earlier).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__pageCalls?.some((call: any) => call.before === 180)))
+    .toBe(true);
   for (let guard = 0; guard < 5 && (await earlier.count()); guard++) {
     await earlier.click();
     await page.waitForTimeout(150);

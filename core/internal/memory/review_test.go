@@ -168,3 +168,26 @@ func TestBrokenReviewStateReadsAsZero(t *testing.T) {
 		t.Fatal("counter did not recover")
 	}
 }
+
+// The reminder sits in the system prompt, ahead of the whole cached
+// conversation. If its text moved with the turn count, every turn after the
+// threshold would rewrite the entire context cache at the write price, so it
+// must read the same on turn 3, 4 and 40.
+func TestNudgeTextDoesNotChangeWhileItStaysDue(t *testing.T) {
+	dir := t.TempDir()
+	b := NewBank(t.TempDir())
+	b.SetConfig(Config{ReviewTurns: 3})
+	for i := 0; i < 3; i++ {
+		_, _ = EndTurn(dir)
+	}
+	first := b.DueForNudge(dir)
+	if first == "" {
+		t.Fatal("expected a nudge at the threshold")
+	}
+	for i := 0; i < 5; i++ {
+		_, _ = EndTurn(dir)
+		if got := b.DueForNudge(dir); got != first {
+			t.Fatalf("the reminder changed with the turn count, breaking the prompt cache:\n%q\n%q", first, got)
+		}
+	}
+}

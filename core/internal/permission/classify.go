@@ -11,12 +11,12 @@ import (
 
 // Request kinds.
 const (
-	KindShell    = "shell"
-	KindWrite    = "write"
-	KindEscalate = "escalate"
-	KindMCP      = "mcp"
-	KindRead     = "read"
-	KindWeb      = "web"
+	KindShell       = "shell"
+	KindWrite       = "write"
+	KindPermissions = "permissions"
+	KindMCP         = "mcp"
+	KindRead        = "read"
+	KindWeb         = "web"
 	// KindProject asks whether a tool the workspace ships may run.
 	KindProject = "project"
 	// KindExtension is a call to an extension tool.
@@ -75,7 +75,6 @@ type Request struct {
 	URL  string
 }
 
-// ClassifyMCP describes a call to a tool proxied from an MCP server.
 // classifyExtension is a call to an extension tool, with its arguments
 // for the card.
 func classifyExtension(req Request, raw json.RawMessage) Request {
@@ -87,6 +86,7 @@ func classifyExtension(req Request, raw json.RawMessage) Request {
 	return req
 }
 
+// ClassifyMCP describes a call to a tool proxied from an MCP server.
 func ClassifyMCP(name string, info tools.MCPInfo, raw json.RawMessage) Request {
 	args := strings.TrimSpace(string(raw))
 	if len(args) > maxCardArgs {
@@ -97,7 +97,7 @@ func ClassifyMCP(name string, info tools.MCPInfo, raw json.RawMessage) Request {
 }
 
 // Classify reports whether a call needs a permission decision and what
-// it would do. Reads, todos, asks and memory never do.
+// it would do. Workspace reads, todos, asks and memory need no decision.
 func Classify(name string, raw json.RawMessage, workspace string) (Request, bool) {
 	switch name {
 	case "shell":
@@ -248,11 +248,14 @@ func outsideReads(words []string, workspace string) (out []readTarget, variable 
 	home, _ := homeDir()
 	for _, w := range words[1:] {
 		if strings.HasPrefix(w, "-") {
-			_, v, ok := strings.Cut(w, "=")
-			if !ok {
+			if _, v, ok := strings.Cut(w, "="); ok {
+				w = v
+			} else if rest := attachedPath(w); rest != "" {
+				// -f/etc/shadow: a path glued to a short option.
+				w = rest
+			} else {
 				continue
 			}
-			w = v
 		}
 		if strings.Contains(w, "$") || (strings.HasPrefix(w, "~") && w != "~" && !strings.HasPrefix(w, "~/")) {
 			variable = true
@@ -277,6 +280,17 @@ func outsideReads(words []string, workspace string) (out []readTarget, variable 
 		if safeDevice[abs] {
 			continue
 		}
+		if strings.ContainsAny(abs, "*?[") {
+			// A glob can expand through a symlink to a file outside the
+			// workspace; judge what it matches, not the pattern.
+			matches, _ := filepath.Glob(abs)
+			for _, m := range matches {
+				if _, scope, err := tools.ResolveScopedPath("shell", "path", m, workspace); err == nil && scope == tools.ScopeOutside {
+					out = append(out, newReadTarget(m, workspace))
+				}
+			}
+			continue
+		}
 		if !filepath.IsAbs(w) && !strings.HasPrefix(w, "~") && !strings.Contains(w, "..") {
 			// Plain relative words (patterns, file names) only count
 			// when they exist and resolve out of the workspace.
@@ -289,6 +303,19 @@ func outsideReads(words []string, workspace string) (out []readTarget, variable 
 		}
 	}
 	return out, variable
+}
+
+// attachedPath returns the path glued to a short option (-f/etc/x,
+// -f~/.ssh/key, -f../x), or "" when the word is an ordinary option.
+func attachedPath(w string) string {
+	if len(w) < 3 || strings.HasPrefix(w, "--") {
+		return ""
+	}
+	rest := w[2:]
+	if strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "~") || strings.HasPrefix(rest, "..") {
+		return rest
+	}
+	return ""
 }
 
 var safeDevice = map[string]bool{"/dev/null": true, "/dev/stdin": true, "/dev/stdout": true, "/dev/stderr": true}
@@ -441,10 +468,32 @@ func prefixOf(words []string) string {
 	if len(words) == 0 {
 		return ""
 	}
+	// A rule for a shell, interpreter or fetch tool would later allow any
+	// script or URL; one for "git" after "git -C dir status" would allow
+	// "git -c alias.x=!cmd x". Save exactly what was approved instead.
+	if neverBlanketRule[words[0]] || (len(words) > 1 && strings.HasPrefix(words[1], "-") && flagFirstTools[words[0]]) {
+		return strings.Join(words, " ")
+	}
 	if len(words) > 1 && isSubcommand(words[1]) {
 		return words[0] + " " + words[1]
 	}
 	return words[0]
+}
+
+// neverBlanketRule lists programs that run whatever they are handed.
+var neverBlanketRule = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "csh": true, "tcsh": true,
+	"pwsh": true, "powershell": true, "cmd": true, "eval": true,
+	"python": true, "python2": true, "python3": true, "node": true, "nodejs": true, "deno": true, "bun": true,
+	"ruby": true, "perl": true, "php": true, "lua": true, "osascript": true,
+	"curl": true, "wget": true, "ssh": true, "scp": true, "nc": true, "ncat": true,
+}
+
+// flagFirstTools take options before their subcommand ("git -C dir
+// status"), and a leading option can change what the command does.
+var flagFirstTools = map[string]bool{
+	"git": true, "docker": true, "kubectl": true, "helm": true, "gh": true, "npm": true, "pnpm": true,
+	"yarn": true, "cargo": true, "go": true, "pip": true, "pip3": true, "uv": true,
 }
 
 func isSubcommand(w string) bool {
@@ -459,8 +508,7 @@ func isSubcommand(w string) bool {
 	return true
 }
 
-// isDestructive flags commands that can lose work beyond a sandbox's
-// reach (force pushes, history rewrites) or wipe trees. It errs toward
+// isDestructive flags force pushes, history rewrites and commands that wipe trees. It errs toward
 // asking; it is a prompt trigger, not a security boundary.
 func isDestructive(cmd string) bool {
 	segs, err := splitCommand(cmd)
@@ -570,7 +618,9 @@ func contains(args []string, s string) bool {
 // something run code later: git's config and hooks (.git), agent
 // settings, hooks and MCP servers (.paladin, .claude), and installed
 // tools and packages Paladin or the user runs (node_modules, a Python
-// virtualenv). It is "" for any other path. Names compare case-blind,
+// virtualenv), and the files other tools execute or load from a project
+// (.husky, .vscode, .cargo, .mcp.json, .envrc, git and npm settings;
+// CI workflows run elsewhere and stay ordinary). It is "" for any other path. Names compare case-blind,
 // as on macOS's default file system.
 func protectedDir(base, path string) string {
 	rel, err := filepath.Rel(base, path)
@@ -581,7 +631,10 @@ func protectedDir(base, path string) string {
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
 		cur = filepath.Join(cur, part)
 		switch strings.ToLower(part) {
-		case ".git", ".paladin", ".claude", "node_modules", ".venv":
+		case ".git", ".paladin", ".claude", "node_modules", ".venv",
+			// Tool and editor configuration other programs run on open.
+			".husky", ".vscode", ".cargo",
+			".mcp.json", ".envrc", ".gitattributes", ".gitmodules", ".npmrc", ".yarnrc", ".yarnrc.yml":
 			return cur
 		}
 		if _, err := os.Stat(filepath.Join(cur, "pyvenv.cfg")); err == nil {

@@ -19,7 +19,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,14 +30,9 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/errlog"
 	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
 func main() {
-	// The Linux sandbox re-execs agent-host to confine a shell command.
-	if len(os.Args) > 1 && os.Args[1] == sandbox.HelperArg {
-		os.Exit(sandbox.RunHelper(os.Args[2:]))
-	}
 	if len(os.Args) > 2 && os.Args[1] == "extensions" && os.Args[2] == "init" {
 		example := false
 		for _, arg := range os.Args[3:] {
@@ -81,22 +75,24 @@ func main() {
 	fmt.Fprintf(os.Stderr, "agent-host ready dir=%s\n", rt.GetWorkspace())
 
 	requests := newDispatcher(rt, emitResponse, defaultLimits)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	err := readLines(os.Stdin, maxRequestLine, func(line []byte) {
 		if len(line) == 0 {
-			continue
+			return
 		}
 		var req Request
 		if err := json.Unmarshal(line, &req); err != nil {
 			logf("WARN bad request line: %v", err)
 			errlog.Global(dataRoot, "protocol:bad-request", err.Error()+"\n"+string(line))
-			continue
+			return
 		}
 		requests.dispatch(&req)
-	}
-	if err := scanner.Err(); err != nil {
+	}, func(prefix []byte) {
+		logf("WARN request line over %d bytes refused", maxRequestLine)
+		if id := requestIDFromPrefix(prefix); id != nil {
+			emitResponse(errResponse(id, fmt.Sprintf("request is larger than %d bytes", maxRequestLine)))
+		}
+	})
+	if err != nil {
 		logf("WARN read stdin: %v", err)
 		errlog.Global(dataRoot, "protocol:stdin", err.Error())
 	}

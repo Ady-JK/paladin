@@ -38,8 +38,8 @@ function toolSummary(name: string, raw: string): string {
     if (typeof args.path === "string") {
       return args.path;
     }
-    for (const value of Object.values(args)) {
-      if (typeof value === "string" && value) {
+    for (const [key, value] of Object.entries(args)) {
+      if (key !== "reason" && typeof value === "string" && value) {
         return value;
       }
     }
@@ -229,8 +229,16 @@ export function runLabel(tools: ToolInfo[]): string {
     .join(", ");
 }
 
+// toolReason is the one-line note the model gave for a call (the
+// required `reason` argument); "" when a call carries none (older
+// transcripts, MCP and plugin tools).
+export function toolReason(tool: ToolInfo): string {
+  const reason = parseArgs(tool.arguments).reason;
+  return typeof reason === "string" ? reason.trim() : "";
+}
+
 // toolIcon is the glyph for a kind of call.
-function toolIcon(name: string): IconName {
+export function toolIcon(name: string): IconName {
   return kindOf(name).icon;
 }
 

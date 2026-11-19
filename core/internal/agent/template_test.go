@@ -377,7 +377,7 @@ func TestBuildSkillErrors(t *testing.T) {
 func TestBuildLetsTheGateReadTheSessionFolder(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000031")
 	d, _, _, _ := testDeps(t, sess)
-	shared := &permission.Gate{Preset: permission.Auto, Workspace: "/proj"}
+	shared := &permission.Gate{Preset: permission.Review, Workspace: "/proj"}
 	d.Gate = shared
 	for _, mode := range []string{ModeBuild, ModePlan} {
 		a, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "hi", Cwd: "/proj", Mode: mode})

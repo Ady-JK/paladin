@@ -29,7 +29,11 @@ func (r *AgentRuntime) SessionUsage(sessionID, cwd string) (session.SessionUsage
 	}
 	totals, model := readUsage(sess)
 	window, known := r.windowOf(sess, model)
-	return totals.View(sess.Meta.SessionID, window, known, r.windowResolver(sess)), nil
+	view := totals.View(sess.Meta.SessionID, window, known, r.windowResolver(sess))
+	if sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessCodex {
+		view.Limits = r.codexLimitWindows()
+	}
+	return view, nil
 }
 
 // windowOf resolves a model's context window for a session: the window
@@ -38,6 +42,12 @@ func (r *AgentRuntime) windowOf(sess transcript.Session, model string) (int64, b
 	provider := ""
 	if sess.Meta.Provider != nil {
 		provider = *sess.Meta.Provider
+	}
+	if sess.Meta.Harness != nil {
+		// A harness runs its models with windows of its own; Paladin's table
+		// describes something else, so only what the harness reported counts.
+		window := r.loadSettings().ContextWindows[sess.Meta.Harness.Name][model]
+		return window, window > 0
 	}
 	meta := config.ModelMeta{}
 	if provider != "" && model != "" {
@@ -55,29 +65,6 @@ func (r *AgentRuntime) windowOf(sess transcript.Session, model string) (int64, b
 // knows model ids.
 func (r *AgentRuntime) windowResolver(sess transcript.Session) func(string) (int64, bool) {
 	return func(model string) (int64, bool) { return r.windowOf(sess, model) }
-}
-
-// catalogWindow is the context window the provider's catalog published
-// for model, or 0 when it published none (the agent then falls back to
-// the built-in table). The session's provider still names whose catalog
-// to read when the turn picks its own model.
-func (r *AgentRuntime) catalogWindow(provider *string, model *string) int64 {
-	name := ""
-	if provider != nil {
-		name = strings.TrimSpace(*provider)
-	}
-	if name == "" || model == nil {
-		return 0
-	}
-	id := strings.TrimSpace(*model)
-	if id == "" {
-		return 0
-	}
-	if meta := r.store.ModelMeta(name, id); meta.ContextWindow > 0 || meta.MaxInput > 0 {
-		window, _ := inference.WindowFor(meta, id)
-		return window
-	}
-	return 0
 }
 
 // firstModel returns the first non-empty model id: the turn's own choice

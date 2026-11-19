@@ -17,7 +17,7 @@ func TestReadImageReturnsModelImage(t *testing.T) {
 	}
 	r := NewRegistry()
 	r.Register(ReadTool{})
-	res := r.Call(&ToolCall{ID: "read-1", Name: "read", Arguments: `{"path":"` + path + `"}`}, &ToolCtx{Workspace: root, Cancel: context.Background()})
+	res := r.Call(&ToolCall{ID: "read-1", Name: "read", Arguments: `{"reason":"test","path":"` + path + `"}`}, &ToolCtx{Workspace: root, Cancel: context.Background()})
 	if res.IsError || res.Image == nil || res.Image.MIMEType != "image/png" {
 		t.Fatalf("read image: %+v", res)
 	}

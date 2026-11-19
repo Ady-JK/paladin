@@ -364,14 +364,10 @@ func cleanNames(names []string) []string {
 	return out
 }
 
-// childTools is a subagent turn's registry: the kind's allowlist,
+// childToolsFrom is a subagent turn's registry: the kind's allowlist,
 // narrowed to tools both the parent and the child have switched on. A
 // child may use selected MCP tools but never delegation tools or a tool its
 // parent cannot use.
-func (r *AgentRuntime) childTools(child transcript.Session, kind subagentKind) *tools.Registry {
-	return r.childToolsFrom(child, kind, r.tools)
-}
-
 func (r *AgentRuntime) childToolsFrom(child transcript.Session, kind subagentKind, all *tools.Registry) *tools.Registry {
 	if child.Meta.Subagent == nil {
 		return tools.NewRegistry()

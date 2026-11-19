@@ -19,6 +19,7 @@ import {
 } from "../core/dom";
 import { bare, escapeAttr, escapeHtml, shortPath, splitModel } from "../core/format";
 import { state } from "../core/state";
+import { CODEX } from "../core/harness";
 import type { AgentInfo, AgentStatus, HistoryPage, MessageInfo, SessionInfo } from "../core/types";
 import { paintResources, resBadge } from "./resources";
 import { toast } from "../ui/toast";
@@ -30,6 +31,7 @@ import { buildHistory } from "./sessions/history";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { persistModelChoice, syncModelSelects } from "./models";
+import { openedHarness, setHarness } from "../adapters/codex/harness";
 import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
 import { forkSessionById, renameSessionById } from "./sessionActions";
 import { resetDraft, syncPermChip } from "./permissions";
@@ -55,7 +57,7 @@ export async function refreshSessions(): Promise<void> {
   // folder's: filtering by cwd hid old sessions whenever the workspace
   // changed (e.g. after New Session picked another folder).
   try {
-    state.sessions = await api.listSessions(null, 100);
+    state.sessions = await api.listSessions(null, 0);
   } catch (error) {
     console.warn(`refreshSessions failed: ${String(error)}`);
     state.sessions = [];
@@ -150,6 +152,14 @@ function childrenBlock(parent: SessionInfo, kids: SessionInfo[]): string {
     <div class="session-children" data-kids-of="${id}"${open ? "" : " hidden"}>${kids.map(childRow).join("")}</div>`;
 }
 
+// engineChip says which engine runs a session: Codex (the user's own CLI) or
+// Paladin's agent.
+function engineChip(session: SessionInfo): string {
+  const codex = session.harness === CODEX;
+  const title = codex ? "Runs on your Codex CLI" : "Runs on Paladin's agent";
+  return `<span class="session-harness" data-engine="${codex ? "codex" : "paladin"}" title="${title}">${codex ? "Codex" : "Paladin"}</span>`;
+}
+
 function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
   const active = session.sessionId === state.sessionId;
   const title = session.title || "untitled session";
@@ -163,6 +173,7 @@ function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
         <span class="truncate">${escapeHtml(title)}</span>
       </button>`
       }
+      ${engineChip(session)}
       ${session.worktree ? `<span class="session-branch" title="Worktree ${escapeAttr(session.worktree.path)}">${icon("code-branch", "h-2.5 w-2.5")}<span>${escapeHtml(session.worktree.branch.replace(/^paladin\//, ""))}</span></span>` : ""}
       ${session.damaged ? `<span class="session-damaged" title="Unreadable: ${escapeAttr(session.damaged)}">${icon("warning", "h-3 w-3")}</span>` : ""}
       ${hasAgentBrowser(session.sessionId) || kids.some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
@@ -253,6 +264,7 @@ export function renderSessions(): void {
           <button data-recent="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)} · ${escapeAttr(shortPath(session.cwd))}">
             <span class="truncate">${escapeHtml(title)}</span>
           </button>
+          ${engineChip(session)}
           ${hasAgentBrowser(session.sessionId) || (kidsOf.get(session.sessionId) ?? []).some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
           ${liveIndicator(session.sessionId, live)}
         </div>`;
@@ -452,16 +464,54 @@ async function deleteSession(id: string, discardWorktree = false): Promise<void>
   disposeSidePanes(gone);
 }
 
+let openGeneration = 0;
+
+let syncingSession = false;
+
+// External Codex clients write the same thread without sending events through
+// Paladin's app-server. Refresh the visible idle session without resetting the
+// composer, selected model, or history when nothing changed.
+async function syncLinkedSession(): Promise<void> {
+  if (syncingSession || document.hidden || state.harness !== "codex" || state.busy || !state.sessionId) return;
+  const id = state.sessionId;
+  const generation = openGeneration;
+  syncingSession = true;
+  try {
+    const changed = await api.syncSession(id, state.cwd || null);
+    if (changed && id === state.sessionId && generation === openGeneration) {
+      beginAttach(id);
+      try {
+        const snap = await api.attachSession(id, 0, state.cwd);
+        if (id !== state.sessionId || generation !== openGeneration) {
+          abortAttach(id);
+          return;
+        }
+        renderHistory(snap.history);
+        finishAttach(id, snap);
+      } catch (error) {
+        abortAttach(id);
+        throw error;
+      }
+      void refreshSessions();
+    }
+  } catch (error) {
+    console.debug("Linked session sync will retry", error);
+  } finally {
+    syncingSession = false;
+  }
+}
+
 export async function openSession(id: string): Promise<void> {
+  const generation = ++openGeneration;
   const damaged = state.sessions.find((s) => s.sessionId === id)?.damaged;
   if (damaged) {
     setStatus(`This session can't be opened (${damaged}). You can still delete it.`, "error");
     return;
   }
   try {
-    // Null cwd searches every workspace namespace; the session brings
-    // its own cwd with it, which becomes the new working folder.
-    const session = await api.openSession(id, null);
+    // Use the listed workspace to avoid searching every namespace.
+    const session = await api.openSession(id, state.sessions.find((item) => item.sessionId === id)?.cwd || null);
+    if (generation !== openGeneration) return;
 
     state.sessionId = session.sessionId;
     window.dispatchEvent(new Event("paladin:session-selected"));
@@ -486,7 +536,11 @@ export async function openSession(id: string): Promise<void> {
     workspaceLabelEl.textContent = shortPath(state.cwd);
     workspaceInputEl.value = state.cwd;
 
-    if (session.provider) {
+    await openedHarness(session.harness, session.model);
+    if (generation !== openGeneration) return;
+    if (session.harness) {
+      // The Codex model list is already in the picker.
+    } else if (session.provider) {
       state.selectedProvider = session.provider;
       state.selectedLab = session.model ? splitModel(session.model).lab : "";
       state.selectedModel = session.model;
@@ -505,18 +559,18 @@ export async function openSession(id: string): Promise<void> {
     beginAttach(session.sessionId);
     let snap;
     try {
-      snap = await api.attachSession(session.sessionId);
+      snap = await api.attachSession(session.sessionId, 0, session.cwd);
     } catch (error) {
       abortAttach(session.sessionId);
       throw error;
     }
-    if (state.sessionId !== session.sessionId) {
+    if (generation !== openGeneration || state.sessionId !== session.sessionId) {
       // The user moved on while this loaded; keep the buffer flowing.
       abortAttach(session.sessionId);
       return;
     }
     await pluginCardsReady();
-    if (state.sessionId !== session.sessionId) {
+    if (generation !== openGeneration || state.sessionId !== session.sessionId) {
       abortAttach(session.sessionId);
       return;
     }
@@ -533,7 +587,7 @@ export async function openSession(id: string): Promise<void> {
       setStatus("ready", "ok");
     }
   } catch (error) {
-    setStatus(String(error), "error");
+    if (generation === openGeneration) setStatus(String(error), "error");
   }
 }
 
@@ -574,11 +628,28 @@ const HISTORY_PAGE = 120;
 let historyStart = 0;
 let historyHasMore = false;
 let historyLoading = false;
+let prefetchedHistory: { sessionId: string; before: number; page: Promise<HistoryPage> } | null = null;
+
+function prefetchEarlierHistory(sessionId: string): void {
+  if (!historyHasMore || !sessionId) {
+    prefetchedHistory = null;
+    return;
+  }
+  const before = historyStart;
+  const page = api.sessionHistoryPage(sessionId, state.cwd || null, HISTORY_PAGE, before);
+  // Handle a failed speculative request; a click can retry it normally.
+  void page.catch(() => {
+    if (prefetchedHistory?.page === page) prefetchedHistory = null;
+  });
+  prefetchedHistory = { sessionId, before, page };
+}
 
 export async function loadHistory(id: string): Promise<void> {
-  // Null cwd searches every workspace namespace, matching openSession.
+  const generation = openGeneration;
+  const cwd = state.cwd || null;
   await pluginCardsReady();
-  renderHistory(await api.sessionHistoryPage(id, null, HISTORY_PAGE, 0));
+  const page = await api.sessionHistoryPage(id, cwd, HISTORY_PAGE, 0);
+  if (generation === openGeneration && id === state.sessionId) renderHistory(page);
 }
 
 function earlierRow(): HTMLElement {
@@ -599,15 +670,24 @@ function earlierRow(): HTMLElement {
 async function loadEarlierHistory(): Promise<void> {
   const id = state.sessionId;
   if (!id || historyLoading || !historyHasMore) return;
+  const generation = openGeneration;
   historyLoading = true;
+  const cwd = state.cwd || null;
+  const before = historyStart;
   const btn = messagesEl.querySelector<HTMLButtonElement>(".history-earlier-btn");
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Loading…";
   }
   try {
-    const page = await api.sessionHistoryPage(id, null, HISTORY_PAGE, historyStart);
-    if (id !== state.sessionId) return;
+    const cached = prefetchedHistory;
+    let page: HistoryPage;
+    if (cached?.sessionId === id && cached.before === before) {
+      page = await cached.page.catch(() => api.sessionHistoryPage(id, cwd, HISTORY_PAGE, before));
+    } else {
+      page = await api.sessionHistoryPage(id, cwd, HISTORY_PAGE, before);
+    }
+    if (generation !== openGeneration || id !== state.sessionId) return;
     const holder = document.createElement("div");
     buildHistory(holder, page.messages, !state.subagent);
     const anchor = messagesEl.querySelector(".history-earlier");
@@ -620,10 +700,19 @@ async function loadEarlierHistory(): Promise<void> {
     historyStart = page.start;
     historyHasMore = page.hasMore;
     if (page.hasMore) messagesEl.insertBefore(earlierRow(), messagesEl.firstChild);
+    prefetchEarlierHistory(id);
     // Keep the row the user was reading under the cursor.
     chatViewEl.scrollTop = prevTop + (chatViewEl.scrollHeight - prevHeight);
+  } catch (error) {
+    if (generation === openGeneration && id === state.sessionId) {
+      toast(`Could not load earlier messages: ${String(error)}`, "error");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Load earlier messages";
+      }
+    }
   } finally {
-    historyLoading = false;
+    if (generation === openGeneration) historyLoading = false;
   }
 }
 
@@ -634,6 +723,7 @@ function renderHistory(raw: HistoryPage | MessageInfo[]): void {
   historyStart = page.start ?? 0;
   historyHasMore = page.hasMore === true;
   historyLoading = false;
+  prefetchedHistory = null;
   messagesEl.innerHTML = "";
   // One layout for the whole transcript: keep the container display:none
   // while rows are appended, then paint once.
@@ -651,9 +741,12 @@ function renderHistory(raw: HistoryPage | MessageInfo[]): void {
   }
 
   scrollToBottom();
+  prefetchEarlierHistory(state.sessionId);
 }
 
 export function newSession(): void {
+  openGeneration++;
+  setHarness("");
   state.sessionId = "";
   window.dispatchEvent(new Event("paladin:session-selected"));
   void refreshRecovery("");
@@ -683,6 +776,10 @@ export function newSession(): void {
 
 // initSessions wires the session search and the delete confirm dialog.
 export function initSessions(): void {
+  void api.startCodexDiscovery().catch((error: unknown) => console.debug("Codex discovery unavailable", error));
+  window.setInterval(() => void syncLinkedSession(), 3000);
+  window.addEventListener("focus", () => void syncLinkedSession());
+  document.addEventListener("visibilitychange", () => void syncLinkedSession());
   let searchTimer = 0;
   searchInputEl.addEventListener("input", () => {
     window.clearTimeout(searchTimer);

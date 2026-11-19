@@ -35,9 +35,59 @@ const (
 
 // TurnSnapshot is the folder state captured just before a user turn.
 type TurnSnapshot struct {
-	Turn int       `json:"turn"`
-	Tree string    `json:"tree"`
-	At   time.Time `json:"at"`
+	Turn  int       `json:"turn"`
+	Tree  string    `json:"tree"`
+	After string    `json:"after,omitempty"`
+	At    time.Time `json:"at"`
+}
+
+// finishTurnSnapshot freezes a completed turn's changes before subsequent
+// work in the shared workspace can be mistaken for this session's work.
+func (r *AgentRuntime) finishTurnSnapshot(sess transcript.Session, workspace string, turn int) {
+	r.undoMu.Lock()
+	defer r.undoMu.Unlock()
+	repo := r.snapRepo(workspace)
+	if repo == nil {
+		return
+	}
+	list, err := readAllTurnSnapshots(sess.Dir)
+	if err != nil {
+		log.Printf("changes: read turn snapshots: %v", err)
+		return
+	}
+	for i := range list {
+		if list[i].Turn != turn {
+			continue
+		}
+		turns, err := r.historyCache.read(sess)
+		if err != nil {
+			log.Printf("changes: read completed turn: %v", err)
+			return
+		}
+		msgs, _ := transcript.Flatten(turns)
+		if turn >= len(msgs) {
+			return // An unpersisted turn must not be recorded as read-only.
+		}
+		if !turnCanChangeFiles(msgs, []TurnSnapshot{list[i]})[turn] {
+			list[i].After = list[i].Tree
+			if err := writeTurnSnapshots(sess.Dir, list); err != nil {
+				log.Printf("changes: save completed turn: %v", err)
+			}
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
+		tree, err := repo.Snapshot(ctx)
+		cancel()
+		if err != nil {
+			log.Printf("changes: snapshot completed turn: %v", err)
+			return
+		}
+		list[i].After = tree
+		if err := writeTurnSnapshots(sess.Dir, list); err != nil {
+			log.Printf("changes: save completed turn: %v", err)
+		}
+		return
+	}
 }
 
 // recordTurnSnapshot captures the folder before a user message starts
@@ -311,6 +361,9 @@ func (r *AgentRuntime) collectSnapshots(ctx context.Context, repo *snapshot.Repo
 			}
 			for _, turn := range saved.Turns {
 				roots = append(roots, turn.Tree)
+				if turn.After != "" {
+					roots = append(roots, turn.After)
+				}
 			}
 		case turnsFile:
 			list, err := readTurnSnapshots(filepath.Dir(path))
@@ -319,6 +372,9 @@ func (r *AgentRuntime) collectSnapshots(ctx context.Context, repo *snapshot.Repo
 			}
 			for _, item := range list {
 				roots = append(roots, item.Tree)
+				if item.After != "" {
+					roots = append(roots, item.After)
+				}
 			}
 		case "meta.json":
 			data, err := os.ReadFile(path)

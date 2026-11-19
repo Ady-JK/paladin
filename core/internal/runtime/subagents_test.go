@@ -132,7 +132,7 @@ func routedModel(t *testing.T, fn func(modelCall) modelReply) (*httptest.Server,
 			var parts []string
 			for i, tc := range reply.Calls {
 				id := fmt.Sprintf("%s--%d", tc.Name, seq.Add(1))
-				parts = append(parts, fmt.Sprintf(`{"index":%d,"id":%q,"function":{"name":%q,"arguments":%q}}`, i, id, tc.Name, tc.Args))
+				parts = append(parts, fmt.Sprintf(`{"index":%d,"id":%q,"function":{"name":%q,"arguments":%q}}`, i, id, tc.Name, testReason(tc.Args)))
 			}
 			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[%s]}}]}\n\ndata: [DONE]\n\n", strings.Join(parts, ","))
 			return

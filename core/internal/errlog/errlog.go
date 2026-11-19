@@ -63,7 +63,7 @@ func Global(dataDir, source, text string) {
 		return
 	}
 	dir := filepath.Join(dataDir, "logs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
 	write(filepath.Join(dir, "errors.log"), source, text)

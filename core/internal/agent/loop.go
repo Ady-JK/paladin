@@ -162,12 +162,13 @@ func (r roundResult) empty() bool { return r.text == "" && len(r.calls) == 0 }
 func (a *Agent) streamRound() roundResult {
 	a.sentLen = len(a.messages)
 	a.thinking.Reset()
+	a.thinkingState = nil
 	a.publishLive()
 	prx := make(chan inference.Chunk, 64)
 	providerErr := make(chan error, 1)
 	streamCtx, stopStream := context.WithCancel(a.ctx)
 	defer stopStream()
-	go a.startToolStream(streamCtx, prx, providerErr,
+	go a.startToolStream(a.callContext(streamCtx, inference.CallAgent), prx, providerErr,
 		append([]inference.LlmMessage(nil), a.messages...),
 		append([]inference.ToolDefinition(nil), a.toolDefs...), a.session.Meta.SessionID)
 	var stream toolRoundStream
@@ -282,7 +283,7 @@ func (a *Agent) consumeToolText(stream *toolRoundStream, text string) bool {
 // round; err ends the turn.
 func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
 	resp, err := a.timeGenComplete(func() (inference.ToolResponse, error) {
-		return a.provider.CompleteTools(a.ctx, a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
+		return a.provider.CompleteTools(a.callContext(a.ctx, inference.CallAgent), a.system, a.messages, a.toolDefs, a.session.Meta.SessionID)
 	})
 	if err != nil {
 		if a.stopRequested() {
@@ -294,7 +295,7 @@ func (a *Agent) completeBuffered(round *roundResult) (retry bool, err error) {
 		}
 		return false, roundFailure(err)
 	}
-	if err := a.noteThinking(inference.Chunk{Reasoning: resp.Reasoning}); err != nil {
+	if err := a.noteThinking(inference.Chunk{Reasoning: resp.Reasoning, Thinking: resp.Thinking}); err != nil {
 		a.recordStoppedPartial(round.text)
 		return false, turnStop{}
 	}
@@ -322,10 +323,11 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 		a.retries, a.timeoutRetries = 0, 0
 		// The model must see its own answer if the turn goes on (a steer,
 		// a job notice or a Stop hook).
-		a.messages = append(a.messages, inference.LlmMessage{Role: "assistant", Content: text})
+		reasoning, thinking := a.takeThinking()
+		a.messages = append(a.messages, inference.LlmMessage{Role: "assistant", Content: text, Thinking: thinking})
 		a.records = append(a.records, transcript.Message{
 			Role: transcript.RoleAssistant, Content: text,
-			CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
+			CreatedAt: time.Now().UTC(), Reasoning: reasoning, Thinking: toTranscriptThinking(thinking),
 		})
 		if err := a.checkpoint(""); err != nil {
 			return false, err
@@ -359,9 +361,10 @@ func (a *Agent) finishTextRound(text string) (more bool, err error) {
 
 func (a *Agent) recordStoppedPartial(roundText string) {
 	if roundText != "" {
+		reasoning, thinking := a.takeThinking()
 		a.records = append(a.records, transcript.Message{
 			Role: transcript.RoleAssistant, Content: roundText,
-			CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
+			CreatedAt: time.Now().UTC(), Reasoning: reasoning, Thinking: toTranscriptThinking(thinking),
 		})
 	}
 }
@@ -374,18 +377,15 @@ func (a *Agent) keepPartial(round roundResult) {
 	if round.text == "" || len(round.calls) > 0 || len(a.toolDefs) == 0 {
 		return
 	}
+	reasoning, thinking := a.takeThinking()
 	a.records = append(a.records, transcript.Message{
 		Role: transcript.RoleAssistant, Content: round.text,
-		CreatedAt: time.Now().UTC(), Reasoning: a.takeThinking(),
+		CreatedAt: time.Now().UTC(), Reasoning: reasoning, Thinking: toTranscriptThinking(thinking),
 	})
 }
 
 // maxParallelTools caps one concurrent batch.
 const maxParallelTools = 8
-
-// maxEscalations bounds sandbox-block prompts per call: each granted
-// folder reruns the command, which may then hit the next folder.
-const maxEscalations = 3
 
 // NoticeInterruptedContent is the row result for a tool call the model
 // announced but never finished sending (stop, failure or retry).
@@ -406,9 +406,18 @@ func (a *Agent) drainNotifications() error {
 		notices = append(notices, a.notices()...)
 	}
 	for _, n := range notices {
+		if n.Transient {
+			if err := a.emit(ChatChunk{Notice: &ChatNotice{Kind: "info", Text: n.Content}}); err != nil {
+				return turnStop{}
+			}
+			continue
+		}
 		a.appendNotify(n.Content, n.CallID, n.Name, n.IsError)
 		if err := a.checkpoint(""); err != nil {
 			return err
+		}
+		if n.Appended != nil {
+			n.Appended()
 		}
 		status := session.ToolOK
 		if n.IsError {
@@ -490,7 +499,7 @@ func (a *Agent) streamPlainRound() (streamed, retry bool, err error) {
 	providerErr := make(chan error, 1)
 	streamCtx, stopStream := context.WithCancel(a.ctx)
 	defer stopStream()
-	go a.startToolStream(streamCtx, chunks, providerErr,
+	go a.startToolStream(a.callContext(streamCtx, inference.CallAgent), chunks, providerErr,
 		append([]inference.LlmMessage(nil), a.messages...), nil, a.session.Meta.SessionID)
 	streamed, retry, err = a.collectPlainStream(chunks)
 	if retry || err != nil {
@@ -577,7 +586,7 @@ func (a *Agent) consumePlainText(stream *plainStream, text string) error {
 
 func (a *Agent) completePlainRound() (bool, error) {
 	resp, err := a.timeGenComplete(func() (inference.ToolResponse, error) {
-		return a.provider.CompleteTools(a.ctx, a.system, a.messages, nil, a.session.Meta.SessionID)
+		return a.provider.CompleteTools(a.callContext(a.ctx, inference.CallAgent), a.system, a.messages, nil, a.session.Meta.SessionID)
 	})
 	if err != nil {
 		if a.stopRequested() {
@@ -587,6 +596,9 @@ func (a *Agent) completePlainRound() (bool, error) {
 			return true, nil
 		}
 		return false, turnFailed{"provider unavailable: " + err.Error()}
+	}
+	if err := a.noteThinking(inference.Chunk{Reasoning: resp.Reasoning, Thinking: resp.Thinking}); err != nil {
+		return false, turnStop{}
 	}
 	a.appendDelta(resp.Content)
 	if resp.Usage != nil {

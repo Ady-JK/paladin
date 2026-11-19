@@ -1,8 +1,6 @@
-// Package permission decides whether a tool call may run, asks the user
-// when it may not, and remembers their answers as rules. It mirrors
-// Codex's approval presets and OpenCode's allow/deny rules: a preset sets
-// the baseline, rules (global, per folder, per session) refine it, and
-// destructive shell commands always ask unless the preset is full access.
+// Package permission enforces Read-Only and Full Access session policies.
+// Plugin-panel calls use rule-based review with scoped approval choices.
+// Explicit deny rules apply to every policy; execution is not OS-sandboxed.
 package permission
 
 import (
@@ -12,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
@@ -20,22 +17,21 @@ import (
 type Preset string
 
 const (
-	ReadOnly   Preset = "read-only"
-	Auto       Preset = "auto"
+	ReadOnly Preset = "read-only"
+	// Review is the internal rule-based policy for plugin UI calls, not a session preset.
+	Review     Preset = "review"
 	FullAccess Preset = "full-access"
 )
 
-// ParsePreset maps the wire value; empty means Auto.
+// ParsePreset maps session permissions. Legacy Auto selections migrate to ReadOnly.
 func ParsePreset(s string) (Preset, error) {
 	switch Preset(strings.TrimSpace(s)) {
-	case "", Auto:
-		return Auto, nil
-	case ReadOnly:
+	case "", "auto", ReadOnly:
 		return ReadOnly, nil
 	case FullAccess:
 		return FullAccess, nil
 	}
-	return "", fmt.Errorf("permissions must be %q, %q or %q, got %q", ReadOnly, Auto, FullAccess, s)
+	return "", fmt.Errorf("permissions must be %q or %q, got %q", ReadOnly, FullAccess, s)
 }
 
 // Rule tools and actions.
@@ -137,9 +133,6 @@ type Decision struct {
 	Verdict     Verdict
 	Reasons     []string
 	Destructive bool
-	// Sandbox is the confinement for a shell call that runs (after
-	// approval, when asked).
-	Sandbox sandbox.Mode
 	// Remember holds the rules "this session"/"this folder" would save;
 	// empty when the call cannot be generalized safely.
 	Remember []Rule
@@ -155,15 +148,19 @@ func Decide(p Preset, req Request, rules []Rule) Decision {
 		return Decision{Verdict: Deny, Rule: r, Reasons: []string{"blocked by a rule"}}
 	}
 	if p == FullAccess {
-		return Decision{Verdict: Allow, Sandbox: sandbox.ModeNone}
+		return Decision{Verdict: Allow}
+	}
+	if p == ReadOnly && (req.Kind == KindWrite || req.Kind == KindMCP || req.Kind == KindExtension ||
+		(req.Kind == KindShell && (!req.Safe || req.Hidden || req.Unparsed || req.VarRead || req.Destructive))) {
+		return Decision{Verdict: Deny, Reasons: []string{"read-only mode: switch to Full Access to run modifying tools or commands"}}
 	}
 	switch req.Kind {
 	case KindWrite:
-		return decideWrite(p, req, rules)
+		return decideWrite(req, rules)
 	case KindShell:
-		return decideShell(p, req, rules)
+		return decideShell(req, rules)
 	case KindMCP:
-		return decideMCP(p, req, rules)
+		return decideMCP(req, rules)
 	case KindExtension:
 		return decideExtension(req, rules)
 	case KindRead:
@@ -253,10 +250,37 @@ func narrowFolder(path string) string {
 			broad = broad || dir == h || dir == filepath.Dir(h)
 		}
 	}
-	if broad {
+	if broad || sensitiveHomePath(path, home) {
 		return path
 	}
 	return dir
+}
+
+// sensitiveHomeDirs are places in the home folder where credentials, keys
+// and login items live. A grant under one is for the one file.
+var sensitiveHomeDirs = []string{
+	".ssh", ".aws", ".gnupg", ".gpg", ".kube", ".docker", ".azure", ".oci",
+	".config/gcloud", ".config/gh", ".config/git",
+	"Library/LaunchAgents", "Library/LaunchDaemons", "Library/Keychains",
+}
+
+// sensitiveHomePath reports whether path is inside one of sensitiveHomeDirs.
+func sensitiveHomePath(path, home string) bool {
+	if home == "" {
+		return false
+	}
+	for _, h := range []string{filepath.Clean(home), tools.RealPath(home)} {
+		rel, err := filepath.Rel(h, path)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		for _, dir := range sensitiveHomeDirs {
+			if rel == dir || strings.HasPrefix(rel, dir+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // allowingRead matches allow-read and allow-write rules against the
@@ -295,7 +319,7 @@ func deniesRead(r *Rule, t readTarget) bool {
 // decideMCP: allow rules run the call; destructive tools always ask
 // once; anything else asks and can be remembered per tool. A server's
 // readOnly hint is not trusted, so it allows nothing.
-func decideMCP(p Preset, req Request, rules []Rule) Decision {
+func decideMCP(req Request, rules []Rule) Decision {
 	if req.Destructive {
 		return Decision{Verdict: Ask, Destructive: true, Reasons: []string{"the server marks this tool destructive"},
 			Choices: []string{ReplyOnce, ReplyDeny}}
@@ -304,9 +328,6 @@ func decideMCP(p Preset, req Request, rules []Rule) Decision {
 		return Decision{Verdict: Allow, Rule: r}
 	}
 	reason := "MCP tool that may make changes"
-	if p == ReadOnly {
-		reason = "read-only mode"
-	}
 	remember := []Rule{{Tool: ToolMCP, Pattern: req.Server + "/" + req.MCPTool, Action: ActionAllow}}
 	return Decision{Verdict: Ask, Reasons: []string{reason}, Remember: remember, Choices: allChoices()}
 }
@@ -314,8 +335,7 @@ func decideMCP(p Preset, req Request, rules []Rule) Decision {
 // extensionPattern is a plugin name, "plugin/tool" or "plugin/*".
 var extensionPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*(/[a-zA-Z][a-zA-Z0-9_-]*|/\*)?$`)
 
-// decideExtension: an extension tool runs the user's local code with no
-// sandbox, so each call asks unless a rule names its plugin, the tool, or
+// decideExtension: plugin-panel calls ask unless a rule names the plugin, the tool, or
 // everything ("*").
 func decideExtension(req Request, rules []Rule) Decision {
 	for i := range rules {
@@ -324,7 +344,7 @@ func decideExtension(req Request, rules []Rule) Decision {
 			return Decision{Verdict: Allow, Rule: r}
 		}
 	}
-	return Decision{Verdict: Ask, Reasons: []string{"extension tool: it runs local code without the sandbox"},
+	return Decision{Verdict: Ask, Reasons: []string{"extension tool: it runs local code"},
 		Remember: []Rule{{Tool: ToolExtension, Pattern: extensionPatternOf(req), Action: ActionAllow}},
 		Choices:  writeChoices()}
 }
@@ -384,7 +404,7 @@ func mcpMatches(pattern, server, tool string) bool {
 // hiddenReason explains why a call with hidden characters always asks.
 const hiddenReason = "has invisible or direction-changing characters, so it may not do what it shows"
 
-func decideWrite(p Preset, req Request, rules []Rule) Decision {
+func decideWrite(req Request, rules []Rule) Decision {
 	if req.Hidden {
 		return Decision{Verdict: Ask, Reasons: []string{"the path " + hiddenReason}, Choices: []string{ReplyOnce, ReplyDeny}}
 	}
@@ -405,35 +425,29 @@ func decideWrite(p Preset, req Request, rules []Rule) Decision {
 	switch {
 	case req.Outside:
 		reasons = append(reasons, "outside the workspace")
-	case p == ReadOnly:
-		reasons = append(reasons, "read-only mode")
 	default:
 		return Decision{Verdict: Allow}
 	}
-	remember := []Rule{{Tool: ToolWrite, Pattern: filepath.Dir(req.Path), Action: ActionAllow}}
+	remember := []Rule{{Tool: ToolWrite, Pattern: narrowFolder(req.Path), Action: ActionAllow}}
 	return Decision{Verdict: Ask, Reasons: reasons, Remember: remember, Choices: writeChoices()}
 }
 
-func decideShell(p Preset, req Request, rules []Rule) Decision {
-	safeMode := sandbox.ModeWorkspaceWrite
-	if p == ReadOnly {
-		safeMode = sandbox.ModeReadOnly
-	}
+func decideShell(req Request, rules []Rule) Decision {
 	if req.Hidden {
 		return Decision{Verdict: Ask, Destructive: req.Destructive, Reasons: []string{"the command " + hiddenReason},
-			Sandbox: sandbox.ModeWorkspaceWrite, Choices: []string{ReplyOnce, ReplyDeny}}
+			Choices: []string{ReplyOnce, ReplyDeny}}
 	}
 	if req.Destructive {
 		return Decision{Verdict: Ask, Destructive: true, Reasons: []string{"destructive command"},
-			Sandbox: sandbox.ModeWorkspaceWrite, Choices: []string{ReplyOnce, ReplyDeny}}
+			Choices: []string{ReplyOnce, ReplyDeny}}
 	}
 	if req.Unparsed {
 		return Decision{Verdict: Ask, Reasons: []string{"uses shell substitution"},
-			Sandbox: sandbox.ModeWorkspaceWrite, Choices: []string{ReplyOnce, ReplyDeny}}
+			Choices: []string{ReplyOnce, ReplyDeny}}
 	}
 	if req.VarRead {
 		return Decision{Verdict: Ask, Reasons: []string{"expands a variable, which may read outside the workspace"},
-			Sandbox: safeMode, Choices: []string{ReplyOnce, ReplyDeny}}
+			Choices: []string{ReplyOnce, ReplyDeny}}
 	}
 	var reads []Rule
 	var readReasons []string
@@ -448,7 +462,7 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 		readReasons = append(readReasons, "reads "+t.path+" outside the workspace")
 	}
 	if req.Safe && len(reads) == 0 {
-		return Decision{Verdict: Allow, Sandbox: safeMode}
+		return Decision{Verdict: Allow}
 	}
 	var missing []Rule
 	seen := map[string]bool{}
@@ -467,12 +481,8 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 			missing = append(missing, Rule{Tool: ToolShell, Pattern: prefix, Action: ActionAllow})
 		}
 	}
-	mode := sandbox.ModeWorkspaceWrite
-	if req.Safe {
-		mode = safeMode
-	}
 	if len(missing) == 0 && len(reads) == 0 {
-		return Decision{Verdict: Allow, Sandbox: mode, Rule: matched}
+		return Decision{Verdict: Allow, Rule: matched}
 	}
 	var reasons []string
 	choices := writeChoices()
@@ -480,7 +490,7 @@ func decideShell(p Preset, req Request, rules []Rule) Decision {
 		reasons = append(reasons, "not on the safe list")
 		choices = allChoices()
 	}
-	return Decision{Verdict: Ask, Reasons: append(reasons, readReasons...), Sandbox: mode,
+	return Decision{Verdict: Ask, Reasons: append(reasons, readReasons...),
 		Remember: append(missing, reads...), Choices: choices}
 }
 
@@ -624,7 +634,7 @@ func commandMatches(pattern string, words []string) bool {
 // variables. A rule approved for "git" or "make all" does not cover them.
 func riskyEnvironment(words []string) bool {
 	for _, w := range words {
-		if w == "env" || strings.HasPrefix(w, "-") {
+		if wrapperWords[w] || strings.HasPrefix(w, "-") {
 			continue
 		}
 		if !isAssign(w) {
@@ -638,6 +648,9 @@ func riskyEnvironment(words []string) bool {
 	}
 	return false
 }
+
+// wrapperWords run the next command; assignments after them still reach it.
+var wrapperWords = map[string]bool{"env": true, "time": true, "nohup": true, "command": true, "exec": true, "nice": true}
 
 var riskyEnvNames = map[string]bool{"BASH_ENV": true, "ENV": true, "LESSOPEN": true, "LESSCLOSE": true, "VISUAL": true,
 	"PROMPT_COMMAND": true, "PS4": true, "IFS": true, "PATH": true, "SHELLOPTS": true, "BASHOPTS": true, "ZDOTDIR": true,

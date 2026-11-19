@@ -325,10 +325,11 @@ func FetchLiteLLMPricing(ctx context.Context, baseURL, key string) (map[string]c
 }
 
 // estimateCopilotUsage uses published list prices, not an account invoice.
-// Missing cache-read counts or rates make the estimate unavailable. Copilot's
-// chat endpoint never reports cache writes, so an unreported write count is
-// taken as zero (the estimate is then a lower bound for cache-write surcharges).
-func (p *OpenAIProvider) estimateCopilotUsage(u *Usage, separateInput bool) *Usage {
+// u.PromptTokens is the whole input, cached or not. Missing cache-read counts
+// or rates make the estimate unavailable. Copilot's chat endpoint never reports
+// cache writes, so an unreported write count is taken as zero (the estimate is
+// then a lower bound for cache-write surcharges).
+func (p *OpenAIProvider) estimateCopilotUsage(u *Usage) *Usage {
 	if !p.isCopilot || u == nil || u.HasCost || !u.CacheReadKnown {
 		return u
 	}
@@ -337,9 +338,6 @@ func (p *OpenAIProvider) estimateCopilotUsage(u *Usage, separateInput bool) *Usa
 		return u
 	}
 	totalInput := u.PromptTokens
-	if separateInput {
-		totalInput += u.CacheReadTokens + u.CacheWriteTokens
-	}
 	uncached := totalInput - u.CacheReadTokens - u.CacheWriteTokens
 	if uncached < 0 {
 		return u

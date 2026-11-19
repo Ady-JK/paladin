@@ -44,6 +44,43 @@ func TestFinishedTurnsAdvanceTheReviewCounter(t *testing.T) {
 	}
 }
 
+func TestMemoryReviewReminderPreservesSystemPromptAcrossTurns(t *testing.T) {
+	var systems []string
+	var users [][]string
+	rt, ws, parentID, _ := agentRuntime(t, func(c modelCall) modelReply {
+		if !c.Child {
+			systems = append(systems, c.System)
+			users = append(users, append([]string(nil), c.Users...))
+		}
+		return modelReply{Text: "done"}
+	})
+	writeMemoryConfig(t, rt, `{"reviewTurns": 1}`)
+	runParent(t, rt, parentID, ws, "first task")
+	rt.hub.SettleDone(5 * time.Second)
+	runParent(t, rt, parentID, ws, "second task")
+	rt.hub.SettleDone(5 * time.Second)
+	sess, err := rt.transcripts.Load(ws, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.NoteWrite(sess.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := memory.EndTurn(sess.Dir); err != nil {
+		t.Fatal(err)
+	}
+	runParent(t, rt, parentID, ws, "third task")
+	if len(systems) != 3 || systems[0] != systems[1] || systems[1] != systems[2] {
+		t.Fatal("memory review changed the cached system prompt between turns")
+	}
+	if !strings.Contains(strings.Join(users[1], "\n"), "MEMORY REVIEW:") {
+		t.Fatal("due memory review reminder was not sent to the model")
+	}
+	if len(users[2]) == 0 || users[2][len(users[2])-1] != "third task" {
+		t.Fatal("memory review reminder remained due after a memory write")
+	}
+}
+
 func TestMemoryWriteDuringATurnResetsTheCounter(t *testing.T) {
 	rt, ws, parentID, _ := agentRuntime(t, func(c modelCall) modelReply {
 		if _, ok := c.Results["memory"]; ok {
@@ -126,7 +163,7 @@ func TestReviewChildCannotReachWorkspaceTools(t *testing.T) {
 		t.Fatalf("review child not spawned: %v", ids)
 	}
 	child := loadChild(t, rt, ws, ids[0])
-	reg := rt.childTools(child, reviewKind())
+	reg := rt.childToolsFrom(child, reviewKind(), rt.tools)
 	for _, banned := range []string{"write", "edit", "shell", "spawn_agent", "browser"} {
 		if _, ok := reg.Get(banned); ok {
 			t.Fatalf("review child was given %q; it may only write memory", banned)
@@ -157,7 +194,10 @@ func TestAutoReviewOffDoesNotFork(t *testing.T) {
 }
 
 func TestReviewKindIsNotADelegationTarget(t *testing.T) {
-	names := subagentKindNames()
+	// Inspect the real model-facing schema instead of a parallel helper list.
+	def := spawnDefFor(subagentKinds)
+	props := def.Parameters.(map[string]any)["properties"].(map[string]any)
+	names := props["agent_type"].(map[string]any)["enum"].([]string)
 	for _, n := range names {
 		if n == "memory-review" {
 			t.Fatal("the review fork must not be offered to the model as a spawn target")
@@ -210,5 +250,69 @@ func TestRecallAddsOneReminderForAMatchingMessage(t *testing.T) {
 	}
 	if strings.Contains(last[1], "Recalled from") {
 		t.Fatalf("unrelated message was reminded:\n%s", last[1])
+	}
+}
+
+// recallCount is how many recalled-memory reminders the model's last
+// request carried.
+func recallCount(calls []modelCall) int {
+	var last modelCall
+	for _, c := range calls {
+		if !c.Child {
+			last = c
+		}
+	}
+	n := 0
+	for _, u := range last.Users {
+		if strings.Contains(u, "Recalled from project memory") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestARecalledEntryIsAppendedOnceUntilTheConversationForgetsIt(t *testing.T) {
+	rt, ws, sid, calls := agentRuntime(t, func(modelCall) modelReply { return modelReply{Text: "done"} })
+	if _, err := rt.memory.Apply(memory.TargetProject, ws, []memory.Op{{Action: "add", Content: "desktop playwright tests run with pnpm exec playwright test"}}); err != nil {
+		t.Fatal(err)
+	}
+	runParent(t, rt, sid, ws, "run the desktop playwright tests")
+	if n := recallCount(calls()); n != 1 {
+		t.Fatalf("first match recalled %d times, want 1", n)
+	}
+	runParent(t, rt, sid, ws, "rerun the playwright tests for desktop")
+	if n := recallCount(calls()); n != 1 {
+		t.Fatalf("a repeat match appended the entry again: %d copies in the conversation", n)
+	}
+
+	// Once the conversation no longer holds the reminder, the entry is
+	// recalled afresh.
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.ResetRecalled(sess.Dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	runParent(t, rt, sid, ws, "one more playwright desktop tests run")
+	if n := recallCount(calls()); n != 2 {
+		t.Fatalf("after clearing, the entry was recalled %d times in total, want 2", n)
+	}
+}
+
+func TestAnEditedEntryIsRecalledAsANewOne(t *testing.T) {
+	rt, ws, sid, calls := agentRuntime(t, func(modelCall) modelReply { return modelReply{Text: "done"} })
+	op := func(o memory.Op) {
+		t.Helper()
+		if _, err := rt.memory.Apply(memory.TargetProject, ws, []memory.Op{o}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	op(memory.Op{Action: "add", Content: "desktop playwright tests run with pnpm exec playwright test"})
+	runParent(t, rt, sid, ws, "run the desktop playwright tests")
+	op(memory.Op{Action: "patch", OldText: "desktop playwright tests run", Content: "desktop playwright tests run headless with pnpm exec playwright test"})
+	runParent(t, rt, sid, ws, "run the desktop playwright tests again")
+	if n := recallCount(calls()); n != 2 {
+		t.Fatalf("an edited entry should be recalled again, got %d reminders", n)
 	}
 }

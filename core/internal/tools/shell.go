@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,7 +16,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
 	"github.com/Ady-JK/paladin/core/internal/redact"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
@@ -26,7 +24,7 @@ var (
 	// hands the still-running command to the background and returns a
 	// job id. Nothing is killed: the command keeps running either way.
 	// A variable so tests can shorten the wait.
-	DefaultShellYieldMs = 60_000
+	DefaultShellYieldMs = 120_000
 )
 
 const (
@@ -35,14 +33,12 @@ const (
 
 	ShellRun    = "run"
 	ShellStatus = "status"
-	ShellWait   = "wait"
 	ShellCancel = "cancel"
 
-	// DefaultShellWaitSeconds and MaxShellWaitSeconds bound the wait
-	// action: it blocks until the job ends or the time is up, and never
-	// longer than the cap, so one call cannot stall a turn indefinitely.
-	DefaultShellWaitSeconds = 60
-	MaxShellWaitSeconds     = 300
+	// removedShellWait is the action older prompts and transcripts still
+	// call. Blocking on a job made the model re-wait in a loop, one model
+	// call per round; the job's own notices replace it.
+	removedShellWait = "wait"
 
 	JobRunning   = "running"
 	JobDone      = "done"
@@ -67,8 +63,6 @@ type ShellArgs struct {
 	// unless the caller opts out. A pointer distinguishes "absent" from
 	// an explicit false.
 	Notify *bool `json:"notify"`
-	// Seconds bounds the wait action. Zero means the default.
-	Seconds int `json:"seconds"`
 }
 
 // notifyWanted reports whether a background job should report its completion.
@@ -109,14 +103,14 @@ type ShellTool struct {
 }
 
 func NewShellTool() *ShellTool {
-	return &ShellTool{inner: &shellJobs{byID: map[string]*job{}, changed: newBroadcaster()}}
+	return &ShellTool{inner: &shellJobs{byID: map[string]*job{}}}
 }
 
 // runSync starts the command as a job and waits up to
 // DefaultShellYieldMs for it. A command that outlives the wait keeps
-// running: it is armed for a completion notice, gets a five-minute
-// running notice until it ends, and the call returns its job id.
-func (s *ShellTool) runSync(cmd, dir, owner, callID string, cancel context.Context, sessionDir string, sb *sandbox.Policy) (string, error) {
+// running: it is armed for completion and progress notices, and the
+// call returns its job id.
+func (s *ShellTool) runSync(cmd, dir, owner, callID string, cancel context.Context, sessionDir string) (string, error) {
 	cleanup := ""
 	if sessionDir == "" {
 		// No session (an eval, a plan check): keep the log in a temp
@@ -130,21 +124,21 @@ func (s *ShellTool) runSync(cmd, dir, owner, callID string, cancel context.Conte
 	if cleanup != "" {
 		defer os.RemoveAll(cleanup)
 	}
-	started, err := s.startJob(cmd, dir, owner, callID, false, true, sessionDir, sb)
+	started, err := s.startJob(cmd, dir, owner, callID, false, true, sessionDir)
 	if err != nil {
 		return "", err
 	}
 	select {
 	case <-started.done:
 		s.markReported(started.id)
-		return s.completed(started.id, sb != nil)
+		return s.completed(started.id)
 	case <-time.After(time.Duration(DefaultShellYieldMs) * time.Millisecond):
 		if s.armAuto(started.id) {
 			return s.runningResult(started.id,
-				fmt.Sprintf("still running after %s; moved to the background. Its completion and its running time are reported to you automatically; call wait with this job_id when you need the result before continuing.", yieldLabel()))
+				fmt.Sprintf("still running after %s; moved to the background. You are woken when it finishes, and told if it goes quiet for a long time, so do not poll it. Keep working on something that does not depend on it, or end your turn. Its output so far is in the log file named in this answer; use status to check whether it is still running, or cancel to stop it.", yieldLabel()))
 		}
 		s.markReported(started.id)
-		return s.completed(started.id, sb != nil)
+		return s.completed(started.id)
 	case <-cancel.Done():
 		_, _ = s.cancel(started.id, owner)
 		select {
@@ -156,15 +150,15 @@ func (s *ShellTool) runSync(cmd, dir, owner, callID string, cancel context.Conte
 }
 
 // completed builds the answer for a command that has finished.
-func (s *ShellTool) completed(id string, sandboxed bool) (string, error) {
-	out, terr := s.completedResult(id, sandboxed)
+func (s *ShellTool) completed(id string) (string, error) {
+	out, terr := s.completedResult(id)
 	if terr != nil {
 		return "", terr
 	}
 	return out, nil
 }
 
-func (s *ShellTool) completedResult(id string, sandboxed bool) (string, *ToolError) {
+func (s *ShellTool) completedResult(id string) (string, *ToolError) {
 	s.inner.mu.Lock()
 	j, ok := s.inner.byID[id]
 	var snap job
@@ -187,7 +181,7 @@ func (s *ShellTool) completedResult(id string, sandboxed bool) (string, *ToolErr
 		outputFile = snap.log
 	}
 	raw = []byte(strings.ToValidUTF8(string(raw), "�"))
-	return finishSync(raw, truncated, outputFile, waitResult{code: snap.exitCode, signaled: snap.exitCode == nil}, sandboxed)
+	return finishSync(raw, truncated, outputFile, waitResult{code: snap.exitCode, signaled: snap.exitCode == nil})
 }
 
 func (s *ShellTool) runningResult(id, note string) (string, error) {
@@ -243,6 +237,15 @@ func yieldLabel() string {
 	}
 }
 
+// beforeJobRead is a test seam between a log's size check and its read.
+var beforeJobRead = func() {}
+
+// readUpTo reads at most limit bytes of r. Sizes come from an earlier
+// Stat, and a running command's log can outgrow them.
+func readUpTo(r io.Reader, limit int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, limit))
+}
+
 // readJobOutput reads at most max bytes of a command log: the whole
 // file when it fits, otherwise its start and end around the truncation
 // marker. The log itself keeps every byte.
@@ -256,15 +259,27 @@ func readJobOutput(path string, max int) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if st.Size() <= int64(max) {
-		data, err := io.ReadAll(f)
-		return data, false, err
+	size := st.Size()
+	beforeJobRead()
+	if size <= int64(max) {
+		// The job may still be writing: never read past the window.
+		data, err := readUpTo(f, int64(max)+1)
+		if err != nil || len(data) <= max {
+			return data, false, err
+		}
+		if st, err = f.Stat(); err != nil {
+			return nil, false, err
+		}
+		size = st.Size()
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, false, err
+		}
 	}
 	half := max / 2
 	head := make([]byte, half)
 	n, _ := io.ReadFull(f, head)
 	head = head[:n]
-	if _, err := f.Seek(st.Size()-int64(half), io.SeekStart); err != nil {
+	if _, err := f.Seek(size-int64(half), io.SeekStart); err != nil {
 		return nil, false, err
 	}
 	tail := make([]byte, half)
@@ -309,7 +324,7 @@ type waitResult struct {
 	signaled bool
 }
 
-func finishSync(output []byte, truncated bool, outputFile string, w waitResult, sandboxed bool) (string, *ToolError) {
+func finishSync(output []byte, truncated bool, outputFile string, w waitResult) (string, *ToolError) {
 	if w.signaled || w.code == nil {
 		return "", ArgsError("shell: the command exited with status 1")
 	}
@@ -334,9 +349,6 @@ func finishSync(output []byte, truncated bool, outputFile string, w waitResult, 
 	content, err := shellResponseJSON("", JobFailed, &codePtr, &outText, truncPtr, "", outputFile, "")
 	if err != nil {
 		return "", mustToolError(err)
-	}
-	if sandboxed && sandbox.LooksBlocked(text) {
-		content = markSandboxBlocked(content)
 	}
 	return "", WithContent(content, fmt.Sprintf("shell: the command exited with status %d", code))
 }
@@ -420,27 +432,29 @@ func (ShellTool) Definition() ToolDefinition {
 			"Pass the shell command in the command field. " +
 			"There is no workdir: every run starts in the workspace root, " +
 			"so cd inside the command when you need a subdirectory. " +
-			"A normal call waits up to a minute: a command that finishes sooner " +
+			"A normal call waits up to two minutes: a command that finishes sooner " +
 			"returns its output, and one that runs longer is moved to the background " +
 			"automatically and returns a job_id in running state. Nothing is killed. " +
 			"Start work you expect to be slow (a full test suite, a build, an install) " +
-			"with background true in the same call: it returns a job_id at once and " +
-			"reports when it finishes, so you never spend the wait. " +
-			"Status checks a job, wait blocks on one until it ends, cancel stops one. " +
-			"A job reports when it finishes and every five minutes while it runs; " +
-			"keep working and do not poll it with a sleep command. Every command writes its whole output " +
+			"with background true in the same call: it returns a job_id at once. " +
+			"A background job needs no polling and there is no wait action: you are woken when it finishes, " +
+			"with its exit code and output. While it runs you also get its last output lines once an hour if it keeps printing, " +
+			"and when it has printed nothing for 10 minutes and again at 30 minutes, so a stuck job shows itself. " +
+			"Neither of those stops it; decide then whether to cancel it or let it run. " +
+			"While a job runs, do other work that does not depend on it, or end your turn. " +
+			"Status checks without blocking whether a job is still running; its output so far is in the log file named in the answer. Cancel stops a job. " +
+			"Never poll with a sleep command. Every command writes its whole output " +
 			"to the log file named in the answer. " +
 			"When a command exits, any processes it left behind are terminated; " +
 			"start servers with background true rather than '&'.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "wait", "cancel"}, "description": "What to do: run a command, check a job, block until a job ends, or stop a job. Defaults to run."},
-				"job_id":     map[string]any{"type": "string", "description": "The job to check, wait for, or stop. Empty or missing for a new run."},
+				"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "cancel"}, "description": "What to do: run a command, check a job without blocking, or stop a job. Defaults to run."},
+				"job_id":     map[string]any{"type": "string", "description": "The job to check or stop. Empty or missing for a new run."},
 				"command":    map[string]any{"type": "string", "description": "The shell command to run. Required for action run. It starts in the session workspace; cd inside the command for a subdirectory."},
 				"background": map[string]any{"type": "boolean", "description": "When true the call returns at once with a running job_id. Defaults to false."},
-				"notify":     map[string]any{"type": "boolean", "description": "With background true, report the job's final state and output tail when it finishes. Defaults to true; pass false to start a job you do not want to hear about. Ignored without background."},
-				"seconds":    map[string]any{"type": "integer", "description": "With action wait, how long to block before answering, in seconds. Defaults to 60, maximum 300."},
+				"notify":     map[string]any{"type": "boolean", "description": "With background true, report the job's final state and output tail when it finishes, plus its hourly and silence notices. Defaults to true; pass false to start a job you do not want to hear about. Ignored without background."},
 			},
 		},
 	}
@@ -479,68 +493,25 @@ func (s *ShellTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 		}
 		if args.Background {
 			// Background runs detach; notify arming happens per-turn.
-			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, args.notifyWanted(), ctx.SessionDir, ctx.Sandbox)
+			return s.runBackground(cmd, dir, ctx.SessionID, ctx.CallID, args.notifyWanted(), ctx.SessionDir)
 		}
-		return s.runSync(cmd, dir, ctx.SessionID, ctx.CallID, ctx.Cancel, ctx.SessionDir, ctx.Sandbox)
+		return s.runSync(cmd, dir, ctx.SessionID, ctx.CallID, ctx.Cancel, ctx.SessionDir)
 	case ShellStatus:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
 		}
 		return s.status(args.JobID, ctx.SessionID)
-	case ShellWait:
-		return s.wait(args.JobID, args.Seconds, ctx.SessionID, ctx.Cancel)
+	case removedShellWait:
+		return "", ArgsError("shell: the wait action was removed. A job that outlives its foreground call reports to you " +
+			"when it finishes, and again if it prints nothing for a long time, so do not poll it. Keep working on " +
+			"something that does not depend on it, or end your turn: you are woken when it finishes. " +
+			"Use status to see whether it is still running (its output so far is in its log file), or cancel to stop it.")
 	case ShellCancel:
 		if strings.TrimSpace(args.JobID) == "" {
 			return "", ArgsError("shell: job_id is required for this action")
 		}
 		return s.cancel(args.JobID, ctx.SessionID)
 	default:
-		return "", ArgsError(fmt.Sprintf("shell: action must be one of run, status, wait or cancel, got %q", args.Action))
+		return "", ArgsError(fmt.Sprintf("shell: action must be one of run, status or cancel, got %q", args.Action))
 	}
-}
-
-// sandboxBlockedHint tells the model why a write failed under the sandbox.
-const sandboxBlockedHint = "the OS sandbox blocked a write outside the workspace; the user was asked whether to rerun it unsandboxed"
-
-// markSandboxBlocked flags a failed result so the agent can offer to
-// rerun the command outside the sandbox.
-func markSandboxBlocked(content string) string {
-	var m map[string]any
-	if json.Unmarshal([]byte(content), &m) != nil {
-		return content
-	}
-	m["sandbox_blocked"] = true
-	m["hint"] = sandboxBlockedHint
-	b, err := json.Marshal(m)
-	if err != nil {
-		return content
-	}
-	return string(b)
-}
-
-// SandboxBlocked reports whether a shell result was flagged by
-// markSandboxBlocked, and the command's output.
-func SandboxBlocked(content string) (output string, blocked bool) {
-	var m struct {
-		Blocked bool   `json:"sandbox_blocked"`
-		Output  string `json:"output"`
-	}
-	if json.Unmarshal([]byte(content), &m) != nil || !m.Blocked {
-		return "", false
-	}
-	return m.Output, true
-}
-
-// confine rewrites cmd to run inside the sandbox policy (nil: as is).
-func confine(cmd *exec.Cmd, sb *sandbox.Policy) error {
-	if sb == nil || sb.Mode == sandbox.ModeNone {
-		return nil
-	}
-	inner := append([]string{cmd.Path}, cmd.Args[1:]...)
-	argv, err := sandbox.Wrap(*sb, inner)
-	if err != nil {
-		return err
-	}
-	cmd.Path, cmd.Args = argv[0], argv
-	return nil
 }

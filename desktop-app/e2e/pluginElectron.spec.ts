@@ -19,6 +19,7 @@ test("real plugin panels and overlays use the restricted bridge", async ({ brows
   fs.mkdirSync(path.join(plugin, "ui"), { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
   fs.writeFileSync(path.join(workspace, "sample.txt"), "local sample");
+  fs.writeFileSync(path.join(workspace, ".env"), "TOKEN=hunter2");
   fs.writeFileSync(path.join(root, "outside"), "private");
   fs.writeFileSync(path.join(data, "config", "extensions.json"), JSON.stringify({ enabled: ["probe"] }));
   fs.writeFileSync(path.join(plugin, "package.json"), JSON.stringify({ type: "module" }));
@@ -109,6 +110,16 @@ test("real plugin panels and overlays use the restricted bridge", async ({ brows
       .evaluate(async () => (window as any).paladin.plugins.readFile("../outside"));
     expect(denied.ok).toBe(false);
     expect(denied.error).toContain("outside the workspace");
+    const secret = await panel.locator("body").evaluate(async () => (window as any).paladin.plugins.readFile(".env"));
+    expect(secret.ok).toBe(false);
+    expect(JSON.stringify(secret)).not.toContain("hunter2");
+    const huge = await panel
+      .locator("body")
+      .evaluate(async () =>
+        (window as any).paladin.plugins.invokeTool("extension__probe__echo", { value: "x".repeat(300_000) }),
+      );
+    expect(huge.ok).toBe(false);
+    expect(huge.error).toContain("too large");
     const cross = await panel
       .locator("body")
       .evaluate(async () => (window as any).paladin.plugins.invokeTool("extension__other__echo", {}));

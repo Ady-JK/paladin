@@ -26,10 +26,10 @@ func budgetChunks(chunks []ChatChunk) []BudgetNotice {
 
 func TestBudgetReachedWrapsUpWithoutTools(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{
-		costly(callRound("c1", "read", `{"path":"/nope"}`), 0.6),
+		costly(callRound("c1", "read", `{"reason":"test","path":"/nope"}`), 0.6),
 		{chunks: []inference.Chunk{
 			inference.TextChunk("done: read; left: tests"),
-			{ToolCalls: []inference.ToolCall{{ID: "c2", Name: "read", Arguments: `{"path":"/nope"}`}}},
+			{ToolCalls: []inference.ToolCall{{ID: "c2", Name: "read", Arguments: `{"reason":"test","path":"/nope"}`}}},
 		}},
 	}}
 	a, sess, tx, done := testAgent(t, prov)
@@ -86,8 +86,8 @@ func TestBudgetAlreadySpentEndsTurnWithoutCallingModel(t *testing.T) {
 func TestBudgetWarnsOnceWhenCostIsUnknown(t *testing.T) {
 	noCost := inference.Chunk{Usage: &inference.Usage{TotalTokens: 10}}
 	prov := &mockProvider{streams: []streamScript{
-		{chunks: append(callRound("c1", "read", `{"path":"/nope"}`).chunks, noCost)},
-		{chunks: append(callRound("c2", "read", `{"path":"/nope2"}`).chunks, noCost)},
+		{chunks: append(callRound("c1", "read", `{"reason":"test","path":"/nope"}`).chunks, noCost)},
+		{chunks: append(callRound("c2", "read", `{"reason":"test","path":"/nope2"}`).chunks, noCost)},
 		{chunks: []inference.Chunk{inference.TextChunk("ok"), noCost}},
 	}}
 	a, _, tx, done := testAgent(t, prov)
@@ -108,7 +108,7 @@ func TestBudgetWarnsOnceWhenCostIsUnknown(t *testing.T) {
 func TestBudgetWrapUpLeavesSteeringForLater(t *testing.T) {
 	inbox := &steerInbox{}
 	prov := &mockProvider{streams: []streamScript{
-		costly(callRound("c1", "read", `{"path":"/nope"}`), 1),
+		costly(callRound("c1", "read", `{"reason":"test","path":"/nope"}`), 1),
 		{chunks: []inference.Chunk{inference.TextChunk("summary")}},
 	}}
 	prov.afterChunks = func(idx int) {
@@ -128,7 +128,7 @@ func TestBudgetWrapUpLeavesSteeringForLater(t *testing.T) {
 
 func TestNoBudgetMeansNoNotices(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{
-		costly(callRound("c1", "read", `{"path":"/nope"}`), 5),
+		costly(callRound("c1", "read", `{"reason":"test","path":"/nope"}`), 5),
 		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
 	}}
 	a, _, tx, done := testAgent(t, prov)
@@ -143,7 +143,7 @@ func TestNoBudgetMeansNoNotices(t *testing.T) {
 
 func TestBudgetWarnsWhenTheLedgerWasRecovered(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{
-		costly(callRound("c1", "read", `{"path":"/nope"}`), 0.1),
+		costly(callRound("c1", "read", `{"reason":"test","path":"/nope"}`), 0.1),
 		costly(streamScript{chunks: []inference.Chunk{inference.TextChunk("ok")}}, 0.1),
 	}}
 	a, sess, tx, done := testAgent(t, prov)

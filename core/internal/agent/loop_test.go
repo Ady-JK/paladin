@@ -163,7 +163,7 @@ func TestRunToolRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	prov := &mockProvider{streams: []streamScript{
-		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path": "` + wsFile + `"}`}}}}},
+		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "read", Arguments: `{"reason":"test","path": "` + wsFile + `"}`}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("saw it")}},
 	}}
 	sess := testSession(t, "00000000-0000-4000-8000-000000000002")
@@ -208,7 +208,7 @@ func TestRunUsesStableSessionIDAcrossRounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	prov := &mockProvider{streams: []streamScript{
-		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path": "` + wsFile + `"}`}}}}},
+		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "read", Arguments: `{"reason":"test","path": "` + wsFile + `"}`}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
 	const sid = "00000000-0000-4000-8000-0000000000aa"
@@ -274,7 +274,7 @@ func TestLoopHasNoRoundCap(t *testing.T) {
 	const rounds = 150
 	var streams []streamScript
 	for i := 0; i < rounds; i++ {
-		args := fmt.Sprintf(`{"path":"f%d.txt"}`, i)
+		args := fmt.Sprintf(`{"reason":"test","path":"f%d.txt"}`, i)
 		streams = append(streams, streamScript{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: fmt.Sprintf("c%d", i), Name: "read", Arguments: args}}}}})
 	}
 	streams = append(streams, streamScript{chunks: []inference.Chunk{inference.TextChunk("all done")}})
@@ -348,16 +348,22 @@ func TestRunBackgroundNotifyRoundTrip(t *testing.T) {
 	// This test exercises job notification, not the user's shell startup files.
 	t.Setenv("SHELL", "/bin/sh")
 	sess := testSession(t, "00000000-0000-4000-8000-000000000005")
-	callArgs := `{"cmd":"echo notify-bg","background":true,"notify":true}`
+	callArgs := `{"reason":"test","cmd":"echo notify-bg","background":true,"notify":true}`
 	prov := &mockProvider{streams: []streamScript{
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "shell", Arguments: callArgs}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("after")}},
 	}}
-	// The completion notice is delivered at the end of the round after
-	// the job finishes; give the short echo command time to exit.
+	// The completion notice is delivered at the end of the round after the
+	// job finishes, so wait for the echo to exit rather than guess how long a
+	// shell takes to start on a loaded machine.
+	var a *Agent
 	prov.afterChunks = func(idx int) {
-		if idx == 1 {
-			time.Sleep(150 * time.Millisecond)
+		if idx != 1 {
+			return
+		}
+		deadline := time.Now().Add(30 * time.Second)
+		for len(a.shell.RunningJobs()) > 0 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	a, tx, done := newAgentForTest(t, prov, sess, "run bg", false, true)
@@ -410,7 +416,7 @@ func TestTurnStatsTimesModelCallsOnly(t *testing.T) {
 	prov := &mockProvider{
 		streams: []streamScript{
 			{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
-				{ID: "c1", Name: "shell", Arguments: `{"cmd":"echo slow"}`}}}}},
+				{ID: "c1", Name: "shell", Arguments: `{"reason":"test","cmd":"echo slow"}`}}}}},
 			{chunks: []inference.Chunk{inference.TextChunk("done")}},
 		},
 		afterChunks: func(idx int) {

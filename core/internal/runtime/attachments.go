@@ -12,7 +12,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/media"
+	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
 // Base64 plus JSON must stay below both the host scanner and desktop
@@ -90,7 +92,7 @@ func (r *AgentRuntime) SaveAttachment(sessionID, cwd, name, encoded string) (*me
 		_ = os.Remove(path)
 		return nil, err
 	}
-	if err := os.WriteFile(path+".json", metadata, 0600); err != nil {
+	if err := atomicfile.Write(path+".json", metadata); err != nil {
 		_ = os.Remove(path)
 		return nil, err
 	}
@@ -169,11 +171,25 @@ func (r *AgentRuntime) SessionImage(sessionID, cwd, path string) (string, error)
 	if err != nil || realRel == ".." || strings.HasPrefix(realRel, ".."+string(filepath.Separator)) || filepath.IsAbs(realRel) {
 		return "", fmt.Errorf("image is outside session")
 	}
-	// Only paths already recorded in this session's transcript are readable.
-	msgs, err := sess.History()
+	// A running or queued turn may not have landed in the transcript yet.
+	// Its attachments were validated when submitted, so they are also safe
+	// to read for this session while the turn is active.
+	for _, turn := range r.hub.List() {
+		if turn.SessionID != sessionID {
+			continue
+		}
+		for _, attachment := range turn.Attachments {
+			if attachment.Image != nil && attachment.Image.Path == path {
+				return attachment.Image.DataURL()
+			}
+		}
+	}
+	// Otherwise, only paths recorded in this session's transcript are readable.
+	turns, err := r.historyCache.read(sess)
 	if err != nil {
 		return "", err
 	}
+	msgs, _ := transcript.Flatten(turns)
 	for _, msg := range msgs {
 		if msg.Image != nil && msg.Image.Path == path {
 			return msg.Image.DataURL()

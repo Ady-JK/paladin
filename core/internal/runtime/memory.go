@@ -50,10 +50,6 @@ func (s runtimeSections) SystemSections(sess transcript.Session) []string {
 	out = append(out, mcpSection(s.r.mcp, sess.Meta.ProjectCwd()))
 	if s.r.memory != nil {
 		out = append(out, s.r.memory.SessionSnapshot(sess.Dir, sess.Meta.ProjectCwd()))
-		// Turn-count staleness: after enough turns with no memory write,
-		// one short reminder joins the prompt. It is empty (and the
-		// prompt unchanged) on every other turn.
-		out = append(out, s.r.memory.DueForNudge(sess.Dir))
 	}
 	if wt := sess.Meta.Worktree; wt != nil {
 		out = append(out, worktreeSection(wt))

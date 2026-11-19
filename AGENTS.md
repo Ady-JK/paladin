@@ -1,10 +1,10 @@
 # AGENTS.md
 
 Paladin is an AI coding agent desktop app: a Go core (the "agent-host" sidecar) that
-runs agent turns, tools, MCP servers and sandboxing, plus an Electron desktop UI. The
+runs agent turns, tools, MCP servers and permissions, plus an Electron desktop UI. The
 two halves talk over **one JSON object per line** on stdio — no HTTP, no SSE, no
-WebSocket. `HOW-IT-WORKS.md` is the full architecture doc (830 lines, accurate and
-worth reading before large changes); `desktop-app/PROTOCOL.md` is the wire spec.
+WebSocket. `README.md`, `core/README.md` and `desktop-app/README.md` describe the architecture;
+`desktop-app/PROTOCOL.md` is the wire spec.
 
 ## Layout
 
@@ -15,15 +15,17 @@ worth reading before large changes); `desktop-app/PROTOCOL.md` is the wire spec.
 | `core/internal/runtime/` | Turn hub (scheduling), sessions, subagents, MCP wiring, undo, worktrees |
 | `core/internal/tools/` | Built-in tools (`read/write/edit/shell/grep/glob/list/ask/browser/web_fetch/visual/todo`) |
 | `core/internal/inference/` | Model providers and streaming |
-| `core/internal/permission/`, `sandbox/`, `redact/` | Approval gate, OS sandbox, stored-key masking |
+| `core/internal/permission/`, `redact/` | Tool-level permission gate and stored-key masking |
 | `core/internal/transcript/`, `session/`, `memory/`, `atomicfile/` | Persistence |
 | `core/internal/{hooks,lsp,mcp,skills,extension,commands,prompt}/` | Plug-in surfaces |
+| `core/internal/harness/`, `core/internal/codex/` | External coding agents: the adapter contract and the Codex adapter (`harness/codexadapter`, pure translation), and Codex's app-server client |
+| `desktop-app/src/adapters/` | Agent UI: the shared question card and one folder per agent (`codex/`); see `docs/AGENT-ADAPTERS.md` |
 | `desktop-app/electron/` | Electron main + preload: spawns the sidecar, IPC bridge, `WebContentsView`s (web tabs + local browser), sandboxed `plugin://` host |
 | `desktop-app/src/core/` | `api.ts` (the single bridge seam), `state.ts`, `dom.ts`, `format.ts`, `types.ts` |
 | `desktop-app/src/features/` | 50 feature modules, one concern each (`chat`, `live`, `turnView`, `sessions`, `sidePane`, `web`, `pluginPanels`, …) |
 | `desktop-app/src/styles/` | Tailwind v4 theme (`base.css`) + one sheet per feature |
 | `desktop-app/e2e/` | 60 Playwright specs + `paladin-stub.js` (a fake `window.paladin`) |
-| `docs/PLUGIN-UI.md` | Plugin panel/card guide; `HOW-IT-WORKS.md` and `desktop-app/PROTOCOL.md` are the architecture and wire specs |
+| `docs/PLUGIN-UI.md` | Plugin panel/card guide; the READMEs describe the architecture; `desktop-app/PROTOCOL.md` is the wire spec |
 | `core/bin/`, `desktop-app/{dist,dist-electron,release}/` | Build output — never committed |
 
 No CI config exists in the repo; `make test` and `make lint` are the only gates.
@@ -130,7 +132,12 @@ hidden; closing the tab (or reloading the renderer) destroys the view. `views:st
 feeds the live page title, address bar and back/forward buttons. The agent's **local
 browser** is a separate `browser` tab with an empty per-session in-memory profile, the
 element picker and pass-to-agent. Conversation `https` links open web tabs; localhost
-links open the local browser. Plugin panels and tool-result cards are sandboxed
+links open the local browser. The local browser has no remote-debugging port: Playwright's
+`connectOverCDP(transport)` talks to `electron/cdpBridge.ts`, which forwards CDP to each
+agent-browser page's `webContents.debugger` and answers the browser-level calls itself.
+Only registered agent-browser pages exist for it; never re-add `remote-debugging-port`
+(it would expose the privileged main window to any local process). `make app-dev` users
+can check it with `electron . --smoke-browser`. Plugin panels and tool-result cards are sandboxed
 `plugin://` iframes, not `WebContentsView`s.
 
 **Styling.** Tailwind v4 with CSS-first `@theme` tokens in `src/styles/base.css`. New
@@ -175,12 +182,15 @@ serial. Playwright specs drive the real renderer with the fake bridge from
   `invokeTool` calls go through the normal permission gate, and the approval card is
   rendered by the host, never by the plugin.
 - **Agent shell commands run as jobs.** Each command streams its output to `<session>/tmp/<job>.log`;
-  a foreground call waits 60 s and then hands a still-running command to the background with a job id.
-  `action: "wait"` blocks on that job (60 s default, 300 s cap) — a `sleep` poll would itself become a
-  second job. Nothing is killed on a timer — only `cancel` (or the user, from the running-jobs panel) stops one.
-  Every answer that reports a command still running (a foreground yield and a timed-out wait) carries `output`
-  with the last 5 lines of the log, so the model can tell a working command from a stuck one without spending
-  another wait; it is a bounded read of the log's tail, not the whole file. A `status` check returns no output.
+  a foreground call waits 120 s and then hands a still-running command to the background with a job id.
+  There is no `wait` action (it was removed because the model re-waited in a loop, one LLM call per round):
+  an auto-backgrounded or `background: true` job reports its completion and wakes an idle session, and while
+  it runs `core/internal/runtime/jobs.go` samples the log size every 30 s with no model call. It adds a notice
+  with the last 5 log lines (`last_output`) only for a reason: hourly while the log grows (`job_progress`),
+  after 10 min of silence (`job_stalled`), and after 30 min (`job_stuck`, the last until it prints again).
+  Nothing is killed on a timer or on silence — only `cancel` (or the user, from the running-jobs panel) stops one.
+  The foreground yield answer carries `output` with the last 5 lines of the log, so the model can tell a
+  working command from a stuck one; it is a bounded read of the log's tail, not the whole file. A `status` check returns no output.
   When a command exits, any processes it left in its process group are killed, and on Linux every child
   carries `Pdeathsig=SIGKILL` (hooks, MCP and LSP servers too). Starting a server with `&` no longer
   survives the call — use `background: true`. Commands run at the same CPU priority as the user's
@@ -188,12 +198,13 @@ serial. Playwright specs drive the real renderer with the fake bridge from
   samples, not `ps`'s lifetime average.
 - **Port 5173 is fixed** (`strictPort` in `vite.config.ts` and the Playwright `webServer`).
   Vite fails rather than picking another port.
-- **Only the OpenAI-compatible dialect is implemented.** `ApiTypeAnthropic` and
-  `ApiTypeGoogle` exist as constants (`core/internal/config/config.go`) but are not wired;
-  OpenCode-gateway models route through extra dialects in `core/internal/inference/opencode.go`.
-- **Sandboxing is OS-specific**: macOS Seatbelt, Linux Landlock via a re-exec helper
-  (`PALADIN_SANDBOX_HELPER`), and nothing elsewhere — other platforms rely on approvals only
-  (`core/internal/sandbox/sandbox.go`).
+- **Provider dialects:** standalone `ApiTypeAnthropic` and `ApiTypeGoogle` templates return
+  an unimplemented error. Provider-specific routing can use Responses, Anthropic Messages
+  and Google wire implementations; see `core/internal/inference/`.
+- **Tool permissions**: native execution has no OS sandbox. Session presets are Read-Only
+  (blocks modifying tools/commands) and Full Access (ordinary user privileges, explicit deny
+  rules still apply). Legacy Auto selections migrate to Read-Only. External agents retain
+  their own managed execution policy. Browser and plugin isolation remain separate.
 - **Never commit** `core/bin/`, `core/agent-host`, `desktop-app/{node_modules,dist,dist-electron,release}/`,
   `test-results/`, `playwright-report/`, `.vite/`, or `tmp/`. Root `.gitignore` covers `core/bin/`,
   `tmp/`, `.idea/`; `desktop-app/.gitignore` covers the rest.

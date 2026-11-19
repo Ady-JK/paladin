@@ -1,5 +1,4 @@
 import { errorText } from "./utils";
-import { renderDiff } from "./diffView";
 import * as api from "../../core/api";
 import { escapeAttr, escapeHtml } from "../../core/format";
 import type { SessionChanges } from "../../core/types";
@@ -95,11 +94,12 @@ export async function loadChangeDiff(tab: ChangesTab, path: string): Promise<voi
   try {
     const diff = await api.sessionDiff(tab.sessionId, null, tab.turn, path);
     if (request !== tab.request || tab.selected !== path) return;
-    preview.replaceChildren();
     if (!diff.patch) {
       preview.textContent = "No text diff available for this file.";
       return;
     }
+    const { renderDiff } = await import("./diffView");
+    if (request !== tab.request || tab.selected !== path) return;
     const mark = tab.mark?.path === path ? tab.mark : null;
     preview.innerHTML = renderDiff(diff.patch, path, mark, diff.truncated);
     Array.from(preview.querySelectorAll<HTMLElement>(".change-mark"))

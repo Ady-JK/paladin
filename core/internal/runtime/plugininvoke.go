@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/permission"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
@@ -104,20 +103,22 @@ func (r *AgentRuntime) PluginInvoke(sessionID, cwd, plugin, view, name string, a
 		return PluginToolResult{}, fmt.Errorf("unknown tool %q", name)
 	}
 
+	if registry.TakesReason(name) {
+		args = tools.WithDefaultReason(args, fmt.Sprintf("Plugin %s (%s panel) called %s", plugin, view, name))
+	}
 	call := &tools.ToolCall{ID: fmt.Sprintf("plugin-%d", time.Now().UnixNano()), Name: name, Arguments: string(args)}
 	preparedName, prepared, ok := registry.Prepare(call)
 	if !ok {
 		preparedName, prepared = name, args
 	}
 	gate := &permission.Gate{
-		Preset:      permission.Auto,
-		Workspace:   workspace,
-		SessionID:   sessionID,
-		Store:       r.perms,
-		Broker:      r.broker,
-		SandboxKind: sandbox.Kind(),
-		MCP:         registry.MCPInfo,
-		Extension:   extensionRef(registry),
+		Preset:    permission.Review,
+		Workspace: workspace,
+		SessionID: sessionID,
+		Store:     r.perms,
+		Broker:    r.broker,
+		MCP:       registry.MCPInfo,
+		Extension: extensionRef(registry),
 	}
 	auth := gate.Authorize(ctx, call.ID, preparedName, prepared, func(ap permission.Approval) {
 		r.emitPlugin(PluginEvent{Event: "plugin/approval", SessionID: sessionID, Approval: &ap})
@@ -131,7 +132,6 @@ func (r *AgentRuntime) PluginInvoke(sessionID, cwd, plugin, view, name string, a
 		SessionDir: sessionDir,
 		SessionID:  sessionID,
 		Cancel:     ctx,
-		Sandbox:    auth.Sandbox,
 	})
 	return PluginToolResult{Content: result.Content, IsError: result.IsError}, nil
 }

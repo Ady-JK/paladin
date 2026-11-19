@@ -1,14 +1,25 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 )
 
 func TestStdioApprovalFlow(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "inspect.txt")
+	if err := os.WriteFile(target, []byte("approval test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	toolArgs, err := json.Marshal(map[string]string{"reason": "test", "path": target})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var mu sync.Mutex
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -18,7 +29,7 @@ func TestStdioApprovalFlow(t *testing.T) {
 		n++
 		mu.Unlock()
 		if i == 0 {
-			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"shell","arguments":"{\"cmd\":\"make -v >/dev/null 2>&1; echo ran\"}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
+			fmt.Fprintf(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read","arguments":%q}}]}}]}`+"\n\ndata: [DONE]\n\n", string(toolArgs))
 			return
 		}
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
@@ -38,7 +49,7 @@ func TestStdioApprovalFlow(t *testing.T) {
 	h.call("submitChat", map[string]any{"sessionId": sid, "message": "go", "cwd": cwd})
 	ev := h.event("chat/approval", sid, nil)
 	ap := ev["approval"].(map[string]any)
-	if ap["id"] != "c1" || ap["state"] != "pending" || ap["command"] == "" {
+	if ap["id"] != "c1" || ap["state"] != "pending" || ap["path"] != target {
 		t.Fatalf("approval %v", ap)
 	}
 	att := h.call("attach", map[string]any{"sessionId": sid})["result"].(map[string]any)
@@ -61,7 +72,7 @@ func TestStdioApprovalFlow(t *testing.T) {
 	if folder := view["folder"].([]any); len(folder) != 0 {
 		t.Fatalf("folder rules not cleared: %v", view)
 	}
-	if _, ok := view["sandbox"].(map[string]any)["kind"]; !ok {
-		t.Fatalf("sandbox kind missing: %v", view)
+	if _, ok := view["sandbox"]; ok {
+		t.Fatalf("obsolete sandbox field present: %v", view)
 	}
 }

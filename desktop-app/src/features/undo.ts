@@ -29,6 +29,12 @@ async function reload(sessionId: string): Promise<void> {
   void refreshSessions();
 }
 
+// hideRecovery drops the bar: recovery only lasts until the user sends
+// their next message after an undo (the core discards the snapshot then).
+export function hideRecovery(): void {
+  recoveryBar.hidden = true;
+}
+
 export async function refreshRecovery(sessionId: string): Promise<void> {
   recoveryBar.hidden = true;
   if (!sessionId) return;

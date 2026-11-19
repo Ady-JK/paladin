@@ -21,7 +21,7 @@ func nestedOf(t *testing.T, content string) string {
 
 func callRead(t *testing.T, r *Registry, ctx *ToolCtx, path string) ToolResult {
 	t.Helper()
-	raw, _ := json.Marshal(map[string]string{"path": path})
+	raw, _ := json.Marshal(map[string]string{"reason": "test", "path": path})
 	res := r.Call(&ToolCall{ID: "r", Name: "read", Arguments: string(raw)}, ctx)
 	if res.IsError {
 		t.Fatalf("read %s: %s", path, res.Content)
@@ -82,11 +82,11 @@ func TestNestedInstructionsSkipOutsideAndFailedCalls(t *testing.T) {
 	if got := nestedOf(t, callRead(t, r, ctx, filepath.Join(outside, "sub", "x.go")).Content); got != "" {
 		t.Fatalf("outside the workspace: %q", got)
 	}
-	res := r.Call(&ToolCall{ID: "e", Name: "read", Arguments: `{"path":"` + filepath.Join(ws, "pkg", "missing.go") + `"}`}, ctx)
+	res := r.Call(&ToolCall{ID: "e", Name: "read", Arguments: `{"reason":"test","path":"` + filepath.Join(ws, "pkg", "missing.go") + `"}`}, ctx)
 	if !res.IsError || strings.Contains(res.Content, "pkg rules") {
 		t.Fatalf("a failed call attaches nothing: %+v", res)
 	}
-	raw, _ := json.Marshal(map[string]any{"path": filepath.Join(ws, "pkg", "new.go"), "content": "package pkg\n"})
+	raw, _ := json.Marshal(map[string]any{"reason": "test", "path": filepath.Join(ws, "pkg", "new.go"), "content": "package pkg\n"})
 	res = r.Call(&ToolCall{ID: "w", Name: "write", Arguments: string(raw)}, ctx)
 	if res.IsError || !strings.Contains(nestedOf(t, res.Content), "pkg rules") {
 		t.Fatalf("write into a new folder attaches its rules: %+v", res)
@@ -114,7 +114,7 @@ func TestFirstMutationIntoASubfolderIsHeldWithItsInstructions(t *testing.T) {
 	writeTree(t, ws, map[string]string{"pkg/AGENTS.md": "pkg rules", "pkg/old.go": "package pkg\n"})
 	r := BuiltinRegistry()
 	target := filepath.Join(ws, "pkg", "new.go")
-	raw, _ := json.Marshal(map[string]any{"path": target, "content": "package pkg\n"})
+	raw, _ := json.Marshal(map[string]any{"reason": "test", "path": target, "content": "package pkg\n"})
 	call := &ToolCall{ID: "w1", Name: "write", Arguments: string(raw)}
 	held, ok := r.HoldForInstructions(call, ctx)
 	if !ok || !held.IsError || !strings.Contains(nestedOf(t, held.Content), "pkg rules") || !strings.Contains(held.Content, "resend") {
@@ -130,16 +130,16 @@ func TestFirstMutationIntoASubfolderIsHeldWithItsInstructions(t *testing.T) {
 	if res.IsError || nestedOf(t, res.Content) != "" {
 		t.Fatalf("the resent write runs without repeating them: %+v", res)
 	}
-	edit, _ := json.Marshal(map[string]any{"path": filepath.Join(ws, "pkg", "old.go"), "old_string": "pkg", "new_string": "pkg2"})
+	edit, _ := json.Marshal(map[string]any{"reason": "test", "path": filepath.Join(ws, "pkg", "old.go"), "old_string": "pkg", "new_string": "pkg2"})
 	if _, held := r.HoldForInstructions(&ToolCall{ID: "e", Name: "edit", Arguments: string(edit)}, ctx); held {
 		t.Fatal("seen folders are not held again")
 	}
 	// Reads, outside paths and folders without instructions run at once.
 	writeTree(t, ws, map[string]string{"lib/AGENTS.md": "lib rules", "plain/x.go": "package plain\n"})
 	for _, c := range []*ToolCall{
-		{Name: "read", Arguments: `{"path":"` + filepath.Join(ws, "lib", "AGENTS.md") + `"}`},
-		{Name: "write", Arguments: `{"path":"` + filepath.Join(ws, "plain", "y.go") + `","content":"x"}`},
-		{Name: "write", Arguments: `{"path":"` + filepath.Join(t.TempDir(), "sub", "z.go") + `","content":"x"}`},
+		{Name: "read", Arguments: `{"reason":"test","path":"` + filepath.Join(ws, "lib", "AGENTS.md") + `"}`},
+		{Name: "write", Arguments: `{"reason":"test","path":"` + filepath.Join(ws, "plain", "y.go") + `","content":"x"}`},
+		{Name: "write", Arguments: `{"reason":"test","path":"` + filepath.Join(t.TempDir(), "sub", "z.go") + `","content":"x"}`},
 	} {
 		if _, held := r.HoldForInstructions(c, ctx); held {
 			t.Fatalf("held %s %s", c.Name, c.Arguments)
@@ -212,7 +212,7 @@ func TestInstructionsOverTheBudgetHoldUntilRead(t *testing.T) {
 }
 
 func heldWrite(path string) *ToolCall {
-	raw, _ := json.Marshal(map[string]any{"path": path, "content": "package x\n"})
+	raw, _ := json.Marshal(map[string]any{"reason": "test", "path": path, "content": "package x\n"})
 	return &ToolCall{ID: "w", Name: "write", Arguments: string(raw)}
 }
 

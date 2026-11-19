@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -49,10 +50,14 @@ func logf(format string, args ...any) {
 func initLogging(dataDir string) {
 	dataRoot = dataDir
 	logsDir := filepath.Join(dataDir, "logs")
-	_ = os.MkdirAll(logsDir, 0o755)
-	f, err := os.OpenFile(filepath.Join(logsDir, "paladin.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	_ = os.MkdirAll(logsDir, 0o700)
+	f, err := os.OpenFile(filepath.Join(logsDir, "paladin.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		f = nil
 	}
 	logger = &logWriter{file: f}
+	// The runtime and packages below it log through the standard library;
+	// route that into the same timestamped, redacted, file-backed writer.
+	log.SetFlags(0)
+	log.SetOutput(logger)
 }

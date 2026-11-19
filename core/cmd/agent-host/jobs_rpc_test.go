@@ -20,7 +20,7 @@ func TestStdioRunningJobsAndKill(t *testing.T) {
 		n++
 		mu.Unlock()
 		if i == 0 {
-			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"shell","arguments":"{\"cmd\":\"sleep 30\",\"background\":true}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
+			fmt.Fprint(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"shell","arguments":"{\"reason\":\"test\",\"cmd\":\"sleep 30\",\"background\":true}"}}]}}]}`+"\n\ndata: [DONE]\n\n")
 			return
 		}
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")

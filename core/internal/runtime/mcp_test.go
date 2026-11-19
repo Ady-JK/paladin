@@ -116,7 +116,7 @@ func TestTurnUsesMCPTools(t *testing.T) {
 	}
 }
 
-func TestMCPToolNeedsApproval(t *testing.T) {
+func TestReadOnlyBlocksMCPWithoutApproval(t *testing.T) {
 	model := newToolModel(t, [2]string{"mcp__dummy__slow", `{"ms":1}`})
 	rt, _, _ := mcpRuntime(t, model.srv.URL)
 	if _, err := rt.MCPSetConfig(mcp.ScopeGlobal, "", dummyConfig(t)); err != nil {
@@ -124,29 +124,14 @@ func TestMCPToolNeedsApproval(t *testing.T) {
 	}
 	ws := t.TempDir()
 	sess, _ := rt.OpenSession("", ws)
-	done := make(chan agent.ChatOutcome, 1)
-	go func() {
-		o, _ := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: ws})
-		done <- o
-	}()
-	waitApproval(t, rt, sess.SessionID, "c0")
-	if _, err := rt.AnswerApproval(sess.SessionID, "c0", "folder"); err != nil {
-		t.Fatal(err)
+	_, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: ws, Permissions: "read-only"})
+	if !strings.Contains(model.body(1), "read-only") {
+		t.Fatal("read-only refusal missing from tool result")
 	}
-	select {
-	case o := <-done:
-		if o.Reply != "finished" {
-			t.Fatalf("%+v", o)
+	for _, chunk := range chunks {
+		if chunk.Approval != nil {
+			t.Fatal("read-only must refuse MCP without prompting")
 		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("turn never finished")
-	}
-	if !strings.Contains(model.body(1), "slept") {
-		t.Fatalf("slow result missing: %s", model.body(1))
-	}
-	rules, _ := rt.perms.Rules("folder", ws, sess.SessionID)
-	if len(rules) != 1 || rules[0].Pattern != "dummy/slow" || rules[0].Tool != "mcp" {
-		t.Fatalf("rules %+v", rules)
 	}
 }
 

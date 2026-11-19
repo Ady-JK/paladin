@@ -164,7 +164,7 @@ func TestTodoInvalidInput(t *testing.T) {
 	// (Registry-level JSON errors are generic and carry no todo: prefix.)
 	r := NewRegistry()
 	r.Register(TodoTool{})
-	res := r.Call(&ToolCall{ID: "1", Name: "todo", Arguments: `{"todos":`}, ctx)
+	res := r.Call(&ToolCall{ID: "1", Name: "todo", Arguments: `{"reason":"test","todos":`}, ctx)
 	if !res.IsError || !strings.Contains(res.Content, "valid JSON") {
 		t.Fatalf("got %+v", res)
 	}
@@ -180,7 +180,7 @@ func TestTodoPersistsAcrossRegistries(t *testing.T) {
 
 	// Turn one, through one registry instance: create the list.
 	regA := BuiltinRegistry()
-	res := regA.Call(&ToolCall{ID: "1", Name: "todo", Arguments: `{"todos":[
+	res := regA.Call(&ToolCall{ID: "1", Name: "todo", Arguments: `{"reason":"test","todos":[
 		{"content":"One","status":"in_progress"},
 		{"content":"Two","status":"not_started"}]}`}, ctx)
 	if res.IsError {
@@ -193,7 +193,7 @@ func TestTodoPersistsAcrossRegistries(t *testing.T) {
 	if _, ok := regB.Get("todo"); !ok {
 		t.Fatal("todo missing from builtin registry")
 	}
-	res = regB.Call(&ToolCall{ID: "2", Name: "todo", Arguments: `{}`}, ctx)
+	res = regB.Call(&ToolCall{ID: "2", Name: "todo", Arguments: `{"reason":"test"}`}, ctx)
 	if res.IsError {
 		t.Fatalf("read: %s", res.Content)
 	}

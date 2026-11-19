@@ -16,7 +16,7 @@ function ensureChip(): HTMLElement {
   el.id = "modeChip";
   el.className = "mode-chip hidden";
   el.innerHTML =
-    `<span class="mode-chip-label" title="Plan mode: read-only — the agent explores and proposes a plan (Shift+Tab to toggle)">` +
+    `<span class="mode-chip-label" title="Plan mode: the agent explores and proposes a plan (Shift+Tab to toggle)">` +
     `${icon("sl-plan", "h-3.5 w-3.5")}<span>Plan</span></span>` +
     `<button type="button" id="modeImplementBtn" class="mode-chip-go" title="Switch to build mode and implement the plan">Implement</button>` +
     `<button type="button" class="mode-chip-x" aria-label="Leave plan mode" title="Leave plan mode">${icon("xmark", "h-3 w-3")}</button>`;

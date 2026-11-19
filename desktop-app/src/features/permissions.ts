@@ -1,5 +1,5 @@
 // permissions.ts owns the composer's permission preset chip (per
-// session, Codex-style: Read-only / Auto / Full access) and the
+// session, Codex-style: Read-only / Full access) and the
 // Settings → Permissions pane where saved approval rules are edited.
 
 import * as api from "../core/api";
@@ -14,22 +14,44 @@ import { loadText, saveText } from "../core/storage";
 
 const DEFAULT_KEY = "paladin.permissions.default";
 const SESSION_KEY = "paladin.permissions.session.";
-const PRESETS: PermissionPreset[] = ["read-only", "auto", "full-access"];
+const PRESETS: PermissionPreset[] = ["read-only", "full-access"];
 
 const INFO: Record<PermissionPreset, { label: string; icon: "sl-eye" | "sl-shield" | "sl-shield-off"; blurb: string }> =
   {
-    "read-only": { label: "Read-only", icon: "sl-eye", blurb: "Reads and safe commands only. Asks before any change." },
-    auto: {
-      label: "Auto",
-      icon: "sl-shield",
-      blurb: "Works freely in this folder. Asks for new commands and writes outside it.",
+    "read-only": {
+      label: "Read-only",
+      icon: "sl-eye",
+      blurb: "Reads and inspection commands only. Switch to Full Access to make changes.",
     },
     "full-access": {
       label: "Full access",
       icon: "sl-shield-off",
-      blurb: "Runs anything without asking, outside the sandbox.",
+      blurb: "Runs tools with your account access. Explicit deny rules still apply.",
     },
   };
+
+// CODEX_BLURB describes the presets for a Codex session, whose sandbox and
+// approvals are Codex's own.
+const CODEX_BLURB: Record<PermissionPreset, string> = {
+  "read-only": "Codex can read files but not change them. It asks before running anything else.",
+  "full-access": "No sandbox and no questions.",
+};
+
+// offered are the presets the open session can pick from. Codex accepts
+// only what its managed settings allow, which can rule out full access.
+function offered(): PermissionPreset[] {
+  const allowed = state.harness === "codex" ? state.codex?.permissions : undefined;
+  return allowed?.length ? PRESETS.filter((p) => allowed.includes(p)) : PRESETS;
+}
+
+// fitPreset maps a saved choice to one the session offers: the next safer
+// preset, never a looser one.
+function fitPreset(p: PermissionPreset): PermissionPreset {
+  const list = offered();
+  if (list.includes(p)) return p;
+  const safer = PRESETS.slice(0, PRESETS.indexOf(p)).reverse();
+  return safer.find((s) => list.includes(s)) ?? list[0] ?? p;
+}
 
 const RULE_LABEL: Record<PermissionRule["tool"], string> = {
   shell: "command",
@@ -43,7 +65,7 @@ const RULE_LABEL: Record<PermissionRule["tool"], string> = {
 
 const RULE_HINT: Record<PermissionRule["tool"], string> = {
   shell: "npm test",
-  write: "/abs/dir (sandboxed commands may write here too)",
+  write: "/abs/dir for built-in file writes",
   read: "/abs/dir outside the workspace the agent may read",
   mcp: "server/tool   or   server",
   web: "example.com or localhost:PORT   or   *",
@@ -56,14 +78,8 @@ const RULE_HINT: Record<PermissionRule["tool"], string> = {
 type ExtensionTarget = { value: string; label: string };
 let extensionTargets: ExtensionTarget[] = [];
 
-const SANDBOX: Record<string, string> = {
-  seatbelt: "macOS Seatbelt sandbox",
-  landlock: "Linux Landlock sandbox",
-};
-
 let chip: HTMLButtonElement | null = null;
 let menu: HTMLElement | null = null;
-let sandboxKind: string | null = null;
 let draft: PermissionPreset | null = null;
 
 function isPreset(v: unknown): v is PermissionPreset {
@@ -72,14 +88,14 @@ function isPreset(v: unknown): v is PermissionPreset {
 
 function defaultPreset(): PermissionPreset {
   const v = loadText(DEFAULT_KEY);
-  return isPreset(v) ? v : "auto";
+  return isPreset(v) ? v : "read-only";
 }
 
 // currentPreset is what the visible session's next turn runs under.
 export function currentPreset(): PermissionPreset {
-  if (!state.sessionId) return draft ?? defaultPreset();
+  if (!state.sessionId) return fitPreset(draft ?? defaultPreset());
   const v = loadText(SESSION_KEY + state.sessionId);
-  return isPreset(v) ? v : (draft ?? defaultPreset());
+  return fitPreset(v === "auto" ? "read-only" : isPreset(v) ? v : (draft ?? defaultPreset()));
 }
 
 // keepDraftFor pins the preset picked before the session existed.
@@ -143,20 +159,23 @@ function ensureChip(): HTMLButtonElement {
 function paintMenu(): void {
   if (!menu) return;
   const cur = currentPreset();
-  const noSandbox = sandboxKind === "";
+  const codex = state.harness === "codex";
   menu.innerHTML =
     `<div class="perm-menu-head">Permissions</div>` +
-    PRESETS.map((p) => {
-      const info = INFO[p];
-      const blurb = p !== "full-access" && noSandbox ? `${info.blurb} No OS sandbox here: approvals only.` : info.blurb;
-      return (
-        `<button type="button" role="menuitemradio" aria-checked="${p === cur}" class="perm-item${p === cur ? " is-on" : ""}${p === "full-access" ? " is-risky" : ""}" data-preset="${p}">` +
-        `<span class="perm-item-ico">${icon(info.icon, "h-4 w-4")}</span>` +
-        `<span class="perm-item-text"><span class="perm-item-label">${info.label}</span><span class="perm-item-blurb">${escapeHtml(blurb)}</span></span>` +
-        `<span class="perm-item-check">${p === cur ? icon("check", "h-3 w-3") : ""}</span>` +
-        `</button>`
-      );
-    }).join("");
+    offered()
+      .map((p) => {
+        const info = INFO[p];
+        const base = codex ? CODEX_BLURB[p] : info.blurb;
+        const blurb = base;
+        return (
+          `<button type="button" role="menuitemradio" aria-checked="${p === cur}" class="perm-item${p === cur ? " is-on" : ""}${p === "full-access" ? " is-risky" : ""}" data-preset="${p}">` +
+          `<span class="perm-item-ico">${icon(info.icon, "h-4 w-4")}</span>` +
+          `<span class="perm-item-text"><span class="perm-item-label">${info.label}</span><span class="perm-item-blurb">${escapeHtml(blurb)}</span></span>` +
+          `<span class="perm-item-check">${p === cur ? icon("check", "h-3 w-3") : ""}</span>` +
+          `</button>`
+        );
+      })
+      .join("");
 }
 
 function toggleMenu(): void {
@@ -183,31 +202,13 @@ export function syncPermChip(): void {
   const p = currentPreset();
   const info = INFO[p];
   el.dataset.preset = p;
-  el.dataset.sandbox = sandboxKind === "" ? "none" : sandboxKind ? sandboxKind : "unknown";
-  const warn =
-    sandboxKind === "" && p !== "full-access" ? `<span class="perm-chip-warn" aria-hidden="true"></span>` : "";
-  el.innerHTML = `${icon(info.icon, "h-3.5 w-3.5")}<span>${info.label}</span>${warn}${icon("chevron-down", "h-3 w-3")}`;
-  const where =
-    sandboxKind === ""
-      ? "no OS sandbox on this platform — approvals only"
-      : sandboxKind
-        ? (SANDBOX[sandboxKind] ?? sandboxKind)
-        : "";
-  el.title = `Permissions: ${info.label} — ${info.blurb}${where ? ` (${where})` : ""}`;
+  el.innerHTML = `${icon(info.icon, "h-3.5 w-3.5")}<span>${info.label}</span>${icon("chevron-down", "h-3 w-3")}`;
+  el.title = `Permissions: ${info.label} — ${state.harness === "codex" ? CODEX_BLURB[p] : info.blurb}`;
   if (menu && !menu.classList.contains("hidden")) paintMenu();
 }
 
 export function initPermissions(): void {
   syncPermChip();
-  void api
-    .permissionsGet(state.cwd || null)
-    .then((v) => {
-      sandboxKind = v.sandbox?.kind ?? "";
-      syncPermChip();
-    })
-    .catch(() => {
-      // Older sidecar: no permissions RPC; keep the chip neutral.
-    });
 }
 
 // ---- Settings → Permissions ----
@@ -225,7 +226,6 @@ export async function loadPermissions(cwd?: string): Promise<void> {
     const v = await api.permissionsGet(folderCwd || null, state.sessionId || null);
     if (mine !== loading) return;
     view = v;
-    sandboxKind = v.sandbox?.kind ?? "";
     syncPermChip();
     paintPane();
   } catch (error) {
@@ -303,10 +303,6 @@ function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): stri
 function paintPane(): void {
   if (!view) return;
   const def = defaultPreset();
-  const kind = view.sandbox?.kind ?? "";
-  const sandbox = kind
-    ? `<span class="perm-sandbox is-on">${icon("sl-shield-check", "h-3.5 w-3.5")}${escapeHtml(SANDBOX[kind] ?? kind)}</span>`
-    : `<span class="perm-sandbox is-off">${icon("sl-shield-off", "h-3.5 w-3.5")}No OS sandbox on this platform — approvals only</span>`;
   const presets = PRESETS.map(
     (p) =>
       `<button type="button" class="perm-seg${p === def ? " is-on" : ""}" data-default-preset="${p}" aria-pressed="${p === def}" title="${escapeHtml(INFO[p].blurb)}">` +
@@ -332,10 +328,7 @@ function paintPane(): void {
     : "";
   permBodyEl.innerHTML =
     `<section class="mem-section"><div class="mem-head"><div><div class="mem-title">Default for new sessions</div>` +
-    `<div class="mem-blurb">Each session can switch from the composer chip.</div></div>${sandbox}</div>` +
-    (kind
-      ? `<div class="mem-blurb perm-grant-note">Allow-write rules also open their folders to sandboxed commands; the rest of the disk stays read-only.</div>`
-      : "") +
+    `<div class="mem-blurb">Each session can switch from the composer chip.</div></div></div>` +
     `<div class="perm-segs" role="group" aria-label="Default permissions">${presets}</div></section>` +
     rulesSection("global", view.global) +
     (folderCwd ? rulesSection("folder", view.folder) : "") +

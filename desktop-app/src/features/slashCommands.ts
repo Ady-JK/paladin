@@ -187,6 +187,127 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help", label: "Help", desc: "List every command", hint: "/help", icon: "sl-help", args: "none" },
 ];
 
+// CODEX_COMMANDS is the `/` catalog of a Codex session: the commands Codex
+// itself has, which the core passes on to it (compact, goal, review,
+// feedback), plus the few that only move around Paladin's own UI.
+export const CODEX_COMMANDS: SlashCommand[] = [
+  {
+    name: "compact",
+    label: "Compact",
+    desc: "Have Codex compact its context to free up room",
+    hint: "/compact",
+    icon: "sl-compact",
+    args: "none",
+  },
+  {
+    name: "goal",
+    label: "Goal",
+    desc: "Set a goal Codex keeps working on, or pause, resume or clear it",
+    hint: "/goal [what done looks like | pause | resume | clear]",
+    icon: "sl-plan",
+    args: "optional",
+  },
+  {
+    name: "review",
+    label: "Code review",
+    desc: "Review uncommitted changes, a base branch, a commit or custom focus",
+    hint: "/review [base <branch> | commit <sha> | focus]",
+    icon: "sl-review",
+    args: "optional",
+  },
+  {
+    name: "feedback",
+    label: "Feedback",
+    desc: "Send this conversation and Codex's logs to OpenAI",
+    hint: "/feedback [what went wrong]",
+    icon: "sl-help",
+    args: "optional",
+  },
+  {
+    name: "fast",
+    label: "Fast mode",
+    desc: "Run the model faster at the cost of more of your Codex plan",
+    hint: "/fast [on | off]",
+    icon: "sl-build",
+    args: "optional",
+  },
+  {
+    name: "mcp",
+    label: "MCP servers",
+    desc: "List the MCP servers Codex has and how each is doing",
+    hint: "/mcp",
+    icon: "sl-plug",
+    args: "none",
+  },
+  {
+    name: "plan",
+    label: "Plan mode",
+    desc: "Codex explores and proposes a plan, asking questions when it needs to",
+    hint: "/plan [task]",
+    icon: "sl-plan",
+    args: "optional",
+  },
+  {
+    name: "build",
+    label: "Default mode",
+    desc: "Leave plan mode and let Codex work",
+    hint: "/build",
+    icon: "sl-build",
+    args: "none",
+  },
+  {
+    name: "new",
+    label: "New chat",
+    desc: "Start a fresh Codex session",
+    hint: "/new [first message]",
+    icon: "sl-new",
+    args: "optional",
+  },
+  {
+    name: "fork",
+    label: "Fork",
+    desc: "Branch this conversation into a new Codex session",
+    hint: "/fork",
+    icon: "sl-fork",
+    args: "none",
+  },
+  {
+    name: "undo",
+    label: "Undo",
+    desc: "Revert the last message: its file changes and Codex's reply",
+    hint: "/undo",
+    icon: "tl-undo",
+    args: "none",
+  },
+  {
+    name: "rename",
+    label: "Rename",
+    desc: "Rename this session",
+    hint: "/rename <title>",
+    icon: "tl-pencil",
+    args: "required",
+  },
+  {
+    name: "model",
+    label: "Model",
+    desc: "Pick the Codex model",
+    hint: "/model",
+    icon: "sl-model",
+    args: "none",
+    chevron: true,
+  },
+  {
+    name: "thinking",
+    label: "Reasoning",
+    desc: "Set how hard Codex reasons, or show the options",
+    hint: "/thinking [level]",
+    icon: "zap-line",
+    args: "optional",
+    chevron: true,
+  },
+  { name: "help", label: "Help", desc: "List every command", hint: "/help", icon: "sl-help", args: "none" },
+];
+
 const PROMPT_LABELS: Record<string, string> = { review: "Code review", init: "Init AGENTS.md" };
 export const PROMPT_ICONS: Record<string, IconName> = { review: "sl-review", init: "sl-init" };
 
@@ -233,6 +354,9 @@ export function setComposer(text: string): void {
 
 // slashHelp lists every command, prompt and skill.
 export function slashHelp(): string {
+  if (state.harness === "codex") {
+    return ["Commands:", ...CODEX_COMMANDS.map((c) => `  ${c.hint} — ${c.desc}`)].join("\n");
+  }
   const lines = ["Commands:", ...SLASH_COMMANDS.map((c) => `  ${c.hint} — ${c.desc}`)];
   if (prompts?.length) {
     lines.push(

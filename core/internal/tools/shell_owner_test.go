@@ -46,3 +46,26 @@ func TestJobsAnswerOnlyTheirOwnSession(t *testing.T) {
 		t.Fatalf("owner cancel = %s, %v", out, err)
 	}
 }
+
+// Job logs hold command output, which can include secrets: owner-only.
+func TestJobLogsAreOwnerOnly(t *testing.T) {
+	tool := NewShellTool()
+	ctx := ownerCtx(t, "sess-modes")
+	id := startJob(t, tool, ctx, `{"cmd":"echo hi; sleep 5","background":true}`)
+	t.Cleanup(func() { _, _ = tool.Call(json.RawMessage(`{"action":"cancel","job_id":"`+id+`"}`), ctx) })
+	logPath := filepath.Join(ctx.SessionDir, "tmp", id+".log")
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("job log mode = %o, want 600", got)
+	}
+	dir, err := os.Stat(filepath.Dir(logPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dir.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("job log folder mode = %o, want owner-only", got)
+	}
+}

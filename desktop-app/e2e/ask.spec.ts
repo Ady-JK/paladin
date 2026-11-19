@@ -78,6 +78,9 @@ test("the wizard walks one question at a time and submits every answer", async (
 
   const modal = page.locator("#askModal");
   await expect(modal).toBeVisible();
+  await expect(modal.locator(".question-card")).toBeVisible();
+  expect(await modal.evaluate((el) => el.parentElement?.classList.contains("composer-stack"))).toBe(true);
+  expect(await modal.evaluate((el) => getComputedStyle(el).backdropFilter)).toBe("none");
   await expect(modal).toContainText("Question 1 of 2");
   await expect(modal).toContainText("Deploy where?");
 

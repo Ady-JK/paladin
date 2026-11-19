@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,6 +27,8 @@ type Session struct {
 	Worktree *session.WorktreeInfo `json:"worktree,omitempty"`
 	// Subagent is set when the session is a subagent's child session.
 	Subagent *session.SubagentInfo `json:"subagent,omitempty"`
+	// Harness names the external agent running the session ("codex").
+	Harness string `json:"harness,omitempty"`
 }
 
 // runtimeSessions adapts the transcript store to agent.SessionSource.
@@ -59,6 +62,10 @@ func (r *AgentRuntime) loadSessionWithRecovery(cwd, sessionID string) (transcrip
 
 func (r *AgentRuntime) OpenSession(sessionID, cwd string) (Session, error) {
 	if strings.TrimSpace(sessionID) != "" {
+		if _, err := r.SyncSession(sessionID, cwd); err != nil {
+			// A disconnected Codex must not make the local history unreadable.
+			log.Printf("codex: refresh session %s: %v", sessionID, err)
+		}
 		sess, err := r.loadSessionWithRecovery(cwd, sessionID)
 		if err != nil {
 			return Session{}, err
@@ -73,7 +80,7 @@ func (r *AgentRuntime) OpenSession(sessionID, cwd string) (Session, error) {
 		}
 		opened := Session{SessionID: sess.Meta.SessionID, Cwd: sess.Meta.Cwd, Provider: provider, Model: model,
 			Revert: session.RevertView(sess.Meta.Revert), Worktree: session.WorktreeView(sess.Meta.Worktree),
-			Subagent: session.SubagentView(sess.Meta.Subagent)}
+			Subagent: session.SubagentView(sess.Meta.Subagent), Harness: session.HarnessName(sess.Meta.Harness)}
 		if opened.Subagent != nil {
 			opened.Subagent.Status = r.subagents.status(opened.SessionID, opened.Subagent.Status)
 		}
@@ -121,12 +128,13 @@ func (r *AgentRuntime) SessionHistory(sessionID, cwd string) ([]session.HistoryM
 	if err != nil {
 		return nil, err
 	}
-	turns, err := sess.HistoryTurns()
+	turns, err := r.historyCache.read(sess)
 	if err != nil {
 		return nil, err
 	}
+	r.checkCodexRepair(sess)
 	msgs, statsAt := transcript.Flatten(turns)
-	rows := session.HistoryViewStats(visibleMessages(sess.Meta, msgs), statsAt)
+	rows := session.HistoryViewStats(visibleMessages(sess.Meta, annotateHarness(sess.Meta, msgs)), statsAt)
 	if err := annotateProtection(sess, rows, turns); err != nil {
 		markProtectionUnknown(rows)
 	}
@@ -143,12 +151,13 @@ func (r *AgentRuntime) SessionHistoryPage(sessionID, cwd string, limit, before i
 	if err != nil {
 		return session.HistoryPage{}, err
 	}
-	turns, err := sess.HistoryTurns()
+	turns, err := r.historyCache.read(sess)
 	if err != nil {
 		return session.HistoryPage{}, err
 	}
+	r.checkCodexRepair(sess)
 	msgs, statsAt := transcript.Flatten(turns)
-	page := session.HistoryPageStats(visibleMessages(sess.Meta, msgs), statsAt, limit, before)
+	page := session.HistoryPageStats(visibleMessages(sess.Meta, annotateHarness(sess.Meta, msgs)), statsAt, limit, before)
 	if err := annotateProtection(sess, page.Messages, turns); err != nil {
 		markProtectionUnknown(page.Messages)
 	}
@@ -166,10 +175,11 @@ func (r *AgentRuntime) SessionImages(sessionID, cwd string) (session.ImagesView,
 	if err != nil {
 		return session.ImagesView{}, err
 	}
-	msgs, err := sess.History()
+	turns, err := r.historyCache.read(sess)
 	if err != nil {
 		return session.ImagesView{}, err
 	}
+	msgs, _ := transcript.Flatten(turns)
 	return session.ImagesViewOf(visibleMessages(sess.Meta, msgs)), nil
 }
 
@@ -267,6 +277,11 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 				m.Children = slices.DeleteFunc(m.Children, func(id string) bool { return id == sessionID })
 				return nil
 			})
+		}
+	}
+	if loadErr == nil && sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessCodex && sess.Meta.Harness.ThreadID != "" {
+		if err := r.hideCodexThread(sess.Meta.Harness.ThreadID); err != nil {
+			return false, fmt.Errorf("remember deleted Codex session: %w", err)
 		}
 	}
 	if err := r.transcripts.Delete(cwd, sessionID); err != nil {

@@ -43,7 +43,7 @@ func TestCopilotCatalogRoutesSupportedModels(t *testing.T) {
 		raw, _ := json.Marshal(models)
 		t.Fatalf("models %s", raw)
 	}
-	want := map[string]string{"claude-haiku": protocolChat, "gpt-5.6-luna": protocolResponses, "unknown-chat": protocolChat, "future-model": protocolResponses, "gpt-9": protocolChat, "messages-only": protocolAnthropic}
+	want := map[string]string{"claude-haiku": protocolAnthropic, "gpt-5.6-luna": protocolResponses, "unknown-chat": protocolChat, "future-model": protocolResponses, "gpt-9": protocolChat, "messages-only": protocolAnthropic}
 	for _, id := range models {
 		m, ok := meta[id]
 		if !ok || m.Protocol != want[id] {
@@ -81,7 +81,7 @@ func TestCopilotMessagesOnlyModel(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer access-token" || r.Header.Get("Openai-Intent") != "messages-proxy" || r.Header.Get("Copilot-Integration-Id") == "" {
+		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer access-token" || r.Header.Get("Openai-Intent") != "conversation-agent" || r.Header.Get("Copilot-Integration-Id") == "" {
 			t.Errorf("invalid messages request")
 		}
 		var body struct {
@@ -216,5 +216,33 @@ func TestCopilotCatalogFallsBackWhenVersionUnsupported(t *testing.T) {
 	models, meta, err := provider.(*OpenAIProvider).ListCatalog(context.Background())
 	if err != nil || calls != 2 || len(models) != 1 || meta["sample"].MaxInput != 200000 {
 		t.Fatalf("fallback calls=%d models=%v meta=%+v error=%v", calls, models, meta, err)
+	}
+}
+
+func TestCopilotEndpointPrecedenceMatchesVSCode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		endpoints []string
+		want      string
+	}{
+		"responses beats chat":      {[]string{"/chat/completions", "/responses"}, protocolResponses},
+		"messages beats chat":       {[]string{"/chat/completions", "/v1/messages"}, protocolAnthropic},
+		"responses beats messages":  {[]string{"/v1/messages", "/responses"}, protocolResponses},
+		"chat when nothing better":  {[]string{"/chat/completions"}, protocolChat},
+		"websocket alone is no api": {[]string{"ws:/responses"}, ""},
+	} {
+		if got := copilotEndpointProtocol(tc.endpoints); got != tc.want {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestCopilotCatalogReadsThinkingCapabilities(t *testing.T) {
+	meta, include, err := parseCopilotModel("claude-sonnet-5.5", `{"supported_endpoints":["/v1/messages","/chat/completions"],"capabilities":{"type":"chat","limits":{"max_output_tokens":128000},"supports":{"adaptive_thinking":true,"reasoning_effort":["low","high"]}}}`)
+	if err != nil || !include || !meta.AdaptiveThinking || meta.MinThinkingBudget != 0 {
+		t.Fatalf("adaptive: %+v include=%v err=%v", meta, include, err)
+	}
+	meta, _, _ = parseCopilotModel("claude-haiku-4.5", `{"supported_endpoints":["/chat/completions","/v1/messages"],"capabilities":{"type":"chat","supports":{"min_thinking_budget":1024,"max_thinking_budget":32000}}}`)
+	if meta.AdaptiveThinking || meta.MinThinkingBudget != 1024 || meta.MaxThinkingBudget != 32000 || meta.Protocol != protocolAnthropic {
+		t.Fatalf("budget mode: %+v", meta)
 	}
 }

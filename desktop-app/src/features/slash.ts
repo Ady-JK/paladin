@@ -6,11 +6,13 @@
 // Esc dismisses.
 
 import { inputEl } from "../core/dom";
+import { state } from "../core/state";
 import { escapeHtml } from "../core/format";
 import { icon, type IconName } from "../icons";
 import { attach as attachSkill, loadSkills, skillsSnapshot } from "./skills";
 import {
   type Args,
+  CODEX_COMMANDS,
   SLASH_COMMANDS,
   PROMPT_ICONS,
   cachedPrompts,
@@ -47,7 +49,8 @@ export function setSlashRunner(run: () => void): void {
 }
 
 function items(): Item[] {
-  const out: Item[] = SLASH_COMMANDS.map((c) => ({
+  const codex = state.harness === "codex";
+  const out: Item[] = (codex ? CODEX_COMMANDS : SLASH_COMMANDS).map((c) => ({
     kind: "command" as const,
     name: c.name,
     label: c.label,
@@ -57,6 +60,8 @@ function items(): Item[] {
     chevron: !!c.chevron,
     tag: c.hint,
   }));
+  // A Codex session has no Paladin prompt commands or skills.
+  if (codex) return out;
   const local = new Set(out.map((i) => i.name.toLowerCase()));
   for (const c of cachedPrompts()) {
     if (local.has(c.name.toLowerCase())) continue;

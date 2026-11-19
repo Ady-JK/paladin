@@ -40,26 +40,35 @@ type copilotModel struct {
 			Output  int64 `json:"max_output_tokens"`
 		} `json:"limits"`
 		Supports struct {
-			ReasoningEffort *[]string `json:"reasoning_effort"`
+			ReasoningEffort   *[]string `json:"reasoning_effort"`
+			AdaptiveThinking  bool      `json:"adaptive_thinking"`
+			MinThinkingBudget int64     `json:"min_thinking_budget"`
+			MaxThinkingBudget int64     `json:"max_thinking_budget"`
 		} `json:"supports"`
 	} `json:"capabilities"`
 }
 
+// copilotEndpointProtocol picks the API for a model the way the VS Code
+// Copilot extension does: Responses when listed, else Messages, else Chat
+// Completions. A model that lists none of them is not usable.
 func copilotEndpointProtocol(endpoints []string) string {
-	for _, endpoint := range endpoints {
-		if endpoint == "/chat/completions" || endpoint == "/v1/chat/completions" {
-			return protocolChat
+	has := func(want ...string) bool {
+		for _, endpoint := range endpoints {
+			for _, w := range want {
+				if endpoint == w {
+					return true
+				}
+			}
 		}
+		return false
 	}
-	for _, endpoint := range endpoints {
-		if endpoint == "/responses" || endpoint == "/v1/responses" {
-			return protocolResponses
-		}
-	}
-	for _, endpoint := range endpoints {
-		if endpoint == "/v1/messages" {
-			return protocolAnthropic
-		}
+	switch {
+	case has("/responses", "/v1/responses"):
+		return protocolResponses
+	case has("/v1/messages"):
+		return protocolAnthropic
+	case has("/chat/completions", "/v1/chat/completions"):
+		return protocolChat
 	}
 	return ""
 }
@@ -105,7 +114,8 @@ func parseCopilotModel(id, raw string) (config.ModelMeta, bool, error) {
 	if protocol == "" {
 		protocol = copilotProtocol(id, config.ModelMeta{})
 	}
-	meta := config.ModelMeta{Protocol: protocol, ContextWindow: model.Capabilities.Limits.Context, MaxInput: model.Capabilities.Limits.Input, MaxOutput: model.Capabilities.Limits.Output}
+	meta := config.ModelMeta{Protocol: protocol, ContextWindow: model.Capabilities.Limits.Context, MaxInput: model.Capabilities.Limits.Input, MaxOutput: model.Capabilities.Limits.Output,
+		AdaptiveThinking: model.Capabilities.Supports.AdaptiveThinking, MinThinkingBudget: model.Capabilities.Supports.MinThinkingBudget, MaxThinkingBudget: model.Capabilities.Supports.MaxThinkingBudget}
 
 	prices := model.Billing.TokenPrices
 	if prices.Default != nil && prices.Default.MaxInput > 0 && prices.Default.MaxInput < meta.MaxInput {

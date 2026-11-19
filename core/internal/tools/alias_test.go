@@ -110,7 +110,7 @@ func TestCanonicalName(t *testing.T) {
 func TestCallThroughBashAlias(t *testing.T) {
 	ctx, _ := testCtx(t)
 	reg := BuiltinRegistry()
-	res := reg.Call(&ToolCall{ID: "c1", Name: "bash", Arguments: `{"command":"echo aliased"}`}, ctx)
+	res := reg.Call(&ToolCall{ID: "c1", Name: "bash", Arguments: `{"reason":"test","command":"echo aliased"}`}, ctx)
 	if res.IsError {
 		t.Fatalf("call failed: %s", res.Content)
 	}
@@ -130,14 +130,14 @@ func TestCallThroughBashAlias(t *testing.T) {
 // so Prepare must resolve an alias exactly as Call does.
 func TestPrepareThroughBashAlias(t *testing.T) {
 	reg := BuiltinRegistry()
-	name, args, ok := reg.Prepare(&ToolCall{ID: "c1", Name: "Bash", Arguments: `{"command":"echo hi"}`})
+	name, args, ok := reg.Prepare(&ToolCall{ID: "c1", Name: "Bash", Arguments: `{"reason":"test","command":"echo hi"}`})
 	if !ok {
 		t.Fatal("Prepare did not resolve the alias")
 	}
 	if name != "shell" {
 		t.Fatalf("Prepare name = %q, want shell", name)
 	}
-	if string(args) != `{"command":"echo hi"}` {
+	if string(args) != `{"reason":"test","command":"echo hi"}` {
 		t.Fatalf("Prepare args = %s", args)
 	}
 }

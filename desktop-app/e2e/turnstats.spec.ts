@@ -72,17 +72,17 @@ test("the summary is docked right, in line with the turn's own rows", async ({ p
   const stats = page.locator("#messages .turn-stats");
   await expect(stats).toHaveCount(1);
 
-  // Right-aligned against the conversation's right edge, not centered:
-  // the text ends at (nearly) the same x as the user bubble above it.
+  // Right-aligned against the conversation column's right edge, not centered:
+  // the text ends at the same x as the user bubble above it.
   const box = await stats.boundingBox();
   const bubble = await page.locator("#messages .bubble-user").first().boundingBox();
-  const pane = await page.locator("#chatView").boundingBox();
-  expect(box && bubble && pane).toBeTruthy();
+  const column = await page.locator("#messages").boundingBox();
+  expect(box && bubble && column).toBeTruthy();
   const statsRight = box!.x + box!.width;
   const bubbleRight = bubble!.x + bubble!.width;
-  const paneRight = pane!.x + pane!.width - 24; // #chatView padding
+  const columnRight = column!.x + column!.width;
   expect(Math.abs(statsRight - bubbleRight)).toBeLessThan(12);
-  expect(Math.abs(statsRight - paneRight)).toBeLessThan(40);
+  expect(Math.abs(statsRight - columnRight)).toBeLessThan(12);
 });
 
 test("the rate divides by model time, not the turn's wall time", async ({ page }) => {

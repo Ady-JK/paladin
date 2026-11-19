@@ -23,10 +23,16 @@ type Counters struct {
 	ReasoningTokens  int64    `json:"reasoningTokens"`
 	CacheReadTokens  int64    `json:"cacheReadTokens"`
 	CacheWriteTokens int64    `json:"cacheWriteTokens"`
-	TotalTokens      int64    `json:"totalTokens"`
-	Cost             float64  `json:"cost"`
-	ListCost         float64  `json:"listCost"`
-	HasCost          bool     `json:"hasCost"`
+	// CacheHitSum adds up each call's own cache share (cache-read tokens over
+	// that call's whole prompt, 0..1) across the CacheHitCalls calls that
+	// reported their cache. Their average is the cache hit rate: every call
+	// weighs the same, however large its prompt.
+	CacheHitSum   float64 `json:"cacheHitSum,omitempty"`
+	CacheHitCalls int64   `json:"cacheHitCalls,omitempty"`
+	TotalTokens   int64   `json:"totalTokens"`
+	Cost          float64 `json:"cost"`
+	ListCost      float64 `json:"listCost"`
+	HasCost       bool    `json:"hasCost"`
 	// CostEstimated marks spend the gateway did not charge: a
 	// subscription plan or free tier, where Cost is 0 and ListCost is
 	// what the tokens would have cost. The UI shows ListCost then, so a
@@ -50,6 +56,8 @@ func (c *Counters) Add(o Counters) {
 	c.ReasoningTokens += o.ReasoningTokens
 	c.CacheReadTokens += o.CacheReadTokens
 	c.CacheWriteTokens += o.CacheWriteTokens
+	c.CacheHitSum += o.CacheHitSum
+	c.CacheHitCalls += o.CacheHitCalls
 	c.TotalTokens += o.TotalTokens
 	if o.HasCost {
 		c.Cost += o.Cost
@@ -63,6 +71,15 @@ func (c *Counters) Add(o Counters) {
 		}
 	}
 	c.CostEstimated = c.CostEstimated || o.CostEstimated
+}
+
+// CacheShare is one call's cache share: the part of its prompt served from
+// the cache, 0..1.
+func CacheShare(prompt, cacheRead int64) float64 {
+	if prompt <= 0 || cacheRead <= 0 {
+		return 0
+	}
+	return min(float64(cacheRead)/float64(prompt), 1)
 }
 
 // Estimated reports whether SpendUsd is the list price of tokens the
@@ -89,6 +106,9 @@ func (c Counters) SpendUsd() float64 {
 // UsageTotals is the persisted per-session ledger (usage.json). The
 // embedded Counters are the across-models sum for cheap reads.
 type UsageTotals struct {
+	// Schema 2 counts a call's cached input inside PromptTokens, whatever the
+	// provider's own convention. Older ledgers are brought to it when read.
+	Schema    int    `json:"schema,omitempty"`
 	SessionID string `json:"sessionId"`
 	Model     string `json:"model"`
 	Counters
@@ -96,7 +116,14 @@ type UsageTotals struct {
 	// The context fill reads last-call input over the model window, so
 	// this — not the cumulative total — is what the gauge reports.
 	LastInputTokens int64 `json:"lastInputTokens"`
-	UpdatedAt       int64 `json:"updatedAt"`
+	// ContextTokens and ContextWindow are what a harness (Codex) reported
+	// about its own context after its latest call: how many tokens the
+	// conversation holds and the window it really runs with. They replace
+	// the input-over-table guess, which a harness's own prompt and model
+	// make wrong.
+	ContextTokens int64 `json:"contextTokens,omitempty"`
+	ContextWindow int64 `json:"contextWindow,omitempty"`
+	UpdatedAt     int64 `json:"updatedAt"`
 	// Models breaks the same counters down per model id, so mid-session
 	// model switches keep their own books.
 	Models map[string]*ModelUsage `json:"models,omitempty"`
@@ -117,6 +144,40 @@ type ModelUsage struct {
 	Counters
 	// LastInputTokens mirrors UsageTotals: this model's latest call.
 	LastInputTokens int64 `json:"lastInputTokens"`
+	ContextTokens   int64 `json:"contextTokens,omitempty"`
+	ContextWindow   int64 `json:"contextWindow,omitempty"`
+}
+
+// ContextReading is a harness's own report of its context: the tokens the
+// conversation holds after a call and the window of the model running it.
+// Window is 0 when the harness did not say.
+type ContextReading struct {
+	Tokens int64
+	Window int64
+}
+
+// SetContext records a harness's report for the session and for model. A
+// report without a window keeps the last one it gave.
+func (t *UsageTotals) SetContext(model string, r ContextReading) {
+	t.ContextTokens = r.Tokens
+	if r.Window > 0 {
+		t.ContextWindow = r.Window
+	}
+	if model == "" {
+		return
+	}
+	if t.Models == nil {
+		t.Models = map[string]*ModelUsage{}
+	}
+	m := t.Models[model]
+	if m == nil {
+		m = &ModelUsage{}
+		t.Models[model] = m
+	}
+	m.ContextTokens = r.Tokens
+	if r.Window > 0 {
+		m.ContextWindow = r.Window
+	}
 }
 
 // dayKey renders a unix epoch as a UTC calendar day.
@@ -129,6 +190,9 @@ func dayKey(now int64) string {
 // non-empty model wins as the session's current model.
 func (t *UsageTotals) AddCall(model string, call Counters, now int64) {
 	call.Calls = 1
+	if call.CacheHitCalls == 0 && call.CacheHitSum == 0 && call.CacheReadTokens > 0 && call.PromptTokens > 0 {
+		call.CacheHitCalls, call.CacheHitSum = 1, CacheShare(call.PromptTokens, call.CacheReadTokens)
+	}
 	if !call.HasCost {
 		call.UnpricedCalls = 1
 	}
@@ -173,12 +237,27 @@ type SessionUsage struct {
 	ContextWindow int64  `json:"contextWindow"`
 	ContextKnown  bool   `json:"contextKnown"`
 	Counters
-	LastInputTokens int64    `json:"lastInputTokens"`
-	FillPercent     *float64 `json:"fillPercent,omitempty"`
+	LastInputTokens int64 `json:"lastInputTokens"`
+	// ContextTokens is what the fill is measured on when the provider
+	// reported its own context (a harness); otherwise it is absent and the
+	// fill is the last call's input.
+	ContextTokens int64    `json:"contextTokens,omitempty"`
+	FillPercent   *float64 `json:"fillPercent,omitempty"`
+	// Limits are the plan's usage windows (a Codex account's five hours and
+	// week), when the session's harness reports them.
+	Limits []LimitWindow `json:"limits,omitempty"`
 	// Models is the per-model breakdown, heaviest session share first.
 	Models []ModelUsageView `json:"models,omitempty"`
 	// Daily is the per-day activity ledger, oldest day first.
 	Daily []DailyPoint `json:"daily,omitempty"`
+}
+
+// LimitWindow is one usage window of a plan: how much of it is used and when
+// it renews (unix seconds, 0 when unknown).
+type LimitWindow struct {
+	Label       string  `json:"label"`
+	UsedPercent float64 `json:"usedPercent"`
+	ResetsAt    int64   `json:"resetsAt,omitempty"`
 }
 
 // ModelUsageView is one model's client-facing slice: its own window,
@@ -189,6 +268,7 @@ type ModelUsageView struct {
 	ContextKnown  bool   `json:"contextKnown"`
 	Counters
 	LastInputTokens int64    `json:"lastInputTokens"`
+	ContextTokens   int64    `json:"contextTokens,omitempty"`
 	FillPercent     *float64 `json:"fillPercent,omitempty"`
 }
 
@@ -211,6 +291,10 @@ func fillPercent(lastInput, window int64, known bool) *float64 {
 // the session's current model; windowOf resolves every model in the
 // breakdown.
 func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf func(string) (int64, bool)) SessionUsage {
+	used, contextTokens := t.LastInputTokens, int64(0)
+	if t.ContextWindow > 0 {
+		window, known, used, contextTokens = t.ContextWindow, true, t.ContextTokens, t.ContextTokens
+	}
 	out := SessionUsage{
 		SessionID:       sessionID,
 		Model:           t.Model,
@@ -218,7 +302,8 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 		ContextKnown:    known,
 		Counters:        t.Counters,
 		LastInputTokens: t.LastInputTokens,
-		FillPercent:     fillPercent(t.LastInputTokens, window, known),
+		ContextTokens:   contextTokens,
+		FillPercent:     fillPercent(used, window, known),
 	}
 	// Surface the inferred flag so the client labels a subscription's
 	// list price as an estimate even when the ledger predates the field.
@@ -229,7 +314,11 @@ func (t UsageTotals) View(sessionID string, window int64, known bool, windowOf f
 		}
 		mv := ModelUsageView{Model: name, Counters: m.Counters, LastInputTokens: m.LastInputTokens}
 		mv.CostEstimated = mv.Estimated()
-		if windowOf != nil {
+		switch {
+		case m.ContextWindow > 0:
+			mv.ContextWindow, mv.ContextKnown, mv.ContextTokens = m.ContextWindow, true, m.ContextTokens
+			mv.FillPercent = fillPercent(m.ContextTokens, m.ContextWindow, true)
+		case windowOf != nil:
 			if w, ok := windowOf(name); ok {
 				mv.ContextWindow, mv.ContextKnown = w, true
 				mv.FillPercent = fillPercent(m.LastInputTokens, w, true)

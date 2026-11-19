@@ -3,7 +3,9 @@
 // receives access to the local SSH process or credentials.
 export type CoreConnection = { mode: "local" } | { mode: "ssh"; target: string; binary: string };
 
-const TARGET = /^(?:[a-zA-Z0-9_.-]+@)?[a-zA-Z0-9_.-]+$/;
+// Neither the user nor the host may start with "-": ssh would read it as an
+// option (the "--" before the target is the second guard).
+const TARGET = /^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*@)?[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/;
 
 export function validateConnection(value: unknown): CoreConnection {
   if (!value || typeof value !== "object") throw new Error("invalid core connection");
@@ -32,8 +34,11 @@ export function hostEnv(
   exec: string = process.execPath,
 ) {
   const env: NodeJS.ProcessEnv = { ...base };
-  // Electron's own runtime variables would leak into the sidecar.
-  delete env.ELECTRON_RUN_AS_NODE;
+  // Electron's own runtime variables would leak into the sidecar, and
+  // NODE_OPTIONS would load code into every Node child it starts (plugins,
+  // MCP servers). Provider keys and the rest of the environment pass through.
+  for (const name of Object.keys(env)) if (name.startsWith("ELECTRON_")) delete env[name];
+  delete env.NODE_OPTIONS;
   if (connection.mode === "local" && exec) env.ELECTRON_NODE = exec;
   return env;
 }

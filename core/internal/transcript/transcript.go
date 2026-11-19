@@ -3,6 +3,9 @@
 package transcript
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,9 +56,27 @@ type Message struct {
 	// (`/review`, `/skill x …`); history and titles show it while the
 	// model keeps seeing Content.
 	Display string `json:"display,omitempty"`
-	// Reasoning is an assistant message's visible thinking. It is shown
-	// in history but never sent back to the model.
+	// Reasoning is an assistant message's visible thinking, shown in
+	// history.
 	Reasoning string `json:"reasoning,omitempty"`
+	// Thinking is the same reasoning in the form the provider can take
+	// back: encrypted state included. It is sent with the message on
+	// later rounds so the model remembers how it got there.
+	Thinking *Thinking `json:"thinking,omitempty"`
+	// HarnessTurn is the external agent's own id for the turn this message
+	// opens (set on a turn's first row). Undo and fork use it to take the
+	// harness's conversation back to the same point.
+	HarnessTurn string `json:"harnessTurn,omitempty"`
+}
+
+// Thinking mirrors inference.Thinking on disk.
+type Thinking struct {
+	Text     string          `json:"text,omitempty"`
+	Provider string          `json:"provider,omitempty"`
+	Model    string          `json:"model,omitempty"`
+	Format   string          `json:"format,omitempty"`
+	Opaque   string          `json:"opaque,omitempty"`
+	Raw      json.RawMessage `json:"raw,omitempty"`
 }
 
 // Compaction describes one context compaction checkpoint.
@@ -99,6 +120,27 @@ type Meta struct {
 	// Children are the subagent sessions this session spawned, oldest
 	// first.
 	Children []string `json:"children,omitempty"`
+	// Harness is set when an external agent (Codex) runs this session's
+	// turns instead of Paladin's own loop.
+	Harness *Harness `json:"harness,omitempty"`
+}
+
+// Harness names the external agent that owns a session and the
+// conversation thread it keeps for it.
+type Harness struct {
+	// Name is the harness ("codex").
+	Name string `json:"name"`
+	// ThreadID is the harness's own id for this conversation.
+	ThreadID string `json:"threadId,omitempty"`
+	// ForkOf is set on a forked session whose harness thread is not made yet:
+	// the first turn forks this thread through this turn.
+	ForkOf *HarnessFork `json:"forkOf,omitempty"`
+}
+
+// HarnessFork names the harness thread and turn a forked session continues from.
+type HarnessFork struct {
+	ThreadID string `json:"threadId"`
+	LastTurn string `json:"lastTurn"`
 }
 
 // ContextChoice is the saved compaction threshold and input window for one model.
@@ -390,6 +432,102 @@ func (s *Session) appendLines(data []byte) error {
 // SaveMeta writes the session's metadata atomically.
 func (s *Session) SaveMeta() error {
 	return writeMeta(s.Dir, s.Meta)
+}
+
+// ReplaceTurns atomically replaces a mirrored conversation. Callers hold the
+// session persistence gate and must not replace a turn that is still running.
+func (s *Session) ReplaceTurns(turns []Turn) error {
+	var buf []byte
+	for _, turn := range turns {
+		line, err := jsonx.Marshal(turnLine{Turn: turnBody{Messages: turn.Messages, Stats: turn.Stats}})
+		if err != nil {
+			return err
+		}
+		buf = append(append(buf, line...), '\n')
+	}
+	if err := dropSummary(s.Dir); err != nil {
+		return err
+	}
+	defer func() { _ = dropSummary(s.Dir) }()
+	return atomicWrite(s.Dir, "messages.jsonl", buf)
+}
+
+// RewriteMessages lets fn change stored messages in place and returns how many
+// it changed. Only the lines holding a changed message are encoded again (a turn
+// keeps its stats and journal id), the file is replaced atomically, and a call
+// that changes nothing leaves it alone. A harness uses this to settle a row that
+// was written before its outcome was known, such as a background command. Callers
+// run it under the session's persistence gate so it cannot interleave an append.
+func (s *Session) RewriteMessages(fn func(*Message) bool) (int, error) {
+	path := filepath.Join(s.Dir, "messages.jsonl")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("io: read transcript: %s", syserr.Str(err))
+	}
+	changed := 0
+	var out []byte
+	for _, raw := range bytes.SplitAfter(data, []byte("\n")) {
+		line := bytes.TrimSpace(raw)
+		if len(line) == 0 {
+			continue
+		}
+		torn := !bytes.HasSuffix(raw, []byte("\n"))
+		var encoded []byte
+		if bytes.HasPrefix(line, turnPrefix) {
+			var turn turnLine
+			if err := json.Unmarshal(line, &turn); err != nil {
+				if torn {
+					continue // a half-written last line is dropped, as an append would
+				}
+				return 0, fmt.Errorf("io: decode turn: %s", syserr.Str(err))
+			}
+			n := 0
+			for i := range turn.Turn.Messages {
+				if fn(&turn.Turn.Messages[i]) {
+					n++
+				}
+			}
+			if n > 0 {
+				if encoded, err = jsonx.Marshal(turn); err != nil {
+					return 0, fmt.Errorf("io: encode turn: %s", syserr.Str(err))
+				}
+				changed += n
+			}
+		} else {
+			var msg Message
+			if err := json.Unmarshal(line, &msg); err != nil {
+				if torn {
+					continue
+				}
+				return 0, fmt.Errorf("io: decode message: %s", syserr.Str(err))
+			}
+			if fn(&msg) {
+				if encoded, err = jsonx.Marshal(msg); err != nil {
+					return 0, fmt.Errorf("io: encode message: %s", syserr.Str(err))
+				}
+				changed++
+			}
+		}
+		if encoded == nil {
+			encoded = line
+		}
+		out = append(append(out, encoded...), '\n')
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	// The list summary covers the old bytes; drop it on both sides of the rewrite.
+	if err := dropSummary(s.Dir); err != nil {
+		return 0, err
+	}
+	defer func() { _ = dropSummary(s.Dir) }()
+	if err := atomicWrite(s.Dir, "messages.jsonl", out); err != nil {
+		return 0, err
+	}
+	return changed, nil
 }
 
 // Truncate keeps the first n transcript messages, atomically.

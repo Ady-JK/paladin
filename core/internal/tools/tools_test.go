@@ -20,7 +20,7 @@ func testCtx(t *testing.T) (*ToolCtx, string) {
 
 func TestUnknownToolIsErrorResult(t *testing.T) {
 	r := NewRegistry()
-	result := r.Call(&ToolCall{ID: "1", Name: "missing", Arguments: "{}"}, &ToolCtx{})
+	result := r.Call(&ToolCall{ID: "1", Name: "missing", Arguments: `{"reason":"test"}`}, &ToolCtx{})
 	if !result.IsError {
 		t.Fatal("expected error")
 	}

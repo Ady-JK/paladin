@@ -127,3 +127,38 @@ func TestTerminalRunLoadsZshEnvironment(t *testing.T) {
 		t.Fatalf("terminal environment: %+v %v", result, err)
 	}
 }
+
+func TestOneSessionCannotOpenEveryTerminal(t *testing.T) {
+	hub := newTerminalHub(func(terminalEvent) {})
+	for i := 0; i < maxTerminalsPerSession; i++ {
+		hub.entries[fmt.Sprintf("t%d", i)] = &terminalProcess{sessionID: "busy"}
+	}
+	if _, err := hub.start("busy", t.TempDir(), 80, 24); err == nil || !strings.Contains(err.Error(), "this session") {
+		t.Fatalf("err = %v, want a per-session limit", err)
+	}
+	// Another session is unaffected by the first one's terminals (it gets as
+	// far as spawning, or fails there, but not on the limit).
+	if _, err := hub.start("other", t.TempDir(), 80, 24); err != nil && strings.Contains(err.Error(), "this session") {
+		t.Fatalf("other session hit the limit: %v", err)
+	}
+	for id, entry := range hub.entries {
+		if entry.cmd == nil {
+			delete(hub.entries, id) // the stand-ins have no process to stop
+		}
+	}
+	hub.closeAll()
+}
+
+func TestTerminalRunIgnoresTerminalAppSessions(t *testing.T) {
+	if _, err := os.Stat("/bin/zsh"); err != nil {
+		t.Skip("zsh unavailable")
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
+	t.Setenv("TERM_SESSION_ID", "6F1B2C3D-0000-4000-8000-ABCDEF123456")
+	result, err := terminalRun("printf ok", t.TempDir())
+	if err != nil || result.Output != "ok" {
+		t.Fatalf("Terminal.app's session hook leaked into the output: %+v %v", result, err)
+	}
+}

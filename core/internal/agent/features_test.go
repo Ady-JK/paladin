@@ -188,7 +188,7 @@ func TestPlanModeKeepsMCPToolsBehindTheGate(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000036")
 	d, _, _, _ := testDeps(t, sess)
 	d.Tools = d.Tools.With(fakeMCPTool{name: "mcp__s__look", readOnly: true}, fakeMCPTool{name: "mcp__s__change"})
-	d.Gate = &permission.Gate{Preset: permission.Auto}
+	d.Gate = &permission.Gate{Preset: permission.Review}
 	a, err := DefaultTemplate().Build(d, Request{SessionID: sess.Meta.SessionID, Message: "plan", Mode: "plan"})
 	if err != nil {
 		t.Fatal(err)

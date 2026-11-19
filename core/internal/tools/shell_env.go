@@ -14,14 +14,42 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // toolchainDirs are prepended to PATH when missing. Lookups probe the
 // real filesystem so we only add dirs that exist.
 func toolchainDirs() []string {
 	home, _ := os.UserHomeDir()
+	toolchainMu.Lock()
+	defer toolchainMu.Unlock()
+	if toolchainCache.home == home && toolchainCache.at != (time.Time{}) && toolchainClock().Sub(toolchainCache.at) < toolchainTTL {
+		return slices.Clone(toolchainCache.dirs)
+	}
+	dirs := probeToolchainDirs(home)
+	toolchainCache.home, toolchainCache.dirs, toolchainCache.at = home, dirs, toolchainClock()
+	return slices.Clone(dirs)
+}
+
+// toolchainTTL is how long a probe of the toolchain dirs is reused: every
+// shell, MCP and LSP spawn builds a PATH, and installs land rarely.
+const toolchainTTL = 10 * time.Second
+
+var (
+	toolchainMu    sync.Mutex
+	toolchainClock = time.Now
+	toolchainCache struct {
+		home string
+		dirs []string
+		at   time.Time
+	}
+)
+
+func probeToolchainDirs(home string) []string {
 	candidates := []string{
 		"/usr/local/go/bin",
 		"/opt/go/bin",
@@ -74,7 +102,10 @@ func nvmNodeBins(home string) []string {
 
 // shellEnv returns the environment for spawned commands: the parent
 // environment plus the toolchain dirs above on PATH, plus the
-// non-interactive sanitisers each spawn site already set.
+// non-interactive sanitisers each spawn site already set. It also turns off
+// macOS Terminal's per-session history save and restore, which otherwise
+// prints "Saving session..." into the output of every command when the app
+// was started from Terminal.app.
 func shellEnv(extra ...string) []string {
 	env := os.Environ()
 	var path string
@@ -86,7 +117,7 @@ func shellEnv(extra ...string) []string {
 		}
 		rest = append(rest, kv)
 	}
-	rest = append(rest, "PATH="+augmentedPath(path))
+	rest = append(rest, "PATH="+augmentedPath(path), "SHELL_SESSIONS_DISABLE=1")
 	return append(rest, extra...)
 }
 

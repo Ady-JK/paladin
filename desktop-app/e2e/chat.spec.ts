@@ -51,7 +51,7 @@ test("agent markdown renders while the user bubble stays plain", async ({ page }
   await expect(rows.nth(0)).toContainText("explain **boldly**");
 });
 
-test("the conversation and composer use the full pane width", async ({ page }) => {
+test("the conversation and composer share a centered reading width", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.fill("#promptInput", "hello");
   await page.click("#sendBtn");
@@ -64,8 +64,8 @@ test("the conversation and composer use the full pane width", async ({ page }) =
   const composer = await width("footer > div");
   expect(row).toBeCloseTo(messages, 0);
   expect(composer).toBeCloseTo(messages, 0);
-  // Only the 24px gutters (and a possible scrollbar) may remain.
-  expect(messages).toBeGreaterThan(chat - 90);
+  expect(messages).toBeLessThan(chat - 90);
+  expect(messages).toBeLessThanOrEqual(1100);
 });
 
 test("wide tables scroll sideways and tall tables scroll vertically", async ({ page }) => {

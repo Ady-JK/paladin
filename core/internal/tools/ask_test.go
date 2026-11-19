@@ -191,7 +191,7 @@ func TestAskRegistryStampsCallID(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		res := reg.Call(
-			&ToolCall{ID: " stamped ", Name: "ask", Arguments: `{"questions":[{"question":"q"}]}`},
+			&ToolCall{ID: " stamped ", Name: "ask", Arguments: `{"reason":"test","questions":[{"question":"q"}]}`},
 			&ToolCtx{Workspace: t.TempDir(), SessionDir: t.TempDir(), Cancel: context.Background(), SessionID: "sess-5"},
 		)
 		if res.IsError {

@@ -30,6 +30,14 @@ type anthropicBlock struct {
 	Content   string                `json:"content,omitempty"`
 	IsError   bool                  `json:"is_error,omitempty"`
 	Source    *anthropicImageSource `json:"source,omitempty"`
+	// Thinking, Signature and Data carry a thinking block (Data is the body
+	// of a redacted_thinking block); CacheControl marks a prompt-cache
+	// breakpoint. Thinking is a pointer so an empty thinking text is still
+	// sent, which the API requires.
+	Thinking     *string         `json:"thinking,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
+	Data         string          `json:"data,omitempty"`
+	CacheControl *anthropicCache `json:"cache_control,omitempty"`
 }
 
 type anthropicImageSource struct {
@@ -44,18 +52,22 @@ type anthropicMessage struct {
 }
 
 type anthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  map[string]any  `json:"input_schema"`
+	CacheControl *anthropicCache `json:"cache_control,omitempty"`
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stream    bool               `json:"stream,omitempty"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
+	// System is a string for OpenCode and a list of text blocks for Copilot.
+	System       any                    `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	Stream       bool                   `json:"stream,omitempty"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 func toolInput(arguments string) any {
@@ -73,11 +85,10 @@ func toAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefini
 }
 
 func (p *OpenAIProvider) anthropicRequest(system string, messages []LlmMessage, tools []ToolDefinition) anthropicRequest {
-	req := buildAnthropicRequest(system, messages, tools, p.isCopilot)
-	if p.isCopilot && p.meta.MaxOutput > 0 && p.meta.MaxOutput < int64(req.MaxTokens) {
-		req.MaxTokens = int(p.meta.MaxOutput)
+	if p.isCopilot {
+		return p.copilotMessagesRequest(system, messages, tools)
 	}
-	return req
+	return buildAnthropicRequest(system, messages, tools, false)
 }
 
 func anthropicUserBlocks(message LlmMessage, includeImage bool) []anthropicBlock {
@@ -98,8 +109,10 @@ func anthropicUserBlocks(message LlmMessage, includeImage bool) []anthropicBlock
 func buildAnthropicRequest(system string, messages []LlmMessage, tools []ToolDefinition, includeUserImages bool) anthropicRequest {
 	req := anthropicRequest{
 		MaxTokens: anthropicMaxToken,
-		System:    system,
 		Messages:  []anthropicMessage{},
+	}
+	if system != "" {
+		req.System = system
 	}
 	var pendingToolResults []anthropicBlock
 	flushTools := func() {
@@ -186,6 +199,13 @@ func (p *OpenAIProvider) messagesURL() string {
 func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string) (ToolResponse, error) {
 	body := p.anthropicRequest(system, messages, tools)
 	body.Model = p.model
+	if p.isCopilot && body.MaxTokens > messagesBufferedMaxTokens {
+		// Long requests must stream; a buffered call stays under that size.
+		body.MaxTokens = messagesBufferedMaxTokens
+		if body.Thinking != nil && body.Thinking.BudgetTokens >= body.MaxTokens {
+			body.Thinking.BudgetTokens = body.MaxTokens - 1
+		}
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: encode: %v", p.name, err))
@@ -196,7 +216,7 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 	if err != nil {
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
-	p.anthropicHeaders(req, sessionID, false)
+	p.anthropicHeaders(ctx, req, messages, sessionID, false)
 	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -214,11 +234,14 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 	}
 	var wire struct {
 		Content []struct {
-			Type  string          `json:"type"`
-			Text  string          `json:"text"`
-			ID    string          `json:"id"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
+			Type      string          `json:"type"`
+			Text      string          `json:"text"`
+			ID        string          `json:"id"`
+			Name      string          `json:"name"`
+			Input     json.RawMessage `json:"input"`
+			Thinking  string          `json:"thinking"`
+			Signature string          `json:"signature"`
+			Data      string          `json:"data"`
 		} `json:"content"`
 		Usage anthropicUsageBlock `json:"usage"`
 		Error *struct {
@@ -233,8 +256,14 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 	}
 	var out ToolResponse
 	var text strings.Builder
-	for _, block := range wire.Content {
+	var thinking messagesThinkingAcc
+	for i, block := range wire.Content {
 		switch block.Type {
+		case "thinking", "redacted_thinking":
+			if p.isCopilot {
+				thinking.start(i, block.Type, block.Thinking, block.Data)
+				thinking.addSignature(i, block.Signature)
+			}
 		case "text":
 			text.WriteString(block.Text)
 		case "tool_use":
@@ -246,18 +275,35 @@ func (p *OpenAIProvider) completeAnthropic(ctx context.Context, system string, m
 		}
 	}
 	out.Content = text.String()
+	if p.isCopilot {
+		out.Reasoning = thinking.display.String()
+		out.Thinking = thinking.result(p)
+	}
 	if u := anthropicUsage(wire.Usage); u != nil {
-		out.Usage = p.estimateCopilotUsage(u, true)
+		out.Usage = p.estimateCopilotUsage(u)
 	}
 	return out, nil
 }
 
-// anthropicUsage folds one usage block into Usage. Input-side fields
-// arrive in message_start, output tokens in message_delta; both map
-// onto the same accumulator.
+// merge folds a streamed usage report into b. The Messages API reports usage
+// twice per call, on message_start and again on message_delta, and the counts
+// are cumulative: message_delta may repeat the input side and carries the
+// final output total. Each field therefore keeps its largest value; adding the
+// two reports counted every call's input and cache twice.
+func (b *anthropicUsageBlock) merge(o anthropicUsageBlock) {
+	b.InputTokens = max(b.InputTokens, o.InputTokens)
+	b.CacheCreationInputTokens = max(b.CacheCreationInputTokens, o.CacheCreationInputTokens)
+	b.CacheReadInputTokens = max(b.CacheReadInputTokens, o.CacheReadInputTokens)
+	b.OutputTokens = max(b.OutputTokens, o.OutputTokens)
+}
+
+// anthropicUsage maps one call's usage block onto Usage. Anthropic's
+// input_tokens leaves cached input out, so the call's prompt is the sum of the
+// three input fields: the same meaning prompt_tokens has everywhere else, which
+// keeps the context fill, the cache share and the totals comparable.
 func anthropicUsage(b anthropicUsageBlock) *Usage {
 	out := &Usage{
-		PromptTokens:     b.InputTokens,
+		PromptTokens:     b.InputTokens + b.CacheReadInputTokens + b.CacheCreationInputTokens,
 		CompletionTokens: b.OutputTokens,
 		CacheReadTokens:  b.CacheReadInputTokens,
 		CacheWriteTokens: b.CacheCreationInputTokens,
@@ -271,7 +317,7 @@ func anthropicUsage(b anthropicUsageBlock) *Usage {
 	return out
 }
 
-func (p *OpenAIProvider) anthropicHeaders(req *http.Request, sessionID string, stream bool) {
+func (p *OpenAIProvider) anthropicHeaders(ctx context.Context, req *http.Request, messages []LlmMessage, sessionID string, stream bool) {
 	req.Header.Set("Content-Type", "application/json")
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
@@ -285,9 +331,12 @@ func (p *OpenAIProvider) anthropicHeaders(req *http.Request, sessionID string, s
 		req.Header.Set("Editor-Version", "vscode/1.95.0")
 		req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.7")
 		req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
-		req.Header.Set("Openai-Intent", "messages-proxy")
-		req.Header.Set("X-Interaction-Type", "messages-proxy")
-		req.Header.Set("X-Github-Api-Version", copilotAPIVersion)
+		for key, value := range p.copilotRequestHeaders(ctx, messages) {
+			req.Header.Set(key, value)
+		}
+		if beta := p.messagesBetaHeader(); beta != "" {
+			req.Header.Set("anthropic-beta", beta)
+		}
 	}
 	p.setSessionHeaders(req, sessionID)
 }
@@ -314,7 +363,7 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 	if err != nil {
 		return RequestError(fmt.Sprintf("%s: anthropic: %v", p.name, err))
 	}
-	p.anthropicHeaders(req, sessionID, true)
+	p.anthropicHeaders(ctx, req, messages, sessionID, true)
 	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		if parent.Err() != nil {
@@ -341,7 +390,8 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 		}
 	}
 	accs := map[int]*anthropicCallAcc{}
-	var streamUsage Usage
+	var streamBlock anthropicUsageBlock // cumulative: merged, never summed
+	var thinking messagesThinkingAcc
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -362,14 +412,19 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 			} `json:"message"`
 			Usage        *anthropicUsageBlock `json:"usage"`
 			ContentBlock *struct {
-				Type string `json:"type"`
-				ID   string `json:"id"`
-				Name string `json:"name"`
+				Type     string `json:"type"`
+				ID       string `json:"id"`
+				Name     string `json:"name"`
+				Thinking string `json:"thinking"`
+				Data     string `json:"data"`
 			} `json:"content_block"`
 			Delta *struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
+				Thinking    string `json:"thinking"`
+				Signature   string `json:"signature"`
+				StopReason  string `json:"stop_reason"`
 			} `json:"delta"`
 			Error *struct {
 				Type    string `json:"type"`
@@ -383,14 +438,20 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 		case "message_start":
 			// Input-side usage rides on message_start.message.usage.
 			if ev.Message != nil {
-				addUsage(&streamUsage, anthropicUsage(ev.Message.Usage))
+				streamBlock.merge(ev.Message.Usage)
 			}
 		case "message_delta":
 			// Output tokens arrive here.
 			if ev.Usage != nil {
-				addUsage(&streamUsage, anthropicUsage(*ev.Usage))
+				streamBlock.merge(*ev.Usage)
+			}
+			if p.isCopilot && ev.Delta != nil && ev.Delta.StopReason == "refusal" {
+				return RequestError(fmt.Sprintf("%s: anthropic: the model refused to answer (stop_reason refusal)", p.name))
 			}
 		case "content_block_start":
+			if p.isCopilot && ev.ContentBlock != nil && (ev.ContentBlock.Type == "thinking" || ev.ContentBlock.Type == "redacted_thinking") {
+				thinking.start(ev.Index, ev.ContentBlock.Type, ev.ContentBlock.Thinking, ev.ContentBlock.Data)
+			}
 			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
 				acc := &anthropicCallAcc{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name, index: ev.Index}
 				accs[ev.Index] = acc
@@ -413,16 +474,33 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 				if acc := accs[ev.Index]; acc != nil {
 					acc.arguments.WriteString(ev.Delta.PartialJSON)
 				}
+			case "thinking_delta":
+				if p.isCopilot && ev.Delta.Thinking != "" {
+					thinking.addText(ev.Index, ev.Delta.Thinking)
+					if err := send(Chunk{Reasoning: ev.Delta.Thinking}); err != nil {
+						return CancelledError()
+					}
+				}
+			case "signature_delta":
+				if p.isCopilot {
+					thinking.addSignature(ev.Index, ev.Delta.Signature)
+				}
 			}
 		case "message_stop":
+			if p.isCopilot {
+				if th := thinking.result(p); th != nil {
+					if err := send(Chunk{Thinking: th}); err != nil {
+						return CancelledError()
+					}
+				}
+			}
 			if calls := anthropicCalls(accs); len(calls) > 0 {
 				if err := send(Chunk{ToolCalls: calls}); err != nil {
 					return CancelledError()
 				}
 			}
-			if !streamUsage.Empty() {
-				u := streamUsage
-				if err := send(Chunk{Usage: p.estimateCopilotUsage(&u, true)}); err != nil {
+			if u := anthropicUsage(streamBlock); u != nil {
+				if err := send(Chunk{Usage: p.estimateCopilotUsage(u)}); err != nil {
 					return CancelledError()
 				}
 			}
@@ -464,10 +542,9 @@ func (p *OpenAIProvider) streamAnthropic(ctx context.Context, system string, mes
 			return CancelledError()
 		}
 	}
-	if !streamUsage.Empty() {
-		u := streamUsage
+	if u := anthropicUsage(streamBlock); u != nil {
 		select {
-		case tx <- Chunk{Usage: p.estimateCopilotUsage(&u, true)}:
+		case tx <- Chunk{Usage: p.estimateCopilotUsage(u)}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/media"
@@ -60,6 +62,7 @@ type Request struct {
 	// (default) or "full-access".
 	Permissions   string             `json:"permissions,omitempty"`
 	AttachmentIDs []string           `json:"attachmentIds,omitempty"`
+	TaggedPaths   []string           `json:"taggedPaths,omitempty"`
 	Attachments   []media.Attachment `json:"-"`
 	// Steer, when set, returns (and clears) messages the user sent while
 	// the turn runs; they join before the next model call. The turn hub
@@ -100,6 +103,12 @@ type Notice struct {
 	Arguments string
 	Content   string
 	IsError   bool
+	// Transient makes the notice a message for the user only: Content is
+	// shown as an info notice and nothing joins the conversation.
+	Transient bool
+	// Appended, when set, runs once the notice has joined the
+	// conversation, so a caller records it only if it really did.
+	Appended func()
 }
 
 // SteerMessage is a user message sent into a running turn.
@@ -145,6 +154,9 @@ type ChatChunk struct {
 	Budget *BudgetNotice `json:"budget,omitempty"`
 	// Hook reports a hook that blocked, added context, failed or stopped.
 	Hook *hooks.Note `json:"hook,omitempty"`
+	// Notice is something the harness running the turn wants the user to know:
+	// a warning, a model switch, a server that failed to start.
+	Notice *ChatNotice `json:"notice,omitempty"`
 	// Reasoning is a piece of the model's thinking, streamed apart from
 	// the answer (Delta).
 	Reasoning string `json:"reasoning,omitempty"`
@@ -157,11 +169,16 @@ type ChatChunk struct {
 	UsageChanged bool `json:"usageChanged,omitempty"`
 }
 
-// ToolGate decides whether a tool call may run, and under which
-// sandbox. A nil gate runs everything unconfined.
+// ChatNotice is a short message for the turn: Kind is "info", "warning" or
+// "error".
+type ChatNotice struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+// ToolGate decides whether a tool call may run. A nil gate allows all calls.
 type ToolGate interface {
 	Authorize(ctx context.Context, callID, name string, args json.RawMessage, notify func(permission.Approval)) permission.Auth
-	Escalate(ctx context.Context, callID, name string, args json.RawMessage, b permission.Blocked, notify func(permission.Approval)) permission.Escalation
 }
 
 // ProjectTrust is a gate that also decides whether tools the workspace
@@ -321,8 +338,15 @@ type Agent struct {
 	journalInput []transcript.Message
 	reply        strings.Builder
 	// thinking is the current round's visible reasoning, saved with
-	// its assistant record.
-	thinking strings.Builder
+	// its assistant record; thinkingState is the provider's replayable
+	// form of it (encrypted state included).
+	thinking      strings.Builder
+	thinkingState *inference.Thinking
+	// interactionID names this prompt to the provider: every model call the
+	// turn makes carries it. userCallSent is set once the turn's first call
+	// has gone out, which is the only one the user initiated.
+	interactionID string
+	userCallSent  bool
 	// turnUsage accumulates every LLM call's Usage for the turn, across
 	// all rounds and both streaming and fallback paths.
 	turnUsage inference.Usage
@@ -385,6 +409,7 @@ func newAgent(c runConfig) *Agent {
 		}
 	}
 	return &Agent{
+		interactionID: uuid.NewString(),
 		window:        window,
 		compactPct:    c.compactPct,
 		contextChoice: c.contextChoice,
@@ -607,7 +632,11 @@ func (a *Agent) persist(message string, resume bool) error {
 	}
 	turn = append(turn, a.records...)
 	if len(a.toolDefs) == 0 && !a.compactOnly && (a.reply.Len() > 0 || resume) {
-		turn = append(turn, transcript.Message{Role: transcript.RoleAssistant, Content: a.reply.String()})
+		reasoning, thinking := a.takeThinking()
+		turn = append(turn, transcript.Message{
+			Role: transcript.RoleAssistant, Content: a.reply.String(),
+			Reasoning: reasoning, Thinking: toTranscriptThinking(thinking),
+		})
 	}
 	// A resume turn has no user row to hang a summary on, and a failed
 	// write leaves nothing to describe.
@@ -683,7 +712,7 @@ func (a *Agent) timeGenComplete(call func() (inference.ToolResponse, error)) (in
 func (a *Agent) noteCallUsage(u inference.Usage) {
 	a.turnUsage.Add(u)
 	defer a.noteCallCost(u)
-	if n := contextTokens(u, a.provider.ApiType()); n > 0 {
+	if n := u.PromptTokens; n > 0 {
 		a.promptTokens, a.promptLen = n, a.sentLen
 	}
 	session.RecordCall(a.session.UsagePath(), a.session.Meta.SessionID, a.provider.Model(), UsageCounters(u))
@@ -696,7 +725,7 @@ func (a *Agent) noteCallUsage(u inference.Usage) {
 
 // UsageCounters is one LLM call's usage in ledger form.
 func UsageCounters(u inference.Usage) session.Counters {
-	return session.Counters{
+	c := session.Counters{
 		PromptTokens:     u.PromptTokens,
 		CompletionTokens: u.CompletionTokens,
 		ReasoningTokens:  u.ReasoningTokens,
@@ -708,6 +737,12 @@ func UsageCounters(u inference.Usage) session.Counters {
 		HasCost:          u.HasCost,
 		CostEstimated:    u.CostEstimated,
 	}
+	// A call whose provider reported its cache has a hit share of its own, a
+	// miss included; one that did not report it is left out of the average.
+	if u.CacheReadKnown && u.PromptTokens > 0 {
+		c.CacheHitCalls, c.CacheHitSum = 1, session.CacheShare(u.PromptTokens, u.CacheReadTokens)
+	}
+	return c
 }
 
 func (a *Agent) emit(chunk ChatChunk) error {
@@ -730,6 +765,9 @@ func (a *Agent) noteThinking(c inference.Chunk) error {
 			return err
 		}
 	}
+	if c.Thinking != nil {
+		a.thinkingState = c.Thinking
+	}
 	if c.Reasoning == "" {
 		return nil
 	}
@@ -737,11 +775,41 @@ func (a *Agent) noteThinking(c inference.Chunk) error {
 	return a.emit(ChatChunk{Reasoning: c.Reasoning})
 }
 
-// takeThinking hands over the current round's thinking for its record.
-func (a *Agent) takeThinking() string {
-	s := a.thinking.String()
+// callContext tells the provider what the next model call is: which prompt
+// it belongs to, what it is for, and whether the user started it. Only the
+// first call of a fresh prompt counts as the user's; later rounds, retries,
+// resumes, subagents and compaction are the agent's.
+func (a *Agent) callContext(ctx context.Context, kind inference.CallKind) context.Context {
+	meta := inference.CallMeta{InteractionID: a.interactionID, Kind: kind}
+	subagent := a.session.Meta.Subagent != nil
+	if subagent && kind == inference.CallAgent {
+		meta.Kind = inference.CallSubagent
+	}
+	user := kind == inference.CallAgent && !subagent && !a.currentResume && !a.compactOnly && !a.userCallSent
+	if kind == inference.CallAgent {
+		a.userCallSent = true
+	}
+	meta.UserInitiated = &user
+	return inference.WithCallMeta(ctx, meta)
+}
+
+// takeThinking hands over the current round's thinking for its record:
+// the readable text, and the replayable state that goes back to the model
+// with the assistant message (nil when the round thought nothing).
+func (a *Agent) takeThinking() (string, *inference.Thinking) {
+	text := a.thinking.String()
 	a.thinking.Reset()
-	return s
+	state := a.thinkingState
+	a.thinkingState = nil
+	if text == "" && state.Empty() {
+		return text, nil
+	}
+	var th inference.Thinking
+	if state != nil {
+		th = *state
+	}
+	th.Text = text
+	return text, &th
 }
 
 // publishLive hands a copy of the conversation to the live observer
@@ -753,10 +821,12 @@ func (a *Agent) publishLive() {
 }
 
 func (a *Agent) appendAssistant(content string, calls []inference.ToolCall) {
+	reasoning, thinking := a.takeThinking()
 	a.messages = append(a.messages, inference.LlmMessage{
 		Role:      "assistant",
 		Content:   content,
 		ToolCalls: append([]inference.ToolCall(nil), calls...),
+		Thinking:  thinking,
 	})
 	if len(calls) > 0 {
 		a.publishLive()
@@ -770,7 +840,8 @@ func (a *Agent) appendAssistant(content string, calls []inference.ToolCall) {
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
 		ToolCalls: &stored,
-		Reasoning: a.takeThinking(),
+		Reasoning: reasoning,
+		Thinking:  toTranscriptThinking(thinking),
 	})
 }
 

@@ -19,6 +19,13 @@
   position: relative;
 }
 
+#messages,
+#agentView footer > div.w-full {
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+}
+
 #messages .turn-row {
   font-size: 0.9375rem;
   line-height: 1.7;
@@ -90,7 +97,7 @@
 
 /* ---- Tool calls: one quiet line each, folded into runs. ---- */
 .tool-run {
-  margin: 6px 0;
+  margin: 8px 0;
 }
 
 .tool-run + .agent-text:empty + .tool-run {
@@ -327,6 +334,29 @@
   color: var(--color-slate-800);
   font-size: 0.8125rem;
   padding: 12px 14px;
+}
+
+#messages .md .md-pre {
+  padding-right: 2.5rem;
+}
+
+/* One line: tight, text and copy button both centred in the block. */
+#messages .md .md-pre.is-oneline {
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+#messages .md .md-pre.is-oneline > code {
+  display: block;
+  line-height: 1.5;
+}
+
+#messages .md .md-pre.is-oneline .md-copy {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .dark #messages .md .md-pre {
@@ -695,4 +725,110 @@
   gap: 5px;
   color: var(--color-slate-500);
   font-size: 10px;
+}
+
+/* ---- Group steps: each call in an expanded group is its reason, and
+   opens to the full tool row. A call with no reason shows the tool row
+   directly (no head), as before. ---- */
+.tool-step-head {
+  display: none;
+}
+
+.tool-run.is-group .tool-step.has-reason > .tool-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 0.9375rem;
+  line-height: 1.5rem;
+  color: var(--color-slate-500);
+  cursor: pointer;
+}
+
+.tool-run.is-group .tool-step.has-reason > .tool-step-head:hover {
+  background: rgb(0 0 0 / 0.035);
+  color: var(--color-slate-700);
+}
+
+.dark .tool-run.is-group .tool-step.has-reason > .tool-step-head {
+  color: var(--color-slate-400);
+}
+
+.dark .tool-run.is-group .tool-step.has-reason > .tool-step-head:hover {
+  background: rgb(255 255 255 / 0.035);
+  color: var(--color-slate-200);
+}
+
+.tool-run.is-group .tool-step.has-reason > .tool-step-head:focus-visible {
+  outline: 2px solid rgb(146 134 214 / 0.55);
+  outline-offset: -2px;
+}
+
+.tool-step-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-step-head [hidden] {
+  display: none !important;
+}
+
+.tool-step-caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-slate-400);
+  transition: transform 160ms ease;
+}
+
+.tool-step.is-open > .tool-step-head .tool-step-caret {
+  transform: rotate(90deg);
+}
+
+.tool-step[data-status="failed"] > .tool-step-head .tool-ico {
+  color: #dc2626;
+}
+
+.dark .tool-step[data-status="failed"] > .tool-step-head .tool-ico {
+  color: #f87171;
+}
+
+.tool-run.is-group .tool-step.has-reason:not(.is-open) > .tool-step-body {
+  display: none;
+}
+
+.tool-run.is-group .tool-step.has-reason > .tool-step-body {
+  padding: 0 14px 10px;
+}
+
+/* The box: shown once the group is open and any call carries a reason. */
+.tool-run.is-group.has-reasons.is-open > .tool-run-list {
+  margin: 8px 0 4px;
+  padding: 0;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 14px;
+}
+
+.dark .tool-run.is-group.has-reasons.is-open > .tool-run-list {
+  border-color: rgb(255 255 255 / 0.09);
+}
+
+.tool-run.is-group.has-reasons > .tool-run-list > .tool-run-inner {
+  border-radius: 13px;
+}
+
+.tool-run.is-group.has-reasons .tool-step + .tool-step {
+  border-top: 1px solid var(--color-slate-200);
+}
+
+.dark .tool-run.is-group.has-reasons .tool-step + .tool-step {
+  border-top-color: rgb(255 255 255 / 0.06);
+}
+
+.tool-run.is-group.has-reasons .tool-step:not(.has-reason) {
+  padding: 4px 14px;
 }

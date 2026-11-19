@@ -74,8 +74,9 @@ export async function turnTotal(sessionId: string, turn: SessionChanges["turns"]
 const paintedMarker = new WeakMap<HTMLElement, { heading: string; files: string }>();
 
 // turnAnchor is the last row of the turn that starts at row. It stops at
-// the next turn's user row, and at a live root (which holds another
-// turn's rows), so a turn's card can never end up under a later turn.
+// the next turn's user row, at a live root (which holds another turn's
+// rows), and at a compaction that sits between turns, so a turn's card
+// can never end up under a later turn or below a summary.
 function turnAnchor(row: HTMLElement): HTMLElement {
   let anchor = row;
   let next = anchor.nextElementSibling as HTMLElement | null;
@@ -84,7 +85,8 @@ function turnAnchor(row: HTMLElement): HTMLElement {
     !next.hasAttribute("data-turn-index") &&
     !next.hasAttribute("data-turn-id") &&
     !next.classList.contains("live-root") &&
-    !next.classList.contains("turn-change-card")
+    !next.classList.contains("turn-change-card") &&
+    next.dataset.notice !== "compaction"
   ) {
     anchor = next;
     next = anchor.nextElementSibling as HTMLElement | null;

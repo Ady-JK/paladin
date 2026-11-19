@@ -204,7 +204,7 @@ func attachNested(sessionDir string, files []string, read string) nestedDelivery
 		b.WriteString("\n--- " + file + " ---\n" + body + "\n")
 	}
 	if changed {
-		if data, err := json.Marshal(rec); err == nil && os.MkdirAll(sessionDir, 0o755) == nil {
+		if data, err := json.Marshal(rec); err == nil && os.MkdirAll(sessionDir, 0o700) == nil {
 			_ = atomicfile.Write(recordPath, data)
 		}
 	}

@@ -3,8 +3,7 @@
 // nothing is ever downloaded: gofmt and rustfmt for Go and Rust, ruff or
 // black for Python when pyproject.toml (or ruff.toml) configures them,
 // and prettier only from the project's own node_modules/.bin. The
-// formatter reads the file on stdin inside a read-only sandbox (where
-// the OS has one) and its output replaces the file through the same
+// formatter reads the file on stdin and its output replaces the file through the same
 // conflict-checked write as edit. Files outside the workspace, failures
 // and timeouts leave the file as written.
 
@@ -21,7 +20,6 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/custom"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
 const formatTimeout = 10 * time.Second
@@ -202,11 +200,6 @@ func runFormatter(ctx *ToolCtx, argv []string, dir string, input []byte) ([]byte
 	cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = ChildEnv("NO_COLOR=1")
-	if sandbox.Kind() != "" {
-		if err := confine(cmd, &sandbox.Policy{Mode: sandbox.ModeReadOnly}); err != nil {
-			return nil, err
-		}
-	}
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout limitedBuffer
 	stdout.max = 2 * MaxFileBytes

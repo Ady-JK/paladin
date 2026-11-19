@@ -53,7 +53,7 @@ func TestCopilotLiveCatalogAndLowCostModels(t *testing.T) {
 		}
 	}
 	t.Logf("verified catalog routes for %d selectable models", len(ids))
-	for _, c := range []struct{ model, protocol string }{{"claude-haiku-4.5", protocolChat}, {"gpt-5.6-luna", protocolResponses}} {
+	for _, c := range []struct{ model, protocol string }{{"claude-haiku-4.5", protocolAnthropic}, {"gpt-5.6-luna", protocolResponses}} {
 		t.Run(c.model, func(t *testing.T) {
 			metadata, ok := meta[c.model]
 			if !ok {

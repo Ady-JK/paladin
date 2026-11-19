@@ -13,7 +13,7 @@ import { setStatus } from "../ui/status";
 import { toast } from "../ui/toast";
 import { escapeHtml } from "../core/format";
 import { createTurn, dismissGreeting, followTail, scrollToBottom, mountLinkCards } from "./chatView";
-import { mountImage, mountUserImage, registerImage } from "./mediaGallery";
+import { mountImage, mountUserAttachments, mountUserImage, registerImage } from "./mediaGallery";
 import { TurnView } from "./turnView";
 import { handleAskToolEvent } from "./ask";
 import { handleTodoToolEvent, refreshTodos } from "./todos";
@@ -23,7 +23,7 @@ import { refreshSkillsCache } from "./skills";
 import { refreshWorktreeBar, syncWorktreeChip } from "./worktrees";
 import { syncBudget, scheduleBudgetRefresh } from "./budget";
 import { showContextBox } from "./contextBox";
-import { noteToolChange, refreshChanges } from "./sidePane";
+import { hideLiveChanges, noteToolChange, refreshChanges } from "./sidePane";
 import { handlePluginApproval } from "./pluginApproval";
 import { createTurnStats } from "./turnStats";
 import { paintProtection } from "./snapshotProtection";
@@ -206,6 +206,19 @@ export function isBusy(sessionId: string): boolean {
   return !!e && (e.running !== null || e.queued.length > 0);
 }
 
+export function runningUserRow(sessionId: string): HTMLElement | null {
+  const entry = entries.get(sessionId);
+  return entry?.running ? (entry.users.get(entry.running.turnId) ?? null) : null;
+}
+
+export function hasRunningTurn(sessionId: string): boolean {
+  return !!entries.get(sessionId)?.running;
+}
+
+export function runningTurnIndex(sessionId: string): number | undefined {
+  return entries.get(sessionId)?.running?.index;
+}
+
 // syncComposer shows the visible session's controls: pause and steer
 // while it works. Send stays live so a follow-up queues behind the
 // running turn; steer adds it to the running turn instead.
@@ -217,7 +230,9 @@ export function syncComposer(): void {
   // Only its parent agent gives a subagent work.
   const child = !!state.subagent;
   inputEl.disabled = child;
-  inputEl.placeholder = child ? "A subagent takes work from its parent agent only" : defaultPlaceholder;
+  inputEl.placeholder = child
+    ? "A subagent takes work from its parent agent only"
+    : (inputEl.dataset.idlePlaceholder ?? defaultPlaceholder);
   sendBtn.disabled = child;
   sendBtn.classList.remove("hidden");
   sendBtn.title = busy ? "Queue after the running turn" : "Send";
@@ -241,6 +256,7 @@ function queuedRow(e: Entry, turn: TurnInfo): HTMLElement {
   });
   textEl.prepend(chip);
   e.users.set(turn.turnId, wrapper);
+  mountUserAttachments(wrapper, e.sessionId, turn.attachments);
   return wrapper;
 }
 
@@ -309,6 +325,7 @@ function startTurn(e: Entry, turn: TurnInfo): TurnView {
     e.users.set(turn.turnId, anchor);
     e.root.insertBefore(anchor, firstQueued(e));
   }
+  if (anchor) mountUserAttachments(anchor, e.sessionId, turn.attachments);
   let view = e.views.get(turn.turnId);
   if (!view) {
     view = newView(e);
@@ -532,6 +549,7 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
     return;
   }
   e.running = null;
+  hideLiveChanges(e.sessionId);
   e.tools.clear();
   e.approvals.clear();
   e.awaitingHint = false;
@@ -587,7 +605,7 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
   if (turn.index !== undefined && userRow) userRow.dataset.turnIndex = String(turn.index);
   const quiet = turn.cancelled || turn.stopped;
   if (shown) {
-    void refreshChanges(e.sessionId);
+    void refreshChanges(e.sessionId, userRow);
     e.badge = "";
     if (failure) {
       setStatus(failure, "error");
@@ -639,25 +657,46 @@ export function noteSubmitted(info: TurnInfo): void {
   }
 }
 
-// showSentImages puts the images just sent above the user's row at once,
-// so they do not wait for the turn to finish. finishTurn skips any path
-// already on the row.
-export function showSentImages(info: TurnInfo, images: api.SessionAttachment[]): void {
+// Show submitted attachments even if the turn event arrived before the reply.
+export function showSentAttachments(info: TurnInfo, attachments: api.SessionAttachment[], paths: string[]): void {
   const row = entry(info.sessionId).users.get(info.turnId);
   if (!row) return;
-  for (const attachment of images) {
-    if (attachment.image && !hasImage(row, attachment.image.path))
-      mountUserImage(row, info.sessionId, attachment.image.path, attachment.name);
-  }
+  const files = paths.map((path) => ({
+    id: "",
+    name:
+      path
+        .replace(/[\\/]+$/, "")
+        .split(/[\\/]/)
+        .pop() || path,
+    path,
+    size: 0,
+    mimeType: "",
+  }));
+  mountUserAttachments(row, info.sessionId, [...attachments, ...files]);
 }
 
 function onEvent(ev: TurnEvent): void {
   if (ev?.event === "host/restarted") {
+    void api.startCodexDiscovery().catch((error: unknown) => console.debug("Codex discovery unavailable", error));
     void recoverFromRestart();
+    return;
+  }
+  if (ev?.event === "host/failed") {
+    toast(ev.message || "The agent host stopped and could not be restarted.", "error");
     return;
   }
   if (ev?.event === "host/resync") {
     void resync();
+    return;
+  }
+  if (ev?.event === "session/refresh") {
+    // Something settled while no turn was running (a background command ended): a
+    // session on screen reads its history again.
+    if (ev.sessionId && ev.sessionId === state.sessionId) reopen?.(ev.sessionId);
+    return;
+  }
+  if (ev?.event === "sessions/changed") {
+    scheduleRefreshSessions();
     return;
   }
   if (ev?.event === "agents/changed") {
@@ -770,6 +809,7 @@ export function finishAttach(sessionId: string, snap: AttachSnapshot): void {
       view.lastSeq = Math.max(view.lastSeq, snap.seq);
     }
     if (user) {
+      mountUserAttachments(user, sessionId, live.attachments);
       for (const ev of snap.events ?? []) {
         if (ev.event === "chat/protection" && ev.protection) paintProtection(user, ev.protection);
       }
@@ -813,6 +853,7 @@ export function finishAttach(sessionId: string, snap: AttachSnapshot): void {
   }
   if (shown && e.running) {
     setStatus("thinking…", "busy");
+    void refreshChanges(sessionId);
   }
   syncComposer();
   sidebar();
@@ -866,6 +907,8 @@ export function initLive(open: (sessionId: string) => void): void {
   if (wired) return;
   wired = true;
   reopen = open;
+  // An answer to an agent's question may have started a turn the view should show.
+  window.addEventListener("paladin:turn-submitted", (event) => noteSubmitted((event as CustomEvent<TurnInfo>).detail));
   try {
     api.onAgentEvent(onEvent);
     api.onOpenSessionRequest((id) => open(id));

@@ -37,7 +37,7 @@ var methodClass = map[string]runClass{
 	"turns": runInline, "resources": runInline, "runningJobs": runInline, "killJob": runInline, "getWorkspace": runInline,
 	"fsHome": runInline, "resolveWorkspace": runInline,
 
-	"listProviders": runRead, "ideReadFile": runRead, "ideFileStatuses": runRead, "ideList": runRead, "ideSearch": runRead, "ideLayoutGet": runRead, "ideExplorerSettingsGet": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
+	"listProviders": runRead, "codexStatus": runRead, "ideReadFile": runRead, "ideFileStatuses": runRead, "ideList": runRead, "ideSearch": runRead, "ideLayoutGet": runRead, "ideExplorerSettingsGet": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
 	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead, "memoryConfig": runRead,
 	"creatorModeGet": runRead,
 	"contextSources": runRead,
@@ -50,7 +50,7 @@ var methodClass = map[string]runClass{
 	"listSideChats": runRead, "loadSideChat": runRead, "hooksList": runRead, "mcpList": runRead,
 	"mcpConfig": runRead, "mcpParse": runRead, "toolsList": runRead, "customList": runRead, "customGet": runRead,
 
-	"submitChat": runSession, "steerChat": runSession, "openSession": runSession,
+	"submitChat": runSession, "steerChat": runSession, "answerQuestion": runSession, "openSession": runSession,
 	"pluginInvoke":    runSession,
 	"saveAttachment":  runSession,
 	"saveTaggedImage": runSession,
@@ -72,13 +72,15 @@ var methodClass = map[string]runClass{
 	"toolsReload": runGlobal,
 	"customSet":   runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
 
-	"refreshProviders": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
+	"refreshProviders": runLong, "codexThreads": runLong, "deleteCodexThread": runLong, "codexSkills": runLong, "importCodexThread": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
 	"copilotSignInStart": runLong, "copilotSignInPoll": runLong, "copilotSignInCancel": runLong,
+	"syncSession":         runLong,
+	"startCodexDiscovery": runInline,
 }
 
 // startsTurn marks the requests a later stopChat for the same session
 // cancels if they have not started yet.
-var startsTurn = map[string]bool{"submitChat": true, "steerChat": true}
+var startsTurn = map[string]bool{"submitChat": true, "steerChat": true, "answerQuestion": true}
 
 const globalLane = "\x00global"
 

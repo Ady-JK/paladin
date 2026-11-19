@@ -148,3 +148,13 @@ func TestUserShellDefaultsToMacTerminalShell(t *testing.T) {
 		t.Fatalf("macOS default shell = %q", got)
 	}
 }
+
+func TestShellEnvDisablesTerminalAppSessions(t *testing.T) {
+	t.Setenv("TERM_SESSION_ID", "6F1B2C3D-0000-4000-8000-ABCDEF123456")
+	for _, kv := range shellEnv() {
+		if kv == "SHELL_SESSIONS_DISABLE=1" {
+			return
+		}
+	}
+	t.Fatal("macOS Terminal's save/restore hook would print 'Saving session...' into every command's output")
+}

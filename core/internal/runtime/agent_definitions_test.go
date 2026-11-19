@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -95,6 +96,12 @@ func TestCreateAgentCatalogIncludesReadyMCPTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { rt.mcp.Close() })
+	// The catalog waits only briefly for servers that are still starting, and a
+	// loaded machine can take longer than that to launch one. Start it first so
+	// the catalog is the thing under test.
+	warm, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	rt.mcpTools(warm, ws)
+	cancel()
 	text := rt.agentCapabilityContext(ws, "")
 	if !strings.Contains(text, "MCP dummy / echo") {
 		t.Fatalf("missing MCP tool: %s", text)

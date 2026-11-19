@@ -12,6 +12,7 @@ import { undoLast } from "./undo";
 import { forkSessionById, renameSessionById } from "./sessionActions";
 import { openSettings } from "./settings";
 import { loadSkills, parseSkillLine } from "./skills";
+import { startCodexSession } from "../adapters/codex/harness";
 import { openToolsMenu } from "./toolSwitches";
 import { openUsageDashboard } from "./usage";
 import { askSideQuestion, openSideChat } from "./sidePane";
@@ -60,6 +61,7 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
   const clear = () => {
     inputEl.value = "";
   };
+  if (state.harness === "codex") return routeCodexSlash(parsed);
   switch (name) {
     case "skill":
       // chat.ts splits `/skill <name> [message]` and sends the name
@@ -188,6 +190,85 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
       return "local";
   }
   return routeSidecarCommand(name, rest, trimmed);
+}
+
+// CODEX_AGENT_COMMANDS are the commands Codex itself runs: the line goes to
+// the core as the message and the core hands it to Codex.
+const CODEX_AGENT_COMMANDS = new Set(["compact", "goal", "review", "feedback", "mcp", "fast"]);
+
+// routeCodexSlash handles a `/` line in a Codex session. Codex's own commands
+// (and any command this app does not know, which Codex may) travel as the
+// message; the rest move around Paladin's own UI.
+async function routeCodexSlash(parsed: { trimmed: string; name: string; rest: string }): Promise<"local" | AgentRoute> {
+  const { trimmed, name, rest } = parsed;
+  const clear = () => {
+    inputEl.value = "";
+  };
+  switch (name) {
+    case "plan":
+      setMode("plan");
+      clear();
+      if (!rest) {
+        toast("Plan mode — Codex proposes a plan");
+        return "local";
+      }
+      return { message: rest, display: rest, mode: "plan" };
+    case "build":
+      setMode("build");
+      clear();
+      toast("Plan mode off");
+      return "local";
+    case "new":
+      clear();
+      newSession();
+      if (!(await startCodexSession())) return "local";
+      inputEl.value = rest;
+      toast(rest ? "New Codex session started" : "New Codex session");
+      return "local";
+    case "fork":
+      clear();
+      void forkCurrent();
+      return "local";
+    case "undo":
+      clear();
+      void undoLast();
+      return "local";
+    case "rename":
+      clear();
+      if (!rest) {
+        setComposer("/rename ");
+        toast("Usage: /rename <title>", "error");
+        return "local";
+      }
+      void renameCurrent(rest);
+      return "local";
+    case "model":
+      clear();
+      modelSelectBtn.click();
+      return "local";
+    case "thinking":
+      clear();
+      if (!rest) {
+        openThinkingCard();
+        return "local";
+      }
+      if (/\s/.test(rest)) {
+        setComposer("/thinking ");
+        toast("Usage: /thinking <level> — or /thinking to see the options", "error");
+        return "local";
+      }
+      void setThinkingLevel(rest);
+      return "local";
+    case "help":
+      clear();
+      await loadPrompts();
+      addTurn("user", trimmed, { revertable: false });
+      addTurn("agent", slashHelp());
+      return "local";
+  }
+  if (CODEX_AGENT_COMMANDS.has(name) && !needSession(`use /${name}`)) return "local";
+  inputEl.value = "";
+  return { message: trimmed, display: trimmed };
 }
 
 // parseSlashLine splits a `/name args` line. Arguments keep later

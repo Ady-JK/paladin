@@ -10,6 +10,7 @@ import {
   modelTreeEl,
 } from "../core/dom";
 import { bare, escapeAttr, escapeHtml, modelsOf, splitModel } from "../core/format";
+import { CODEX_MODEL_KEY, activeProviders } from "../core/harness";
 import { state } from "../core/state";
 import { loadJson, saveJson } from "../core/storage";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
@@ -36,6 +37,7 @@ export function resetDefaultRefresh(): void {
 
 // Only the default provider is fetched, with a cooldown between refreshes.
 export async function refreshDefaultCatalog(): Promise<void> {
+  if (state.harness) return;
   const provider = state.providers.find((item) => item.default);
   if (!provider || defaultRefreshInFlight || Date.now() < nextDefaultRefresh) return;
   const generation = defaultRefreshGeneration;
@@ -72,7 +74,9 @@ export async function loadProviders(): Promise<void> {
   state.onProvidersChanged();
 }
 
-function restoreModel(): void {
+export function restoreModel(): void {
+  // A Codex session keeps its own model list and choice.
+  if (state.harness) return;
   const saved = loadJson(MODEL_KEY) as { provider?: string; model?: string } | null | undefined;
   const provider =
     state.providers.find((p) => p.name === saved?.provider) ??
@@ -126,11 +130,11 @@ function score(query: string, text: string): number {
 
 // Search results are reused for keyboard navigation until the catalog or query changes.
 let lastSearch:
-  { providers: typeof state.providers; query: string; filter: string; choices: ModelChoice[] } | undefined;
+  { providers: ReturnType<typeof activeProviders>; query: string; filter: string; choices: ModelChoice[] } | undefined;
 
 function choices(query: string): ModelChoice[] {
   const normalized = query.toLowerCase().trim();
-  if (lastSearch?.providers === state.providers && lastSearch.query === normalized && lastSearch.filter === filter)
+  if (lastSearch?.providers === activeProviders() && lastSearch.query === normalized && lastSearch.filter === filter)
     return lastSearch.choices;
 
   // A provider or model can occur many times in a catalog. Score each distinct
@@ -143,7 +147,7 @@ function choices(query: string): ModelChoice[] {
     scores.set(text, rank);
     return rank;
   };
-  const matches = state.providers
+  const matches = activeProviders()
     .filter((provider) => filter === "*" || provider.name === filter)
     .flatMap((provider) => {
       const providerScore = scoreOnce(bare(provider.name));
@@ -156,7 +160,7 @@ function choices(query: string): ModelChoice[] {
       });
     });
   const catalogPriority = (provider: string): number =>
-    state.providers.find((p) => p.name === provider)?.default ? 0 : 1;
+    activeProviders().find((p) => p.name === provider)?.default ? 0 : 1;
   const result = matches
     .filter((item) => Number.isFinite(item.rank))
     .sort(
@@ -168,7 +172,7 @@ function choices(query: string): ModelChoice[] {
         a.choice.provider.localeCompare(b.choice.provider),
     )
     .map((item) => item.choice);
-  lastSearch = { providers: state.providers, query: normalized, filter, choices: result };
+  lastSearch = { providers: activeProviders(), query: normalized, filter, choices: result };
   return result;
 }
 
@@ -202,7 +206,7 @@ export function syncModelSelects(): void {
 }
 
 export function pickModel(name: string, model: string): void {
-  if (!state.providers.some((p) => p.name === name)) return;
+  if (!activeProviders().some((p) => p.name === name)) return;
   state.selectedProvider = name;
   state.selectedLab = splitModel(model).lab;
   state.selectedModel = model;
@@ -212,6 +216,10 @@ export function pickModel(name: string, model: string): void {
 }
 
 export function persistModelChoice(): void {
+  if (state.harness) {
+    saveJson(CODEX_MODEL_KEY, state.selectedModel);
+    return;
+  }
   saveJson(MODEL_KEY, { provider: state.selectedProvider, model: state.selectedModel });
 }
 
@@ -241,7 +249,8 @@ export function openModelMenu(): void {
     toggleMenu(modelMenu);
   }
   highlighted = null;
-  filter = state.providers.find((p) => p.default)?.name ?? state.providers[0]?.name ?? "";
+  const offered = activeProviders();
+  filter = offered.find((p) => p.default)?.name ?? offered[0]?.name ?? "";
   modelSearchEl.value = "";
   syncModelSelects();
   modelSearchEl.focus();
@@ -331,7 +340,7 @@ export function initModelPicker(): void {
 }
 
 function renderProviderFilter(): void {
-  const providers = [...state.providers].sort(
+  const providers = [...activeProviders()].sort(
     (a, b) => Number(b.default) - Number(a.default) || a.name.localeCompare(b.name),
   );
   if (filter !== "*" && !providers.some((p) => p.name === filter)) filter = providers[0]?.name ?? "";

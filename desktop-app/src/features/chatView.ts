@@ -81,9 +81,33 @@ function isLocalBrowserURL(raw: string): boolean {
   }
 }
 
+// initCodeCopy wires the copy button every fenced code block carries. The
+// glyph is drawn in CSS, so blocks rendered anywhere (chat, side chat,
+// history) need no painting; one delegated click copies the block's text
+// and shows a check for a moment.
+const COPIED_MS = 1400;
+
+function initCodeCopy(): void {
+  document.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("button[data-copy-code]");
+    const code = button?.parentElement?.querySelector("code");
+    if (!button || !code) {
+      return;
+    }
+    navigator.clipboard
+      .writeText(code.textContent ?? "")
+      .then(() => {
+        button.classList.add("is-copied");
+        window.setTimeout(() => button.classList.remove("is-copied"), COPIED_MS);
+      })
+      .catch((error: unknown) => toast(`Could not copy: ${String(error)}`, "error"));
+  });
+}
+
 // Localhost links open the session browser. Other web links still use the
 // system browser, and no link navigates the Paladin renderer itself.
 export function initMessageLinks(): void {
+  initCodeCopy();
   messagesEl.addEventListener("click", (event) => {
     const anchor = (event.target as HTMLElement).closest?.("a[data-ext]");
     if (!anchor) {
@@ -227,6 +251,9 @@ export function compactionText(info: CompactionInfo): string {
   }
   const after = info.tokensAfter ? ` → ${approxTokens(info.tokensAfter)}` : "";
   const reason = info.reason === "overflow" ? " · provider context limit" : "";
+  if (!info.tokensBefore) {
+    return `Context compacted${info.tokensAfter ? ` · ${approxTokens(info.tokensAfter)} tokens` : ""}${reason}`;
+  }
   return `Context compacted · ${approxTokens(info.tokensBefore)}${after} tokens${reason}`;
 }
 

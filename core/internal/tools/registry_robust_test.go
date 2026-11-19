@@ -27,13 +27,13 @@ func (echoTool) Call(args json.RawMessage, _ *ToolCtx) (string, error) { return 
 func TestCallRecoversToolPanic(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(panicTool{})
-	res := reg.Call(&ToolCall{ID: "c1", Name: "boom", Arguments: "{}"}, &ToolCtx{})
+	res := reg.Call(&ToolCall{ID: "c1", Name: "boom", Arguments: `{"reason":"test"}`}, &ToolCtx{})
 	if !res.IsError || !strings.Contains(res.Content, "crashed") || res.CallID != "c1" {
 		t.Fatalf("panic must become an error result, got %+v", res)
 	}
 	// The registry stays usable afterwards.
 	reg.Register(echoTool{name: "echo"})
-	if r := reg.Call(&ToolCall{ID: "c2", Name: "echo", Arguments: `{"a":1}`}, &ToolCtx{}); r.IsError {
+	if r := reg.Call(&ToolCall{ID: "c2", Name: "echo", Arguments: `{"reason":"test","a":1}`}, &ToolCtx{}); r.IsError {
 		t.Fatalf("registry broken after panic: %+v", r)
 	}
 }
@@ -42,7 +42,7 @@ func TestCallNormalizesToolNames(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(echoTool{name: "web_fetch"})
 	for _, name := range []string{"web_fetch", " web_fetch ", "Web_Fetch", "functions.web_fetch", "web-fetch", "tools.web_fetch"} {
-		res := reg.Call(&ToolCall{ID: "c", Name: name, Arguments: "{}"}, &ToolCtx{})
+		res := reg.Call(&ToolCall{ID: "c", Name: name, Arguments: `{"reason":"test"}`}, &ToolCtx{})
 		if res.IsError {
 			t.Fatalf("%q should resolve to web_fetch: %+v", name, res)
 		}
@@ -56,7 +56,7 @@ func TestUnknownToolListsAvailable(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(echoTool{name: "read"})
 	reg.Register(echoTool{name: "write"})
-	res := reg.Call(&ToolCall{ID: "c", Name: "delete_everything", Arguments: "{}"}, &ToolCtx{})
+	res := reg.Call(&ToolCall{ID: "c", Name: "delete_everything", Arguments: `{"reason":"test"}`}, &ToolCtx{})
 	if !res.IsError || !strings.Contains(res.Content, "read") || !strings.Contains(res.Content, "write") {
 		t.Fatalf("unknown tool must list available tools: %+v", res)
 	}
@@ -66,12 +66,12 @@ func TestCallRepairsLightJSONDamage(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(echoTool{name: "echo"})
 	cases := map[string]string{
-		"```json\n{\"path\":\"a\"}\n```": `{"path":"a"}`,
-		"```\n{\"path\":\"a\"}\n```":     `{"path":"a"}`,
-		`{"path":"a",}`:                  `{"path":"a"}`,
-		`{"list":[1,2,],}`:               `{"list":[1,2]}`,
-		`{"s":"keep ,} inside"}`:         `{"s":"keep ,} inside"}`,
-		"  {\"path\":\"a\"}  ":           `{"path":"a"}`,
+		"```json\n{\"reason\":\"t\",\"path\":\"a\"}\n```": `{"path":"a"}`,
+		"```\n{\"reason\":\"t\",\"path\":\"a\"}\n```":     `{"path":"a"}`,
+		`{"reason":"t","path":"a",}`:                      `{"path":"a"}`,
+		`{"reason":"t","list":[1,2,],}`:                   `{"list":[1,2]}`,
+		`{"reason":"t","s":"keep ,} inside"}`:             `{"s":"keep ,} inside"}`,
+		"  {\"reason\":\"t\",\"path\":\"a\"}  ":           `{"path":"a"}`,
 	}
 	for in, want := range cases {
 		res := reg.Call(&ToolCall{ID: "c", Name: "echo", Arguments: in}, &ToolCtx{})
@@ -89,7 +89,7 @@ func TestCallRepairsLightJSONDamage(t *testing.T) {
 			t.Fatalf("%q: got %s want %s", in, gb, eb)
 		}
 	}
-	res := reg.Call(&ToolCall{ID: "c", Name: "echo", Arguments: `{"path": "a"`}, &ToolCtx{})
+	res := reg.Call(&ToolCall{ID: "c", Name: "echo", Arguments: `{"reason":"test","path": "a"`}, &ToolCtx{})
 	if !res.IsError || !strings.Contains(res.Content, "not valid JSON") {
 		t.Fatalf("truncated JSON must still fail with guidance: %+v", res)
 	}

@@ -27,6 +27,10 @@ type CompactionView struct {
 }
 
 func (r *AgentRuntime) CompactionGet(provider, model string) (CompactionView, error) {
+	if strings.TrimSpace(provider) == HarnessCodex {
+		// Codex compacts its own context; the view only keeps the UI whole.
+		return CompactionView{Provider: HarnessCodex, Model: strings.TrimSpace(model), Window: 272000, Percent: 90}, nil
+	}
 	entry, _, err := r.store.Resolve(provider)
 	if err != nil {
 		return CompactionView{}, err

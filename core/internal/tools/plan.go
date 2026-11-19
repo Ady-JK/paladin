@@ -83,6 +83,11 @@ func ReadOnlyCommand(cmd string) error {
 	if HiddenChars(cmd) {
 		return fmt.Errorf("the command has invisible or direction-changing characters")
 	}
+	if strings.Contains(cmd, "${(") {
+		// zsh parameter flags such as (e) evaluate their value as code,
+		// even inside double quotes.
+		return fmt.Errorf("zsh parameter flags are not allowed in read-only commands")
+	}
 	segments, err := splitShellSegments(cmd)
 	if err != nil {
 		return err
@@ -154,6 +159,27 @@ func (p *shellSegmentParser) consumeQuoted() {
 func (p *shellSegmentParser) consumeUnquoted() error {
 	current := p.runes[p.index]
 	switch current {
+	case '$':
+		// $'..' (ANSI-C) and $".." (locale) quoting build words from
+		// escapes this parser does not decode.
+		if p.index+1 < len(p.runes) && (p.runes[p.index+1] == '\'' || p.runes[p.index+1] == '"') {
+			return fmt.Errorf("$'...' quoting is not allowed in read-only commands")
+		}
+		p.current.WriteRune(current)
+	case '(':
+		// zsh runs code from =(...) and glob qualifiers such as *(e:...:),
+		// and a subshell is not a plain read either. Quote a literal one.
+		return fmt.Errorf("unquoted parentheses are not allowed in read-only commands")
+	case '~':
+		if p.index+1 < len(p.runes) && p.runes[p.index+1] == '[' {
+			return fmt.Errorf("zsh ~[name] expansion is not allowed in read-only commands")
+		}
+		p.current.WriteRune(current)
+	case '{':
+		if p.braceExpands() {
+			return fmt.Errorf("brace expansion is not allowed in read-only commands")
+		}
+		p.current.WriteRune(current)
 	case '#':
 		if p.index == 0 || strings.ContainsRune(" \t\n;|&()", p.runes[p.index-1]) {
 			return fmt.Errorf("comments are not allowed in read-only commands")
@@ -186,6 +212,27 @@ func (p *shellSegmentParser) consumeUnquoted() error {
 	return nil
 }
 
+// braceExpands reports whether the unquoted { at the cursor starts a brace
+// expansion ({a,b} or {1..3}): a comma or ".." before the closing } inside
+// the same word. A plain {0} (as in HEAD@{1}) is left alone.
+func (p *shellSegmentParser) braceExpands() bool {
+	for i := p.index + 1; i < len(p.runes); i++ {
+		switch r := p.runes[i]; r {
+		case '}':
+			return false
+		case ' ', '\t', '\n', ';', '|', '&':
+			return false
+		case ',':
+			return true
+		case '.':
+			if i+1 < len(p.runes) && p.runes[i+1] == '.' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (p *shellSegmentParser) consumeAmpersand() error {
 	if p.index+1 < len(p.runes) && p.runes[p.index+1] == '&' {
 		p.index++
@@ -199,7 +246,11 @@ func (p *shellSegmentParser) consumeAmpersand() error {
 	return fmt.Errorf("background operator & is not allowed")
 }
 
-// shellWords splits a segment into words, dropping quotes.
+// shellWords splits a segment into words the way the shell does: quotes
+// are dropped, an unquoted backslash escapes the next character, and in
+// double quotes a backslash only escapes $, `, " and \. It must agree
+// with splitShellSegments on where words and quotes begin, or a flag
+// check can be walked around (-\exec is -exec).
 func shellWords(seg string) []string {
 	var (
 		words []string
@@ -207,14 +258,30 @@ func shellWords(seg string) []string {
 		quote rune
 		has   bool
 	)
-	for _, r := range seg {
+	runes := []rune(seg)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		switch {
-		case quote != 0:
-			if r == quote {
+		case quote == '\'':
+			if r == '\'' {
 				quote = 0
 			} else {
 				cur.WriteRune(r)
 			}
+		case quote == '"':
+			switch {
+			case r == '"':
+				quote = 0
+			case r == '\\' && i+1 < len(runes) && strings.ContainsRune("$`\"\\", runes[i+1]):
+				i++
+				cur.WriteRune(runes[i])
+			default:
+				cur.WriteRune(r)
+			}
+		case r == '\\' && i+1 < len(runes):
+			i++
+			cur.WriteRune(runes[i])
+			has = true
 		case r == '\'' || r == '"':
 			quote, has = r, true
 		case r == ' ' || r == '\t':
@@ -258,6 +325,11 @@ func isEnvAssign(w string) bool {
 func readOnlyArgs(words []string) error {
 	prog := words[0]
 	if i := strings.LastIndexByte(prog, '/'); i >= 0 {
+		// A program named by path is whatever sits at that path, so only
+		// the system's own bin folders count.
+		if !systemBinDirs[prog[:i]] {
+			return fmt.Errorf("%q is not run from a system folder", words[0])
+		}
 		prog = prog[i+1:]
 	}
 	if !readOnlyPrograms[prog] {
@@ -286,6 +358,10 @@ func readOnlyArgs(words []string) error {
 		}
 	}
 	return nil
+}
+
+var systemBinDirs = map[string]bool{
+	"/bin": true, "/usr/bin": true, "/usr/local/bin": true, "/opt/homebrew/bin": true, "/sbin": true, "/usr/sbin": true,
 }
 
 func readOnlyGitArgs(args []string) error {
@@ -340,7 +416,8 @@ func readOnlyExecutionArg(program, arg string) error {
 }
 
 func readOnlyAwkArg(arg string) error {
-	if arg == "-f" || arg == "-E" || arg == "-i" || arg == "-l" || hasAnyPrefix(arg, "--file", "--exec", "--include", "--load") {
+	// Attached forms (-fprog.awk, -iinplace) load code just like -f prog.awk.
+	if hasAnyPrefix(arg, "-f", "-E", "-i", "-l", "--file", "--exec", "--include", "--load") {
 		return fmt.Errorf("awk %s loads a program from a file", arg)
 	}
 	if strings.Contains(arg, "system") || strings.Contains(arg, "getline") || awkPipe.MatchString(arg) || awkPrint.MatchString(arg) {
@@ -355,7 +432,7 @@ func readOnlyAwkArg(arg string) error {
 func readOnlyOutputArg(program, arg string) error {
 	switch program {
 	case "sort":
-		if hasAnyPrefix(arg, "--output", "--compress-program") || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "o")) {
+		if abbreviatesAny(arg, "--output", "--compress-program") || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "o")) {
 			return fmt.Errorf("sort %s writes a file or runs a program", arg)
 		}
 	case "tree":
@@ -412,6 +489,22 @@ var awkPipe = regexp.MustCompile(`(^|[^|])\|([^|]|$)`)
 
 // awkPrint is print or printf with output redirection.
 var awkPrint = regexp.MustCompile(`\bprintf?\b[^;{}\n]*>`)
+
+// abbreviatesAny reports whether arg, up to any "=", is "--" plus at least
+// one letter of one of the long options: GNU and BSD tools accept
+// --comp=prog for --compress-program.
+func abbreviatesAny(arg string, options ...string) bool {
+	name, _, _ := strings.Cut(arg, "=")
+	if len(name) < 3 || !strings.HasPrefix(name, "--") {
+		return false
+	}
+	for _, option := range options {
+		if strings.HasPrefix(option, name) {
+			return true
+		}
+	}
+	return false
+}
 
 func hasAnyPrefix(s string, prefixes ...string) bool {
 	for _, p := range prefixes {

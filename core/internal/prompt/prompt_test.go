@@ -148,6 +148,39 @@ func TestGuidanceIsOSSpecific(t *testing.T) {
 	}
 }
 
+// TestShellGuidanceHasNoWaitAction pins how the model is told to treat a
+// slow command. The wait action made it re-wait in a loop, one model call
+// per round, so the prompt must not offer it and must say that a background
+// job reports on its own: on completion, hourly while it prints, and when it
+// goes quiet for 10 and then 30 minutes.
+func TestShellGuidanceHasNoWaitAction(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		p := strings.Join(strings.Fields(AssembleSystemPrompt("", ToolGuidanceFor(goos), "", UsageExamplesFor(goos), "")), " ")
+		for _, want := range []string{
+			"two minutes",
+			"There is no wait action",
+			"woken",
+			"10 minutes",
+			"end your turn",
+			"There is no wait action; the call is refused",
+		} {
+			if !strings.Contains(p, want) {
+				t.Fatalf("%s: shell guidance lost %q", goos, want)
+			}
+		}
+		for _, stale := range []string{
+			"call the wait action",
+			"a reminder every five minutes",
+			"Take the result now",
+			"outlives the 1-minute wait",
+		} {
+			if strings.Contains(p, stale) {
+				t.Fatalf("%s: shell guidance still says %q", goos, stale)
+			}
+		}
+	}
+}
+
 // TestMachineDetailsAlwaysInjected pins the guarantee the UI states:
 // every compiled turn carries the machine (OS + arch) and the session
 // workspace, no matter what the prompt file holds.

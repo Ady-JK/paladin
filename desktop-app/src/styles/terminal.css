@@ -30,11 +30,22 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The padding sits on .xterm, not the surface: the fit addon measures the
+   surface's height and subtracts only the terminal element's own padding,
+   so padding on the surface made the last row fall under the bottom edge. */
 .terminal-surface {
   min-height: 0;
   flex: 1;
-  padding: 10px 11px;
+  overflow: hidden;
 }
 .terminal-surface .xterm {
+  box-sizing: border-box;
   height: 100%;
+  padding: 10px 11px;
+}
+/* xterm's scroll viewport is absolutely positioned over the whole element,
+   padding included, and paints itself black: that showed as a black frame
+   around the text. Let the pane's own background through instead. */
+.terminal-surface .xterm .xterm-viewport {
+  background-color: transparent !important;
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/session"
@@ -37,12 +38,13 @@ type TurnInfo struct {
 	Message   string `json:"message"`
 	// Display is the client's rendering of the message (before @path
 	// expansion); it rides along so a re-attaching UI can redraw it.
-	Display string `json:"display,omitempty"`
-	Skill   string `json:"skill,omitempty"`
-	Command string `json:"command,omitempty"`
-	Mode    string `json:"mode,omitempty"`
-	Compact bool   `json:"compact,omitempty"`
-	Resume  bool   `json:"resume,omitempty"`
+	Display     string             `json:"display,omitempty"`
+	Attachments []media.Attachment `json:"attachments,omitempty"`
+	Skill       string             `json:"skill,omitempty"`
+	Command     string             `json:"command,omitempty"`
+	Mode        string             `json:"mode,omitempty"`
+	Compact     bool               `json:"compact,omitempty"`
+	Resume      bool               `json:"resume,omitempty"`
 	// Parent is set on a subagent's turn: its parent session's id.
 	Parent string `json:"parentSessionId,omitempty"`
 	// Permissions is the turn's approval preset as submitted.
@@ -87,6 +89,7 @@ type TurnEvent struct {
 	Steer           *agent.SteerMessage         `json:"steer,omitempty"`
 	Budget          *agent.BudgetNotice         `json:"budget,omitempty"`
 	Hook            *hooks.Note                 `json:"hook,omitempty"`
+	Notice          *agent.ChatNotice           `json:"notice,omitempty"`
 	Turn            *TurnInfo                   `json:"turn,omitempty"`
 }
 
@@ -176,6 +179,24 @@ func NewHub(run RunFunc, limit func() int) *Hub {
 // falls far behind loses streaming chunks and then gets a host/resync.
 func (h *Hub) SetSink(sink func(TurnEvent)) { h.events.setSink(sink) }
 
+// PublishSession broadcasts an event that belongs to a session rather than to a
+// turn: something settled while no turn was running (a background command ended).
+func (h *Hub) PublishSession(sessionID, event string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.seq++
+	h.events.push(TurnEvent{Event: event, Seq: h.seq, SessionID: sessionID})
+}
+
+// Gated runs fn under the session's persistence gate, so it cannot interleave
+// with a turn writing the transcript or with an attach reading it.
+func (h *Hub) Gated(sessionID string, fn func() error) error {
+	gate := h.sessionGate(sessionID)
+	gate.Lock()
+	defer gate.Unlock()
+	return fn()
+}
+
 // publishResync tells the client it missed streaming events and should
 // re-attach the sessions it shows.
 func (h *Hub) publishResync() {
@@ -237,6 +258,7 @@ func (h *Hub) newTurn(req agent.Request, opts SubmitOpts) *hubTurn {
 			Cwd:         req.Cwd,
 			Message:     req.Message,
 			Display:     opts.Display,
+			Attachments: req.Attachments,
 			Parent:      opts.ParentSessionID,
 			Skill:       derefString(req.Skill),
 			Command:     derefString(req.Command),
@@ -458,6 +480,9 @@ func (h *Hub) forward(t *hubTurn, chunk agent.ChatChunk) {
 	if chunk.Hook != nil {
 		h.publishLocked(t, TurnEvent{Event: "chat/hook", Hook: chunk.Hook})
 	}
+	if chunk.Notice != nil {
+		h.publishLocked(t, TurnEvent{Event: "chat/notice", Notice: chunk.Notice})
+	}
 	if chunk.Approval != nil {
 		if chunk.Approval.State == permission.StatePending {
 			t.waiting[chunk.Approval.ID] = true
@@ -598,6 +623,21 @@ func (h *Hub) Running(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.active[sessionID] != nil
+}
+
+func (h *Hub) runningCanChangeFiles(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t := h.active[sessionID]
+	if t == nil {
+		return false
+	}
+	for _, event := range t.log {
+		if event.Tool != nil && canChangeFiles(event.Tool.Name, event.Tool.Arguments) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunningTurnID is the id of the session's running turn, or "".

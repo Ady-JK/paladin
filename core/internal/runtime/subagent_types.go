@@ -6,7 +6,6 @@ package runtime
 
 import (
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
@@ -141,17 +140,6 @@ func findSubagentKind(name string) (subagentKind, bool) {
 		}
 	}
 	return subagentKind{}, false
-}
-
-func subagentKindNames() []string {
-	names := make([]string, 0, len(subagentKinds))
-	for _, k := range subagentKinds {
-		if subagentKindVisible(k.Name) {
-			names = append(names, k.Name)
-		}
-	}
-	sort.Strings(names)
-	return names
 }
 
 // subagentTemplate is the agent template a child of this kind runs.

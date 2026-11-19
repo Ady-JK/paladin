@@ -217,14 +217,49 @@
     line-height: 1.6;
     color: #e2e8f0;
   }
-  .md .md-lang {
+  /* The copy button sits in the corner; its glyph is a CSS mask so a
+     block needs no markup beyond the button. */
+  .md .md-copy {
     position: absolute;
     top: 0.375rem;
-    right: 0.625rem;
-    font-size: 0.625rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    right: 0.5rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 0;
+    border-radius: 0.375rem;
+    background: transparent;
     color: #94a3b8;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition:
+      opacity 120ms ease,
+      background-color 120ms ease;
+  }
+  .md .md-pre:hover .md-copy,
+  .md .md-copy:focus-visible,
+  .md .md-copy.is-copied {
+    opacity: 1;
+  }
+  .md .md-copy:hover {
+    background: rgb(148 163 184 / 0.18);
+  }
+  .md .md-copy::before {
+    content: "";
+    width: 0.875rem;
+    height: 0.875rem;
+    background: currentColor;
+    -webkit-mask: var(--copy-glyph) center / contain no-repeat;
+    mask: var(--copy-glyph) center / contain no-repeat;
+    --copy-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='12' height='12' rx='2'/%3E%3Cpath d='M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1'/%3E%3C/svg%3E");
+  }
+  .md .md-copy.is-copied {
+    color: var(--color-accent-500);
+  }
+  .md .md-copy.is-copied::before {
+    --copy-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 13 4 4L19 7'/%3E%3C/svg%3E");
   }
   .md .md-quote {
     border-left: 2px solid var(--color-accent-500);
@@ -245,6 +280,15 @@
     max-height: 21.5rem;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+  /* KaTeX display math keeps its own line; a formula wider than the
+     column scrolls sideways instead of spilling over the transcript. */
+  .md .katex-display {
+    max-width: 100%;
+    margin: 0.5em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
   }
   .md .md-table {
     border-collapse: collapse;

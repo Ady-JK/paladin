@@ -33,7 +33,7 @@ func TestWebCallsAreClassifiedBySite(t *testing.T) {
 
 func TestNewSitesAskAndRulesDecide(t *testing.T) {
 	req, _ := webReq(t, "web_fetch", map[string]any{"url": "https://docs.example.com/a"})
-	for _, p := range []Preset{ReadOnly, Auto} {
+	for _, p := range []Preset{ReadOnly, Review} {
 		d := Decide(p, req, nil)
 		if d.Verdict != Ask || len(d.Remember) != 1 || d.Remember[0] != (Rule{Tool: ToolWeb, Pattern: "docs.example.com", Action: ActionAllow}) {
 			t.Fatalf("%s: %+v", p, d)
@@ -46,11 +46,11 @@ func TestNewSitesAskAndRulesDecide(t *testing.T) {
 		t.Fatalf("full access: %+v", d)
 	}
 	allowSite := []Rule{{Tool: ToolWeb, Pattern: "example.com", Action: ActionAllow}}
-	if d := Decide(Auto, req, allowSite); d.Verdict != Allow {
+	if d := Decide(Review, req, allowSite); d.Verdict != Allow {
 		t.Fatalf("a site rule covers its subdomains: %+v", d)
 	}
 	other, _ := webReq(t, "web_fetch", map[string]any{"url": "https://badexample.com/"})
-	if d := Decide(Auto, other, allowSite); d.Verdict != Ask {
+	if d := Decide(Review, other, allowSite); d.Verdict != Ask {
 		t.Fatalf("a look-alike domain is not covered: %+v", d)
 	}
 	deny := []Rule{{Tool: ToolWeb, Pattern: "*", Action: ActionDeny}}
@@ -94,7 +94,7 @@ func TestLocalhostAsksPerPort(t *testing.T) {
 		if !gated || r.Kind != KindWeb || r.Host != c.host {
 			t.Fatalf("%s: %v %+v", c.url, gated, r)
 		}
-		d := Decide(Auto, r, nil)
+		d := Decide(Review, r, nil)
 		if d.Verdict != Ask || d.Remember[0].Pattern != c.host || len(d.Choices) != 5 {
 			t.Fatalf("%s: %+v", c.url, d)
 		}
@@ -102,17 +102,17 @@ func TestLocalhostAsksPerPort(t *testing.T) {
 	dev, _ := webReq(t, "web_fetch", map[string]any{"url": "http://localhost:5173/"})
 	proxy, _ := webReq(t, "web_fetch", map[string]any{"url": "http://127.0.0.1:4000/"})
 	rules := []Rule{{Tool: ToolWeb, Pattern: "localhost:5173", Action: ActionAllow}}
-	if d := Decide(Auto, dev, rules); d.Verdict != Allow {
+	if d := Decide(Review, dev, rules); d.Verdict != Allow {
 		t.Fatalf("an approved port: %+v", d)
 	}
-	if d := Decide(Auto, proxy, rules); d.Verdict != Ask {
+	if d := Decide(Review, proxy, rules); d.Verdict != Ask {
 		t.Fatalf("another port: %+v", d)
 	}
 	// "Every site" is about the web, not this machine.
-	if d := Decide(Auto, proxy, []Rule{{Tool: ToolWeb, Pattern: "*", Action: ActionAllow}}); d.Verdict != Ask {
+	if d := Decide(Review, proxy, []Rule{{Tool: ToolWeb, Pattern: "*", Action: ActionAllow}}); d.Verdict != Ask {
 		t.Fatalf("* covered localhost: %+v", d)
 	}
-	if d := Decide(Auto, proxy, []Rule{{Tool: ToolWeb, Pattern: "*", Action: ActionDeny}}); d.Verdict != Deny {
+	if d := Decide(Review, proxy, []Rule{{Tool: ToolWeb, Pattern: "*", Action: ActionDeny}}); d.Verdict != Deny {
 		t.Fatalf("a deny-all still covers localhost: %+v", d)
 	}
 }

@@ -7,9 +7,10 @@ import { createThinkingBlock } from "../turnView";
 import { createFindingsCard } from "../findings";
 import { createVisualCard } from "../visuals";
 import { ToolRun } from "../toolRun";
-import { mountImage, mountUserImage, registerImage } from "../mediaGallery";
+import { mountImage, mountUserAttachments, registerImage } from "../mediaGallery";
 import { paintProtection } from "../snapshotProtection";
 import { createPluginCard, hasPluginCard } from "../pluginCards";
+import { createQuestionCard } from "../../adapters/agentQuestion";
 
 // buildHistory appends a persisted transcript's rows to container.
 // Rows of a session the user cannot rewind here get no revert button.
@@ -56,6 +57,11 @@ export function buildHistory(
       run = null;
       return;
     }
+    if (tool.name === "agent_question") {
+      agentBody!.append(createQuestionCard(sessionId, tool));
+      run = null;
+      return;
+    }
     if (tool.name === "report_findings" || tool.name === "visual") {
       agentBody!.append(tool.name === "visual" ? createVisualCard(tool) : createFindingsCard(sessionId, tool));
       run = null;
@@ -77,10 +83,14 @@ export function buildHistory(
 
   for (const [index, message] of history.entries()) {
     // A turn's summary closes it, so a pending one is flushed as soon as
-    // the next turn begins: a user row starts one, and a row that
+    // the next turn begins: a user row starts one, a compaction that
+    // follows a finished turn starts the next span, and a row that
     // carries its own stats is the last row of one (see the core's
     // HistoryViewStats, which anchors the summary on the turn's end).
-    if (pendingStats && (message.role === "user" || message.stats)) {
+    const compaction = message.role === "system" && message.kind === "compaction";
+    const boundary = message.role === "user" || compaction;
+    const endedTurn = pendingStats !== null && boundary;
+    if (pendingStats && (boundary || message.stats)) {
       container.append(pendingStats);
       pendingStats = null;
     }
@@ -93,15 +103,7 @@ export function buildHistory(
       });
       if (message.index !== undefined) turn.wrapper.dataset.turnIndex = String(message.index);
       if (message.protection) paintProtection(turn.wrapper, message.protection);
-      for (const attachment of message.attachments ?? []) {
-        if (attachment.image) mountUserImage(turn.wrapper, sessionId, attachment.image.path, attachment.name);
-        else {
-          const file = document.createElement("div");
-          file.className = "session-file-card";
-          file.textContent = `${attachment.name} · ${attachment.path}`;
-          turn.textEl.append(file);
-        }
-      }
+      mountUserAttachments(turn.wrapper, sessionId, message.attachments);
       container.append(turn.wrapper);
     } else if (message.role === "assistant" && message.kind === "thinking") {
       if (!agentBody) {
@@ -111,19 +113,29 @@ export function buildHistory(
       agentBody!.append(createThinkingBlock(message.content, false));
     } else if (message.role === "assistant") {
       pushAgentText(message.content);
-    } else if (message.role === "system" && message.kind === "compaction") {
+    } else if (compaction) {
       // Divider where older context was summarized; later agent text
       // and tools append below it.
-      if (!agentBody) {
-        openAgent("");
-      }
       run = null;
       const label = message.compaction ? compactionText({ phase: "done", ...message.compaction }) : "Context compacted";
-      agentBody!.append(createCompactionDivider(label, message.content));
+      const divider = createCompactionDivider(label, message.content);
+      if (endedTurn) {
+        // A compaction after a finished turn is a boundary between turns,
+        // not part of that turn: it sits after the turn's footer (stats
+        // and change card), so the card never ends up below the summary.
+        agentBody = null;
+        container.append(divider);
+      } else {
+        if (!agentBody) {
+          openAgent("");
+        }
+        agentBody!.append(divider);
+      }
     } else if (message.role === "tool") {
       if (message.image) registerImage(sessionId, message.image.path);
       pushAgentTool({
-        id: `h${index}`,
+        // A question card is answered by its call id, so it keeps the real one.
+        id: message.name === "agent_question" && message.toolCallId ? message.toolCallId : `h${index}`,
         name: message.name || "tool",
         arguments: message.arguments || "{}",
         result: message.content,

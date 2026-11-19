@@ -1,0 +1,38 @@
+.user-images {
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.user-images .session-image-thumb,
+.user-images .session-file-card {
+  height: 80px;
+  margin: 0;
+}
+
+.user-images .session-image-thumb {
+  position: relative;
+  flex: 0 0 80px;
+}
+
+.user-images .session-image-thumb[hidden] {
+  display: none;
+}
+
+.user-images .session-file-card {
+  display: flex;
+  align-items: center;
+}
+
+.user-image-count {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: rgb(0 0 0 / 0.7);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}

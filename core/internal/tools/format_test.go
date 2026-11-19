@@ -8,18 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
-	"github.com/Ady-JK/paladin/core/internal/sandbox/sandboxtest"
 )
 
 func formatCtx(t *testing.T) (*ToolCtx, string) {
 	t.Helper()
-	// Formatters run inside the OS sandbox, which re-execs the helper
-	// binary; under go test that would be this test binary, recursively.
-	if sandbox.Kind() != "" {
-		sandboxtest.Helper(t)
-	}
 	ctx, ws := testCtx(t)
 	ctx.SessionID = "fmt-" + t.Name()
 	ctx.FormatOnWrite = true
@@ -149,7 +141,7 @@ func TestFormatterTheProjectShipsNeedsTrust(t *testing.T) {
 	ctx.TrustProject = func(tool string) bool { asked = append(asked, tool); return false }
 	target := filepath.Join(ws, "a.js")
 	r := BuiltinRegistry()
-	raw, _ := json.Marshal(map[string]any{"path": target, "content": "x  =  1\n"})
+	raw, _ := json.Marshal(map[string]any{"reason": "test", "path": target, "content": "x  =  1\n"})
 	if res := r.Call(&ToolCall{ID: "w", Name: "write", Arguments: string(raw)}, ctx); res.IsError {
 		t.Fatal(res.Content)
 	}
@@ -158,7 +150,7 @@ func TestFormatterTheProjectShipsNeedsTrust(t *testing.T) {
 	}
 	ctx.TrustProject = func(string) bool { return true }
 	target = filepath.Join(ws, "b.js")
-	raw, _ = json.Marshal(map[string]any{"path": target, "content": "x  =  1\n"})
+	raw, _ = json.Marshal(map[string]any{"reason": "test", "path": target, "content": "x  =  1\n"})
 	if res := r.Call(&ToolCall{ID: "w2", Name: "write", Arguments: string(raw)}, ctx); res.IsError {
 		t.Fatal(res.Content)
 	}

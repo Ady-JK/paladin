@@ -135,7 +135,7 @@ func TestResponsesInputShapes(t *testing.T) {
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "doing", ToolCalls: []ToolCall{{ID: id, Name: "read", Arguments: "{}"}}},
 		{Role: "tool", Content: "out", ToolCallID: &id},
-	})
+	}, nil)
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)

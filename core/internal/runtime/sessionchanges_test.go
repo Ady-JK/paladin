@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+func TestReadOnlyToolsDoNotClaimWorkspaceChanges(t *testing.T) {
+	for _, test := range []struct {
+		name, args string
+		changes    bool
+	}{
+		{"read", `{}`, false},
+		{"shell", `{"cmd":"ls"}`, false},
+		{"shell", `{"cmd":"echo hi > file"}`, true},
+		{"write", `{}`, true},
+	} {
+		if got := canChangeFiles(test.name, test.args); got != test.changes {
+			t.Errorf("canChangeFiles(%s, %s) = %v", test.name, test.args, got)
+		}
+	}
+}
+
 // Files whose diff could not be built, or that did not fit, are named
 // with the reason instead of silently left out of /review session.
 func TestSessionChangesNameWhatTheyLeaveOut(t *testing.T) {

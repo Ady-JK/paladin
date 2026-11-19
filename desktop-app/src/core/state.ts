@@ -1,7 +1,7 @@
 // state.ts holds the shared mutable frontend state.
 // Features read and write one object so modules stay free of cycles.
 
-import type { ProviderInfo, SessionInfo, SessionUsage, SubagentLink } from "./types";
+import type { CodexStatus, ProviderInfo, SessionInfo, SessionUsage, SubagentLink } from "./types";
 
 // state is the single mutable store the feature modules share.
 export const state = {
@@ -16,6 +16,12 @@ export const state = {
   cwd: "",
   sessions: [] as SessionInfo[],
   providers: [] as ProviderInfo[],
+  // harness is the external agent running the open (or about to start)
+  // session: "" for Paladin's own agent. While it is "codex" the model
+  // picker lists Codex's models instead of the configured providers.
+  harness: "" as "" | "codex",
+  // codex is what the Codex CLI reported, once asked.
+  codex: null as CodexStatus | null,
   selectedProvider: "",
   selectedLab: "",
   selectedModel: "",

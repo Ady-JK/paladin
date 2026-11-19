@@ -17,7 +17,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/jsonx"
 	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/redact"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
 // ToolCtx is per-turn tool context.
@@ -33,8 +32,6 @@ type ToolCtx struct {
 	// the ask tool can rendezvous the blocked call with the UI answer.
 	SessionID string
 	CallID    string
-	// Sandbox confines shell commands; nil runs them unconfined.
-	Sandbox *sandbox.Policy
 	// FormatOnWrite runs the project's formatter after write and edit
 	// (format.go).
 	FormatOnWrite bool
@@ -120,10 +117,41 @@ func ArgsError(msg string) *ToolError {
 
 func (e *ToolError) ResultContent() string {
 	if e.Kind == "failed" {
-		return e.Content
+		return withErrorField(e.Content, e.Msg)
 	}
 	content, _ := json.Marshal(map[string]string{"error": e.Error()})
 	return string(content)
+}
+
+// withErrorField gives a failed result its reason. A JSON object without an
+// "error" key (a finished job's report, say) gets the message added, so the
+// app shows why the call failed instead of a generic line. Anything else,
+// including text, is returned unchanged.
+func withErrorField(content, msg string) string {
+	if msg == "" {
+		return content
+	}
+	if strings.TrimSpace(content) == "" {
+		out, _ := json.Marshal(map[string]string{"error": msg})
+		return string(out)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &fields); err != nil || fields == nil {
+		return content
+	}
+	if _, ok := fields["error"]; ok {
+		return content
+	}
+	reason, err := json.Marshal(msg)
+	if err != nil {
+		return content
+	}
+	fields["error"] = reason
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return content
+	}
+	return string(out)
 }
 
 // Tool is one model-callable tool.
@@ -201,7 +229,11 @@ func (r *Registry) Definitions() []ToolDefinition {
 	names := r.Names()
 	var out []ToolDefinition
 	for _, n := range names {
-		out = append(out, r.tools[n].Definition())
+		def := r.tools[n].Definition()
+		if r.takesReason(n) {
+			def = withReason(def)
+		}
+		out = append(out, def)
 	}
 	if out == nil {
 		out = []ToolDefinition{}
@@ -343,7 +375,13 @@ func (r *Registry) Call(call *ToolCall, ctx *ToolCtx) (result ToolResult) {
 	} else if fixed, ok := repairArgs(call.Arguments); !ok {
 		return errorResult(result, "the arguments are not valid JSON (possibly truncated); resend the complete JSON object")
 	} else {
-		args = coerceArgs(json.RawMessage(fixed), tool.Definition().Parameters, !r.Mutates(name))
+		args = coerceArgs(json.RawMessage(fixed), r.schemaOf(name), !r.Mutates(name))
+	}
+	if r.takesReason(name) {
+		if reasonOf(args) == "" {
+			return missingReason(result)
+		}
+		args = stripReason(args)
 	}
 	// A tool bug must never take down the sidecar: the panic becomes a
 	// model-visible failure and the turn carries on.
@@ -391,7 +429,7 @@ func (r *Registry) Prepare(call *ToolCall) (string, json.RawMessage, bool) {
 	if !ok {
 		return "", nil, false
 	}
-	return name, coerceArgs(json.RawMessage(fixed), r.tools[name].Definition().Parameters, !r.Mutates(name)), true
+	return name, coerceArgs(json.RawMessage(fixed), r.schemaOf(name), !r.Mutates(name)), true
 }
 
 // ctxWithCall clones the turn context with the call id stamped in. Call

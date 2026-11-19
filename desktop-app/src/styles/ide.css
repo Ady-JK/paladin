@@ -318,6 +318,109 @@
   border-color: transparent;
   color: var(--color-slate-400);
 }
+/* Keep find and replace close to the code, with native CodeMirror behavior. */
+#ideEditor .cm-editor {
+  position: relative;
+}
+#ideEditor .cm-panels-bottom {
+  position: absolute;
+  z-index: 10;
+  top: 8px;
+  right: 12px;
+  bottom: auto;
+  left: auto;
+  width: min(540px, calc(100% - 24px));
+  border: 1px solid var(--color-slate-200);
+  border-radius: 10px;
+  background: var(--color-slate-50);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
+}
+.dark #ideEditor .cm-panels-bottom {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-900);
+}
+#ideEditor .cm-panel.cm-search {
+  padding: 10px 36px 10px 10px;
+  color: var(--color-slate-600);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.dark #ideEditor .cm-panel.cm-search {
+  color: var(--color-slate-300);
+}
+#ideEditor .cm-search input:not([type="checkbox"]) {
+  width: min(140px, 100%);
+  border: 1px solid var(--color-slate-300);
+  border-radius: 6px;
+  background: var(--color-slate-100);
+  padding: 6px 8px;
+  color: var(--color-slate-800);
+  font: inherit;
+}
+.dark #ideEditor .cm-search input:not([type="checkbox"]) {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-950);
+  color: var(--color-slate-100);
+}
+#ideEditor .cm-search input:focus-visible,
+#ideEditor .cm-search button:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 1px;
+}
+#ideEditor .cm-search .cm-button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 6px 5px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#ideEditor .cm-search input,
+#ideEditor .cm-search button,
+#ideEditor .cm-search label {
+  margin: 3px 4px 3px 0;
+}
+#ideEditor .cm-search .cm-button:hover {
+  background: var(--color-slate-200);
+}
+.dark #ideEditor .cm-search .cm-button:hover {
+  background: var(--color-slate-700);
+}
+#ideEditor .cm-search input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  appearance: none;
+  vertical-align: middle;
+  border: 1px solid var(--color-slate-400);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+#ideEditor .cm-search input[type="checkbox"]:checked {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-500);
+}
+#ideEditor .cm-search input[type="checkbox"]:checked::after {
+  display: block;
+  width: 4px;
+  height: 7px;
+  margin: 1px 0 0 4px;
+  transform: rotate(45deg);
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  content: "";
+}
+#ideEditor .cm-search [name="close"] {
+  top: 9px;
+  right: 12px;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
 .ide-status {
   min-height: 23px;
   padding: 4px 12px;
@@ -326,6 +429,9 @@
 }
 .ide-status.is-error {
   color: var(--color-agent-rose);
+}
+.ide-status:empty {
+  display: none;
 }
 .ide-chat-head {
   flex-shrink: 0;
@@ -391,6 +497,21 @@
 }
 .ide-chat-head button {
   font-size: 11px;
+}
+#agentSplit.ide-mode #chatView {
+  padding: 16px;
+}
+#agentSplit.ide-mode #agentMain footer {
+  padding: 8px 14px 14px;
+}
+#agentSplit.ide-mode .composer-float {
+  border-radius: 16px;
+}
+#agentSplit.ide-mode .composer-toolbar {
+  gap: 4px;
+}
+#ideShowAgent[hidden] {
+  display: none;
 }
 .ide-session-list {
   flex: 1;
@@ -538,7 +659,7 @@
 .ide-terminal-body .terminal-heading {
   display: none;
 }
-.ide-terminal-body .terminal-surface {
+.ide-terminal-body .terminal-surface .xterm {
   padding: 6px 10px;
 }
 .ide-sessions-more {

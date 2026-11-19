@@ -32,8 +32,8 @@ func imageMessages(t *testing.T) []LlmMessage {
 func TestImageReachesEveryProviderDialect(t *testing.T) {
 	messages := imageMessages(t)
 	cases := map[string]any{
-		"chat":      toSDKMessages(messages),
-		"responses": toResponsesInput(messages),
+		"chat":      toSDKMessages(messages, nil),
+		"responses": toResponsesInput(messages, nil),
 		"anthropic": toAnthropicRequest("", messages, nil),
 		"google":    toGoogleRequest("", messages, nil),
 	}

@@ -18,18 +18,39 @@ import {
   shell,
   WebContentsView,
   type IpcMainInvokeEvent,
-  type WebFrameMain,
 } from "electron";
 import { noteFor } from "./turnNotify";
 import { agentHostFile, Sidecar, type HostMessage } from "./sidecar";
 import { hostCommand, hostEnv, validateConnection, type CoreConnection } from "./remote";
-import { allowedPersonalPopup, guestPermissionAllowed } from "./guestPolicy";
+import {
+  allowedGuestUrl,
+  allowedPersonalPopup,
+  guestPermissionAllowed,
+  validGuestPartition,
+  validSessionId,
+  validViewName,
+} from "./guestPolicy";
 import { BrowserManager, type BrowserRequest, type BrowserState, type EgressSetup } from "./browser";
 import { VoiceManager } from "./voice";
 import { remoteOpenRefusal } from "./browserPolicy";
 import { runBrowserSmoke } from "./browserSmoke";
+import { runWindowSmoke } from "./smokeTest";
 import { refuseAll } from "./browserEgress";
 import { appFrameNavigationAllowed, appNavigationAllowed, isMainWindowFrame } from "./mainWindowPolicy";
+import { absolutePath, errText, externalUrl, field, secretPath, withinBytes } from "./ipcArgs";
+import {
+  allowRate,
+  describeFrame,
+  MAX_PANEL_FILE_BYTES,
+  MAX_TOOL_ARGS_BYTES,
+  newGrant,
+  PANEL_LIMIT_PER_SESSION,
+  PANEL_LIMIT_TOTAL,
+  pathInside,
+  type PanelGrant,
+  PLUGIN_EVENTS,
+  pluginViewUrl,
+} from "./pluginGrants";
 import { creatorDir, PluginHost } from "./pluginHost";
 import { storeKeyValid, toolAllowed } from "./pluginPolicy";
 import { readPluginStore, writePluginStore } from "./pluginStore";
@@ -39,9 +60,6 @@ type ViewBounds = { x: number; y: number; width: number; height: number };
 // Match Chrome's wheel behaviour: interpolate ticks instead of snapping.
 // (Harmless if the platform already defaults to smooth scrolling.)
 app.commandLine.appendSwitch("enable-smooth-scrolling");
-// Chromium chooses an ephemeral loopback port; Playwright connects only to
-// the session browser targets. The port lives for this app process.
-app.commandLine.appendSwitch("remote-debugging-port", "0");
 // Every renderer runs in Chromium's sandbox, whatever its webPreferences
 // say (each already asks for it; this makes it the rule).
 app.enableSandbox();
@@ -104,7 +122,6 @@ app.on("web-contents-created", (_event, contents) => {
   contents.on("will-attach-webview", (event) => event.preventDefault());
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
 });
-app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 // The browser smoke checks the web-site policy without the network: its
 // made-up .test names resolve to its own loopback server, where the two
 // fixture sites stand in for public ones (rebind.test does not).
@@ -202,7 +219,18 @@ function createAgent(selected: CoreConnection): Sidecar {
   const sidecar = new Sidecar({
     ...hostCommand(selected, agentBin()),
     env: hostEnv(selected),
-    onEvent: forwardEvent,
+    // A host still being tried (see switchConnection) is not the live one.
+    onEvent: (msg) => {
+      if (agent === sidecar) forwardEvent(msg);
+    },
+    onGiveUp: () => {
+      if (agent === sidecar) {
+        liveWindow()?.webContents.send("agent:event", {
+          event: "host/failed",
+          message: "The agent host keeps crashing and was stopped. Restart Paladin to try again.",
+        });
+      }
+    },
     // The renderer re-reads sessions and ends any interrupted turns.
     onRestart: () => {
       if (agent === sidecar) liveWindow()?.webContents.send("agent:event", { event: "host/restarted" });
@@ -261,16 +289,9 @@ voice.onEvent = (event) => {
 };
 let nextUIBrowserID = 0;
 
-// isWebUrl admits only http(s) URLs: guest views and the OS browser
-// must never be handed file:, javascript: or custom-scheme URLs.
-function isWebUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try {
-    const { protocol } = new URL(value);
-    return protocol === "https:" || protocol === "http:";
-  } catch {
-    return false;
-  }
+function requireSessionId(value: unknown): string {
+  if (!validSessionId(value)) throw new Error("browser: invalid session");
+  return value;
 }
 
 function isViewBounds(value: unknown): value is ViewBounds {
@@ -286,94 +307,7 @@ function liveWindow(): BrowserWindow | null {
 
 // ---- plugin panels ----
 
-type Rate = { start: number; count: number };
-type PanelGrant = {
-  id: string;
-  plugin: string;
-  view: string;
-  sessionId: string;
-  workspace: string;
-  permissions: Set<string>;
-  inflight: number;
-  reloading: boolean;
-  idleWaiters: Set<() => void>;
-  frame: WebFrameMain | null;
-  subs: Map<string, { events: Set<string> | null; dropped: number }>;
-  rates: Record<"tool" | "file" | "external" | "events" | "prompt", Rate>;
-};
-
 const panels = new Map<string, PanelGrant>();
-const PLUGIN_EVENTS = new Set([
-  "chat/delta",
-  "chat/reasoning",
-  "chat/approval",
-  "chat/budget",
-  "chat/compact",
-  "chat/hook",
-  "chat/protection",
-  "chat/retry",
-  "chat/steer",
-  "chat/thinkingDropped",
-  "chat/usage",
-  "chat/tool",
-  "turn/queued",
-  "turn/start",
-  "turn/done",
-  "browser/navigated",
-  "session/changes",
-  "plugin/updated",
-  "tools/pending",
-]);
-const PANEL_LIMIT_PER_SESSION = 2;
-const PANEL_LIMIT_TOTAL = 4;
-
-function pathInside(root: string, target: string): boolean {
-  const rel = path.relative(root, target);
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-}
-
-function allowRate(grant: PanelGrant, key: keyof PanelGrant["rates"], max: number): boolean {
-  const now = Date.now();
-  const rate = grant.rates[key];
-  if (now - rate.start >= 60_000) {
-    rate.start = now;
-    rate.count = 0;
-  }
-  if (rate.count >= max) return false;
-  rate.count++;
-  return true;
-}
-
-function newGrant(
-  id: string,
-  plugin: string,
-  view: string,
-  sessionId: string,
-  workspace: string,
-  permissions: string[],
-): PanelGrant {
-  return {
-    id,
-    plugin,
-    view,
-    sessionId,
-    workspace,
-    permissions: new Set(permissions),
-    inflight: 0,
-    reloading: false,
-    idleWaiters: new Set(),
-    frame: null,
-    subs: new Map(),
-    rates: {
-      tool: { start: Date.now(), count: 0 },
-      file: { start: Date.now(), count: 0 },
-      external: { start: Date.now(), count: 0 },
-      events: { start: Date.now(), count: 0 },
-      prompt: { start: Date.now(), count: 0 },
-    },
-  };
-}
-
 // panelGrant maps a bridge call back to the frame that was opened. The
 // panel id is unguessable and the URL's plugin/view must still match, so
 // a frame cannot borrow another panel's permissions.
@@ -399,14 +333,6 @@ function panelGrant(event: IpcMainInvokeEvent): PanelGrant {
   if (grant.frame && grant.frame !== frame) throw new Error("plugin panel belongs to another frame");
   grant.frame = frame;
   return grant;
-}
-
-function pluginViewUrl(plugin: string, view: string, entry: string, id: string): string {
-  const rel = entry
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-  return `plugin://${plugin}/${view}/${rel}?panel=${encodeURIComponent(id)}`;
 }
 
 function storePath(grant: PanelGrant): string | null {
@@ -676,6 +602,11 @@ function ensureView(name: string, url: string, partition: string): WebContentsVi
     popup.webContents.on("will-redirect", guard);
     popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   });
+  const keepHttps = (event: Electron.Event, nextURL: string): void => {
+    if (!allowedGuestUrl(nextURL)) event.preventDefault();
+  };
+  view.webContents.on("will-navigate", keepHttps);
+  view.webContents.on("will-redirect", keepHttps);
   defuseGuestDrag(view);
   const report = (): void => reportViewState(name, view);
   view.webContents.on("did-navigate", report);
@@ -714,11 +645,12 @@ function layoutVisible(): void {
   const entry = views.get(visibleView);
   if (!entry) return;
   const b = lastBounds;
+  const zoom = win.webContents.getZoomFactor();
   const next = {
-    x: Math.max(0, Math.round(b.x)),
-    y: Math.max(0, Math.round(b.y)),
-    width: Math.max(1, Math.round(b.width)),
-    height: Math.max(1, Math.round(b.height)),
+    x: Math.max(0, Math.round(b.x * zoom)),
+    y: Math.max(0, Math.round(b.y * zoom)),
+    width: Math.max(1, Math.round(b.width * zoom)),
+    height: Math.max(1, Math.round(b.height * zoom)),
   };
   const prev = entry.applied;
   // setBounds recreates the guest surface: skip no-ops so resizes and
@@ -856,6 +788,9 @@ function createWindow(): void {
       preload: path.join(HERE, "preload.js"),
       contextIsolation: true,
       sandbox: true,
+      // The preload must run in plugin panel frames to give them their
+      // restricted bridge. It exposes it only on plugin: pages (not cards),
+      // and every call is checked against the panel's grant in panelGrant.
       nodeIntegrationInSubFrames: true,
     },
   });
@@ -880,7 +815,11 @@ function createWindow(): void {
   win.webContents.on("will-navigate", keepAppPage);
   win.webContents.on("will-redirect", keepAppPage);
   win.webContents.on("will-frame-navigate", (details) => {
-    if (!details.isMainFrame && !appFrameNavigationAllowed(appURL, details.url)) details.preventDefault();
+    if (
+      !details.isMainFrame &&
+      !appFrameNavigationAllowed(appURL, details.url, (host) => pluginHost.pluginDir(host) !== undefined)
+    )
+      details.preventDefault();
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   // A renderer reload drops every plugin frame; their grants must go too,
@@ -938,10 +877,27 @@ function createWindow(): void {
   win.contentView.on("bounds-changed", layoutVisible);
 }
 
+// One running copy per profile: two would share the data directory and
+// each start its own sidecar. The smokes run beside a developer's app.
+const smokeRun = !app.isPackaged && (process.argv.includes("--smoke-browser") || process.argv.includes("--smoke-test"));
+const firstInstance = smokeRun || app.requestSingleInstanceLock();
+if (!firstInstance) app.quit();
+app.on("second-instance", () => {
+  const existing = liveWindow();
+  if (!existing) return;
+  if (existing.isMinimized()) existing.restore();
+  existing.show();
+  existing.focus();
+});
+
 app
   .whenReady()
   .then(async () => {
+    if (!firstInstance) return;
     nativeTheme.themeSource = appTheme;
+    // Older builds opened a Chromium debugging port and left its address
+    // here; nothing listens now, so a stale file would only mislead.
+    fs.rmSync(path.join(app.getPath("userData"), "DevToolsActivePort"), { force: true });
     connection = loadConnection();
     agent = createAgent(connection);
     if (!process.argv.includes("--smoke-browser")) agent.start();
@@ -954,6 +910,7 @@ app
     ): void {
       ipcMain.handle(channel, (event, ...args: unknown[]) => {
         if (!isMainWindowFrame(event.sender, event.senderFrame, win?.webContents, win?.webContents.mainFrame)) {
+          console.error(`[ipc] refused ${channel} from ${describeFrame(event.senderFrame)}`);
           throw new Error("privileged IPC requires the Paladin main frame");
         }
         return handler(event, ...(args as T));
@@ -985,7 +942,13 @@ app
       handler: (grant: PanelGrant, event: IpcMainInvokeEvent, ...args: T) => R,
     ): void {
       ipcMain.handle(channel, (event, ...args: unknown[]) => {
-        const grant = panelGrant(event);
+        let grant: PanelGrant;
+        try {
+          grant = panelGrant(event);
+        } catch (error) {
+          console.error(`[ipc] refused ${channel} from ${describeFrame(event.senderFrame)}: ${errText(error)}`);
+          throw error;
+        }
         return handler(grant, event, ...(args as T));
       });
     }
@@ -1063,6 +1026,7 @@ app
       if (!toolAllowed([...grant.permissions], grant.plugin, tool)) {
         return { ok: false, error: `this panel may not call ${tool}` };
       }
+      if (!withinBytes(input.args, MAX_TOOL_ARGS_BYTES)) return { ok: false, error: "tool arguments are too large" };
       if (!allowRate(grant, "tool", 60)) return { ok: false, error: "this panel is calling tools too quickly" };
       console.error(`[plugin] ${grant.plugin}/${grant.view} invoked ${tool}`);
       grant.inflight++;
@@ -1080,7 +1044,7 @@ app
         if (result?.isError) return { ok: false, error: content || "the tool failed" };
         return { ok: true, result: content };
       } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        return { ok: false, error: errText(error) };
       } finally {
         grant.inflight--;
         if (!grant.inflight) for (const done of grant.idleWaiters) done();
@@ -1090,25 +1054,37 @@ app
     handlePlugin("plugins:readFile", async (grant, _e, value: unknown) => {
       if (!grant.permissions.has("readFile")) return { ok: false, error: "this panel may not read files" };
       if (!allowRate(grant, "file", 120)) return { ok: false, error: "this panel is reading files too quickly" };
-      const rel = typeof (value as { rel?: unknown } | null)?.rel === "string" ? (value as { rel: string }).rel : "";
+      const rel = field(value, "rel");
       if (!rel || path.isAbsolute(rel)) return { ok: false, error: "readFile needs a relative path" };
       try {
         const root = fs.realpathSync(grant.workspace);
         const target = fs.realpathSync(path.resolve(root, rel));
         if (!pathInside(root, target)) return { ok: false, error: "path is outside the workspace" };
-        const info = fs.statSync(target);
-        if (!info.isFile()) return { ok: false, error: "not a regular file" };
-        if (info.size > 1 << 20) return { ok: false, error: "file is larger than 1 MiB" };
-        const data = fs.readFileSync(target);
-        if (data.includes(0)) return { ok: false, error: "binary files are not readable" };
-        return { ok: true, text: data.toString("utf8") };
+        if (secretPath(path.relative(root, target)) || secretPath(rel)) {
+          return { ok: false, error: "this file may hold credentials and is not readable from a panel" };
+        }
+        // O_NOFOLLOW makes a link swapped in after the checks fail to open;
+        // size and content are judged on the open file, not the path.
+        const file = await fs.promises.open(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+        try {
+          const info = await file.stat();
+          if (!info.isFile()) return { ok: false, error: "not a regular file" };
+          if (info.size > MAX_PANEL_FILE_BYTES) return { ok: false, error: "file is larger than 1 MiB" };
+          const data = Buffer.alloc(Math.min(info.size, MAX_PANEL_FILE_BYTES));
+          const { bytesRead } = await file.read(data, 0, data.length, 0);
+          const text = data.subarray(0, bytesRead);
+          if (text.includes(0)) return { ok: false, error: "binary files are not readable" };
+          return { ok: true, text: text.toString("utf8") };
+        } finally {
+          await file.close();
+        }
       } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        return { ok: false, error: errText(error) };
       }
     });
 
     handlePlugin("plugins:readStore", async (grant, _e, value: unknown) => {
-      const key = typeof (value as { key?: unknown } | null)?.key === "string" ? (value as { key: string }).key : "";
+      const key = field(value, "key");
       if (!storeKeyValid(key)) return null;
       const file = storePath(grant);
       if (!file) throw new Error("plugin folder is not available");
@@ -1126,21 +1102,15 @@ app
         writePluginStore(file, key, input.value);
         return { ok: true };
       } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        return { ok: false, error: errText(error) };
       }
     });
 
     handlePlugin("plugins:openExternal", async (grant, _e, value: unknown) => {
       if (!grant.permissions.has("openExternal")) return { ok: false, error: "this panel may not open links" };
       if (!allowRate(grant, "external", 3)) return { ok: false, error: "too many links opened; try again later" };
-      const url = typeof (value as { url?: unknown } | null)?.url === "string" ? (value as { url: string }).url : "";
-      let parsed: URL;
-      try {
-        parsed = new URL(url);
-      } catch {
-        return { ok: false, error: "invalid URL" };
-      }
-      if (parsed.protocol !== "https:") return { ok: false, error: "only https links may be opened" };
+      const url = field(value, "url");
+      if (!externalUrl(url, {})) return { ok: false, error: "only https links of reasonable length may be opened" };
       console.error(`[plugin] ${grant.plugin}/${grant.view} opened ${url}`);
       await shell.openExternal(url);
       return { ok: true };
@@ -1148,8 +1118,7 @@ app
 
     handlePlugin("plugins:sendPrompt", (grant, _e, value: unknown) => {
       if (!grant.permissions.has("sendPrompt")) return { ok: false, error: "this view may not send chat messages" };
-      const text =
-        typeof (value as { text?: unknown } | null)?.text === "string" ? (value as { text: string }).text.trim() : "";
+      const text = field(value, "text").trim();
       if (!text || text.length > 32000) return { ok: false, error: "message must be 1 to 32000 characters" };
       if (!allowRate(grant, "prompt", 10)) return { ok: false, error: "this view is sending messages too quickly" };
       liveWindow()?.webContents.send("plugin:prompt", { text, sessionId: grant.sessionId, workspace: grant.workspace });
@@ -1168,7 +1137,7 @@ app
         });
         return { ok: true, history };
       } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        return { ok: false, error: errText(error) };
       }
     });
 
@@ -1193,7 +1162,7 @@ app
     });
 
     handlePlugin("plugins:unsubscribe", async (grant, _e, value: unknown) => {
-      const id = typeof (value as { id?: unknown } | null)?.id === "string" ? (value as { id: string }).id : "";
+      const id = field(value, "id");
       return id ? grant.subs.delete(id) : false;
     });
     handleTrusted("app:metrics", () => {
@@ -1214,7 +1183,8 @@ app
 
     // Native OS folder picker for workspace selection. Null means the
     // user cancelled (or no window yet).
-    handleTrusted("dialog:pickDirectory", async (_e, defaultPath: string | null) => {
+    handleTrusted("dialog:pickDirectory", async (_e, requested: unknown) => {
+      const defaultPath = absolutePath(requested);
       if (!win) return null;
       const res = await dialog.showOpenDialog(win, {
         properties: ["openDirectory"],
@@ -1223,8 +1193,8 @@ app
       return res.canceled ? null : (res.filePaths[0] ?? null);
     });
 
-    handleTrusted("views:ensure", (_e, name: string, url: unknown, partition: string) => {
-      if (!win || !isWebUrl(url)) return false;
+    handleTrusted("views:ensure", (_e, name: unknown, url: unknown, partition: unknown) => {
+      if (!win || !validViewName(name) || !validGuestPartition(partition) || !allowedGuestUrl(url)) return false;
       ensureView(name, url, partition);
       return true;
     });
@@ -1242,9 +1212,9 @@ app
       const live = visibleView ? views.get(visibleView)?.view : browsers.visibleView();
       return live ? snapshotOf(live) : null;
     });
-    handleTrusted("views:navigate", (_e, name: string, url: unknown) => {
-      const entry = views.get(name);
-      if (!entry || !isWebUrl(url)) return false;
+    handleTrusted("views:navigate", (_e, name: unknown, url: unknown) => {
+      const entry = validViewName(name) ? views.get(name) : undefined;
+      if (!entry || !allowedGuestUrl(url)) return false;
       entry.url = url;
       entry.view.webContents.loadURL(url).catch(() => undefined);
       return true;
@@ -1266,10 +1236,9 @@ app
       return true;
     });
     handleTrusted("shell:openExternal", (_e, url: unknown) => {
-      if (!isWebUrl(url) && !(typeof url === "string" && url.startsWith("mailto:"))) {
-        throw new Error("openExternal only opens web and mailto links");
-      }
-      return shell.openExternal(url);
+      const link = externalUrl(url, { http: true, mailto: true });
+      if (!link) throw new Error("openExternal only opens web and mailto links");
+      return shell.openExternal(link.href);
     });
 
     handleTrusted("window:minimize", () => win?.minimize());
@@ -1298,7 +1267,8 @@ app
       return true;
     });
 
-    handleTrusted("browser:open", async (_e, sessionId: string, url: string) => {
+    handleTrusted("browser:open", async (_e, sessionId: unknown, url: unknown) => {
+      if (!validSessionId(sessionId) || typeof url !== "string") throw new Error("browser: invalid arguments");
       // A URL typed in the pane follows the same private-network switch
       // as the agent's requests; without an answer the last one stands.
       const tools = (await agent.invoke("toolsList", {}, 3000).catch(() => null)) as {
@@ -1317,16 +1287,22 @@ app
       if (!reply.ok) throw new Error(reply.error ?? "browser open failed");
       return reply.result;
     });
-    handleTrusted("browser:show", (_e, sessionId: string | null) => browsers.show(sessionId));
-    handleTrusted("browser:setBounds", (_e, bounds: ViewBounds) => browsers.setBounds(bounds));
-    handleTrusted("browser:drop", (_e, sessionId: string) => {
-      browsers.drop(sessionId);
+    handleTrusted("browser:show", (_e, sessionId: unknown) => {
+      if (sessionId !== null && !validSessionId(sessionId)) throw new Error("browser: invalid session");
+      return browsers.show(sessionId);
+    });
+    handleTrusted("browser:setBounds", (_e, bounds: unknown) => {
+      if (!isViewBounds(bounds)) throw new Error("browser: invalid bounds");
+      return browsers.setBounds(bounds);
+    });
+    handleTrusted("browser:drop", (_e, sessionId: unknown) => {
+      browsers.drop(requireSessionId(sessionId));
       return true;
     });
-    handleTrusted("browser:pick", (_e, sessionId: string) => browsers.pick(sessionId));
-    handleTrusted("browser:cancelPick", (_e, sessionId: string) => browsers.cancelPick(sessionId));
-    handleTrusted("browser:getNotes", (_e, sessionId: string) => browsers.getNotes(sessionId));
-    handleTrusted("browser:clearNotes", (_e, sessionId: string) => browsers.clearNotes(sessionId));
+    handleTrusted("browser:pick", (_e, sessionId: unknown) => browsers.pick(requireSessionId(sessionId)));
+    handleTrusted("browser:cancelPick", (_e, sessionId: unknown) => browsers.cancelPick(requireSessionId(sessionId)));
+    handleTrusted("browser:getNotes", (_e, sessionId: unknown) => browsers.getNotes(requireSessionId(sessionId)));
+    handleTrusted("browser:clearNotes", (_e, sessionId: unknown) => browsers.clearNotes(requireSessionId(sessionId)));
 
     handleTrusted("voice:overview", () => voice.overview());
     handleTrusted("voice:start", (_e, modelId: unknown) => {
@@ -1369,80 +1345,7 @@ app
     }
     // Headless smoke: --smoke-test loads the window, pings the sidecar
     // over JSONL, reports, and exits (non-zero on any failure).
-    if (process.argv.includes("--smoke-test")) {
-      // Never dereference the mutable global `win` from a delayed
-      // callback: closing the window during a retry used to throw
-      // "Cannot read properties of null (reading 'webContents')".
-      const smokeWin = win;
-      if (!smokeWin) {
-        console.error("[smoke] FAIL: no window to test");
-        process.exit(1);
-      }
-      // Electron emits "closed" while process.exit tears the window down,
-      // so a passing run must not be turned into a failure by its own
-      // shutdown.
-      let finished = false;
-      const fail = (msg: string): never => {
-        finished = true;
-        console.error(`[smoke] FAIL: ${msg}`);
-        process.exit(1);
-      };
-      const timer = setTimeout(() => fail("timed out waiting for load + ping"), 25000);
-      const gone = (): boolean => smokeWin.isDestroyed();
-      const execute = (code: string): Promise<unknown> => {
-        if (gone()) return Promise.reject(new Error("window closed"));
-        return smokeWin.webContents.executeJavaScript(code);
-      };
-      smokeWin.once("closed", () => {
-        clearTimeout(timer);
-        if (!finished) fail("window closed before the smoke test finished");
-      });
-      smokeWin.webContents.on("did-fail-load", (_e, code, desc) => fail(`renderer load failed ${code}: ${desc}`));
-      smokeWin.webContents.on("console-message", (_e, _level, message) => {
-        if (/preload bridge missing|Uncaught/.test(message)) fail(`renderer console: ${message}`);
-      });
-      smokeWin.webContents.on("did-finish-load", () => {
-        // The frame can be momentarily undisposed-ready right after load
-        // (worse headless); poll briefly instead of failing on one shot.
-        const probeBridge = (tries: number): void => {
-          if (gone()) return;
-          execute("typeof window.paladin")
-            .then((t) => {
-              if (gone()) return;
-              if (t !== "object") {
-                if (tries > 0) {
-                  setTimeout(() => probeBridge(tries - 1), 250);
-                } else {
-                  fail(`window.paladin is ${String(t)} (preload bridge missing)`);
-                }
-              }
-            })
-            .catch((e) => {
-              if (gone()) return;
-              if (tries > 0) {
-                setTimeout(() => probeBridge(tries - 1), 250);
-              } else {
-                fail(`bridge probe failed: ${e.message}`);
-              }
-            });
-        };
-        probeBridge(12);
-        agent
-          .invoke("ping")
-          .then(async (r) => {
-            if ((r as { ok?: unknown } | null)?.ok !== true) {
-              fail(`unexpected ping result: ${JSON.stringify(r)}`);
-            }
-            const bridged = await execute('window.paladin.invoke("ping")');
-            if ((bridged as { ok?: unknown } | null)?.ok !== true) fail("preload bridge ping failed");
-            clearTimeout(timer);
-            finished = true;
-            console.log("[smoke] PASS: renderer loaded, preload bridge and agent-host ping ok");
-            process.exit(0);
-          })
-          .catch((e) => fail(`ping failed: ${e.message}`));
-      });
-    }
+    if (process.argv.includes("--smoke-test")) runWindowSmoke(win, agent);
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

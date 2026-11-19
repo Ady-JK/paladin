@@ -313,9 +313,6 @@ func TestSessionUsageFallsBackToTheTable(t *testing.T) {
 	if w, known := usage("omen-alpha"); known || w != inference.DefaultContextWindow {
 		t.Fatalf("unknown window %d known=%v", w, known)
 	}
-	if window := rt.catalogWindow(nil, nil); window != 0 {
-		t.Fatalf("catalogWindow without a provider: %d", window)
-	}
 }
 
 // A published level reaches the provider the runtime builds, including

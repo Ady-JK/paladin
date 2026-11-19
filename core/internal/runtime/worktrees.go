@@ -21,6 +21,10 @@ type OpenOpts struct {
 	Worktree bool
 	// Name names the worktree branch (paladin/<slug>).
 	Name string
+	// Harness starts the session on an external agent ("codex") instead
+	// of Paladin's own loop; Model picks that agent's model.
+	Harness string
+	Model   string
 }
 
 func worktreeSection(wt *transcript.Worktree) string {
@@ -45,6 +49,12 @@ func fromTranscriptWorktree(wt *transcript.Worktree) worktree.Info {
 // OpenSessionWith opens an existing session, or creates one in cwd,
 // optionally in a fresh git worktree of cwd's repository.
 func (r *AgentRuntime) OpenSessionWith(sessionID, cwd string, opts OpenOpts) (Session, error) {
+	if strings.TrimSpace(sessionID) == "" && opts.Harness != "" {
+		if strings.TrimSpace(cwd) == "" {
+			return Session{}, fmt.Errorf("cwd is required to create a session")
+		}
+		return r.openHarnessSession(cwd, opts)
+	}
 	if strings.TrimSpace(sessionID) != "" || !opts.Worktree {
 		return r.OpenSession(sessionID, cwd)
 	}
@@ -199,6 +209,7 @@ func (r *AgentRuntime) DeleteSessionWith(sessionID, cwd string, discard bool) (b
 	if sess, err := r.transcripts.Load(cwd, sessionID); err == nil {
 		wt = sess.Meta.Worktree
 	}
+	defer r.forgetCodexThread(sessionID)
 	ok, err := r.DeleteSession(sessionID, cwd)
 	if err != nil || wt == nil {
 		return ok, err

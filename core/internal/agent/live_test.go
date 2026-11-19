@@ -7,7 +7,7 @@ import (
 )
 
 func TestLiveSnapshotShowsToolCallsWhileTheyRun(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"x.txt"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"x.txt"}`), textRound("ok")}}
 	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	var snaps [][]inference.LlmMessage
@@ -30,7 +30,7 @@ func TestLiveSnapshotShowsToolCallsWhileTheyRun(t *testing.T) {
 }
 
 func TestLiveSnapshotIsPublishedBeforeEveryModelRound(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"x.txt"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"x.txt"}`), textRound("ok")}}
 	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	var snaps [][]inference.LlmMessage

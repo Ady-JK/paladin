@@ -4,11 +4,12 @@
 // onEvent. Every call has a deadline and is never retried here: a
 // mutation that times out may still have happened. A host that exits
 // unexpectedly is restarted with exponential backoff and announced once
-// it answers a ping; calls made while it is down fail fast. No Electron
+// it answers a ping; calls made while it is down fail fast. A host that
+// keeps crashing is given up on after maxCrashes, and a line longer than
+// maxLineBytes is treated as a broken host and restarted. No Electron
 // imports, so it unit-tests in plain Node.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import readline from "node:readline";
 import type { HostEvent } from "./turnNotify";
 
 // HostMessage is one line from the host: a reply ({id, ok,
@@ -48,6 +49,12 @@ type SidecarOptions = {
   // Request bytes buffered for a host that is not reading; more are
   // refused as busy.
   maxBufferedBytes?: number;
+  // The longest reply or event line accepted from the host.
+  maxLineBytes?: number;
+  // Crashes in a row (without a stable run between) before the host is
+  // left stopped and onGiveUp runs. start() tries again.
+  maxCrashes?: number;
+  onGiveUp?: () => void;
 };
 
 type PendingCall = {
@@ -61,6 +68,8 @@ const DEFAULT_BACKOFF: Backoff = { initialMs: 500, maxMs: 30_000, stableMs: 60_0
 const DEFAULT_DEADLINES: Deadlines = { readMs: 30_000, writeMs: 120_000, longMs: 600_000 };
 const DEFAULT_MAX_PENDING = 512;
 const DEFAULT_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_LINE_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MAX_CRASHES = 10;
 // A restarted host must answer a ping this fast, a few times over,
 // before the renderer is told to re-sync.
 const READY_PING_MS = 1000;
@@ -76,6 +85,7 @@ const READ_METHODS = new Set([
   "fsHome",
   "resolveWorkspace",
   "listProviders",
+  "codexStatus",
   "compactionGet",
   "fsList",
   "ideList",
@@ -150,6 +160,60 @@ export function restartDelay(attempt: number, backoff: Backoff): number {
   return Math.min(backoff.initialMs * 2 ** attempt, backoff.maxMs);
 }
 
+// LineSplitter turns a byte stream into newline-delimited lines without
+// ever holding more than max bytes of one line. Unlike readline it can
+// refuse a host that never sends a newline: onOverflow runs once and
+// everything after it is ignored.
+export class LineSplitter {
+  private chunks: Buffer[] = [];
+  private size = 0;
+  private dead = false;
+
+  constructor(
+    private readonly max: number,
+    private readonly onLine: (line: string) => void,
+    private readonly onOverflow: () => void,
+  ) {}
+
+  push(chunk: Buffer): void {
+    let start = 0;
+    while (!this.dead) {
+      const nl = chunk.indexOf(0x0a, start);
+      if (nl === -1) {
+        this.hold(chunk.subarray(start));
+        return;
+      }
+      const tail = chunk.subarray(start, nl);
+      if (this.size + tail.length > this.max) {
+        this.overflow();
+        return;
+      }
+      const line = this.chunks.length ? Buffer.concat([...this.chunks, tail]) : tail;
+      this.chunks = [];
+      this.size = 0;
+      this.onLine(line.toString("utf8"));
+      start = nl + 1;
+    }
+  }
+
+  private hold(rest: Buffer): void {
+    if (rest.length === 0) return;
+    if (this.size + rest.length > this.max) {
+      this.overflow();
+      return;
+    }
+    this.chunks.push(Buffer.from(rest));
+    this.size += rest.length;
+  }
+
+  private overflow(): void {
+    this.dead = true;
+    this.chunks = [];
+    this.size = 0;
+    this.onOverflow();
+  }
+}
+
 export class Sidecar {
   private child: ChildProcess | null = null;
   private readonly pending = new Map<string, PendingCall>();
@@ -158,6 +222,7 @@ export class Sidecar {
   private startedAt = 0;
   private restartTimer: NodeJS.Timeout | null = null;
   private stopping = false;
+  private gaveUp = false;
   private readonly backoff: Backoff;
   private readonly deadlines: Deadlines;
   private readonly log: (line: string) => void;
@@ -174,13 +239,17 @@ export class Sidecar {
 
   start(): void {
     this.stopping = false;
+    this.gaveUp = false;
+    this.crashes = 0;
     this.spawnHost(false);
   }
 
   invoke(method: string, params: unknown = {}, deadlineMs = deadlineFor(method, this.deadlines)): Promise<unknown> {
     const stdin = this.running ? this.child?.stdin : null;
     if (!stdin?.writable) {
-      return Promise.reject(new Error("agent-host is not running"));
+      return Promise.reject(
+        new Error(this.gaveUp ? "agent-host stopped after repeated crashes" : "agent-host is not running"),
+      );
     }
     const maxPending = this.options.maxPending ?? DEFAULT_MAX_PENDING;
     const maxBuffered = this.options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
@@ -253,7 +322,18 @@ export class Sidecar {
     // keeps the stream error from crashing the main process.
     child.stdin?.on("error", (error) => this.log(`[agent-host] stdin: ${error.message}`));
     if (child.stdout) {
-      readline.createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
+      const max = this.options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
+      const splitter = new LineSplitter(
+        max,
+        (line) => this.handleLine(line),
+        () => {
+          // The host's framing cannot be trusted any more; a restart makes
+          // the client re-sync, as after a crash.
+          this.log(`[agent-host] a line exceeded ${max} bytes; restarting the host`);
+          child.kill("SIGKILL");
+        },
+      );
+      child.stdout.on("data", (chunk: Buffer) => splitter.push(chunk));
     }
     if (isRestart && child.pid !== undefined) {
       void this.announceWhenReady(child);
@@ -338,7 +418,14 @@ export class Sidecar {
     this.pending.clear();
     if (this.stopping) return;
     if (Date.now() - this.startedAt >= this.backoff.stableMs) this.crashes = 0;
-    const delay = restartDelay(this.crashes++, this.backoff);
+    this.crashes++;
+    if (this.crashes >= (this.options.maxCrashes ?? DEFAULT_MAX_CRASHES)) {
+      this.gaveUp = true;
+      this.log(`[agent-host] crashed ${this.crashes} times in a row; not restarting`);
+      this.options.onGiveUp?.();
+      return;
+    }
+    const delay = restartDelay(this.crashes - 1, this.backoff);
     this.log(`[agent-host] restarting in ${delay}ms`);
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;

@@ -259,6 +259,38 @@ body.guest-visible .tool-spin {
   animation: none;
 }
 
+/* chat/notice: a quiet note from the harness running the turn. */
+.notice-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-slate-500);
+  min-width: 0;
+}
+.notice-ico {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  color: var(--color-slate-400);
+}
+.notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notice-row[data-kind="warning"] .notice-ico {
+  color: var(--color-agent-amber);
+}
+.notice-row[data-kind="error"] .notice-ico,
+.notice-row[data-kind="error"] .notice-text {
+  color: var(--color-agent-rose);
+}
+.dark .notice-row {
+  color: var(--color-slate-400);
+}
+
 /* chat/hook: a quiet one-line note that a user hook acted. */
 .hook-row {
   display: flex;

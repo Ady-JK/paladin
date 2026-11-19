@@ -18,32 +18,32 @@ func TestDecideMCP(t *testing.T) {
 	if plain.Kind != KindMCP || plain.Server != "gh" || plain.MCPTool != "create_issue" || plain.Args != `{"q":1}` {
 		t.Fatalf("%+v", plain)
 	}
-	d := Decide(Auto, plain, nil)
+	d := Decide(Review, plain, nil)
 	if d.Verdict != Ask || len(d.Choices) != 4 || len(d.Remember) != 1 ||
 		d.Remember[0] != (Rule{Tool: ToolMCP, Pattern: "gh/create_issue", Action: ActionAllow}) {
-		t.Fatalf("auto asks and remembers the tool: %+v", d)
+		t.Fatalf("plugin review asks and remembers the tool: %+v", d)
 	}
 	// readOnlyHint comes from the server and is not trusted.
-	if d := Decide(Auto, mcpReq("gh", "search", true, false), nil); d.Verdict != Ask || len(d.Remember) != 1 {
+	if d := Decide(Review, mcpReq("gh", "search", true, false), nil); d.Verdict != Ask || len(d.Remember) != 1 {
 		t.Fatalf("read-only hint must still ask: %+v", d)
 	}
-	if d := Decide(ReadOnly, mcpReq("gh", "search", true, false), nil); d.Verdict != Ask {
-		t.Fatalf("read-only hint must ask in read-only mode: %+v", d)
+	if d := Decide(ReadOnly, mcpReq("gh", "search", true, false), nil); d.Verdict != Deny {
+		t.Fatalf("read-only hint cannot bypass read-only mode: %+v", d)
 	}
-	if d := Decide(ReadOnly, plain, nil); d.Verdict != Ask {
-		t.Fatalf("read-only preset asks: %+v", d)
+	if d := Decide(ReadOnly, plain, nil); d.Verdict != Deny {
+		t.Fatalf("read-only preset blocks: %+v", d)
 	}
 	if d := Decide(FullAccess, plain, nil); d.Verdict != Allow {
 		t.Fatalf("full access: %+v", d)
 	}
 	destructive := mcpReq("gh", "delete_repo", false, true)
-	d = Decide(Auto, destructive, []Rule{{Tool: ToolMCP, Pattern: "gh", Action: ActionAllow}})
+	d = Decide(Review, destructive, []Rule{{Tool: ToolMCP, Pattern: "gh", Action: ActionAllow}})
 	if d.Verdict != Ask || !d.Destructive || len(d.Choices) != 2 || len(d.Remember) != 0 {
 		t.Fatalf("destructive always asks once/deny: %+v", d)
 	}
 	for _, pattern := range []string{"*", "gh", "gh/*", "gh/create_issue"} {
 		rules := []Rule{{Tool: ToolMCP, Pattern: pattern, Action: ActionAllow}}
-		if d := Decide(Auto, plain, rules); d.Verdict != Allow || d.Rule == nil {
+		if d := Decide(Review, plain, rules); d.Verdict != Allow || d.Rule == nil {
 			t.Errorf("allow %q: %+v", pattern, d)
 		}
 		rules[0].Action = ActionDeny
@@ -52,15 +52,15 @@ func TestDecideMCP(t *testing.T) {
 		}
 	}
 	for _, pattern := range []string{"other", "gh/other", "g", "other/*"} {
-		if d := Decide(Auto, plain, []Rule{{Tool: ToolMCP, Pattern: pattern, Action: ActionAllow}}); d.Verdict != Ask {
+		if d := Decide(Review, plain, []Rule{{Tool: ToolMCP, Pattern: pattern, Action: ActionAllow}}); d.Verdict != Ask {
 			t.Errorf("%q should not match: %+v", pattern, d)
 		}
 	}
 	// Shell rules never cover MCP tools and vice versa.
-	if d := Decide(Auto, plain, []Rule{{Tool: ToolShell, Pattern: "*", Action: ActionAllow}}); d.Verdict != Ask {
+	if d := Decide(Review, plain, []Rule{{Tool: ToolShell, Pattern: "*", Action: ActionAllow}}); d.Verdict != Ask {
 		t.Fatalf("shell rule leaked: %+v", d)
 	}
-	if d := Decide(Auto, shellReq("npm test"), []Rule{{Tool: ToolMCP, Pattern: "*", Action: ActionAllow}}); d.Verdict != Ask {
+	if d := Decide(Review, shellReq("npm test"), []Rule{{Tool: ToolMCP, Pattern: "*", Action: ActionAllow}}); d.Verdict != Ask {
 		t.Fatalf("mcp rule leaked: %+v", d)
 	}
 }
@@ -79,7 +79,7 @@ func TestMCPRuleValidation(t *testing.T) {
 }
 
 func TestGateMCP(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	g.MCP = func(name string) (tools.MCPInfo, bool) {
 		if name == "mcp__gh__create_issue" {
 			return tools.MCPInfo{Server: "gh", Tool: "create_issue"}, true
@@ -89,7 +89,7 @@ func TestGateMCP(t *testing.T) {
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "c1", ReplyFolder)
 	auth := g.Authorize(context.Background(), "c1", "mcp__gh__create_issue", json.RawMessage(`{"title":"x"}`), rec.notify)
-	if !auth.Run || auth.Sandbox != nil {
+	if !auth.Run {
 		t.Fatalf("%+v", auth)
 	}
 	card := rec.evs[0]
@@ -101,7 +101,7 @@ func TestGateMCP(t *testing.T) {
 		t.Fatalf("folder rule should cover the next call: %+v %d", auth, rec2.count())
 	}
 	answer(t, g.Broker, "s1", "c3", ReplyDeny)
-	g2 := newGate(t, Auto)
+	g2 := newGate(t, Review)
 	g2.MCP, g2.Broker = g.MCP, g.Broker
 	if auth := g2.Authorize(context.Background(), "c3", "mcp__gh__create_issue", nil, func(Approval) {}); auth.Run || !strings.Contains(auth.Content, "MCP tool gh/create_issue") {
 		t.Fatalf("deny %+v", auth)
@@ -127,7 +127,7 @@ func planGate(t *testing.T, p Preset) *Gate {
 // Plan mode asks for every MCP call, whatever the hints, presets or
 // allow rules say, and never offers to remember it.
 func TestGatePlanModeAlwaysAsksMCP(t *testing.T) {
-	for _, p := range []Preset{Auto, FullAccess} {
+	for _, p := range []Preset{Review, FullAccess} {
 		g := planGate(t, p)
 		if err := g.Store.Add(ScopeSession, g.Workspace, g.SessionID, Rule{Tool: ToolMCP, Pattern: "gh", Action: ActionAllow}); err != nil {
 			t.Fatal(err)
@@ -147,7 +147,7 @@ func TestGatePlanModeAlwaysAsksMCP(t *testing.T) {
 		}
 	}
 	// Deny rules still win without asking.
-	g := planGate(t, Auto)
+	g := planGate(t, Review)
 	if err := g.Store.Add(ScopeSession, g.Workspace, g.SessionID, Rule{Tool: ToolMCP, Pattern: "gh/search", Action: ActionDeny}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestGatePlanModeAlwaysAsksMCP(t *testing.T) {
 		t.Fatalf("deny %+v", auth)
 	}
 	// A hook's allow does not skip the plan-mode question.
-	g = planGate(t, Auto)
+	g = planGate(t, Review)
 	rec = &recorder{}
 	answer(t, g.Broker, "s1", "p3", ReplyDeny)
 	ctx := WithHookVerdict(context.Background(), HookAllow)

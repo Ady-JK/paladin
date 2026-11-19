@@ -40,7 +40,7 @@ type JobRecord struct {
 	// Command is the shell command line, shown in the running-jobs panel.
 	Command string `json:"command,omitempty"`
 	// Auto marks a foreground command that outlived its foreground wait
-	// and was moved to the background automatically; only those report every 5m.
+	// and was moved to the background automatically.
 	Auto bool `json:"auto,omitempty"`
 	// Candidate marks a foreground command that may still become an auto
 	// job. It is not a tracked job until it backgrounds.
@@ -67,7 +67,7 @@ type jobBook struct {
 	// notices are running-job reminders waiting for the session's next
 	// round, or for the wake turn that delivers them.
 	notices map[string][]agent.Notice
-	// stops ends each live job's five-minute notice loop.
+	// stops ends each live job's log monitor.
 	stops map[string]chan struct{}
 }
 
@@ -121,11 +121,16 @@ func (b *jobBook) JobSpawned(e tools.JobEvent) {
 		if err := writeJobRecord(rec); err != nil {
 			log.Printf("jobs: record %s pid: %v", e.ID, err)
 		}
+		// An explicit background job that asked to be told is watched from
+		// the moment it starts; an auto job is watched when it backgrounds.
+		if rec.Notify {
+			b.startMonitor(rec)
+		}
 	}
 }
 
-// JobBackgrounded marks a foreground command that outlived its wait.
-// Only these jobs report their running time every five minutes.
+// JobBackgrounded marks a foreground command that outlived its wait. It is
+// watched from here on, like a background job that asked to be told.
 func (b *jobBook) JobBackgrounded(e tools.JobEvent) {
 	b.mu.Lock()
 	rec := b.candidates[e.ID]
@@ -145,7 +150,7 @@ func (b *jobBook) JobBackgrounded(e tools.JobEvent) {
 	if err := writeJobRecord(rec); err != nil {
 		log.Printf("jobs: record %s background: %v", e.ID, err)
 	}
-	b.startNoticeLoop(rec.ID, rec.SessionID, rec.Workspace, rec.Command, rec.StartedAt)
+	b.startMonitor(rec)
 }
 
 func (b *jobBook) JobFinished(e tools.JobEvent) {
@@ -183,30 +188,103 @@ func (b *jobBook) JobFinished(e tools.JobEvent) {
 	}
 }
 
-// jobNoticeEvery is how often an auto-backgrounded command reports that
-// it is still running. A variable so tests can shorten it.
-var jobNoticeEvery = 5 * time.Minute
+// How a background job is watched. The monitor samples the job's log size
+// every jobCheckEvery (cheap: a stat, no model call) and wakes the agent only
+// for a reason: an hourly note while the log keeps growing, or a stall note
+// when it has gone quiet. Variables so tests can shorten them.
+var (
+	jobCheckEvery    = 30 * time.Second
+	jobProgressEvery = time.Hour
+	jobStallAfter    = 10 * time.Minute
+	jobStuckAfter    = 30 * time.Minute
+)
 
-func (b *jobBook) startNoticeLoop(id, sessionID, workspace, command string, started time.Time) {
-	stop := make(chan struct{})
+const (
+	noticeProgress = "job_progress"
+	noticeStalled  = "job_stalled"
+	noticeStuck    = "job_stuck"
+)
+
+// logWatch decides which notice a job is due from the size of its log. It
+// holds no timer: the caller feeds it the clock and the size.
+//
+//	stage 0  printing, or quiet for less than jobStallAfter
+//	stage 1  stall notice sent; a second one is due at jobStuckAfter
+//	stage 2  presumed-stuck notice sent; nothing more until it prints again
+//
+// Any new output sends it back to stage 0, so a job that wakes up gets the
+// full silent window again.
+type logWatch struct {
+	size     int64
+	grewAt   time.Time
+	noticeAt time.Time
+	stage    int
+}
+
+func newLogWatch(now time.Time, size int64) *logWatch {
+	return &logWatch{size: size, grewAt: now, noticeAt: now}
+}
+
+// step records the log's size at now and returns the notice that is due, or
+// the empty string. It also reports how long the log has been silent.
+func (w *logWatch) step(now time.Time, size int64) (kind string, silent time.Duration) {
+	if size > w.size {
+		w.grewAt, w.stage = now, 0
+	}
+	w.size = size
+	silent = now.Sub(w.grewAt)
+	switch {
+	case w.stage == 0 && silent >= jobStallAfter:
+		w.stage, w.noticeAt = 1, now
+		return noticeStalled, silent
+	case w.stage == 1 && silent >= jobStuckAfter:
+		w.stage, w.noticeAt = 2, now
+		return noticeStuck, silent
+	case w.stage == 0 && now.Sub(w.noticeAt) >= jobProgressEvery:
+		w.noticeAt = now
+		return noticeProgress, silent
+	}
+	return "", silent
+}
+
+// startMonitor watches a background job until it ends. Auto-backgrounded jobs
+// and background jobs that asked to be told (notify, the default) are
+// watched; a job started with notify false is not.
+func (b *jobBook) startMonitor(rec *JobRecord) {
+	id, sessionID, workspace, command, started := rec.ID, rec.SessionID, rec.Workspace, rec.Command, rec.StartedAt
+	logPath := tools.JobLogPath(rec.dir, id)
 	b.mu.Lock()
+	if b.stops[id] != nil {
+		b.mu.Unlock()
+		return
+	}
+	stop := make(chan struct{})
 	b.stops[id] = stop
 	b.mu.Unlock()
 	go func() {
-		ticker := time.NewTicker(jobNoticeEvery)
+		ticker := time.NewTicker(jobCheckEvery)
 		defer ticker.Stop()
+		watch := newLogWatch(time.Now(), tools.LogSize(logPath))
 		n := 0
 		for {
 			select {
 			case <-ticker.C:
 				b.mu.Lock()
 				_, live := b.live[id]
+				if !live {
+					delete(b.stops, id)
+				}
 				b.mu.Unlock()
 				if !live {
 					return
 				}
+				now := time.Now()
+				kind, silent := watch.step(now, tools.LogSize(logPath))
+				if kind == "" {
+					continue
+				}
 				n++
-				b.runningNotice(id, sessionID, workspace, command, time.Since(started), n)
+				b.jobNotice(kind, id, sessionID, workspace, command, logPath, now.Sub(started), silent, n)
 			case <-stop:
 				return
 			}
@@ -214,12 +292,31 @@ func (b *jobBook) startNoticeLoop(id, sessionID, workspace, command string, star
 	}()
 }
 
-func (b *jobBook) runningNotice(id, sessionID, workspace, command string, elapsed time.Duration, n int) {
+// jobNotice tells the agent about a job that is still running, with the tail
+// of its log so it can judge whether the job is working or stuck. It wakes an
+// idle session; a busy one reads it before its next model call.
+func (b *jobBook) jobNotice(kind, id, sessionID, workspace, command, logPath string, running, silent time.Duration, n int) {
+	last := tools.LogTail(logPath)
+	if last == "" {
+		last = "(no output yet)"
+	}
 	body := map[string]any{
-		"event": "job_running", "job_id": id, "command": command,
-		"running_for": elapsed.Round(time.Second).String(),
-		"note": "Still running in the background. Check it with the shell tool status action, " +
-			"cancel it if it is no longer needed, or keep working on something that does not depend on it.",
+		"event": kind, "job_id": id, "command": command,
+		"running_for": running.Round(time.Second).String(),
+		"last_output": last,
+	}
+	switch kind {
+	case noticeProgress:
+		body["note"] = "Still running and still printing. Nothing is needed from you: keep working on something that does not " +
+			"depend on it, or end your turn; you are woken when it finishes. Cancel it with the shell tool's cancel action only if it is no longer needed."
+	case noticeStalled:
+		body["silent_for"] = silent.Round(time.Second).String()
+		body["note"] = "No output for this long. It may be stuck, or doing quiet work. Judge from last_output: cancel it with the " +
+			"shell tool's cancel action if it looks hung, or leave it running. You are woken when it finishes, and once more if it stays silent."
+	case noticeStuck:
+		body["silent_for"] = silent.Round(time.Second).String()
+		body["note"] = "Presumed stuck: no output for a long time. This is the last silence notice for this job unless it prints again, and it " +
+			"has not been stopped. Cancel it with the shell tool's cancel action, or leave it running."
 	}
 	data, err := jsonx.Marshal(body)
 	if err != nil {
@@ -228,7 +325,7 @@ func (b *jobBook) runningNotice(id, sessionID, workspace, command string, elapse
 	args, _ := jsonx.Marshal(map[string]string{"action": "notify", "job_id": id})
 	b.mu.Lock()
 	b.notices[sessionID] = append(b.notices[sessionID], agent.Notice{
-		CallID:    fmt.Sprintf("%s#running-%d", id, n),
+		CallID:    fmt.Sprintf("%s#%s-%d", id, kind, n),
 		Name:      "shell",
 		Arguments: string(args),
 		Content:   string(data),
@@ -260,8 +357,27 @@ func (r *AgentRuntime) RunningJobs() []tools.JobInfo { return r.shell.RunningJob
 // notice tells the agent who stopped it.
 func (r *AgentRuntime) KillJob(id string) (tools.JobInfo, error) { return r.shell.KillJob(id) }
 
+// afterTurn wakes a session whose turn ended with a job notice still queued.
+// A notice that arrives while the session is busy is read at its next round,
+// but one that lands after the turn's last round would otherwise wait for an
+// unrelated event, and with no wait action nothing else would wake the agent.
+// Only a turn that finished normally is resumed: a stopped or failed turn is
+// the user's call.
+func (b *jobBook) afterTurn(info TurnInfo) {
+	if info.SessionID == "" || info.State != TurnDone || info.Stopped || info.Cancelled || info.Error != "" {
+		return
+	}
+	b.mu.Lock()
+	pending := len(b.notices[info.SessionID]) > 0
+	b.mu.Unlock()
+	if pending || b.rt.shell.HasNotify(info.SessionID) {
+		b.rt.wakeSession(info.SessionID, info.Cwd)
+	}
+}
+
 // wakeSession starts a resume turn so an idle session can see a job
-// notice. A busy session takes it at its next round instead.
+// notice. A busy session takes it at its next round instead; afterTurn
+// covers the notice that lands after that session's last round.
 func (r *AgentRuntime) wakeSession(sessionID, cwd string) {
 	if sessionID == "" || r.hub.Busy(sessionID) {
 		return

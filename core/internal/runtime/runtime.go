@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
+	"github.com/Ady-JK/paladin/core/internal/codex"
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/extension"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
@@ -24,7 +26,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/permission"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/sessionindex"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
 	"github.com/Ady-JK/paladin/core/internal/tools"
@@ -46,6 +47,12 @@ type Settings struct {
 	ThinkingLevels map[string]map[string]string  `json:"thinkingLevels,omitempty"`
 	CompactPercent map[string]map[string]float64 `json:"compactPercent,omitempty"`
 	ContextInputs  map[string]map[string]int64   `json:"contextInputs,omitempty"`
+	// ContextWindows is the window a harness last reported for each model,
+	// by harness then model, so a new session shows it before its first turn.
+	ContextWindows map[string]map[string]int64 `json:"contextWindows,omitempty"`
+	// ServiceTiers is the speed tier chosen for each model of a harness
+	// (Codex's fast mode), by harness then model; absent means the default.
+	ServiceTiers map[string]map[string]string `json:"serviceTiers,omitempty"`
 	// MaxSubagents caps a session's queued or running children; 0
 	// means the default.
 	MaxSubagents int `json:"maxSubagents,omitempty"`
@@ -93,6 +100,11 @@ type AgentRuntime struct {
 	ideCheckCache map[string]ideFileFingerprint
 	store         *config.Store
 	transcripts   *transcript.Store
+	historyCache  historyCache
+	// codexRepaired holds the sessions already checked for commands whose outcome
+	// their transcript never got.
+	codexRepaired sync.Map
+	codexSync     sync.Map // session id -> *codexSyncState
 	sessionIndex  *sessionindex.Index
 	catalog       *tools.Catalog
 	tools         *tools.Registry
@@ -104,6 +116,10 @@ type AgentRuntime struct {
 	broker        *permission.Broker
 	agents        *agent.Registry
 	hub           *Hub
+	codex         *codex.Manager
+	codexMu       sync.Mutex
+	codexLimits   codexLimitCache
+	codexThreads  map[string]*codexThread
 	subagents     *subagentManager
 	lsp           *lsp.Manager
 	editorLsp     *lsp.Manager
@@ -142,6 +158,8 @@ type AgentRuntime struct {
 	sideCancel context.CancelFunc
 	// sideBusy holds side chats with a question in flight.
 	sideBusy map[string]bool
+	// codexDiscovery owns the background saved-thread indexer.
+	codexDiscovery codexDiscovery
 }
 
 // New builds the production runtime, backed by the OS keychain. The
@@ -177,6 +195,8 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		ask:           askTool,
 		browser:       browserTool,
 		agents:        agents,
+		codex:         codex.NewManager(),
+		codexThreads:  map[string]*codexThread{},
 		perms:         permission.NewStore(dataDir),
 		broker:        permission.NewBroker(),
 		snaps:         snapshotStore(dataDir),
@@ -210,6 +230,7 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 	r.hub.SetOnDone(func(info TurnInfo) {
 		r.subagents.onDone(info)
 		r.afterTurn(info)
+		r.jobs.afterTurn(info)
 	})
 	return r
 }
@@ -267,7 +288,6 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 	// the new work. Best-effort — a stale file never fails a turn.
 	workspace := resolveCwd(r, req.Cwd)
 	project := workspace
-	var extraWritable []string
 	var sessionStart string
 	var hookEngine *hooks.Engine
 	var child *subagentKind
@@ -279,11 +299,23 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		// A pending undo becomes permanent once the user moves on.
 		r.undoMu.Lock()
 		cerr := r.commitRevert(&sess)
+		// The user's next message ends the chance to recover the state
+		// before the last undo; wake, resume and compaction turns do not.
+		if cerr == nil && !req.Resume && !req.Compact && sess.Meta.Subagent == nil {
+			cerr = clearRecovery(sess.Dir)
+		}
 		r.undoMu.Unlock()
 		if cerr != nil {
 			return agent.ChatOutcome{}, fmt.Errorf("commit revert: %w", cerr)
 		}
 		r.dropFinishedTodos(sess, req.Resume || req.Compact)
+		if sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessCodex && !req.Resume {
+			if changed, err := r.syncCodexSession(req.SessionID, sess.Meta.Cwd, true); err != nil {
+				return agent.ChatOutcome{}, fmt.Errorf("refresh codex conversation before sending: %w", err)
+			} else if changed {
+				r.hub.PublishSession(req.SessionID, "session/refresh")
+			}
+		}
 		if sess.Meta.Cwd != "" {
 			workspace = sess.Meta.Cwd
 		}
@@ -297,6 +329,9 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 		}
 		if !req.Resume && !req.Compact && sess.Meta.Subagent == nil {
 			status := r.recordTurnSnapshot(sess, workspace)
+			if status.Turn >= 0 && (status.State == "protected" || status.State == "partial") {
+				defer r.finishTurnSnapshot(sess, workspace, status.Turn)
+			}
 			select {
 			case tx <- agent.ChatChunk{SessionID: req.SessionID, Protection: &status}:
 			case <-ctx.Done():
@@ -312,12 +347,12 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			}
 			child, template = &kind, kind.template()
 		}
-		if sess.Meta.Worktree != nil {
-			// Commits from a worktree write to the repository's shared git dir.
-			if dir := worktree.CommonDir(ctx, workspace); dir != "" {
-				extraWritable = append(extraWritable, dir)
-			}
+		if sess.Meta.Harness != nil {
+			return r.runHarnessTurn(ctx, sess, req, workspace, gate, tx)
 		}
+	}
+	if derefString(req.Provider) == HarnessCodex {
+		return agent.ChatOutcome{}, fmt.Errorf("this session runs on Paladin's own agent; start a Codex session from the sidebar to use Codex")
 	}
 	var registry *tools.Registry
 	if child != nil {
@@ -346,8 +381,15 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			extra = append(extra, extensionTools...)
 		}
 		registry = r.turnTools(req.Cwd, req.SessionID, r.tools.With(extra...))
-		req.Notices = withRecall(r.memoryRecall(req, req.Cwd),
+		req.Notices = withRecall(r.memoryRecall(req, req.Cwd, sess.Dir),
 			r.jobs.withNotices(req.SessionID, r.subagents.notices(req.SessionID, req.Cwd)))
+	}
+	// A review reminder changes with the turn count. Append it after the
+	// conversation instead of changing the cacheable system prompt.
+	if r.memory != nil {
+		if reminder := r.memory.DueForNudge(sess.Dir); reminder != "" {
+			req.Notices = withRecall([]agent.Notice{{CallID: "memory-review-reminder", Name: "memory", Content: reminder}}, req.Notices)
+		}
 	}
 	req.Budget = r.turnBudget(req.Cwd, req.SessionID)
 	settings := r.loadSettings()
@@ -418,16 +460,14 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			return view.Window, view.Percent
 		},
 		Gate: &permission.Gate{
-			Preset:      preset,
-			Workspace:   workspace,
-			SessionID:   req.SessionID,
-			Store:       r.perms,
-			Broker:      r.broker,
-			SandboxKind: sandbox.Kind(),
+			Preset:    preset,
+			Workspace: workspace,
+			SessionID: req.SessionID,
+			Store:     r.perms,
+			Broker:    r.broker,
 
-			ExtraWritable: extraWritable,
-			MCP:           registry.MCPInfo,
-			Extension:     extensionRef(registry),
+			MCP:       registry.MCPInfo,
+			Extension: extensionRef(registry),
 		},
 	}, req)
 	if err != nil {
@@ -566,12 +606,8 @@ func (r *AgentRuntime) updateSettings(edit func(*Settings)) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(r.settingsPath()), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(r.settingsPath()), 0o700); err != nil {
 		return err
 	}
-	tmp := r.settingsPath() + ".tmp"
-	if err := os.WriteFile(tmp, append(out, '\n'), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, r.settingsPath())
+	return atomicfile.Write(r.settingsPath(), append(out, '\n'))
 }

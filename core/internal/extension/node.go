@@ -21,8 +21,11 @@ import (
 // minNodeMajor is the oldest Node a plugin may run under.
 const minNodeMajor = 24
 
-// nodeProbeTimeout bounds one `node --version` probe.
-const nodeProbeTimeout = 5 * time.Second
+// nodeProbeTimeout bounds one `node --version` probe. It only has to catch a
+// hung binary; endpoint-security scanners can make the first launch of a
+// binary take several seconds, and killing a healthy node then would fail
+// every plugin.
+const nodeProbeTimeout = 20 * time.Second
 
 // nodeBin is a resolved Node runtime.
 type nodeBin struct {

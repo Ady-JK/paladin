@@ -10,7 +10,7 @@ import (
 // remembered so later files run without a card, and a refusal holds for
 // the session.
 func TestProjectToolsAskOncePerFolder(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "c1", ReplyFolder)
 	if !g.TrustProject(context.Background(), "c1", "node_modules/.bin/prettier", rec.notify) {
@@ -29,7 +29,7 @@ func TestProjectToolsAskOncePerFolder(t *testing.T) {
 		t.Fatalf("asked again: %+v", quiet.evs)
 	}
 
-	g = newGate(t, Auto)
+	g = newGate(t, Review)
 	answer(t, g.Broker, "s1", "c1", ReplyDeny)
 	if g.TrustProject(context.Background(), "c1", "node_modules/.bin/prettier", (&recorder{}).notify) {
 		t.Fatal("denied")

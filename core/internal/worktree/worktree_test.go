@@ -220,7 +220,7 @@ func TestRemoveRefusesDirtyAndKeepsUnmergedBranches(t *testing.T) {
 
 // Paladin's own git work (create, commit, merge) never runs the
 // repository's hooks or fsmonitor: hook files are workspace files the
-// agent can write, and these commands run outside the sandbox.
+// agent can write, and Paladin must not execute them implicitly.
 func TestWorktreeGitRunsNoRepositoryHooks(t *testing.T) {
 	repo := newRepo(t)
 	marker := filepath.Join(t.TempDir(), "hook-ran")

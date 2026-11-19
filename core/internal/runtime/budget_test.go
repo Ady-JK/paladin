@@ -100,7 +100,7 @@ func TestBudgetEndsARealTurnWithASummary(t *testing.T) {
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		if i == 0 {
-			args := fmt.Sprintf(`{"path":%q}`, filepath.Join(ws, "missing.txt"))
+			args := fmt.Sprintf(`{"reason":"test","path":%q}`, filepath.Join(ws, "missing.txt"))
 			fmt.Fprintf(w, "data: %s\n\n", fmt.Sprintf(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c0","function":{"name":"read","arguments":%q}}]}}]}`, args))
 			fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":5,\"total_tokens\":10,\"cost\":0.75}}\n\ndata: [DONE]\n\n")
 			return

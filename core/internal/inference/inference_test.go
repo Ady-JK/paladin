@@ -228,7 +228,7 @@ func TestToSDKMessagesShapes(t *testing.T) {
 		{Role: "tool", Content: "out", ToolCallID: &id, Name: &name},
 		{Role: "tool", Content: "orphan"},
 		{Role: "system", Content: "s"},
-	})
+	}, nil)
 	if len(msgs) != 5 {
 		t.Fatalf("got %d", len(msgs))
 	}

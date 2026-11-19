@@ -13,13 +13,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/hooks"
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
@@ -44,6 +45,8 @@ const (
 	summaryToolResultChars = 2000
 	// summaryArgChars caps each tool call's arguments in the summary input.
 	summaryArgChars = 500
+	// summaryReasoningChars caps each round's reasoning in the summary input.
+	summaryReasoningChars = 2000
 	// summaryInputTokensUnknown bounds the summary input when the model's
 	// window is unknown.
 	summaryInputTokensUnknown = 60000
@@ -92,6 +95,9 @@ func estimateTokens(s string) int64 { return int64(len(s)+3) / 4 }
 
 func estimateMessageTokens(m inference.LlmMessage) int64 {
 	n := estimateTokens(m.Content) + 4
+	if m.Thinking != nil {
+		n += estimateTokens(m.Thinking.Text)
+	}
 	for _, c := range m.ToolCalls {
 		n += estimateTokens(c.Name) + estimateTokens(c.Arguments) + 4
 	}
@@ -104,16 +110,6 @@ func estimateMessagesTokens(msgs []inference.LlmMessage) int64 {
 		n += estimateMessageTokens(m)
 	}
 	return n
-}
-
-// contextTokens is the full prompt size a usage report describes.
-// Anthropic reports cached input separately from input_tokens; the
-// OpenAI-style APIs fold it into prompt_tokens.
-func contextTokens(u inference.Usage, api config.ApiType) int64 {
-	if api == config.ApiTypeAnthropic {
-		return u.PromptTokens + u.CacheReadTokens + u.CacheWriteTokens
-	}
-	return u.PromptTokens
 }
 
 // estimateContext is the size of the next request: the last reported
@@ -175,6 +171,9 @@ func renderForSummary(msgs []inference.LlmMessage, maxChars int) string {
 			b.WriteString(m.Content)
 		case "assistant":
 			b.WriteString("## Assistant\n")
+			if m.Thinking != nil && strings.TrimSpace(m.Thinking.Text) != "" {
+				fmt.Fprintf(&b, "[reasoning: %s]\n", clip(strings.TrimSpace(m.Thinking.Text), summaryReasoningChars))
+			}
 			b.WriteString(m.Content)
 			for _, c := range m.ToolCalls {
 				fmt.Fprintf(&b, "\n[called tool %s %s]", c.Name, clip(c.Arguments, summaryArgChars))
@@ -213,7 +212,7 @@ func validUTF8(s string) string { return strings.ToValidUTF8(s, "") }
 // replayRecord converts a kept model message back into a transcript
 // record flagged as a replay copy.
 func replayRecord(m inference.LlmMessage, now time.Time) transcript.Message {
-	rec := transcript.Message{Content: m.Content, CreatedAt: now, Replay: true}
+	rec := transcript.Message{Content: m.Content, CreatedAt: now, Replay: true, Thinking: toTranscriptThinking(m.Thinking)}
 	switch m.Role {
 	case "assistant":
 		rec.Role = transcript.RoleAssistant
@@ -342,7 +341,7 @@ func (a *Agent) compact(reason string, before int64) error {
 	err := guardProvider(func() error {
 		var cerr error
 		resp, cerr = a.timeGenComplete(func() (inference.ToolResponse, error) {
-			return a.provider.CompleteTools(a.ctx, custom.Text("compact.system"),
+			return a.provider.CompleteTools(a.callContext(a.ctx, inference.CallCompaction), custom.Text("compact.system"),
 				[]inference.LlmMessage{{Role: "user", Content: prompt}}, nil, a.session.Meta.SessionID)
 		})
 		return cerr
@@ -370,6 +369,18 @@ func (a *Agent) compact(reason string, before int64) error {
 	summaryMsg := inference.LlmMessage{Role: "user", Content: compactionUserContent(summary)}
 	a.messages = append([]inference.LlmMessage{summaryMsg}, tail...)
 	a.promptTokens, a.promptLen = 0, 0
+	// The summary replaces the messages that held recalled memory, but the
+	// kept tail still holds its own reminders: those entries stay recalled,
+	// so they are not appended a second time.
+	var kept []string
+	for _, m := range tail {
+		if m.Role == "user" {
+			kept = append(kept, m.Content)
+		}
+	}
+	if err := memory.ResetRecalled(a.session.Dir, memory.RecalledIn(kept)); err != nil {
+		fmt.Fprintf(os.Stderr, "memory: reset recalled entries for %s: %v\n", a.session.Meta.SessionID, err)
+	}
 	after := a.estimateContext()
 	a.records = append(a.records, transcript.Message{
 		Role: transcript.RoleSystem, Content: summary, CreatedAt: now,

@@ -43,7 +43,7 @@ func TestFailedTurnIsLoggedToSession(t *testing.T) {
 
 func TestToolFailureIsLoggedToSession(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{
-		callRound("c1", "read", `{"path":"/definitely/not/here.txt"}`),
+		callRound("c1", "read", `{"reason":"test","path":"/definitely/not/here.txt"}`),
 		textRound("done"),
 	}}
 	a, sess, _, done := testAgent(t, prov)

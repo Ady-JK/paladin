@@ -91,6 +91,7 @@ function scheduleLayout(): void {
 async function restoreLayout(root: string, epoch: number): Promise<void> {
   restoring = true;
   restoreInteracted = false;
+  let prunedFolders = false;
   window.clearTimeout(layoutTimer);
   const beforeOpen = openRequest;
   try {
@@ -112,12 +113,14 @@ async function restoreLayout(root: string, epoch: number): Promise<void> {
       if (dock) dock.style.height = layout.terminalHeight >= 100 ? `${layout.terminalHeight}px` : "";
     }
     if (Array.isArray(layout.expanded)) {
+      const pending: Promise<boolean>[] = [];
       for (const path of layout.expanded.slice(0, 500)) {
         if (typeof path === "string" && inWorkspace(root, path)) {
           expanded.add(path);
-          void loadDirectory(path);
+          pending.push(loadDirectory(path, true));
         }
       }
+      prunedFolders = (await Promise.all(pending)).some((found) => !found);
     }
     await restoreBuffers(root, layout, buffers, () => enabled && cwd === root && workspaceEpoch === epoch, editorState);
     if (!enabled || cwd !== root || workspaceEpoch !== epoch) return;
@@ -153,7 +156,7 @@ async function restoreLayout(root: string, epoch: number): Promise<void> {
   } finally {
     if (cwd === root && workspaceEpoch === epoch) {
       restoring = false;
-      if (restoreInteracted) scheduleLayout();
+      if (restoreInteracted || prunedFolders) scheduleLayout();
     }
   }
 }
@@ -180,15 +183,23 @@ function paintTree(): void {
   $("#ideTree").innerHTML = treeHTML(cwd, 0);
 }
 
-async function loadDirectory(path: string): Promise<void> {
+async function loadDirectory(path: string, restoringFolder = false): Promise<boolean> {
   const epoch = generation;
   try {
     const list = await api.ideList(cwd, path, explorerSettings);
-    if (epoch !== generation) return;
+    if (epoch !== generation) return true;
     listings.set(path, list);
     paintTree();
+    return true;
   } catch (error) {
+    if (epoch === generation && restoringFolder && path !== cwd && /\bdoes not exist\b/i.test(String(error))) {
+      expanded.delete(path);
+      listings.delete(path);
+      paintTree();
+      return false;
+    }
     if (epoch === generation) status(`Could not open folder: ${String(error)}`, true);
+    return true;
   }
 }
 
@@ -424,6 +435,7 @@ function syncPaneVisibility(): void {
   explorer.inert = !explorerVisible;
   $("#ideExplorerResize").hidden = !explorerVisible;
   $("#ideChatResize").hidden = !enabled || !agentVisible;
+  $("#ideShowAgent").hidden = !enabled || agentVisible;
   const button = $("#ideExplorerToggle");
   const label = `${explorerVisible ? "Hide" : "Show"} explorer`;
   button.setAttribute("aria-label", label);
@@ -461,6 +473,13 @@ export function initIDE(): void {
   root.setAttribute("aria-label", "Workspace editor");
   root.innerHTML = `<aside class="ide-explorer" aria-label="File explorer"><div class="ide-explorer-head"><div class="ide-explorer-title"><strong>Files</strong><span>Workspace explorer</span></div><button id="ideSearchBtn" type="button" title="Search workspace" aria-label="Search workspace">${icon("search", "h-4 w-4")}</button><button id="ideRefresh" type="button" title="Refresh files" aria-label="Refresh files">${icon("repeat", "h-4 w-4")}</button></div><button type="button" class="ide-root" aria-expanded="true" aria-controls="ideTree"><span class="ide-root-chevron">${icon("chevron-down", "h-3 w-3")}</span><span class="ide-root-label"><small>WORKSPACE</small><strong id="ideFolderName"></strong></span></button><button id="ideChooseFolder" type="button" title="Switch workspace" aria-label="Switch workspace">${icon("folder-open", "h-4 w-4")}<span>Switch workspace</span></button><div class="ide-explorer-filters"><label><input id="ideHideIgnored" type="checkbox" disabled> Hide Git-ignored items</label><label><input id="ideHideDotFolders" type="checkbox" disabled> Hide dot folders</label></div><div id="ideTree" class="ide-tree"></div></aside><div id="ideExplorerResize" class="ide-resize" role="separator" tabindex="0" aria-label="Resize explorer" aria-orientation="vertical"></div><section class="ide-editor-area"><div class="ide-editor-bar"><div id="ideTabs" class="ide-tabs"><div id="ideFileTabs"></div><div id="ideBrowserTabs"></div></div><button id="ideReloadBtn" type="button" title="Discard changes and reload" disabled>Reload</button><button id="ideSaveBtn" type="button" disabled>Save</button></div><div id="idePath" class="ide-path"></div><div id="ideEditorContent" class="ide-editor-content"><div id="ideEmpty" class="ide-empty"><span>${icon("code", "h-9 w-9")}</span><strong>Open a file to start editing</strong><span>Select a file in Explorer</span></div><div id="ideEditorWrap" class="ide-editor-wrap" hidden><div id="ideEditor"></div></div><aside id="ideChangesPanel" class="ide-changes-panel" aria-label="Session changes" hidden></aside><aside id="ideProblemsPanel" class="ide-problems-panel" aria-label="Problems" hidden></aside></div><div id="ideBrowserArea" class="ide-browser-area" hidden></div><div id="ideStatus" class="ide-status" role="status"></div></section>`;
   const chatResize = document.createElement("div");
+  const showAgent = document.createElement("button");
+  showAgent.id = "ideShowAgent";
+  showAgent.type = "button";
+  showAgent.hidden = true;
+  showAgent.textContent = "Show agent";
+  showAgent.title = "Show agent";
+  root.querySelector(".ide-editor-bar")!.append(showAgent);
   chatResize.id = "ideChatResize";
   chatResize.className = "ide-resize";
   chatResize.hidden = true;
@@ -499,8 +518,10 @@ export function initIDE(): void {
   chatHead.id = "ideChatHead";
   chatHead.className = "ide-chat-head";
   chatHead.hidden = true;
-  chatHead.innerHTML = `<strong>Agent</strong><button id="ideShowSessions" type="button">Sessions</button><button id="ideNewChat" type="button" title="New chat" aria-label="New chat">+</button>`;
+  chatHead.innerHTML = `<strong>Agent</strong><button id="ideShowSessions" type="button">Sessions</button><button id="ideNewChat" type="button" title="New chat" aria-label="New chat">+</button><button id="ideHideAgent" type="button" title="Hide agent" aria-label="Hide agent">${icon("chevron-right", "h-4 w-4")}</button>`;
   $("#agentMain").prepend(chatHead);
+  $("#ideHideAgent").addEventListener("click", () => window.dispatchEvent(new Event("paladin:ide-toggle-agent")));
+  showAgent.addEventListener("click", () => window.dispatchEvent(new Event("paladin:ide-show-agent")));
   initIDESessions();
   initIDEChanges(activateIDEFile);
   initIDEProblems({

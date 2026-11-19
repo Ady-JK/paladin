@@ -26,6 +26,7 @@ import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { pickModel } from "./models";
 import { newSession, refreshSessions } from "./sessions";
+import { codexAvailability, refreshCodexAvailability, startCodexSession } from "../adapters/codex/harness";
 import { crumbsHTML, filterEntries, getShowHidden, rowsHTML, setShowHidden, type PickerSelection } from "./picker";
 import { syncMcp } from "./mcp";
 
@@ -37,7 +38,8 @@ let browseGeneration = 0;
 let choosingFolder = false;
 
 // modelHint mirrors the composer label so the dialog states which model
-// the new session will use before it starts.
+// the new session will use before it starts. The model is Paladin's: a Codex
+// session picks one of Codex's own once it has started.
 function modelHint(): string {
   const short = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "";
   const provider = bare(state.selectedProvider);
@@ -99,6 +101,7 @@ async function browseNewSession(path?: string): Promise<void> {
   const request = ++browseGeneration;
   const startButton = $<HTMLButtonElement>("#sessionStartBtn");
   startButton.disabled = true;
+  $<HTMLButtonElement>("#sessionStartCodexBtn").disabled = true;
   try {
     const list = await api.fsList(target);
     if (request !== browseGeneration) return;
@@ -111,14 +114,35 @@ async function browseNewSession(path?: string): Promise<void> {
   } catch (error) {
     if (request === browseGeneration) toast(String(error), "error");
   } finally {
-    if (request === browseGeneration) startButton.disabled = false;
+    if (request === browseGeneration) {
+      startButton.disabled = false;
+      paintEngines();
+    }
   }
+}
+
+// paintEngines shows the engine choice that follows the folder: Paladin, or Codex
+// when its CLI is on this machine. Without it the Codex choice stays, greyed,
+// saying why, so it never just disappears.
+function paintEngines(): void {
+  const codex = $<HTMLButtonElement>("#sessionStartCodexBtn");
+  const { installed, note } = codexAvailability();
+  codex.hidden = choosingFolder;
+  $("#sessionStartLabel").hidden = choosingFolder;
+  // Both starts wait for the folder list, as the Paladin one always has.
+  codex.disabled = !installed || $<HTMLButtonElement>("#sessionStartBtn").disabled;
+  codex.title = installed
+    ? "Run the session on your Codex CLI, with Codex's models"
+    : note || "Codex was not found on this Mac: install the Codex app or CLI to use it";
 }
 
 export async function openNewSession(options?: { chooseFolder?: boolean }): Promise<void> {
   choosingFolder = !!options?.chooseFolder;
   $("#sessionDialogTitle").textContent = options?.chooseFolder ? "Open folder" : "New Session";
-  $("#sessionStartBtn").textContent = options?.chooseFolder ? "Open folder" : "Start";
+  $("#sessionStartBtn").textContent = options?.chooseFolder ? "Open folder" : "Paladin";
+  $("#sessionStartBtn").title = options?.chooseFolder
+    ? "Use this folder"
+    : "Run the session on Paladin's own agent and your model providers";
   newSessionModelHintEl.hidden = !!options?.chooseFolder;
   state.pendingWorkspace = state.cwd;
   selection = null;
@@ -131,6 +155,9 @@ export async function openNewSession(options?: { chooseFolder?: boolean }): Prom
   newSessionFolderSearchEl.value = "";
   newSessionShowHiddenEl.checked = showHidden;
   openModal(sessionModalEl);
+  // Re-check Codex each time: it may have been installed or updated since launch.
+  void refreshCodexAvailability().then(paintEngines);
+  paintEngines();
 
   await browseNewSession();
 }
@@ -140,7 +167,7 @@ export function closeNewSession(): void {
   closeModal(sessionModalEl);
 }
 
-function startNewSession(): void {
+function startNewSession(codex = false): void {
   if (choosingFolder && state.pendingWorkspace.trim() === state.cwd) {
     closeNewSession();
     return;
@@ -152,9 +179,10 @@ function startNewSession(): void {
     syncMcp();
   }
 
-  pickModel(state.selectedProvider, state.selectedModel);
+  if (!codex) pickModel(state.selectedProvider, state.selectedModel);
   closeNewSession();
   newSession();
+  if (codex) void startCodexSession();
   // The workspace may have changed folders: refetch the global list so
   // sessions from other folders stay visible.
   void refreshSessions();
@@ -164,7 +192,8 @@ function startNewSession(): void {
 export function initSessionDialog(): void {
   $("#sessionCloseBtn").addEventListener("click", closeNewSession);
   $("#sessionCancelBtn").addEventListener("click", closeNewSession);
-  $("#sessionStartBtn").addEventListener("click", startNewSession);
+  $("#sessionStartBtn").addEventListener("click", () => startNewSession(false));
+  $("#sessionStartCodexBtn").addEventListener("click", () => startNewSession(true));
 
   newSessionFolderSearchEl.addEventListener("input", () => {
     query = newSessionFolderSearchEl.value;

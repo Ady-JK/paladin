@@ -9,8 +9,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
 func TestPersistedRulesAreOwnerOnly(t *testing.T) {
@@ -133,42 +131,20 @@ func answer(t *testing.T, b *Broker, sid, id, reply string) {
 }
 
 func newGate(t *testing.T, preset Preset) *Gate {
-	return &Gate{Preset: preset, Workspace: "/ws", SessionID: "s1", Store: NewStore(t.TempDir()), Broker: NewBroker(), SandboxKind: "seatbelt"}
+	return &Gate{Preset: preset, Workspace: "/ws", SessionID: "s1", Store: NewStore(t.TempDir()), Broker: NewBroker()}
 }
 
 func TestGateAllowsSafeWithoutAsking(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	rec := &recorder{}
 	auth := g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "ls"}), rec.notify)
-	if !auth.Run || auth.Sandbox == nil || auth.Sandbox.Writable[0] != "/ws" || rec.count() != 0 {
+	if !auth.Run || rec.count() != 0 {
 		t.Fatalf("%+v events=%d", auth, rec.count())
 	}
 }
 
-func TestGateNoSandboxWhenUnavailable(t *testing.T) {
-	g := newGate(t, Auto)
-	g.SandboxKind = ""
-	auth := g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "ls"}), func(Approval) {})
-	if !auth.Run || auth.Sandbox != nil {
-		t.Fatalf("%+v", auth)
-	}
-}
-
-func TestApprovalReportsActualShellSandbox(t *testing.T) {
-	for _, tc := range []struct{ kind, want string }{{"seatbelt", "workspace-write"}, {"", "unavailable"}} {
-		g := newGate(t, Auto)
-		g.SandboxKind = tc.kind
-		rec := &recorder{}
-		answer(t, g.Broker, "s1", "c1", ReplyDeny)
-		g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm test"}), rec.notify)
-		if got := rec.evs[0].Sandbox; got != tc.want {
-			t.Fatalf("sandbox kind %q: got %q, want %q", tc.kind, got, tc.want)
-		}
-	}
-}
-
 func TestGateAskApproveRemembersForSession(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "c1", ReplySession)
 	auth := g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm test"}), rec.notify)
@@ -187,17 +163,17 @@ func TestGateAskApproveRemembersForSession(t *testing.T) {
 }
 
 func TestGateFolderRulePersists(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	answer(t, g.Broker, "s1", "c1", ReplyFolder)
 	g.Authorize(context.Background(), "c1", "write", args(map[string]any{"path": "/etc/hosts"}), func(Approval) {})
 	rules := g.Store.Effective("/ws", "other-session")
-	if len(rules) != 1 || rules[0].Pattern != "/etc" || rules[0].Tool != ToolWrite {
+	if len(rules) != 1 || rules[0].Pattern != "/etc/hosts" || rules[0].Tool != ToolWrite {
 		t.Fatalf("%+v", rules)
 	}
 }
 
 func TestGateDenyTellsTheModel(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "c1", ReplyDeny)
 	auth := g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm publish"}), rec.notify)
@@ -210,7 +186,7 @@ func TestGateDenyTellsTheModel(t *testing.T) {
 }
 
 func TestGateStopEndsWait(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(20*time.Millisecond, cancel)
 	auth := g.Authorize(ctx, "c1", "shell", args(map[string]any{"cmd": "npm test"}), func(Approval) {})
@@ -226,30 +202,5 @@ func TestGateRuleDenyNeedsNoPrompt(t *testing.T) {
 	auth := g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "curl x"}), rec.notify)
 	if auth.Run || rec.count() != 0 || !strings.Contains(auth.Content, "rule") {
 		t.Fatalf("%+v", auth)
-	}
-}
-
-func TestGateEscalation(t *testing.T) {
-	g := newGate(t, Auto)
-	rec := &recorder{}
-	answer(t, g.Broker, "s1", "c1", ReplyOnce)
-	pol := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Writable: []string{"/ws"}}
-	esc := g.Escalate(context.Background(), "c1", "shell", args(map[string]any{"cmd": "npm i -g x"}),
-		Blocked{Policy: pol, Output: "Operation not permitted"}, rec.notify)
-	if !esc.Run || esc.Sandbox != nil || rec.evs[0].Kind != KindEscalate || len(rec.evs[0].Choices) != 2 {
-		t.Fatalf("esc=%+v %+v", esc, rec.evs)
-	}
-	g.Preset = FullAccess
-	if g.Escalate(context.Background(), "c2", "shell", args(map[string]any{"cmd": "x"}), Blocked{Policy: pol}, rec.notify).Run {
-		t.Fatal("full access never sandboxes, so never escalates")
-	}
-}
-
-func TestGateAddsExtraWritableRoots(t *testing.T) {
-	g := newGate(t, Auto)
-	g.ExtraWritable = []string{"/repo/.git"}
-	auth := g.Authorize(context.Background(), "c1", "shell", args(map[string]any{"cmd": "ls"}), func(Approval) {})
-	if auth.Sandbox == nil || strings.Join(auth.Sandbox.Writable, ",") != "/ws,/repo/.git" {
-		t.Fatalf("%+v", auth.Sandbox)
 	}
 }

@@ -225,6 +225,39 @@ func TestStdioConcurrentSessionsQueueAndAttach(t *testing.T) {
 	}
 }
 
+func TestTaggedPathsRemainAvailableWhileTurnRuns(t *testing.T) {
+	h, free, open := setupLiveHost(t)
+	sid, cwd := open()
+	path := filepath.Join(cwd, "example.txt")
+	upload := h.call("saveAttachment", map[string]any{"sessionId": sid, "cwd": cwd, "name": "one.png", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII="})["result"].(map[string]any)
+	response := h.call("submitChat", map[string]any{"sessionId": sid, "cwd": cwd, "message": "inspect", "taggedPaths": []string{path}, "attachmentIds": []string{upload["id"].(string)}})
+	turn := response["result"].(map[string]any)
+	attachments := turn["attachments"].([]any)
+	if len(attachments) != 2 || attachments[1].(map[string]any)["path"] != path {
+		t.Fatalf("turn attachments: %v", attachments)
+	}
+	if got := h.call("sessionImage", map[string]any{"sessionId": sid, "cwd": cwd, "path": upload["path"]})["result"].(string); !strings.HasPrefix(got, "data:image/png;base64,") {
+		t.Fatalf("running image: %q", got)
+	}
+	other, otherCwd := open()
+	if got := h.callRaw("sessionImage", map[string]any{"sessionId": other, "cwd": otherCwd, "path": upload["path"]}); got["ok"] == true {
+		t.Fatalf("another session could read the image: %v", got)
+	}
+	snapshot := h.call("attach", map[string]any{"sessionId": sid})["result"].(map[string]any)
+	attached := snapshot["turn"].(map[string]any)["attachments"].([]any)
+	if len(attached) != 2 || attached[1].(map[string]any)["name"] != "example.txt" {
+		t.Fatalf("attached turn: %v", snapshot)
+	}
+	free()
+	h.event("turn/done", sid, nil)
+	history := h.call("sessionHistory", map[string]any{"sessionId": sid, "cwd": cwd})["result"].([]any)
+	row := history[0].(map[string]any)
+	stored := row["attachments"].([]any)
+	if len(stored) != 2 || stored[1].(map[string]any)["path"] != path {
+		t.Fatalf("history attachments: %v", row)
+	}
+}
+
 func TestStdioCancelQueuedTurnAndStopDropsQueue(t *testing.T) {
 	h, free, open := setupLiveHost(t)
 	defer free()

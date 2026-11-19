@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
+	"github.com/Ady-JK/paladin/core/internal/media"
 )
 
 const (
@@ -28,7 +30,7 @@ func (r *AgentRuntime) maxConcurrentTurns() int {
 // is idle and a slot is free. The channel yields the final TurnInfo.
 // A subagent session only takes turns from its parent.
 func (r *AgentRuntime) SubmitTurn(req agent.Request, opts SubmitOpts) (TurnInfo, <-chan TurnInfo, error) {
-	if len(req.AttachmentIDs) > 12 {
+	if len(req.AttachmentIDs)+len(req.TaggedPaths) > 12 {
 		return TurnInfo{}, nil, fmt.Errorf("too many attachments")
 	}
 	for _, id := range req.AttachmentIDs {
@@ -38,6 +40,12 @@ func (r *AgentRuntime) SubmitTurn(req agent.Request, opts SubmitOpts) (TurnInfo,
 		}
 		req.Attachments = append(req.Attachments, *ref)
 		req.Message += fmt.Sprintf("\n[Attached file: %q at %q]", ref.Name, ref.Path)
+	}
+	for _, path := range req.TaggedPaths {
+		if !filepath.IsAbs(path) || len(path) > 4096 || strings.ContainsRune(path, 0) {
+			return TurnInfo{}, nil, fmt.Errorf("invalid tagged path")
+		}
+		req.Attachments = append(req.Attachments, media.Attachment{Name: filepath.Base(path), Path: path})
 	}
 	if err := r.subagents.refuseUserTurn(req.SessionID, req.Cwd); err != nil {
 		return TurnInfo{}, nil, err
@@ -83,9 +91,14 @@ func (r *AgentRuntime) Attach(sessionID, cwd string, limit int) (Attachment, err
 // ShutdownTurns stops everything and waits (bounded) for turns to
 // persist, then stops the MCP and language servers.
 func (r *AgentRuntime) ShutdownTurns(timeout time.Duration) {
+	r.codexDiscovery.lifecycleMu.Lock()
 	r.sideCancel()
+	r.codexDiscovery.lifecycleMu.Unlock()
+	r.codexDiscovery.wg.Wait()
 	r.hub.Shutdown(timeout)
 	r.mcp.Close()
+	r.codexThreadsClose()
+	r.codex.Close()
 	r.lsp.Close()
 	r.editorLsp.Close()
 	// Plugins get a shutdown line and a short grace; nothing may keep the

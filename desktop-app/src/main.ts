@@ -28,6 +28,7 @@ import { initSidePane } from "./features/sidePane";
 import { initPluginPanels } from "./features/pluginPanels";
 import { initPluginCards } from "./features/pluginCards";
 import { initCreatorMode } from "./features/creatorMode";
+import { initCodexAdapter } from "./adapters/codex";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
 import { closeNewSite, initWeb } from "./features/web";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
@@ -216,6 +217,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#newSessionBtn").addEventListener("click", () => {
     void openNewSession();
   });
+  initCodexAdapter();
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {

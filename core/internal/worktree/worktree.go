@@ -79,8 +79,8 @@ func gitEnv() []string {
 	return append(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_OPTIONAL_LOCKS=0")
 }
 
-// run is one git command of Paladin's own. It runs outside the sandbox,
-// so the repository's hooks and fsmonitor (workspace files and config
+// run is one git command of Paladin's own. The repository's hooks and
+// fsmonitor (workspace files and config
 // the agent may have written) are switched off, as for snapshots.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.quotePath=false",
@@ -351,13 +351,4 @@ func Head(ctx context.Context, root string) (branch, head string) {
 	branch, _ = trimmed(ctx, root, "branch", "--show-current")
 	head, _ = trimmed(ctx, root, "rev-parse", "--verify", "-q", "HEAD^{commit}")
 	return branch, head
-}
-
-// CommonDir is the git dir shared by all of a repository's worktrees.
-func CommonDir(ctx context.Context, dir string) string {
-	out, err := trimmed(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return ""
-	}
-	return out
 }

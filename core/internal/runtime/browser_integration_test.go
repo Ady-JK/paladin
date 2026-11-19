@@ -19,7 +19,7 @@ func TestBrowserToolRoundTripsThroughRuntimeAndReturnsImage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		if rounds.Add(1) == 1 {
-			args := `{"action":"screenshot"}`
+			args := `{"reason":"test","action":"screenshot"}`
 			fmt.Fprintf(w, "data: %s\n\n", fmt.Sprintf(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-browser","function":{"name":"browser","arguments":%q}}]}}]}`, args))
 			fmt.Fprint(w, "data: [DONE]\n\n")
 			return

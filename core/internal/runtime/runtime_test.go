@@ -16,20 +16,12 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
-	"github.com/Ady-JK/paladin/core/internal/sandbox/sandboxtest"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 func testRuntime(t *testing.T) (*AgentRuntime, string) {
 	t.Helper()
-	// Shell calls run through the permission gate, which sandboxes them
-	// when the OS supports it; point that at a real helper so the test
-	// binary never re-execs itself.
-	if sandbox.Kind() != "" {
-		sandboxtest.Helper(t)
-	}
 	dir := t.TempDir()
 	return WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore()), dir
 }
@@ -54,6 +46,9 @@ func pointMockAt(rt *AgentRuntime, url string) {
 // runTurnSync drives one turn straight through runTurn, without the
 // hub, and closes tx when it returns.
 func runTurnSync(rt *AgentRuntime, req agent.Request, tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
+	if req.Permissions == "" {
+		req.Permissions = "full-access"
+	}
 	defer close(tx)
 	return rt.runTurn(context.Background(), req, nil, tx, done)
 }
@@ -259,7 +254,7 @@ func TestChatStreamsToolRoundEndToEnd(t *testing.T) {
 		calls++
 		mu.Unlock()
 		if n == 0 {
-			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"%s/note.txt\\\"}\"}}]}}]}\n\n", wsDir)
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"reason\\\":\\\"test\\\",\\\"path\\\":\\\"%s/note.txt\\\"}\"}}]}}]}\n\n", wsDir)
 			fmt.Fprint(w, "data: [DONE]\n\n")
 			return
 		}
@@ -914,7 +909,7 @@ func TestChatRunsEveryBuiltinTool(t *testing.T) {
 	toolRound := func(id, name, args string) string {
 		return fmt.Sprintf(
 			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":%q,"function":{"name":%q,"arguments":%q}}]}}]}`,
-			id, name, args)
+			id, name, testReason(args))
 	}
 	rounds := []string{
 		toolRound("c1", "write", `{"path":"`+filepath.Join(wsDir, "notes.txt")+`","content":"alpha\n"}`),
@@ -996,7 +991,7 @@ func TestChatRunsEveryBuiltinTool(t *testing.T) {
 
 func TestChatAskRoundTripBlocksUntilAnswered(t *testing.T) {
 	wsDir := t.TempDir()
-	askRound := `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-ask-1","function":{"name":"ask","arguments":"{\"questions\":[{\"question\":\"Deploy?\",\"options\":[\"yes\",\"no\"]}]}"}}]}}]}`
+	askRound := `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-ask-1","function":{"name":"ask","arguments":"{\"reason\":\"test\",\"questions\":[{\"question\":\"Deploy?\",\"options\":[\"yes\",\"no\"]}]}"}}]}}]}`
 	var calls int64
 	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1084,7 +1079,7 @@ func TestChatAskRoundTripBlocksUntilAnswered(t *testing.T) {
 
 func TestCancelAskStopsTurn(t *testing.T) {
 	wsDir := t.TempDir()
-	askRound := `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-ask-9","function":{"name":"ask","arguments":"{\"questions\":[{\"question\":\"Go?\"}]}"}}]}}]}`
+	askRound := `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c-ask-9","function":{"name":"ask","arguments":"{\"reason\":\"test\",\"questions\":[{\"question\":\"Go?\"}]}"}}]}}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", askRound)

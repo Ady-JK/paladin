@@ -5,21 +5,18 @@ import (
 	"testing"
 )
 
-func TestHookAllowSkipsThePromptButKeepsTheSandbox(t *testing.T) {
-	g := newGate(t, Auto)
+func TestHookAllowSkipsThePrompt(t *testing.T) {
+	g := newGate(t, Review)
 	rec := &recorder{}
 	ctx := WithHookVerdict(context.Background(), HookAllow)
 	auth := g.Authorize(ctx, "c1", "shell", args(map[string]any{"cmd": "npm install"}), rec.notify)
 	if !auth.Run || rec.count() != 0 {
 		t.Fatalf("%+v events=%d", auth, rec.count())
 	}
-	if auth.Sandbox == nil {
-		t.Fatal("a hook allow must not lift the sandbox")
-	}
 }
 
 func TestHookAllowNeverBeatsADenyRule(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	_ = g.Store.Add(ScopeSession, "/ws", "s1", Rule{Tool: ToolShell, Pattern: "npm install", Action: ActionDeny})
 	ctx := WithHookVerdict(context.Background(), HookAllow)
 	if auth := g.Authorize(ctx, "c1", "shell", args(map[string]any{"cmd": "npm install"}), (&recorder{}).notify); auth.Run {
@@ -28,7 +25,7 @@ func TestHookAllowNeverBeatsADenyRule(t *testing.T) {
 }
 
 func TestHookAskForcesAPrompt(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "c1", ReplyOnce)
 	ctx := WithHookVerdict(context.Background(), HookAsk)

@@ -62,18 +62,18 @@ func TestCopilotUsageEstimate(t *testing.T) {
 	input, output, read, write := 1.0, 5.0, 0.1, 1.25
 	p := &OpenAIProvider{isCopilot: true, meta: config.ModelMeta{Pricing: &config.ModelPricing{FetchedAt: time.Now().Unix(), Tiers: []config.PriceTier{{Input: &input, Output: &output, CacheRead: &read, CacheWrite: &write}}}}}
 	usage := &Usage{PromptTokens: 1000, CompletionTokens: 100, CacheReadTokens: 200, CacheWriteTokens: 100, CacheReadKnown: true, CacheWriteKnown: true}
-	p.estimateCopilotUsage(usage, false)
+	p.estimateCopilotUsage(usage)
 	if !usage.HasCost || !usage.CostEstimated || math.Abs(usage.ListCost-0.001345) > 1e-12 {
 		t.Fatalf("estimate = %+v", usage)
 	}
 	// Copilot reports cache reads but never cache writes: still priced.
 	noWrite := &Usage{PromptTokens: 1000, CompletionTokens: 100, CacheReadTokens: 200, CacheReadKnown: true}
-	p.estimateCopilotUsage(noWrite, false)
+	p.estimateCopilotUsage(noWrite)
 	if !noWrite.HasCost || !noWrite.CostEstimated || math.Abs(noWrite.ListCost-0.00132) > 1e-12 {
 		t.Fatalf("estimate without cache writes = %+v", noWrite)
 	}
 	missing := &Usage{PromptTokens: 1000, CompletionTokens: 100}
-	p.estimateCopilotUsage(missing, false)
+	p.estimateCopilotUsage(missing)
 	if missing.HasCost {
 		t.Fatal("missing cache-read information must not imply zero usage")
 	}

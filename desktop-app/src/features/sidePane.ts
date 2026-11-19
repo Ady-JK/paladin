@@ -14,7 +14,7 @@ import type { RunningJob, SessionChanges, SideChatMessage } from "../core/types"
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { registerChangesLink } from "./findings";
-import { abortAttach, liveBadge, liveRoot, onResync } from "./live";
+import { abortAttach, hasRunningTurn, liveBadge, liveRoot, onResync, runningTurnIndex, runningUserRow } from "./live";
 import { agentStatus, openSession, refreshSessions, renderSessions } from "./sessions";
 import { formatElapsed } from "./workingBar";
 import { createAgentTab, loadAgent, paintHead } from "./sidePane/agentTab";
@@ -55,6 +55,7 @@ const menuEl = $("#paneHistoryMenu");
 const menuItemsEl = $("#paneHistoryItems");
 const layoutBtn = $<HTMLButtonElement>("#paneLayoutBtn");
 const changesBtn = $<HTMLButtonElement>("#sessionChangesBtn");
+const liveChangesBtn = $<HTMLButtonElement>("#liveChanges");
 const runningJobsBtn = $<HTMLButtonElement>("#runningJobsBtn");
 const runningJobsCount = $("#runningJobsCount");
 const titleBar = $("#titleBar");
@@ -171,8 +172,10 @@ export function setIDETerminalMode(on: boolean): void {
     paneOpen = true;
   }
   ideTerminalMode = on;
+  hideLiveChanges(state.sessionId);
   terminalDock.setEnabled(on);
   render();
+  if (state.sessionId) void refreshChanges(state.sessionId);
 }
 
 // Standalone terminals keep their PTY owner while following the visible chat.
@@ -336,6 +339,29 @@ function paintChangesHeader(data: SessionChanges | undefined): void {
 }
 
 let changeRequest = 0;
+let floatingChange: { sessionId: string; turn: number } | null = null;
+
+export function hideLiveChanges(sessionId: string): void {
+  if (floatingChange?.sessionId !== sessionId) return;
+  floatingChange = null;
+  liveChangesBtn.hidden = true;
+}
+
+function paintLiveChanges(
+  sessionId: string,
+  turn: SessionChanges["turns"][number] | null,
+  total: Awaited<ReturnType<typeof turnTotal>>,
+): void {
+  if (ideTerminalMode || sessionId !== state.sessionId || !hasRunningTurn(sessionId) || !turn?.files.length) {
+    hideLiveChanges(sessionId);
+    return;
+  }
+  floatingChange = { sessionId, turn: turn.turn };
+  liveChangesBtn.innerHTML =
+    `${turn.files.length} ${turn.files.length === 1 ? "file" : "files"} changed` +
+    (total ? ` <span class="tool-add">+${total.added}</span> <span class="tool-del">-${total.removed}</span>` : "");
+  liveChangesBtn.hidden = false;
+}
 
 // Refresh after a tool settles or a session is opened. Persisted user
 // rows carry transcript indices; the current live row is passed in.
@@ -379,13 +405,29 @@ export async function refreshChanges(
       await Promise.all(data.turns.map(async (turn) => [turn.turn, await turnTotal(sessionId, turn)] as const)),
     );
     if (sessionId !== state.sessionId || request !== changeRequest) return;
+    const activeRow = runningUserRow(sessionId);
+    const sameLiveRow = !liveRow || !activeRow || liveRow === activeRow;
+    const activeIndex = activeRow?.dataset.turnIndex ?? runningTurnIndex(sessionId);
+    const activeTurn = hasRunningTurn(sessionId)
+      ? (data.turns.find((item) => sameLiveRow && item.callIds?.includes(callId ?? "")) ??
+        data.turns.find((item) => activeIndex !== undefined && item.turn === Number(activeIndex)) ??
+        runningTurn(data.turns))
+      : null;
+    paintLiveChanges(sessionId, activeTurn, activeTurn ? (totals.get(activeTurn.turn) ?? null) : null);
     for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
       const turn = Number(row.dataset.turnIndex);
+      if (!ideTerminalMode && (row === activeRow || (activeTurn && turn === activeTurn.turn))) {
+        paintTurnMarker(row, turn, []);
+        continue;
+      }
       paintTurnMarker(row, turn, byTurn.get(turn) ?? [], totals.get(turn));
     }
-    if (liveRow && callId) {
-      const turn = data.turns.find((item) => item.callIds?.includes(callId)) ?? runningTurn(data.turns);
-      if (turn) paintTurnMarker(liveRow, turn.turn, turn.files, totals.get(turn.turn));
+    if (!ideTerminalMode && activeRow && activeTurn) paintTurnMarker(activeRow, activeTurn.turn, []);
+    if (liveRow && (ideTerminalMode || sameLiveRow) && (callId || !hasRunningTurn(sessionId))) {
+      const turn = data.turns.find((item) => callId && item.callIds?.includes(callId)) ?? runningTurn(data.turns);
+      if (turn && (ideTerminalMode || !activeRow))
+        paintTurnMarker(liveRow, turn.turn, turn.files, totals.get(turn.turn));
+      else if (turn && activeRow) paintTurnMarker(liveRow, turn.turn, []);
     }
     const tab = sets.get(sessionId)?.tabs.find((t): t is ChangesTab => t.kind === "changes");
     if (tab) paintChangesTab(tab, data);
@@ -413,7 +455,7 @@ function openChangeAt(sessionId: string, rel: string, start: number, end: number
   void loadChangeDiff(tab, rel);
 }
 
-function openChangesTab(turn: number | null): void {
+function openChangesTab(turn: number | null, selectFirst = false): void {
   const sessionId = state.sessionId;
   if (!sessionId) return;
   const set = currentSet()!;
@@ -423,11 +465,14 @@ function openChangesTab(turn: number | null): void {
     set.tabs.push(tab);
   }
   tab.turn = turn;
-  tab.selected = null;
+  const cached = changesCache.get(sessionId);
+  const files = turn === null ? cached?.files : cached?.turns.find((item) => item.turn === turn)?.files;
+  tab.selected = selectFirst ? (files?.[0]?.path ?? null) : null;
   tab.mark = null;
   set.active = tab.key;
   showPane();
-  paintChangesTab(tab, changesCache.get(sessionId));
+  paintChangesTab(tab, cached);
+  if (tab.selected) void loadChangeDiff(tab, tab.selected);
   void refreshChanges(sessionId);
 }
 
@@ -1380,6 +1425,7 @@ export function paneSessionIds(): string[] {
 
 // syncSidePane follows the main view to another session.
 export function syncSidePane(): void {
+  if (floatingChange && floatingChange.sessionId !== state.sessionId) hideLiveChanges(floatingChange.sessionId);
   window.dispatchEvent(new Event("paladin:workspace-changed"));
   closeMenu();
   attachStandaloneTerminals(state.sessionId);
@@ -1521,6 +1567,9 @@ export function initSidePane(): void {
     if (!state.sessionId) toast("Open a session to see its changes.", "error");
     else openChangesTab(null);
   });
+  liveChangesBtn.addEventListener("click", () => {
+    if (floatingChange?.sessionId === state.sessionId) openChangesTab(floatingChange.turn, true);
+  });
   $("#ideTerminalToggle").addEventListener("click", toggleTerminalFromRail);
   runningJobsBtn.addEventListener("click", openJobsTab);
   void refreshRunningJobs();
@@ -1535,7 +1584,7 @@ export function initSidePane(): void {
     const card = (event.target as HTMLElement).closest<HTMLElement>(".turn-change-card[data-change-turn]");
     if (!card?.dataset.changeTurn) return;
     if ((event.target as HTMLElement).closest(".turn-change-view")) {
-      openChangesTab(Number(card.dataset.changeTurn));
+      openChangesTab(Number(card.dataset.changeTurn), true);
       return;
     }
     card.classList.toggle("turn-change-collapsed");

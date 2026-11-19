@@ -43,6 +43,26 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#promptInput")).toBeVisible();
 });
 
+test("legacy Auto selections become Read-only and only two session modes remain", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("paladin.permissions.default", "auto");
+    localStorage.setItem("paladin.permissions.session.sess-notify-1", "auto");
+  });
+  await page.reload();
+  await expect(page.locator("#permChip")).toContainText("Read-only");
+  await page.locator("#permChip").click();
+  await expect(page.locator("#permMenu [data-preset]")).toHaveCount(2);
+  await expect(page.locator('#permMenu [data-preset="auto"]')).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await showSidebar(page);
+  await page.locator('button.session-pick[data-session="sess-notify-1"]').click();
+  await expect(page.locator("#permChip")).toHaveAttribute("data-preset", "read-only");
+  await send(page, "inspect only");
+  await expect(page.locator("#messages")).toContainText("Stub reply to: inspect only");
+  const submits = await page.evaluate(() => (window as any).__e2eSubmits);
+  expect(submits.at(-1).permissions).toBe("read-only");
+});
+
 test("an approval card shows the command and allows it for the folder", async ({ page }) => {
   await script(page, [
     { event: "chat/tool", tool: SHELL },
@@ -75,14 +95,6 @@ test("an approval card shows the command and allows it for the folder", async ({
   await expect(page.locator('.session-row[data-live="approval"]')).toHaveCount(0);
 });
 
-test("shell approval describes the actual sandbox scope", async ({ page }) => {
-  await script(page, [{ event: "chat/approval", approval: pending({ sandbox: "workspace-write" }) }]);
-  await send(page);
-  const card = page.locator('.approval-card[data-approval="c1"]');
-  await expect(card).toContainText("workspace, temporary folders and development caches");
-  await expect(card).toContainText("Network access remains available");
-});
-
 test("Escape denies, and a destructive call only offers once or deny", async ({ page }) => {
   await script(page, [
     {
@@ -100,63 +112,13 @@ test("Escape denies, and a destructive call only offers once or deny", async ({ 
   const card = page.locator('.approval-card[data-approval="c1"]');
   await expect(card).toBeVisible();
   await expect(card).toHaveClass(/is-destructive/);
+  await expect(card).toHaveCSS("display", "block");
   await expect(card.locator("[data-approve]")).toHaveCount(2);
   await expect(card.locator('[data-approve="once"]')).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(card).toContainText(/Denied/);
   const answers = await page.evaluate(() => (window as any).__e2eApprovalAnswers);
   expect(answers[0].decision).toBe("deny");
-});
-
-test("an escalation card asks to rerun without the sandbox", async ({ page }) => {
-  await script(page, [
-    {
-      event: "chat/approval",
-      approval: pending({
-        kind: "escalate",
-        reasons: ["the sandbox blocked it"],
-        choices: ["once", "deny"],
-        remember: [],
-      }),
-    },
-  ]);
-  await send(page);
-  const card = page.locator('.approval-card[data-approval="c1"]');
-  await expect(card).toContainText(/without the sandbox/i);
-  await card.locator('[data-approve="once"]').click();
-  await expect(card).toContainText(/Allowed once/);
-});
-
-test("a sandbox block offers to grant the blocked folder", async ({ page }) => {
-  const dir = "/Users/me/.nvm/versions/node/v24/lib/node_modules";
-  await script(page, [
-    {
-      event: "chat/approval",
-      approval: pending({
-        kind: "escalate",
-        command: "npm i -g pnpm",
-        path: dir,
-        reasons: ["blocked by the sandbox"],
-        choices: ["session", "folder", "global", "once", "deny"],
-        remember: [{ tool: "write", pattern: dir, action: "allow" }],
-      }),
-    },
-  ]);
-  await send(page);
-  const card = page.locator('.approval-card[data-approval="c1"]');
-  await expect(card).toHaveClass(/is-escalate/);
-  await expect(card.locator(".approval-title")).toContainText(/sandbox blocked a write/i);
-  await expect(card.locator(".approval-grant")).toContainText(dir);
-  await expect(card.locator("[data-approve]")).toHaveCount(5);
-  await expect(card.locator('[data-approve="session"]')).toBeFocused();
-  await expect(card.locator('[data-approve="session"]')).toHaveText(/^Allow for this session/);
-  await expect(card.locator('[data-approve="folder"]')).toContainText(/for this project/i);
-  await expect(card.locator('[data-approve="global"]')).toContainText(/everywhere/i);
-  await expect(card.locator('[data-approve="once"]')).toContainText(/without the sandbox/i);
-  await card.locator('[data-approve="global"]').click();
-  await expect(card).toContainText(/Always allowed everywhere/);
-  const answers = await page.evaluate(() => (window as any).__e2eApprovalAnswers);
-  expect(answers[0].decision).toBe("global");
 });
 
 test("a write approval from a turn started elsewhere shows up live", async ({ page }) => {
@@ -227,11 +189,11 @@ test("an outside read asks with a read grant", async ({ page }) => {
 
 test("the preset chip switches the session's permissions and is sent with the turn", async ({ page }) => {
   const chip = page.locator("#permChip");
-  await expect(chip).toContainText("Auto");
+  await expect(chip).toContainText("Read-only");
   await chip.click();
   const menu = page.locator("#permMenu");
   await expect(menu).toBeVisible();
-  await expect(menu.locator("[data-preset]")).toHaveCount(3);
+  await expect(menu.locator("[data-preset]")).toHaveCount(2);
   await menu.locator('[data-preset="full-access"]').click();
   await expect(menu).toBeHidden();
   await expect(chip).toContainText("Full access");
@@ -242,19 +204,10 @@ test("the preset chip switches the session's permissions and is sent with the tu
   expect(submits[submits.length - 1].permissions).toBe("full-access");
   // The choice sticks to the session across reloads.
   await page.reload();
-  await expect(page.locator("#permChip")).toContainText("Auto");
+  await expect(page.locator("#permChip")).toContainText("Read-only");
   await showSidebar(page);
   await page.locator('button.session-pick[data-session="sess-notify-1"]').click();
   await expect(page.locator("#permChip")).toContainText("Full access");
-});
-
-test("the chip warns when there is no OS sandbox", async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as any).__e2ePerms = { global: [], folders: {}, kind: "" };
-  });
-  await page.reload();
-  await expect(page.locator("#permChip")).toHaveAttribute("data-sandbox", "none");
-  await expect(page.locator("#permChip")).toHaveAttribute("title", /no OS sandbox/i);
 });
 
 test("settings → permissions edits global and folder rules", async ({ page }) => {
@@ -262,17 +215,14 @@ test("settings → permissions edits global and folder rules", async ({ page }) 
   await page.click("#settingsNavPermissions");
   const pane = page.locator("#settingsPanePermissions");
   await expect(pane).toBeVisible();
-  await expect(pane).toContainText(/Seatbelt/i);
+  await expect(pane.locator(".perm-sandbox")).toHaveCount(0);
 
   await pane.locator('[data-default-preset="read-only"]').click();
   await expect(pane.locator('[data-default-preset="read-only"]')).toHaveAttribute("aria-pressed", "true");
 
-  // Write rules double as folders sandboxed commands may write.
-  await expect(pane.locator(".perm-grant-note")).toContainText(/sandboxed commands/i);
-
   const global = pane.locator('[data-rules="global"]');
   await global.locator("[data-rule-tool]").selectOption("write");
-  await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /sandbox/i);
+  await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /built-in file writes/i);
   await global.locator("[data-rule-tool]").selectOption("read");
   await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /outside the workspace/i);
   await global.locator("[data-rule-tool]").selectOption("shell");
@@ -348,7 +298,7 @@ test("an extension tool call asks with its arguments", async ({ page }) => {
         tool: "jira_lookup",
         kind: "extension",
         args: JSON.stringify({ q: "PAL-1" }),
-        reasons: ["extension tool: it runs local code without the sandbox"],
+        reasons: ["extension tool: it runs local code"],
         choices: ["once", "session", "folder", "global", "deny"],
         remember: [{ tool: "extension", pattern: "jira_lookup", action: "allow" }],
         state: "pending",

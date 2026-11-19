@@ -22,7 +22,6 @@ import (
 )
 
 const (
-	copilotAPIVersion    = "2026-08-01"
 	DefaultOpenAIModel   = "gpt-4o-mini"
 	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 )
@@ -55,7 +54,6 @@ func init() {
 				option.WithHeader("Editor-Version", "vscode/1.95.0"),
 				option.WithHeader("Editor-Plugin-Version", "copilot-chat/0.26.7"),
 				option.WithHeader("User-Agent", "GitHubCopilotChat/0.26.7"),
-				option.WithHeader("Openai-Intent", "conversation-panel"),
 			)
 			p.client = &client
 			p.isCopilot = true
@@ -149,8 +147,8 @@ func (p *OpenAIProvider) ApiType() config.ApiType { return config.ApiTypeOpenai 
 func (p *OpenAIProvider) Model() string           { return p.model }
 
 func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
-	if p.isCopilot && sessionID != "catalog" {
-		return []option.RequestOption{option.WithHeader("X-GitHub-Api-Version", copilotAPIVersion)}
+	if p.isCopilot {
+		return nil
 	}
 	if !p.isOpencode {
 		return nil
@@ -174,21 +172,11 @@ func (p *OpenAIProvider) streamOptions(sessionID string) []option.RequestOption 
 	return append(p.headers(sessionID), option.WithMaxRetries(0))
 }
 
-func (p *OpenAIProvider) copilotOptions(messages []LlmMessage) []option.RequestOption {
-	if !p.isCopilot {
-		return nil
-	}
-	initiator := "user"
-	vision := false
-	for _, message := range messages {
-		if message.Role == "assistant" || message.Role == "tool" {
-			initiator = "agent"
-		}
-		vision = vision || message.Image != nil
-	}
-	opts := []option.RequestOption{option.WithHeader("X-Initiator", initiator)}
-	if vision {
-		opts = append(opts, option.WithHeader("Copilot-Vision-Request", "true"))
+// copilotOptions are the per-call Copilot identity headers as SDK options.
+func (p *OpenAIProvider) copilotOptions(ctx context.Context, messages []LlmMessage) []option.RequestOption {
+	var opts []option.RequestOption
+	for key, value := range p.copilotRequestHeaders(ctx, messages) {
+		opts = append(opts, option.WithHeader(key, value))
 	}
 	return opts
 }
@@ -228,7 +216,9 @@ func (p *OpenAIProvider) requestError(status int, body string) *ProviderError {
 	return RequestError(fmt.Sprintf("%s: chat completion: status %d: %s", p.name, status, short))
 }
 
-func toSDKMessages(messages []LlmMessage) []openai.ChatCompletionMessageParamUnion {
+// toSDKMessages builds the chat request's messages; replay decides how an
+// assistant message's reasoning goes back (see thinkingPolicy).
+func toSDKMessages(messages []LlmMessage, replay *thinkingPolicy) []openai.ChatCompletionMessageParamUnion {
 	out := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	var images []LlmMessage
 	flushImages := func() {
@@ -245,13 +235,23 @@ func toSDKMessages(messages []LlmMessage) []openai.ChatCompletionMessageParamUni
 		}
 		images = nil
 	}
-	for _, m := range messages {
+	lastUser := lastUserIndex(messages)
+	for i, m := range messages {
 		if m.Role != "tool" {
 			flushImages()
 		}
 		switch m.Role {
 		case "assistant":
-			u := openai.AssistantMessage(m.Content)
+			text, native := m.Content, false
+			if replay != nil && m.Thinking != nil {
+				if native = replay.replayNative(m.Thinking, i, lastUser); !native && replay.readable && !replay.native(m.Thinking) {
+					text = priorReasoning(m.Thinking, text)
+				}
+			}
+			u := openai.AssistantMessage(text)
+			if native && u.OfAssistant != nil {
+				u.OfAssistant.SetExtraFields(chatReplayFields(m.Thinking))
+			}
 			if len(m.ToolCalls) > 0 && u.OfAssistant != nil {
 				calls := make([]openai.ChatCompletionMessageToolCallParam, 0, len(m.ToolCalls))
 				for _, c := range m.ToolCalls {
@@ -319,7 +319,7 @@ func toSDKTools(tools []ToolDefinition) []openai.ChatCompletionToolParam {
 func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, streaming bool) openai.ChatCompletionNewParams {
 	params := openai.ChatCompletionNewParams{
 		Model:    p.model,
-		Messages: toSDKMessages(messages),
+		Messages: toSDKMessages(messages, p.thinkingReplay()),
 	}
 	if streaming {
 		// The usage-bearing final chunk only arrives when asked for; it
@@ -336,10 +336,17 @@ func (p *OpenAIProvider) newParams(system string, messages []LlmMessage, tools [
 		params.Messages = append([]openai.ChatCompletionMessageParamUnion{sys}, params.Messages...)
 	}
 	if len(tools) > 0 {
+		if p.isCopilot {
+			tools = normalizeCopilotTools(p.model, tools)
+		}
 		params.Tools = toSDKTools(tools)
 	}
 	if p.effort != "" {
 		params.ReasoningEffort = shared.ReasoningEffort(p.effort)
+	}
+	if p.isCopilot {
+		addChatCacheBreakpoints(params.Messages)
+		p.applyCopilotChatParams(&params, len(tools) > 0)
 	}
 	// OpenCode forwards this to the upstream provider. Pairing the stable
 	// conversation id with the x-opencode-session header keeps the
@@ -357,7 +364,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 	defer cancel()
 	var httpRes *http.Response
 	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
-	opts = append(opts, p.copilotOptions(messages)...)
+	opts = append(opts, p.copilotOptions(ctx, messages)...)
 	res, err := p.client.Chat.Completions.New(ctx, p.newParams(system, messages, tools, sessionID, false), opts...)
 	if err != nil {
 		return ToolResponse{}, p.mapError("chat completion", err)
@@ -366,7 +373,16 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: chat completion returned no choices", p.name))
 	}
 	msg := res.Choices[0].Message
+	if res.Choices[0].FinishReason == "content_filter" && msg.Content == "" && len(msg.ToolCalls) == 0 &&
+		p.thinkingReplay().usesReadable(messages) {
+		return ToolResponse{}, errReadableFiltered
+	}
 	out := ToolResponse{Content: msg.Content, Reasoning: deltaReasoning(msg.RawJSON())}
+	if !p.isOpencode {
+		var th chatThinking
+		th.add(msg.RawJSON())
+		out.Thinking = th.result(p)
+	}
 	for _, call := range msg.ToolCalls {
 		out.ToolCalls = append(out.ToolCalls, ToolCall{
 			ID:        call.ID,
@@ -375,7 +391,7 @@ func (p *OpenAIProvider) completeChat(ctx context.Context, system string, messag
 		})
 	}
 	out.Usage = withHeaderCost(chatUsage(res.Usage, res.RawJSON()), httpRes)
-	p.estimateCopilotUsage(out.Usage, false)
+	p.estimateCopilotUsage(out.Usage)
 	return out, nil
 }
 
@@ -420,10 +436,12 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	parent := ctx
 	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	opts := append(p.streamOptions(sessionID), p.copilotOptions(messages)...)
+	opts := append(p.streamOptions(sessionID), p.copilotOptions(ctx, messages)...)
 	stream := p.client.Chat.Completions.NewStreaming(tctx, p.newParams(system, messages, tools, sessionID, true), opts...)
 	defer stream.Close()
 	var usage Usage
+	var thinking chatThinking
+	answered, filtered := false, false
 	accs := map[int64]*callAcc{}
 	signaled := map[int64]bool{}
 	send := func(c Chunk) error {
@@ -443,17 +461,22 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 			usage.Add(*u)
 		}
 		for _, choice := range chunk.Choices {
-			if r := deltaReasoning(choice.Delta.RawJSON()); r != "" {
+			if r := thinking.add(choice.Delta.RawJSON()); r != "" {
 				if err := send(Chunk{Reasoning: r}); err != nil {
 					return CancelledError()
 				}
 			}
+			if choice.FinishReason == "content_filter" {
+				filtered = true
+			}
 			if choice.Delta.Content != "" {
+				answered = true
 				if err := send(TextChunk(choice.Delta.Content)); err != nil {
 					return CancelledError()
 				}
 			}
 			for _, call := range choice.Delta.ToolCalls {
+				answered = true
 				acc := accs[call.Index]
 				if acc == nil {
 					acc = &callAcc{}
@@ -499,6 +522,16 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 		}
 		return p.mapError("stream", err)
 	}
+	if filtered && !answered && p.thinkingReplay().usesReadable(messages) {
+		return errReadableFiltered
+	}
+	if !p.isOpencode {
+		if th := thinking.result(p); th != nil {
+			if err := send(Chunk{Thinking: th}); err != nil {
+				return CancelledError()
+			}
+		}
+	}
 	if len(accs) > 0 {
 		indexes := make([]int64, 0, len(accs))
 		for i := range accs {
@@ -531,7 +564,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 	if !usage.Empty() {
 		u := usage
 		select {
-		case tx <- Chunk{Usage: p.estimateCopilotUsage(&u, false)}:
+		case tx <- Chunk{Usage: p.estimateCopilotUsage(&u)}:
 		case <-done:
 			return CancelledError()
 		case <-parent.Done():
@@ -631,7 +664,7 @@ func (p *OpenAIProvider) ListCatalog(ctx context.Context) ([]string, map[string]
 	defer cancel()
 	opts := p.headers("catalog")
 	if p.isCopilot {
-		opts = append(opts, option.WithHeader("X-GitHub-Api-Version", copilotAPIVersion))
+		opts = append(opts, option.WithHeader("X-GitHub-Api-Version", copilotAPIVersion), option.WithHeader("Openai-Intent", "model-access"))
 	}
 	page, err := p.client.Models.List(ctx, opts...)
 	var apiErr *openai.Error

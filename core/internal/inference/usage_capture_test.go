@@ -168,7 +168,8 @@ func TestAnthropicUnaryCapturesUsage(t *testing.T) {
 	if u == nil {
 		t.Fatal("no usage")
 	}
-	if u.PromptTokens != 40 || u.CompletionTokens != 9 || u.TotalTokens != 49 {
+	// Anthropic leaves cached input out of input_tokens; the call's prompt is all of it.
+	if u.PromptTokens != 57 || u.CompletionTokens != 9 || u.TotalTokens != 66 {
 		t.Fatalf("tokens %+v", u)
 	}
 	if u.CacheReadTokens != 12 || u.CacheWriteTokens != 5 {
@@ -200,7 +201,7 @@ func TestAnthropicStreamCapturesUsage(t *testing.T) {
 	if text != "hi" {
 		t.Fatalf("text %q", text)
 	}
-	if usage == nil || usage.PromptTokens != 40 || usage.CompletionTokens != 9 || usage.CacheReadTokens != 12 {
+	if usage == nil || usage.PromptTokens != 52 || usage.CompletionTokens != 9 || usage.CacheReadTokens != 12 {
 		t.Fatalf("got %+v", usage)
 	}
 }
@@ -280,5 +281,31 @@ func TestChatUnaryIgnoresBadCostHeader(t *testing.T) {
 	resp, err := p.CompleteTools(context.Background(), "", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess")
 	if err != nil || resp.Usage == nil || resp.Usage.HasCost {
 		t.Fatalf("usage %+v err %v", resp.Usage, err)
+	}
+}
+
+// The Messages API repeats the input side in message_delta (its counts are
+// cumulative), so adding message_start and message_delta together counted every
+// call's input and cache twice.
+func TestAnthropicStreamDoesNotCountRepeatedUsageTwice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":300,\"cache_read_input_tokens\":9000,\"output_tokens\":1}}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n")
+		fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":300,\"cache_read_input_tokens\":9000,\"output_tokens\":25}}\n\n")
+		fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer srv.Close()
+	p := anthropicProvider(t, srv)
+	tx := make(chan Chunk, 32)
+	done := make(chan struct{})
+	if err := p.StreamTools(context.Background(), "", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "sess", tx, done); err != nil {
+		t.Fatal(err)
+	}
+	close(done)
+	close(tx)
+	_, _, u := drainUsage(t, p, tx)
+	if u == nil || u.CacheReadTokens != 9000 || u.CacheWriteTokens != 300 || u.PromptTokens != 9304 || u.CompletionTokens != 25 || u.TotalTokens != 9329 {
+		t.Fatalf("usage counted twice: %+v", u)
 	}
 }

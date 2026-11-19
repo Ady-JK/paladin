@@ -17,7 +17,7 @@ func TestHiddenCharactersAlwaysAsk(t *testing.T) {
 		"echo ok\u2066 && rm -rf x\u2069",
 		"git status\ufeff",
 	} {
-		d := Decide(Auto, shellReq(cmd), []Rule{{Tool: ToolShell, Pattern: "*", Action: ActionAllow}})
+		d := Decide(Review, shellReq(cmd), []Rule{{Tool: ToolShell, Pattern: "*", Action: ActionAllow}})
 		if d.Verdict != Ask || len(d.Choices) != 2 || !strings.Contains(strings.Join(d.Reasons, " "), "invisible") {
 			t.Errorf("%q: %+v", cmd, d)
 		}
@@ -25,10 +25,10 @@ func TestHiddenCharactersAlwaysAsk(t *testing.T) {
 			t.Errorf("plan mode accepted %q", cmd)
 		}
 	}
-	if d := Decide(Auto, writeReq("/ws/report\u202etxt.exe"), nil); d.Verdict != Ask {
+	if d := Decide(Review, writeReq("/ws/report\u202etxt.exe"), nil); d.Verdict != Ask {
 		t.Fatalf("a hidden character in a path: %+v", d)
 	}
-	if d := Decide(Auto, shellReq("echo h\u00e9llo w\u00f6rld"), nil); d.Verdict != Allow {
+	if d := Decide(Review, shellReq("echo h\u00e9llo w\u00f6rld"), nil); d.Verdict != Allow {
 		t.Fatalf("ordinary non-ASCII text: %+v", d)
 	}
 }

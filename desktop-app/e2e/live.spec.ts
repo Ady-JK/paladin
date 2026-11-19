@@ -56,6 +56,28 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
 });
 
+test("a slower earlier session open cannot override a later selection", async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    const base = w.__paladinBaseInvoke;
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "openSession" && args.sessionId === "sess-a")
+        await new Promise<void>((resolve) => {
+          w.__releaseSlowOpen = resolve;
+        });
+      return base(cmd, args);
+    };
+  });
+  await page.click('[data-session="sess-a"]');
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__releaseSlowOpen)).toBe("function");
+  await showSidebar(page);
+  await page.click('[data-session="sess-b"]');
+  await expect(page.locator("#sessionLabel")).toHaveText("sess-b");
+  await page.evaluate(() => (window as any).__releaseSlowOpen());
+  await expect(page.locator("#sessionLabel")).toHaveText("sess-b");
+});
+
 test("two sessions stream at once and keep their own transcripts", async ({ page }) => {
   await setup(page);
   await sendIn(page, "sess-a", "alpha");
@@ -157,6 +179,14 @@ test("a restarted agent host ends the turns that died with it", async ({ page })
   await expect(page.locator("#messages")).toContainText("agent host restarted");
   await expect(page.locator("#pauseBtn")).toBeHidden();
   await expect(row(page, "sess-a")).not.toHaveAttribute("data-live", "running");
+});
+
+test("a host the app gave up on is announced, not left to fail silently", async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => {
+    (window as any).__e2eHub.emit({ event: "host/failed", message: "The agent host keeps crashing." });
+  });
+  await expect(page.locator("#toast")).toContainText("keeps crashing");
 });
 
 test("a resync from a lagging host re-attaches the open session and keeps its turn", async ({ page }) => {

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 )
 
 var (
@@ -288,7 +290,7 @@ func (r *Repo) init(ctx context.Context) error {
 		excludes = append(append([]string{}, hardExcludes...), guessExcludes...)
 	}
 	body := "# written by paladin\n" + strings.Join(excludes, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(info, "exclude"), []byte(body), 0o600); err != nil {
+	if err := atomicfile.Write(filepath.Join(info, "exclude"), []byte(body)); err != nil {
 		return fmt.Errorf("snapshot: %w", err)
 	}
 	marker, err := r.git(ctx, []byte(markerBody), "hash-object", "-w", "--stdin")

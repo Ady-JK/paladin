@@ -173,7 +173,7 @@ async function __paladinBaseInvoke(cmd, args) {
     }
     case "permissionsGet":
     case "permissionsSet": {
-      const p = (window.__e2ePerms = window.__e2ePerms || { global: [], folders: {}, kind: "seatbelt" });
+      const p = (window.__e2ePerms = window.__e2ePerms || { global: [], folders: {} });
       if (cmd === "permissionsSet") {
         window.__e2ePermSets = (window.__e2ePermSets || []).concat([JSON.parse(JSON.stringify(args))]);
         if (args.scope === "global") p.global = args.rules || [];
@@ -188,8 +188,7 @@ async function __paladinBaseInvoke(cmd, args) {
         folder: p.folders[cwd] || [],
         session: [],
         folders: Object.entries(p.folders).map(([c, rules]) => ({ cwd: c, rules })),
-        sandbox: { kind: p.kind },
-        presets: ["read-only", "auto", "full-access"],
+        presets: ["read-only", "full-access"],
       };
     }
     case "mcpList":
@@ -406,8 +405,93 @@ async function __paladinBaseInvoke(cmd, args) {
     case "renameSession":
       window.__e2eRenames = (window.__e2eRenames || []).concat([args]);
       return true;
+    case "codexStatus": {
+      window.__e2eCodexCalls = (window.__e2eCodexCalls || []).concat([args]);
+      const status = window.__e2eCodex || {
+        installed: true,
+        version: "0.154.0",
+        loggedIn: true,
+        account: "me@example.com",
+        permissions: ["read-only", "full-access"],
+        models: [
+          { id: "gpt-5.6-sol", displayName: "GPT-5.6-Sol", efforts: ["low", "medium"], isDefault: true },
+          { id: "gpt-5.6-luna", displayName: "GPT-5.6-Luna", efforts: ["low", "medium"], isDefault: false },
+        ],
+      };
+      return args && args.deep ? status : { installed: status.installed, loggedIn: false, models: [], permissions: [] };
+    }
+    case "codexSkills":
+      window.__e2eSkillCalls = (window.__e2eSkillCalls || []).concat([args]);
+      return (
+        window.__e2eCodexSkills || [
+          { name: "guava", title: "Guava", description: "Answers with a fixed word.", scope: "repo" },
+          { name: "documents:documents", description: "Create and edit Word files.", scope: "system" },
+        ]
+      );
+    case "deleteCodexThread":
+      window.__e2eDeletedCodexThreads = (window.__e2eDeletedCodexThreads || []).concat([args.threadId]);
+      return null;
+    case "codexThreads": {
+      window.__e2eThreadQueries = (window.__e2eThreadQueries || []).concat([args]);
+      const at = Math.floor(Date.now() / 1000);
+      const all = window.__e2eCodexThreads || [
+        {
+          id: "th-1",
+          title: "Fix the login bug",
+          preview: "Fix the login bug",
+          cwd: "/home/tester/project",
+          model: "gpt-5.6-luna",
+          source: "cli",
+          updatedAt: at - 3600,
+        },
+        {
+          id: "th-2",
+          title: "Refactor the parser",
+          preview: "Refactor the parser",
+          cwd: "/home/tester/other",
+          model: "gpt-5.6-sol",
+          source: "vscode",
+          updatedAt: at - 90000,
+          sessionId: "sess-codex-9",
+        },
+      ];
+      const q = ((args && args.search) || "").toLowerCase();
+      return { threads: all.filter((t) => !q || t.title.toLowerCase().includes(q)) };
+    }
+    case "importCodexThread":
+      window.__e2eImports = (window.__e2eImports || []).concat([args]);
+      if (window.__e2eImportError) throw new Error(window.__e2eImportError);
+      return {
+        sessionId: "sess-imported-1",
+        cwd: "/home/tester/project",
+        provider: "codex",
+        model: "gpt-5.6-luna",
+        harness: "codex",
+      };
+    case "startCodexDiscovery":
+      window.__e2eDiscoveryStarts = (window.__e2eDiscoveryStarts || 0) + 1;
+      if (window.__e2eDiscoveryPending) return new Promise(() => {});
+      return true;
+    case "syncSession":
+      window.__e2eSyncs = (window.__e2eSyncs || []).concat([args]);
+      if (window.__e2eSyncError) throw new Error(window.__e2eSyncError);
+      if (window.__e2eSyncHistory) {
+        window.__e2eHistories = { ...window.__e2eHistories, [args.sessionId]: window.__e2eSyncHistory };
+        window.__e2eSyncHistory = null;
+        return true;
+      }
+      return false;
     case "openSession":
       window.__e2eOpens = (window.__e2eOpens || []).concat([args]);
+      if (args && args.harness && !args.sessionId) {
+        return {
+          sessionId: "sess-codex-1",
+          cwd: "/home/tester/project",
+          provider: args.harness,
+          model: args.model || "",
+          harness: args.harness,
+        };
+      }
       return {
         sessionId: (args && args.sessionId) || "sess-notify-1",
         cwd: "/home/tester/project",
@@ -790,9 +874,23 @@ async function __paladinBaseInvoke(cmd, args) {
       };
     }
     case "submitChat":
+      // Mirrors the core: the next message after an undo ends its recovery; compaction does not.
+      if (!(args && args.compact)) window.__e2eRecoveryAvailable = false;
       return __e2eHub.submit(args || {});
     case "steerChat":
       return __e2eHub.steer(args || {});
+    case "answerQuestion": {
+      // Mirrors the core: the answer is a user message that steers the running turn
+      // or begins one.
+      window.__e2eAnswers = (window.__e2eAnswers || []).concat([JSON.parse(JSON.stringify(args || {}))]);
+      if (window.__e2eAnswerFails) throw new Error(window.__e2eAnswerFails);
+      const a = args || {};
+      const display = (a.answers || []).map((x) => `> ${x.question}\n\n${x.answer}`).join("\n\n");
+      const message = `<reply ${a.callId}>${JSON.stringify(a.answers || [])}</reply>`;
+      const running = __e2eHub.list().some((t) => t.sessionId === a.sessionId && t.state === "running");
+      if (running) return __e2eHub.steer({ sessionId: a.sessionId, message, display });
+      return __e2eHub.submit({ ...a, message, display });
+    }
     case "thinkingGet":
     case "thinkingSet": {
       // Levels come from the catalog metadata the provider published,
@@ -1201,6 +1299,7 @@ const __e2eHub = (() => {
       onBudget: (budget) => chat(turn, "chat/budget", { budget }),
       onUsage: () => chat(turn, "chat/usage"),
       onHook: (hook) => chat(turn, "chat/hook", { hook }),
+      onNotice: (notice) => chat(turn, "chat/notice", { notice }),
       onReasoning: (reasoning) => chat(turn, "chat/reasoning", { reasoning }),
       onThinkingDropped: (thinkingDropped) => chat(turn, "chat/thinkingDropped", { thinkingDropped }),
     };
@@ -1412,6 +1511,7 @@ window.__e2eRunTurn = async (params, handlers) => {
     else if (ev.event === "chat/compact" && handlers.onCompact) handlers.onCompact(ev.compaction);
     else if (ev.event === "chat/budget" && handlers.onBudget) handlers.onBudget(ev.budget);
     else if (ev.event === "chat/hook" && handlers.onHook) handlers.onHook(ev.hook);
+    else if (ev.event === "chat/notice" && handlers.onNotice) handlers.onNotice(ev.notice);
     else if (ev.event === "chat/approval" && handlers.onApproval) {
       // A pending approval blocks the stub turn until answerApproval,
       // then reports the outcome like the real gate.

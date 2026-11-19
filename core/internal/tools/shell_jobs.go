@@ -4,7 +4,6 @@
 package tools
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
+	"github.com/Ady-JK/paladin/core/internal/redact"
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
 
@@ -43,28 +42,10 @@ type job struct {
 	closed       bool
 }
 
-// broadcaster wakes all waiters; each notify swaps the channel.
-type broadcaster struct {
-	mu sync.Mutex
-	ch chan struct{}
-}
-
-func newBroadcaster() *broadcaster {
-	return &broadcaster{ch: make(chan struct{})}
-}
-
-func (b *broadcaster) notify() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	close(b.ch)
-	b.ch = make(chan struct{})
-}
-
 type shellJobs struct {
 	mu      sync.Mutex
 	byID    map[string]*job
 	counter atomic.Uint64
-	changed *broadcaster
 }
 
 // JobEvent describes a shell command for undo and lifecycle bookkeeping.
@@ -112,21 +93,24 @@ func (s *ShellTool) Observe(o JobObserver) { s.observer = o }
 
 // startJob spawns one command with its output streamed to a log file
 // and registers it. It never kills the command on a timer.
-func (s *ShellTool) startJob(cmd, dir, owner, callID string, notify, candidate bool, sessionDir string, sb *sandbox.Policy) (*job, error) {
+func (s *ShellTool) startJob(cmd, dir, owner, callID string, notify, candidate bool, sessionDir string) (*job, error) {
 	if sessionDir == "" {
 		return nil, ArgsError("shell: no session to keep the background job in")
 	}
 	tmp := filepath.Join(sessionDir, "tmp")
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
+	if err := os.MkdirAll(tmp, 0o700); err != nil {
 		return nil, ArgsError(fmt.Sprintf("shell: cannot keep the job log: %s", syserr.Str(err)))
 	}
 	var id, logPath string
 	var logFile *os.File
-	for {
+	for attempt := 0; ; attempt++ {
+		if attempt >= 1000 {
+			return nil, ArgsError("shell: cannot find a free job log name")
+		}
 		id = fmt.Sprintf("job-%d", s.inner.counter.Add(1))
-		logPath = filepath.Join(tmp, id+".log")
+		logPath = JobLogPath(sessionDir, id)
 		var err error
-		logFile, err = os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		logFile, err = os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, os.ErrExist) {
 			continue
 		}
@@ -141,7 +125,7 @@ func (s *ShellTool) startJob(cmd, dir, owner, callID string, notify, candidate b
 	if s.observer != nil {
 		s.observer.JobStarted(event)
 	}
-	child, err := spawnToLog(cmd, dir, logFile, sb)
+	child, err := spawnToLog(cmd, dir, logFile)
 	logFile.Close()
 	if err != nil {
 		if s.observer != nil {
@@ -180,8 +164,8 @@ func (s *ShellTool) startJob(cmd, dir, owner, callID string, notify, candidate b
 }
 
 // runBackground starts a job and returns its id at once.
-func (s *ShellTool) runBackground(cmd, dir, owner, callID string, notify bool, sessionDir string, sb *sandbox.Policy) (string, error) {
-	j, err := s.startJob(cmd, dir, owner, callID, notify, false, sessionDir, sb)
+func (s *ShellTool) runBackground(cmd, dir, owner, callID string, notify bool, sessionDir string) (string, error) {
+	j, err := s.startJob(cmd, dir, owner, callID, notify, false, sessionDir)
 	if err != nil {
 		return "", err
 	}
@@ -251,7 +235,6 @@ func (s *ShellTool) finishJob(id string, event JobEvent, code *int) {
 		final.EndedAt = time.Now().UTC()
 		s.observer.JobFinished(final)
 	}
-	s.inner.changed.notify()
 }
 
 func (j *job) closeLocked() {
@@ -310,48 +293,31 @@ func (s *ShellTool) status(jobID, caller string) (string, error) {
 	return text, nil
 }
 
-// waitSeconds clamps the wait action's block time: the default when the
-// caller gave none, and the cap so one call cannot stall a turn for longer.
-func waitSeconds(n int) int {
-	if n <= 0 {
-		return DefaultShellWaitSeconds
-	}
-	return min(n, MaxShellWaitSeconds)
+// JobLogPath is where a job's output log lives inside its session folder.
+func JobLogPath(sessionDir, id string) string {
+	return filepath.Join(sessionDir, "tmp", id+".log")
 }
 
-// wait blocks until the job ends or the caller's deadline passes, so the
-// model can take a finished result without polling with a sleep. A job
-// this call saw finish is reported here, not again through the notice
-// stream.
-func (s *ShellTool) wait(jobID string, seconds int, caller string, cancel context.Context) (string, error) {
-	if strings.TrimSpace(jobID) == "" {
-		return "", ArgsError("shell: job_id is required for this action")
+// LogSize is a job log's size in bytes, or zero when it cannot be read. The
+// runtime compares it between checks to tell a job that is still printing
+// from one that has gone quiet.
+func LogSize(path string) int64 {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0
 	}
-	seconds = waitSeconds(seconds)
-	s.inner.mu.Lock()
-	j, ok := s.ownedJobLocked(jobID, caller)
-	if !ok {
-		s.inner.mu.Unlock()
-		return "", ArgsError(fmt.Sprintf("shell: unknown job %q", jobID))
+	return st.Size()
+}
+
+// LogTail is the last few lines of a job log, cleaned for the model (colour
+// codes stripped, stored secrets masked). It is empty for a job that has
+// printed nothing.
+func LogTail(path string) string {
+	lines, _ := peekTail(path)
+	if len(lines) == 0 {
+		return ""
 	}
-	done := j.done
-	s.inner.mu.Unlock()
-	if cancel == nil {
-		cancel = context.Background()
-	}
-	timer := time.NewTimer(time.Duration(seconds) * time.Second)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
-		return s.runningResult(jobID, fmt.Sprintf(
-			"still running after %ds; call wait again if you need the result now, or keep working and let its completion notice arrive.", seconds))
-	case <-cancel.Done():
-		return "", ArgsError("shell: the wait was interrupted")
-	}
-	// The result this call returns is the completion report, so consume it.
-	s.markReported(jobID)
-	return s.completed(jobID, false)
+	return redact.String(ToLF(StripANSI(strings.Join(lines, "\n"))))
 }
 
 func (s *ShellTool) cancel(jobID, caller string) (string, error) {
@@ -380,7 +346,6 @@ func (s *ShellTool) killJob(jobID string, match func(*job) bool, byUser bool) (s
 	if pid != 0 {
 		killProcessGroup(pid)
 	}
-	s.inner.changed.notify()
 	return shellResponseJSON(snap.id, snap.status, snap.exitCode, nil, nil, snap.log, "", "")
 }
 
@@ -452,8 +417,21 @@ func (s *ShellTool) KillJob(id string) (JobInfo, error) {
 	if pid != 0 {
 		killProcessGroup(pid)
 	}
-	s.inner.changed.notify()
 	return info, nil
+}
+
+// HasNotify reports whether a finished job still owes the owner a completion
+// notice, without consuming it. The runtime uses it to wake a session whose
+// turn ended just before a job did.
+func (s *ShellTool) HasNotify(owner string) bool {
+	s.inner.mu.Lock()
+	defer s.inner.mu.Unlock()
+	for _, j := range s.inner.byID {
+		if j.notify && j.owner == owner && j.finished && !j.reported && j.logDone {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *ShellTool) PollNotify(owner string) []NotifyResult {
@@ -522,7 +500,7 @@ func peekTail(path string) (lines []string, truncated bool) {
 	if _, err := f.Seek(size-window, io.SeekStart); err != nil {
 		return nil, false
 	}
-	data, err := io.ReadAll(f)
+	data, err := readUpTo(f, window)
 	if err != nil {
 		return nil, false
 	}
@@ -568,7 +546,7 @@ func tailFile(path string) (string, bool) {
 			return "", false
 		}
 	}
-	data, err := io.ReadAll(f)
+	data, err := readUpTo(f, MaxNotifyOutput)
 	if err != nil {
 		return "", false
 	}

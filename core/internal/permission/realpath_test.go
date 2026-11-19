@@ -32,14 +32,14 @@ func TestWriteRulesFollowSymlinks(t *testing.T) {
 	}
 	req := writeOutside(t, filepath.Join(granted, "link", "authorized_keys"))
 	allow := []Rule{{Tool: ToolWrite, Pattern: granted, Action: ActionAllow}}
-	if d := Decide(Auto, req, allow); d.Verdict == Allow {
+	if d := Decide(Review, req, allow); d.Verdict == Allow {
 		t.Fatalf("the grant followed a symlink out: %+v", d)
 	}
 	deny := []Rule{{Tool: ToolWrite, Pattern: secret, Action: ActionDeny}}
 	if d := Decide(FullAccess, req, deny); d.Verdict != Deny {
 		t.Fatalf("a deny rule missed the symlinked path: %+v", d)
 	}
-	if d := Decide(Auto, writeOutside(t, filepath.Join(granted, "plain.txt")), allow); d.Verdict != Allow {
+	if d := Decide(Review, writeOutside(t, filepath.Join(granted, "plain.txt")), allow); d.Verdict != Allow {
 		t.Fatalf("a plain path in the granted folder: %+v", d)
 	}
 }

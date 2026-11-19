@@ -32,6 +32,16 @@ let button: HTMLButtonElement | null = null;
 let menu: HTMLElement | null = null;
 let listEl: HTMLElement | null = null;
 
+function positionMenu(): void {
+  if (!menu || !button) return;
+  const parent = menu.offsetParent;
+  if (!(parent instanceof HTMLElement)) return;
+  const parentLeft = parent.getBoundingClientRect().left;
+  const desired = button.getBoundingClientRect().left - parentLeft;
+  const max = document.documentElement.clientWidth - parentLeft - menu.offsetWidth - 8;
+  menu.style.left = `${Math.max(-parentLeft + 8, Math.min(desired, max))}px`;
+}
+
 function normalizeSiteUrl(raw: string): string {
   try {
     return new URL(raw).toString();
@@ -117,7 +127,7 @@ export function openWebMenuFromKey(): void {
   if (!button || !menu) return;
   if (!isMenuOpen(menu)) toggleMenu(menu);
   button.setAttribute("aria-expanded", "true");
-  menu.style.left = `${button.offsetLeft}px`;
+  positionMenu();
   paintMenu();
   menu.querySelector<HTMLElement>("[data-web-address]")?.focus();
 }
@@ -171,13 +181,17 @@ function buildMenu(): void {
   actions.insertBefore(button, actions.querySelector("#paneLayoutBtn") ?? null);
   actions.append(menu);
 
+  window.addEventListener("resize", () => {
+    if (menu && isMenuOpen(menu)) positionMenu();
+  });
+
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     if (!menu) return;
     const open = toggleMenu(menu);
     button?.setAttribute("aria-expanded", String(open));
     if (open) {
-      menu.style.left = `${button?.offsetLeft ?? 0}px`;
+      positionMenu();
       paintMenu();
     }
   });

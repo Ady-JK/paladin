@@ -8,16 +8,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/responses"
 	"github.com/openai/openai-go/shared"
 )
 
-func toResponsesInput(messages []LlmMessage) responses.ResponseInputParam {
+// toResponsesInput builds the Responses request's input items; replay
+// decides how an assistant message's reasoning goes back (see
+// thinkingPolicy). Native reasoning items go ahead of the message and
+// calls they belong to.
+// responsesVerbosityLow matches the models VS Code asks to keep answers short.
+var responsesVerbosityLow = regexp.MustCompile(`(?i)(?:^|/)(?:gpt-5\.1(?:$|[^0-9])|gpt-5-mini|gpt-5\.6|gpt-6)`)
+
+func toResponsesInput(messages []LlmMessage, replay *thinkingPolicy) responses.ResponseInputParam {
 	out := make(responses.ResponseInputParam, 0, len(messages))
 	var images []LlmMessage
 	flushImages := func() {
@@ -35,14 +44,23 @@ func toResponsesInput(messages []LlmMessage) responses.ResponseInputParam {
 		}
 		images = nil
 	}
-	for _, m := range messages {
+	lastUser := lastUserIndex(messages)
+	for i, m := range messages {
 		if m.Role != "tool" {
 			flushImages()
 		}
 		switch m.Role {
 		case "assistant":
-			if m.Content != "" {
-				out = append(out, responses.ResponseInputItemParamOfMessage(m.Content, responses.EasyInputMessageRoleAssistant))
+			content := m.Content
+			if replay != nil && m.Thinking != nil {
+				if items := nativeReasoningItems(m.Thinking, replay, i, lastUser); len(items) > 0 {
+					out = append(out, items...)
+				} else if replay.readable && !replay.native(m.Thinking) {
+					content = priorReasoning(m.Thinking, content)
+				}
+			}
+			if content != "" {
+				out = append(out, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleAssistant))
 			}
 			for _, c := range m.ToolCalls {
 				out = append(out, responses.ResponseInputItemParamOfFunctionCall(c.Arguments, c.ID, c.Name))
@@ -78,6 +96,23 @@ func toResponsesInput(messages []LlmMessage) responses.ResponseInputParam {
 	return out
 }
 
+// nativeReasoningItems are t's stored reasoning items as request input,
+// or nil when they cannot go back to this model.
+func nativeReasoningItems(t *Thinking, replay *thinkingPolicy, i, lastUser int) []responses.ResponseInputItemUnionParam {
+	if !replay.replayNative(t, i, lastUser) {
+		return nil
+	}
+	var raws []json.RawMessage
+	if json.Unmarshal(t.Raw, &raws) != nil {
+		return nil
+	}
+	items := make([]responses.ResponseInputItemUnionParam, 0, len(raws))
+	for _, raw := range raws {
+		items = append(items, param.Override[responses.ResponseInputItemUnionParam](raw))
+	}
+	return items
+}
+
 func schemaMap(v any) map[string]any {
 	if v == nil {
 		return nil
@@ -108,21 +143,48 @@ func (p *OpenAIProvider) newResponsesParams(system string, messages []LlmMessage
 	params := responses.ResponseNewParams{
 		Model: p.model,
 		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: toResponsesInput(messages),
+			OfInputItemList: toResponsesInput(messages, p.thinkingReplay()),
 		},
 	}
 	if system != "" {
-		params.Instructions = openai.String(system)
+		if p.isCopilot {
+			// VS Code sends the system prompt as the first input message.
+			sysItem := responses.ResponseInputItemParamOfMessage(responses.ResponseInputMessageContentListParam{
+				responses.ResponseInputContentParamOfInputText(system),
+			}, responses.EasyInputMessageRoleSystem)
+			params.Input.OfInputItemList = append(responses.ResponseInputParam{sysItem}, params.Input.OfInputItemList...)
+		} else {
+			params.Instructions = openai.String(system)
+		}
 	}
 	if len(tools) > 0 {
 		params.Tools = toResponsesTools(tools)
 	}
-	if p.effort != "" {
-		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(p.effort), Summary: shared.ReasoningSummaryAuto}
+	effort := p.effort
+	if effort == "" && p.isCopilot && len(p.meta.ThinkingLevels) > 0 {
+		// A model that declares reasoning levels always gets one: medium.
+		effort = EffortMedium
+	}
+	if effort != "" {
+		params.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(effort), Summary: shared.ReasoningSummaryAuto}
 	}
 	if p.isOpencode {
 		if id := strings.TrimSpace(sessionID); id != "" {
 			params.PromptCacheKey = openai.String(id)
+		}
+	}
+	if p.isCopilot {
+		// Ask for the encrypted reasoning explicitly (GPT-6 needs it) and
+		// keep nothing server-side: the reasoning travels with the history.
+		params.Include = []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent}
+		params.Store = openai.Bool(false)
+		params.Truncation = responses.ResponseNewParamsTruncationDisabled
+		if p.meta.MaxOutput > 0 {
+			params.MaxOutputTokens = openai.Int(p.meta.MaxOutput)
+		}
+		if responsesVerbosityLow.MatchString(p.model) {
+			// The SDK has no typed verbosity field yet.
+			params.SetExtraFields(map[string]any{"text": map[string]any{"verbosity": "low"}})
 		}
 	}
 	return params
@@ -150,10 +212,50 @@ func parseResponsesOutput(res *responses.Response) ToolResponse {
 				Name:      item.Name,
 				Arguments: item.Arguments,
 			})
+		case "reasoning":
+			out.Reasoning += reasoningSummary(item)
 		}
 	}
 	out.Content = text.String()
 	return out
+}
+
+// reasoningSummary is a reasoning item's readable summary.
+func reasoningSummary(item responses.ResponseOutputItemUnion) string {
+	var parts []string
+	for _, s := range item.Summary {
+		if s.Text != "" {
+			parts = append(parts, s.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// reasoningItems is the response's reasoning items as a JSON array, the
+// replayable form; nil when it made none.
+func reasoningItems(res *responses.Response) json.RawMessage {
+	var raws []json.RawMessage
+	for _, item := range res.Output {
+		if item.Type == "reasoning" {
+			raws = append(raws, json.RawMessage(item.RawJSON()))
+		}
+	}
+	if len(raws) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(raws)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// responsesThinking labels a response's reasoning items as p's.
+func (p *OpenAIProvider) responsesThinking(raw json.RawMessage) *Thinking {
+	if p.isOpencode || len(raw) == 0 {
+		return nil
+	}
+	return p.stampThinking(&Thinking{Format: thinkingResponses, Raw: raw})
 }
 
 // responsesUsage maps a Responses usage block onto Usage. Reasoning
@@ -190,7 +292,7 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 	defer cancel()
 	var httpRes *http.Response
 	opts := append(p.headers(sessionID), option.WithResponseInto(&httpRes))
-	opts = append(opts, p.copilotOptions(messages)...)
+	opts = append(opts, p.copilotOptions(ctx, messages)...)
 	res, err := p.client.Responses.New(ctx, p.newResponsesParams(system, messages, tools, sessionID), opts...)
 	if err != nil {
 		// One immediate retry for transport blips (EOF/reset before
@@ -211,8 +313,9 @@ func (p *OpenAIProvider) completeResponses(ctx context.Context, system string, m
 		return ToolResponse{}, RequestError(fmt.Sprintf("%s: responses: %s", p.name, res.Error.Message))
 	}
 	out := parseResponsesOutput(res)
+	out.Thinking = p.responsesThinking(reasoningItems(res))
 	out.Usage = withHeaderCost(responsesUsage(res.Usage, res.RawJSON()), httpRes)
-	p.estimateCopilotUsage(out.Usage, false)
+	p.estimateCopilotUsage(out.Usage)
 	return out, nil
 }
 
@@ -228,6 +331,9 @@ type respStreamState struct {
 	sentText  bool
 	accs      map[string]*respCallAcc
 	announced map[string]bool
+	// reasoning holds reasoning items as they finish, for streams that
+	// end without a completed envelope.
+	reasoning []json.RawMessage
 }
 
 func (p *OpenAIProvider) streamResponses(ctx context.Context, system string, messages []LlmMessage, tools []ToolDefinition, sessionID string, tx chan<- Chunk, done <-chan struct{}) error {
@@ -238,7 +344,7 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 	parent := ctx
 	tctx, idle, cancel := watchIdle(ctx)
 	defer cancel()
-	opts := append(p.streamOptions(sessionID), p.copilotOptions(messages)...)
+	opts := append(p.streamOptions(sessionID), p.copilotOptions(ctx, messages)...)
 	stream := p.client.Responses.NewStreaming(tctx, p.newResponsesParams(system, messages, tools, sessionID), opts...)
 	defer stream.Close()
 
@@ -279,6 +385,10 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 			}
 			if err := send(Chunk{Reasoning: text}); err != nil {
 				return CancelledError()
+			}
+		case "response.output_item.done":
+			if ev.Item.Type == "reasoning" {
+				st.reasoning = append(st.reasoning, json.RawMessage(ev.Item.RawJSON()))
 			}
 		case "response.output_item.added":
 			if ev.Item.Type != "function_call" {
@@ -322,6 +432,11 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 					}
 				}
 			}
+			if items := reasoningItems(&ev.Response); items != nil {
+				if err := send(Chunk{Thinking: p.responsesThinking(items)}); err != nil {
+					return CancelledError()
+				}
+			}
 			if calls := parseResponsesOutput(&ev.Response).ToolCalls; len(calls) > 0 {
 				select {
 				case tx <- Chunk{ToolCalls: calls}:
@@ -334,7 +449,7 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 			// The completed envelope carries the turn's usage; bill it
 			// even when the model made no tool calls.
 			if u := responsesUsage(ev.Response.Usage, ev.Response.RawJSON()); u != nil {
-				p.estimateCopilotUsage(u, false)
+				p.estimateCopilotUsage(u)
 				if err := send(Chunk{Usage: u}); err != nil {
 					return CancelledError()
 				}
@@ -377,6 +492,13 @@ func (p *OpenAIProvider) doStreamResponses(ctx context.Context, system string, m
 			return p.doStreamResponses(parent, system, messages, tools, sessionID, tx, done, false)
 		}
 		return p.mapError("responses", err)
+	}
+	if len(st.reasoning) > 0 {
+		if raw, err := json.Marshal(st.reasoning); err == nil {
+			if err := send(Chunk{Thinking: p.responsesThinking(raw)}); err != nil {
+				return CancelledError()
+			}
+		}
 	}
 	if calls := fallbackRespCalls(st.accs); len(calls) > 0 {
 		select {

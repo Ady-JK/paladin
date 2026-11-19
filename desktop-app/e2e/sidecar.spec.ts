@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { agentHostFile, deadlineFor, isReadMethod, restartDelay, Sidecar, type HostMessage } from "../electron/sidecar";
+import {
+  agentHostFile,
+  deadlineFor,
+  isReadMethod,
+  LineSplitter,
+  restartDelay,
+  Sidecar,
+  type HostMessage,
+} from "../electron/sidecar";
 
 // A minimal JSONL host: answers ping/echo, emits an event on "emit",
 // dies on "crash", and exits cleanly when stdin closes.
@@ -13,6 +21,7 @@ rl.on("line", (line) => {
   const req = JSON.parse(line);
   if (req.method === "crash") process.exit(3);
   if (req.method === "hang") return;
+  if (req.method === "big") return process.stdout.write('{"junk":"' + "x".repeat(req.params.n) + '"}\\n');
   if (req.method === "ping" && Date.now() < deaf) return;
   if (req.method === "garbled") return process.stdout.write('{"id":"' + req.id + '","ok":tru\\n');
   if (req.method === "shapeless") return out({ id: req.id });
@@ -221,4 +230,72 @@ test("the read list matches the host's dispatcher classes", () => {
     if (isReadMethod(method)) expect(["runRead", "runInline"], method).toContain(cls);
   }
   expect(classOf.size).toBeGreaterThan(50);
+});
+
+test("a host line over the cap restarts the host instead of growing memory", async () => {
+  const { sidecar, restarts } = fakeHost({ maxLineBytes: 4096 });
+  sidecar.start();
+  try {
+    await sidecar.invoke("ping");
+    await expect(sidecar.invoke("big", { n: 20_000 })).rejects.toThrow(/exited|exceeded/);
+    await waitFor(() => restarts() === 1);
+    await expect(sidecar.invoke("echo", { ok: 1 })).resolves.toMatchObject({ method: "echo" });
+  } finally {
+    await sidecar.stop(1000);
+  }
+});
+
+test("a line at the cap is delivered", async () => {
+  const { sidecar } = fakeHost({ maxLineBytes: 4096 });
+  sidecar.start();
+  try {
+    await expect(sidecar.invoke("echo", { pad: "y".repeat(1500) })).resolves.toMatchObject({ method: "echo" });
+  } finally {
+    await sidecar.stop(1000);
+  }
+});
+
+test("LineSplitter joins chunks, keeps multibyte text whole, and reports overflow once", () => {
+  const lines: string[] = [];
+  let overflows = 0;
+  const split = new LineSplitter(
+    16,
+    (line) => lines.push(line),
+    () => overflows++,
+  );
+  const bytes = Buffer.from("héllo\nwörld\n", "utf8");
+  split.push(bytes.subarray(0, 2)); // splits the two-byte é
+  split.push(bytes.subarray(2, 9));
+  split.push(bytes.subarray(9));
+  expect(lines).toEqual(["héllo", "wörld"]);
+  split.push(Buffer.from("a".repeat(20)));
+  split.push(Buffer.from("b".repeat(20) + "\nnext\n"));
+  expect(overflows).toBe(1);
+  expect(lines).toEqual(["héllo", "wörld"]); // nothing after an overflow is trusted
+});
+
+test("a host that keeps crashing is given up on, announced once, and can be started again", async () => {
+  let gaveUp = 0;
+  let spawns = 0;
+  const sidecar = new Sidecar({
+    command: process.execPath,
+    args: ["-e", "process.exit(1)"],
+    onEvent: () => undefined,
+    onRestart: () => undefined,
+    onGiveUp: () => gaveUp++,
+    log: (line) => {
+      if (line.includes("exited")) spawns++;
+    },
+    backoff: { initialMs: 5, maxMs: 20, stableMs: 10_000 },
+    maxCrashes: 3,
+  });
+  sidecar.start();
+  await waitFor(() => gaveUp === 1);
+  await new Promise((r) => setTimeout(r, 150));
+  expect(gaveUp).toBe(1);
+  expect(spawns).toBe(3);
+  await expect(sidecar.invoke("ping")).rejects.toThrow(/repeated crashes/);
+  sidecar.start();
+  await waitFor(() => gaveUp === 2);
+  await sidecar.stop(500);
 });

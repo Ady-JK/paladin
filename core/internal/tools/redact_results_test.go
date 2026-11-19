@@ -23,15 +23,15 @@ func TestStoredKeysAreMaskedInEveryToolResult(t *testing.T) {
 	os.WriteFile(path, []byte("provider="+key+"\nexample=sk-example-not-stored-0000000000\n"), 0o644)
 	r := BuiltinRegistry()
 	for _, c := range []ToolCall{
-		{ID: "r", Name: "read", Arguments: argsJSON(map[string]any{"path": path})},
-		{ID: "g", Name: "grep", Arguments: argsJSON(map[string]any{"pattern": "provider", "path": ws})},
+		{ID: "r", Name: "read", Arguments: argsJSON(map[string]any{"reason": "test", "path": path})},
+		{ID: "g", Name: "grep", Arguments: argsJSON(map[string]any{"reason": "test", "pattern": "provider", "path": ws})},
 	} {
 		res := r.Call(&c, ctx)
 		if res.IsError || strings.Contains(res.Content, key) || !strings.Contains(res.Content, "[redacted]") {
 			t.Fatalf("%s leaked the stored key: %s", c.Name, res.Content)
 		}
 	}
-	res := r.Call(&ToolCall{ID: "r2", Name: "read", Arguments: argsJSON(map[string]any{"path": path})}, ctx)
+	res := r.Call(&ToolCall{ID: "r2", Name: "read", Arguments: argsJSON(map[string]any{"reason": "test", "path": path})}, ctx)
 	if !strings.Contains(res.Content, "sk-example-not-stored-0000000000") {
 		t.Fatalf("a look-alike in a file was masked: %s", res.Content)
 	}

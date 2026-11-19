@@ -128,6 +128,9 @@ const off = paladin.onEvent((msg) => {
 is shown with a "changes files" badge in the menu. Every call still goes
 through the normal permission gate. If it asks, Paladin renders the
 approval card in the main window; the bridge call waits for the answer.
+Every built-in tool requires a one-line `reason` argument; a panel may pass
+one in `args`, otherwise Paladin fills in "Plugin <name> (<view> panel)
+called <tool>".
 
 Panel permissions:
 

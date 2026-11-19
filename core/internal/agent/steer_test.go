@@ -28,7 +28,7 @@ func lastUser(msgs []inference.LlmMessage) string {
 func TestSteerJoinsBeforeNextModelCall(t *testing.T) {
 	inbox := &steerInbox{}
 	prov := &mockProvider{streams: []streamScript{
-		callRound("c1", "read", `{"path":"/nope"}`),
+		callRound("c1", "read", `{"reason":"test","path":"/nope"}`),
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
 	prov.afterChunks = func(idx int) {

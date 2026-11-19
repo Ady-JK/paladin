@@ -17,7 +17,7 @@ func TestBashAliasRunsShellAndIsRecordedAsShell(t *testing.T) {
 	dir := t.TempDir()
 	prov := &mockProvider{streams: []streamScript{
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
-			{ID: "c1", Name: "bash", Arguments: `{"command":"echo aliased"}`},
+			{ID: "c1", Name: "bash", Arguments: `{"reason":"test","command":"echo aliased"}`},
 		}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
@@ -84,7 +84,7 @@ func TestBashAliasReplaysAsShellToTheModel(t *testing.T) {
 	dir := t.TempDir()
 	prov := &mockProvider{streams: []streamScript{
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
-			{ID: "c1", Name: "Bash", Arguments: `{"command":"echo hi"}`},
+			{ID: "c1", Name: "Bash", Arguments: `{"reason":"test","command":"echo hi"}`},
 		}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
@@ -146,7 +146,7 @@ func TestBashAliasIsNotMentionedToTheModel(t *testing.T) {
 	dir := t.TempDir()
 	prov := &mockProvider{streams: []streamScript{
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
-			{ID: "c1", Name: "bash", Arguments: `{"command":"echo quiet"}`},
+			{ID: "c1", Name: "bash", Arguments: `{"reason":"test","command":"echo quiet"}`},
 		}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("done")}},
 	}}
@@ -174,7 +174,7 @@ func TestBashAliasIsNotMentionedToTheModel(t *testing.T) {
 func TestBashAliasRespectsMissingShellTool(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
-	calls := []inference.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"command":"echo hi"}`}}
+	calls := []inference.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"reason":"test","command":"echo hi"}`}}
 	canonicalizeCalls(reg, calls)
 	if calls[0].Name != "bash" {
 		t.Fatalf("name = %q, want bash left alone so the call fails visibly", calls[0].Name)
@@ -230,7 +230,7 @@ func TestBashAliasInPlanModeStaysReadOnly(t *testing.T) {
 		plan.Register(tool)
 	}
 
-	calls := []inference.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"command":"rm -rf build"}`}}
+	calls := []inference.ToolCall{{ID: "c1", Name: "bash", Arguments: `{"reason":"test","command":"rm -rf build"}`}}
 	canonicalizeCalls(plan, calls)
 	if calls[0].Name != "shell" {
 		t.Fatalf("name = %q, want shell", calls[0].Name)

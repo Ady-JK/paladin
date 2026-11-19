@@ -147,7 +147,7 @@ func (a *Agent) execBatch(batch []inference.ToolCall) ([]tools.ToolResult, error
 	results := make([]tools.ToolResult, len(batch))
 	run := make([]bool, len(batch))
 	for i, call := range batch {
-		if refusal := a.doom.check(call.Name, call.Arguments); refusal != "" {
+		if refusal := a.doom.check(call.Name, a.tools.WithoutReason(call.Name, call.Arguments)); refusal != "" {
 			results[i] = tools.ToolResult{CallID: call.ID, Name: call.Name, IsError: true,
 				Content: string(jsonx.MustMarshal(map[string]string{"error": refusal}))}
 			continue
@@ -209,10 +209,13 @@ func (j *batchJournal) complete(index int) {
 
 // callGated runs one call through the permission gate (after a hold for
 // unseen folder instructions): refused calls
-// never reach the tool, approved shell calls run in the gate's sandbox,
-// and a sandbox block may be escalated to a rerun, confined with the
-// blocked folder granted or (once) unconfined.
+// never reach the tool; approved calls execute once.
 func (a *Agent) callGated(call *tools.ToolCall) tools.ToolResult {
+	// A call without its reason is refused before any hook, prompt or
+	// hold: the model resends it with one.
+	if refusal, refused := a.tools.CheckReason(call); refused {
+		return refusal
+	}
 	// Unseen folder instructions come first: the call is not run, so it
 	// skips hooks and the gate, and the resent call goes through both.
 	if held, ok := a.tools.HoldForInstructions(call, a.toolCtx); ok {
@@ -246,24 +249,10 @@ func (a *Agent) authorizedCall(call *tools.ToolCall, verdict hooks.Decision) too
 		return tools.ToolResult{CallID: call.ID, Name: name, IsError: true, Content: auth.Content}
 	}
 	ctx := *a.toolCtx
-	ctx.Sandbox = auth.Sandbox
 	if pt, ok := a.gate.(ProjectTrust); ok {
 		ctx.TrustProject = func(tool string) bool { return pt.TrustProject(a.ctx, call.ID, tool, notify) }
 	}
-	result := a.callTool(call, &ctx)
-	for i := 0; i < maxEscalations && ctx.Sandbox != nil && result.IsError; i++ {
-		output, blocked := tools.SandboxBlocked(result.Content)
-		if !blocked {
-			break
-		}
-		esc := a.gate.Escalate(a.ctx, call.ID, name, args, permission.Blocked{Policy: ctx.Sandbox, Output: output}, notify)
-		if !esc.Run {
-			break
-		}
-		ctx.Sandbox = esc.Sandbox
-		result = a.callTool(call, &ctx)
-	}
-	return result
+	return a.callTool(call, &ctx)
 }
 
 // callTool runs the tool itself. Approval waits stay outside it.

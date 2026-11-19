@@ -1,0 +1,380 @@
+/* The cards agents' adapters draw into the conversation. They use the app's own
+   tokens, so every agent looks like Paladin. */
+
+.agent-q {
+  margin: 0.5rem 0;
+  border: 1px solid var(--color-slate-200);
+  border-left: 2px solid var(--color-accent-500);
+  border-radius: 10px;
+  background: var(--color-slate-50);
+  padding: 0.65rem 0.8rem 0.7rem;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dark .agent-q {
+  border-color: var(--color-slate-800);
+  border-left-color: var(--color-accent-500);
+  background: color-mix(in srgb, var(--color-slate-900) 70%, transparent);
+}
+
+.agent-q[data-state="answered"] {
+  border-left-color: var(--color-slate-300);
+}
+
+.dark .agent-q[data-state="answered"] {
+  border-left-color: var(--color-slate-700);
+}
+
+.agent-q-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.agent-q-mark {
+  display: inline-flex;
+  width: 1.1rem;
+  height: 1.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent-500) 18%, transparent);
+  color: var(--color-accent-700);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dark .agent-q-mark {
+  color: var(--color-accent-400);
+}
+
+.agent-q-mark.is-done {
+  background: var(--color-slate-200);
+  color: var(--color-slate-600);
+}
+
+.dark .agent-q-mark.is-done {
+  background: var(--color-slate-800);
+  color: var(--color-slate-400);
+}
+
+.agent-q-title {
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+
+.dark .agent-q-title {
+  color: var(--color-slate-100);
+}
+
+.agent-q-state {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-slate-400);
+}
+
+.agent-q-item + .agent-q-item {
+  margin-top: 0.6rem;
+}
+
+.agent-q-text {
+  color: var(--color-slate-800);
+  white-space: pre-wrap;
+}
+
+.dark .agent-q-text {
+  color: var(--color-slate-200);
+}
+
+.agent-q-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.agent-q-opt {
+  border: 1px solid var(--color-slate-300);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.2rem 0.7rem;
+  font-size: 12px;
+  color: var(--color-slate-700);
+  cursor: pointer;
+}
+
+.dark .agent-q-opt {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-300);
+}
+
+.agent-q-opt:hover:not(:disabled) {
+  border-color: var(--color-accent-500);
+}
+
+.agent-q-opt.is-picked {
+  border-color: var(--color-accent-500);
+  background: color-mix(in srgb, var(--color-accent-500) 14%, transparent);
+  color: var(--color-slate-900);
+}
+
+.dark .agent-q-opt.is-picked {
+  color: var(--color-slate-100);
+}
+
+.agent-q-opt:disabled,
+.agent-q-input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.agent-q-input {
+  margin-top: 0.4rem;
+  width: 100%;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 8px;
+  background: var(--color-slate-100);
+  padding: 0.35rem 0.6rem;
+  font-size: 12px;
+  color: var(--color-slate-800);
+}
+
+.dark .agent-q-input {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+
+.agent-q-input:focus {
+  border-color: var(--color-accent-500);
+  outline: none;
+}
+
+.agent-q-answer {
+  margin-top: 0.25rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--color-slate-300);
+  color: var(--color-slate-600);
+  white-space: pre-wrap;
+}
+
+.dark .agent-q-answer {
+  border-left-color: var(--color-slate-700);
+  color: var(--color-slate-300);
+}
+
+.agent-q-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.7rem;
+}
+
+.agent-q-send {
+  border-radius: 8px;
+  background: var(--color-accent-600);
+  padding: 0.35rem 0.9rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+}
+
+.agent-q-send:hover:not(:disabled) {
+  background: var(--color-accent-700);
+}
+
+.agent-q-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-q-hint {
+  font-size: 11px;
+  color: var(--color-slate-400);
+}
+
+/* Shared question surfaces for blocking and asynchronous asks. */
+.ask-panel {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+.question-card,
+.agent-q {
+  border: 1px solid var(--color-slate-300);
+  border-radius: 16px;
+  background: var(--color-slate-100);
+  padding: 1rem 1.15rem;
+  color: var(--color-slate-900);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.dark .question-card,
+.dark .agent-q {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-900);
+  color: var(--color-slate-100);
+}
+.question-card {
+  max-height: min(60vh, 540px);
+  overflow-y: auto;
+}
+.question-head,
+.agent-q-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  color: var(--color-slate-500);
+}
+.question-head h3 {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  font-weight: 500;
+}
+.question-close {
+  padding: 0.25rem;
+  color: inherit;
+  cursor: pointer;
+}
+.question-text,
+.agent-q-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: inherit;
+}
+.question-progress {
+  margin: 0.35rem 0;
+  font-size: 12px;
+  color: var(--color-slate-500);
+}
+.question-options,
+.agent-q-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.75rem 0;
+}
+.question-option,
+.agent-q-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0.25rem 0.35rem;
+  color: inherit;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+}
+.question-option::before,
+.agent-q-opt::before {
+  content: attr(data-number);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-slate-400);
+  border-radius: 6px;
+  color: var(--color-slate-500);
+  font-size: 12px;
+}
+.question-option:hover,
+.agent-q-opt:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.question-option.is-picked,
+.agent-q-opt.is-picked {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: inherit;
+}
+.question-option.is-picked::before,
+.agent-q-opt.is-picked::before {
+  border-color: currentColor;
+  color: inherit;
+}
+.question-option:focus-visible,
+.agent-q-opt:focus-visible,
+.question-action:focus-visible,
+.agent-q-send:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.question-input,
+.agent-q-input,
+.dark .agent-q-input {
+  width: 100%;
+  margin-top: 0.35rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 0.5rem 0.35rem;
+  color: inherit;
+  font-size: 14px;
+}
+.question-input:focus,
+.agent-q-input:focus {
+  outline: 1px solid var(--color-slate-400);
+}
+.question-actions,
+.agent-q-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+.question-actions > span {
+  margin-right: auto;
+}
+.question-action,
+.agent-q-send {
+  border: 1px solid var(--color-slate-400);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.4rem 0.85rem;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+}
+.question-primary,
+.agent-q-send {
+  background: var(--color-slate-800);
+  color: white;
+}
+.dark .question-primary,
+.dark .agent-q-send {
+  background: var(--color-slate-200);
+  color: var(--color-slate-950);
+}
+.question-action:disabled,
+.agent-q-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.agent-q-mark,
+.dark .agent-q-mark {
+  background: transparent;
+  color: var(--color-slate-500);
+  border: 1px solid currentColor;
+}
+.agent-q-title,
+.dark .agent-q-title {
+  color: var(--color-slate-500);
+  font-weight: 500;
+}
+.agent-q-state {
+  font-family: inherit;
+}
+.agent-q-item + .agent-q-item {
+  margin-top: 1rem;
+}

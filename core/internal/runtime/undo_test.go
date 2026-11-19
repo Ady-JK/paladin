@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/memory"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -290,15 +292,22 @@ func scriptModel(t *testing.T, rounds ...string) *httptest.Server {
 	var mu sync.Mutex
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"stream":true`) {
+			// A one-shot call (a compaction summary) is not a scripted round.
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"summary"},"finish_reason":"stop"}]}`)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		mu.Lock()
 		i := n
 		n++
 		mu.Unlock()
 		if i < len(rounds) && rounds[i] != "" {
-			args := fmt.Sprintf(`{"cmd":%q}`, rounds[i])
+			args := fmt.Sprintf(`{"reason":"test","cmd":%q}`, rounds[i])
 			if strings.HasPrefix(rounds[i], "{") {
-				args = rounds[i]
+				args = testReason(rounds[i])
 			}
 			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", fmt.Sprintf(
 				`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c%d","function":{"name":"shell","arguments":%q}}]}}]}`, i, args))
@@ -454,6 +463,22 @@ func TestRecoverLatestUndoRestoresFilesAndConversation(t *testing.T) {
 		t.Fatalf("conversation not recovered: %+v", rows)
 	} else if rows[0].Protection == nil || rows[0].Protection.State == "unknown" {
 		t.Fatalf("snapshot protection not recovered: %+v", rows[0])
+	}
+}
+
+// Recovery lasts only until the user's next message after the undo.
+func TestRecoveryEndsWithTheNextMessageAfterUndo(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "echo agent > a.txt", "")
+	turn(t, rt, sid, ws, "edit")
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := rt.RecoveryAvailable(sid, ws); err != nil || !ok {
+		t.Fatalf("recovery missing right after undo: %v %v", ok, err)
+	}
+	turn(t, rt, sid, ws, "something else")
+	if ok, err := rt.RecoveryAvailable(sid, ws); err != nil || ok {
+		t.Fatalf("recovery still offered after the next message: %v %v", ok, err)
 	}
 }
 
@@ -751,6 +776,27 @@ func TestSessionChangesAndDiffUseTurnSnapshots(t *testing.T) {
 	}
 }
 
+func TestSessionChangesExcludeAnotherSessionsAndLaterExternalEdits(t *testing.T) {
+	rt, ws, first := undoRuntime(t, "", "printf 'other\\n' > other.txt", "")
+	second, err := rt.OpenSession("", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, first, ws, "answer without editing")
+	turn(t, rt, second.SessionID, ws, "edit a file")
+	if err := os.WriteFile(filepath.Join(ws, "external.txt"), []byte("outside"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	firstChanges, err := rt.SessionChanges(first, ws)
+	if err != nil || len(firstChanges.Files) != 0 {
+		t.Fatalf("first session: %+v, %v", firstChanges, err)
+	}
+	secondChanges, err := rt.SessionChanges(second.SessionID, ws)
+	if err != nil || len(secondChanges.Files) != 1 || secondChanges.Files[0].Path != "other.txt" {
+		t.Fatalf("second session: %+v, %v", secondChanges, err)
+	}
+}
+
 func TestReviewSessionCarriesTheSessionsOwnDiff(t *testing.T) {
 	rt, ws, sid := undoRuntime(t, "printf 'cost $1\\n' > a.txt", "")
 	turn(t, rt, sid, ws, "create a file")
@@ -822,5 +868,82 @@ func TestFileExcerptShowsLinesInsideTheWorkspaceOnly(t *testing.T) {
 	os.WriteFile(filepath.Join(ws, "bin.dat"), []byte{0, 1, 2}, 0o644)
 	if _, err := rt.FileExcerpt(sid, "", filepath.Join(ws, "bin.dat"), 1, 1); err == nil {
 		t.Fatal("binary files are refused")
+	}
+}
+
+// recallRows counts the recalled-memory reminders a session's history holds.
+func recallRows(t *testing.T, rt *AgentRuntime, sid string) int {
+	t.Helper()
+	h, err := rt.SessionHistory(sid, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, m := range h {
+		if m.Role == "tool" && strings.HasPrefix(m.Content, "Recalled from ") {
+			n++
+		}
+	}
+	return n
+}
+
+// An undo drops the messages after a point. A recalled entry whose reminder
+// is still in what remains must not be recalled again; one whose reminder was
+// dropped is recalled afresh.
+func TestUndoKeepsRecalledEntriesWhoseReminderRemains(t *testing.T) {
+	rt, ws, sid := undoRuntime(t)
+	if _, err := rt.memory.Apply(memory.TargetProject, ws, []memory.Op{{Action: "add", Content: "desktop playwright tests run with pnpm exec playwright test"}}); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "run the desktop playwright tests")
+	if n := recallRows(t, rt, sid); n != 1 {
+		t.Fatalf("first match recalled %d times", n)
+	}
+	turn(t, rt, sid, ws, "rerun the playwright tests for desktop")
+	rows := userRows(t, rt, sid)
+	if len(rows) != 2 || rows[1].Index == nil {
+		t.Fatalf("user rows %+v", rows)
+	}
+	// Undo the second message only: the first turn's reminder stays.
+	if _, err := rt.RevertSession(sid, ws, *rows[1].Index); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "run the playwright desktop tests once more")
+	if n := recallRows(t, rt, sid); n != 1 {
+		t.Fatalf("an entry still in the conversation was recalled again: %d reminders", n)
+	}
+	// Undo everything: the reminder goes with it, so the entry comes back.
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "run the desktop playwright tests from scratch")
+	if n := recallRows(t, rt, sid); n != 1 {
+		t.Fatalf("after undoing the reminder away the entry was recalled %d times, want 1", n)
+	}
+}
+
+// Recovering a conversation after an undo brings its reminders back, and the
+// entries they hold stay recalled.
+func TestRecoveryKeepsRecalledEntriesWhoseReminderIsRestored(t *testing.T) {
+	rt, ws, sid := undoRuntime(t)
+	if _, err := rt.memory.Apply(memory.TargetProject, ws, []memory.Op{{Action: "add", Content: "desktop playwright tests run with pnpm exec playwright test"}}); err != nil {
+		t.Fatal(err)
+	}
+	turn(t, rt, sid, ws, "run the desktop playwright tests")
+	if _, err := rt.RevertSession(sid, ws, 0); err != nil {
+		t.Fatal(err)
+	}
+	if n := recallRows(t, rt, sid); n != 0 {
+		t.Fatalf("undo left %d reminders", n)
+	}
+	if _, err := rt.RecoverLatest(sid, ws); err != nil {
+		t.Fatal(err)
+	}
+	if n := recallRows(t, rt, sid); n != 1 {
+		t.Fatalf("recovery restored %d reminders, want 1", n)
+	}
+	turn(t, rt, sid, ws, "rerun the playwright tests for desktop")
+	if n := recallRows(t, rt, sid); n != 1 {
+		t.Fatalf("a restored reminder was appended again: %d reminders", n)
 	}
 }

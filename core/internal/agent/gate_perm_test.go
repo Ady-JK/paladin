@@ -11,19 +11,13 @@ import (
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
 	"github.com/Ady-JK/paladin/core/internal/permission"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
 type fakeGate struct {
 	mu       sync.Mutex
 	auth     permission.Auth
-	escalate bool
-	// grant, when set, answers escalations with a confined rerun.
-	grant     *sandbox.Policy
-	seenArgs  []string
-	escalated []string
-	blocked   []permission.Blocked
+	seenArgs []string
 }
 
 func (g *fakeGate) Authorize(_ context.Context, callID, name string, args json.RawMessage, notify func(permission.Approval)) permission.Auth {
@@ -34,39 +28,20 @@ func (g *fakeGate) Authorize(_ context.Context, callID, name string, args json.R
 	return g.auth
 }
 
-func (g *fakeGate) Escalate(_ context.Context, callID, _ string, _ json.RawMessage, b permission.Blocked, notify func(permission.Approval)) permission.Escalation {
-	g.mu.Lock()
-	g.escalated = append(g.escalated, callID)
-	g.blocked = append(g.blocked, b)
-	g.mu.Unlock()
-	notify(permission.Approval{ID: callID, Kind: permission.KindEscalate, State: permission.StatePending})
-	if g.grant != nil {
-		return permission.Escalation{Run: true, Sandbox: g.grant}
-	}
-	return permission.Escalation{Run: g.escalate}
-}
-
-// sbProbe stands in for shell: it records each call's sandbox and fails
-// as sandbox-blocked while confined when blockConfined is set.
+// sbProbe records whether an approved call reached the shell.
 type sbProbe struct {
-	mu            sync.Mutex
-	seen          []*sandbox.Policy
-	blockConfined bool
-	// blockGranted keeps blocking even with granted folders.
-	blockGranted bool
+	mu   sync.Mutex
+	seen []bool
 }
 
 func (p *sbProbe) Name() string { return "shell" }
 func (p *sbProbe) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{Name: "shell", Parameters: map[string]any{"type": "object"}}
 }
-func (p *sbProbe) Call(_ json.RawMessage, ctx *tools.ToolCtx) (string, error) {
+func (p *sbProbe) Call(_ json.RawMessage, _ *tools.ToolCtx) (string, error) {
 	p.mu.Lock()
-	p.seen = append(p.seen, ctx.Sandbox)
+	p.seen = append(p.seen, true)
 	p.mu.Unlock()
-	if p.blockConfined && ctx.Sandbox != nil && (p.blockGranted || len(ctx.Sandbox.Granted) == 0) {
-		return "", tools.WithContent(`{"status":"failed","exit_code":1,"output":"Operation not permitted","sandbox_blocked":true}`, "blocked")
-	}
 	return `{"status":"done","exit_code":0,"output":"ran"}`, nil
 }
 
@@ -109,7 +84,7 @@ func approvals(chunks []ChatChunk) []permission.Approval {
 func TestGateDenySkipsTheTool(t *testing.T) {
 	probe := &sbProbe{}
 	gate := &fakeGate{auth: permission.Auth{Content: `{"error":"denied by the user"}`}}
-	chunks := gatedRun(t, gate, probe, `{"cmd":"npm publish"}`)
+	chunks := gatedRun(t, gate, probe, `{"reason":"test","cmd":"npm publish"}`)
 	if len(probe.seen) != 0 {
 		t.Fatal("denied tool ran")
 	}
@@ -122,76 +97,11 @@ func TestGateDenySkipsTheTool(t *testing.T) {
 	}
 }
 
-func TestGateSandboxReachesTheTool(t *testing.T) {
-	probe := &sbProbe{}
-	pol := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Writable: []string{"/ws"}}
-	gatedRun(t, &fakeGate{auth: permission.Auth{Run: true, Sandbox: pol}}, probe, `{"cmd":"ls"}`)
-	if len(probe.seen) != 1 || probe.seen[0] != pol {
-		t.Fatalf("seen %+v", probe.seen)
-	}
-}
-
-func TestSandboxBlockEscalatesAndReruns(t *testing.T) {
-	probe := &sbProbe{blockConfined: true}
-	pol := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite}
-	gate := &fakeGate{auth: permission.Auth{Run: true, Sandbox: pol}, escalate: true}
-	chunks := gatedRun(t, gate, probe, `{"cmd":"npm i -g x"}`)
-	if len(probe.seen) != 2 || probe.seen[0] == nil || probe.seen[1] != nil {
-		t.Fatalf("want confined then unconfined, got %+v", probe.seen)
-	}
-	if row := finalTool(chunks, "c1"); row == nil || row.Status != "ok" {
-		t.Fatalf("row %+v", row)
-	}
-}
-
-func TestSandboxBlockDeclinedKeepsFailure(t *testing.T) {
-	probe := &sbProbe{blockConfined: true}
-	gate := &fakeGate{auth: permission.Auth{Run: true, Sandbox: &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite}}}
-	chunks := gatedRun(t, gate, probe, `{"cmd":"npm i -g x"}`)
-	if len(probe.seen) != 1 || len(gate.escalated) != 1 {
-		t.Fatalf("seen %d escalations %d", len(probe.seen), len(gate.escalated))
-	}
-	if row := finalTool(chunks, "c1"); row == nil || row.Status != "failed" {
-		t.Fatalf("row %+v", row)
-	}
-}
-
 func TestGateSeesRepairedArguments(t *testing.T) {
 	gate := &fakeGate{auth: permission.Auth{Run: true}}
-	gatedRun(t, gate, &sbProbe{}, `{"cmd":"rm -rf /",}`)
+	gatedRun(t, gate, &sbProbe{}, `{"reason":"test","cmd":"rm -rf /",}`)
 	if len(gate.seenArgs) != 1 || !json.Valid([]byte(gate.seenArgs[0])) || !strings.Contains(gate.seenArgs[0], "rm -rf") {
 		t.Fatalf("gate saw %q", gate.seenArgs)
-	}
-}
-
-func TestSandboxGrantRerunsConfined(t *testing.T) {
-	probe := &sbProbe{blockConfined: true}
-	pol := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Writable: []string{"/ws"}}
-	grant := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Writable: []string{"/ws"}, Granted: []string{"/opt/x"}}
-	gate := &fakeGate{auth: permission.Auth{Run: true, Sandbox: pol}, grant: grant}
-	chunks := gatedRun(t, gate, probe, `{"cmd":"npm i -g x"}`)
-	if len(probe.seen) != 2 || probe.seen[0] != pol || probe.seen[1] != grant {
-		t.Fatalf("want original then granted policy, got %+v", probe.seen)
-	}
-	if len(gate.blocked) != 1 || gate.blocked[0].Policy != pol || gate.blocked[0].Output != "Operation not permitted" {
-		t.Fatalf("blocked %+v", gate.blocked)
-	}
-	if row := finalTool(chunks, "c1"); row == nil || row.Status != "ok" {
-		t.Fatalf("row %+v", row)
-	}
-}
-
-func TestSandboxEscalationIsBounded(t *testing.T) {
-	probe := &sbProbe{blockConfined: true, blockGranted: true}
-	pol := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite}
-	grant := &sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, Granted: []string{"/opt/x"}}
-	gate := &fakeGate{auth: permission.Auth{Run: true, Sandbox: pol}, grant: grant}
-	chunks := gatedRun(t, gate, probe, `{"cmd":"npm i -g x"}`)
-	if len(gate.escalated) != maxEscalations || len(probe.seen) != maxEscalations+1 {
-		t.Fatalf("escalations %d runs %d", len(gate.escalated), len(probe.seen))
-	}
-	if row := finalTool(chunks, "c1"); row == nil || row.Status != "failed" {
-		t.Fatalf("row %+v", row)
 	}
 }
 
@@ -207,7 +117,7 @@ func TestHeldWriteSkipsTheGateAndRunsWhenResent(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(ws, "pkg", "new.go")
-	args := `{"path":"` + target + `","content":"package pkg\n"}`
+	args := `{"reason":"test","path":"` + target + `","content":"package pkg\n"}`
 	prov := &mockProvider{streams: []streamScript{
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "write", Arguments: args}}}}},
 		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c2", Name: "write", Arguments: args}}}}},
@@ -270,7 +180,7 @@ func (p *trustProbe) Call(_ json.RawMessage, ctx *tools.ToolCtx) (string, error)
 // call id, and the card reaches the UI.
 func TestProjectToolsAreAskedThroughTheGate(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{
-		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "shell", Arguments: `{"cmd":"ls"}`}}}}},
+		{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{{ID: "c1", Name: "shell", Arguments: `{"reason":"test","cmd":"ls"}`}}}}},
 		{chunks: []inference.Chunk{inference.TextChunk("ok")}},
 	}}
 	a, _, tx, done := testAgent(t, prov)

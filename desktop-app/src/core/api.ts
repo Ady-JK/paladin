@@ -4,6 +4,8 @@
 
 import type {
   BudgetView,
+  CodexStatus,
+  CodexSkill,
   ContextView,
   CustomItem,
   CustomState,
@@ -245,6 +247,10 @@ export function memoryConfig(): Promise<MemoryConfigView> {
 // seeds its branch (paladin/<slug>).
 export type WorktreeOpts = { worktree?: boolean; name?: string };
 
+// OpenOpts adds the external agent ("codex") that should run a new
+// session, and the model it runs.
+export type OpenOpts = WorktreeOpts & { harness?: string; model?: string };
+
 export function forkSession(sessionId: string, cwd: string | null, opts: WorktreeOpts = {}): Promise<SessionInfo> {
   return invoke<SessionInfo>("forkSession", { sessionId, cwd, ...opts });
 }
@@ -384,12 +390,27 @@ export function resetPrompt(): Promise<AgentPrompt> {
   return invoke<AgentPrompt>("resetPrompt");
 }
 
-export function openSession(
-  sessionId: string | null,
-  cwd: string | null,
-  opts: WorktreeOpts = {},
-): Promise<OpenedSession> {
+export function openSession(sessionId: string | null, cwd: string | null, opts: OpenOpts = {}): Promise<OpenedSession> {
   return invoke("openSession", { sessionId, cwd, ...opts });
+}
+
+export function syncSession(sessionId: string, cwd: string | null): Promise<boolean> {
+  return invoke<boolean>("syncSession", { sessionId, cwd });
+}
+
+export function startCodexDiscovery(): Promise<boolean> {
+  return invoke<boolean>("startCodexDiscovery", {});
+}
+
+// codexStatus reports whether the Codex CLI can run sessions. A shallow
+// call only checks it is installed; deep signs in and lists its models.
+export function codexStatus(deep = false): Promise<CodexStatus> {
+  return invoke<CodexStatus>("codexStatus", { deep });
+}
+
+// codexSkills lists the enabled skills Codex has for a folder.
+export function codexSkills(cwd: string): Promise<CodexSkill[]> {
+  return invoke<CodexSkill[]>("codexSkills", { cwd });
 }
 
 export function listSessions(cwd: string | null, limit = 100): Promise<SessionInfo[]> {
@@ -456,6 +477,7 @@ export type SubmitArgs = {
   compact?: boolean;
   permissions?: PermissionPreset;
   attachmentIds?: string[];
+  taggedPaths?: string[];
 };
 
 export type SessionAttachment = {
@@ -494,8 +516,8 @@ export function listTurns(): Promise<TurnInfo[]> {
 // attachSession is the atomic history + live snapshot of a session.
 // attachSession joins a session: its newest history page, the live
 // turn and the queue. limit <= 0 uses the core's default page size.
-export function attachSession(sessionId: string, limit = 0): Promise<AttachSnapshot> {
-  return invoke<AttachSnapshot>("attach", { sessionId, ...(limit > 0 ? { limit } : {}) });
+export function attachSession(sessionId: string, limit = 0, cwd?: string): Promise<AttachSnapshot> {
+  return invoke<AttachSnapshot>("attach", { sessionId, ...(cwd ? { cwd } : {}), ...(limit > 0 ? { limit } : {}) });
 }
 
 // cancelTurn drops a queued turn, or stops it if it already runs.
@@ -621,6 +643,25 @@ export function mcpAdd(
 
 export function toolsList(cwd: string | null, sessionId: string | null): Promise<ToolsOverview> {
   return invoke<ToolsOverview>("toolsList", { cwd, sessionId });
+}
+
+// AnswerQuestionArgs answers a question an agent asked without stopping its work.
+// The turn settings are the composer's, as for submitChat.
+export type AnswerQuestionArgs = {
+  sessionId: string;
+  callId: string;
+  answers: { question: string; answer: string }[];
+  cwd: string;
+  provider: string | null;
+  model: string | null;
+  mode?: "build" | "plan";
+  permissions?: PermissionPreset;
+};
+
+// answerQuestion sends the answers: the core writes them in the agent's own reply
+// format and sends them into the running turn, or as a new turn.
+export function answerQuestion(args: AnswerQuestionArgs): Promise<TurnInfo> {
+  return invoke<TurnInfo>("answerQuestion", { ...args, systemPrompt: null });
 }
 
 // steerChat sends a message into the session's running turn; it fails

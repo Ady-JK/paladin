@@ -382,6 +382,17 @@ func (s *Store) ForkTo(cwd, sessionID, target string, wt *Worktree) (Session, er
 	fork.Meta.ForkedFrom = src.Meta.SessionID
 	fork.Meta.ContextChoices = src.Meta.ContextChoices
 	fork.Meta.Worktree = wt
+	if src.Meta.Harness != nil {
+		// The fork shares the history but not the harness's own thread:
+		// its first turn starts a thread seeded from that history.
+		fork.Meta.Harness = &Harness{Name: src.Meta.Harness.Name}
+		// Its first turn forks the harness's thread through the last turn
+		// copied, when there is one to name; otherwise it starts a thread
+		// seeded from the copied history.
+		if last := lastHarnessTurn(msgs); last != "" && src.Meta.Harness.ThreadID != "" {
+			fork.Meta.Harness.ForkOf = &HarnessFork{ThreadID: src.Meta.Harness.ThreadID, LastTurn: last}
+		}
+	}
 	if err := writeMeta(fork.Dir, fork.Meta); err != nil {
 		_ = os.RemoveAll(fork.Dir)
 		return Session{}, err
@@ -460,4 +471,14 @@ func (s *Store) UpdateMeta(cwd, sessionID string, fn func(*Meta) error) error {
 		return err
 	}
 	return writeMeta(sess.Dir, sess.Meta)
+}
+
+// lastHarnessTurn is the harness turn id of the last turn in msgs.
+func lastHarnessTurn(msgs []Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].HarnessTurn != "" {
+			return msgs[i].HarnessTurn
+		}
+	}
+	return ""
 }

@@ -26,14 +26,19 @@ export function isMainWindowFrame(
   return mainContents != null && mainFrame != null && sender === mainContents && senderFrame === mainFrame;
 }
 
-// Frames may navigate only to the local visual page or the validated
-// plugin protocol. The protocol host checks every path before serving it.
-export function appFrameNavigationAllowed(appURL: string, requestedURL: string): boolean {
+// Frames may navigate only to the local visual page or to a loaded plugin
+// on the validated plugin protocol. The protocol host checks every path
+// before serving it.
+export function appFrameNavigationAllowed(
+  appURL: string,
+  requestedURL: string,
+  pluginKnown: (host: string) => boolean,
+): boolean {
   if (requestedURL === "about:blank") return true;
   try {
     const requested = new URL(requestedURL);
-    if (requested.protocol === "plugin:" && requested.hostname && !requested.username && !requested.password) {
-      return true;
+    if (requested.protocol === "plugin:") {
+      return !!requested.hostname && !requested.username && !requested.password && pluginKnown(requested.hostname);
     }
     return requestedURL === new URL("visual-frame.html", appURL).href;
   } catch {

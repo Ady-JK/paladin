@@ -62,3 +62,17 @@ test("images show a thumbnail, folders show their kind, and × removes a tag", a
   expect(submit.attachmentIds).toEqual(["file-1"]);
   await expect(page.locator("#messages .session-image-thumb")).toHaveCount(1);
 });
+
+test("tagged images and files remain visible above the message while the turn runs", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eRunTurn = () => new Promise(() => {});
+  });
+  await acceptMention(page, "@assets/sh", "shot.png");
+  await acceptMention(page, "@src/ma", "src/main.go");
+  await page.fill("#promptInput", "Please inspect these");
+  await page.click("#sendBtn");
+  const row = page.locator("#messages [data-turn-id]").filter({ hasText: "Please inspect these" });
+  await expect(page.locator("#pauseBtn")).toBeVisible();
+  await expect(row.locator('.session-image-thumb img[alt="shot.png"]')).toBeVisible();
+  await expect(row.locator(".session-file-card")).toContainText("main.go");
+});

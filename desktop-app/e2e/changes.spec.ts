@@ -2,6 +2,10 @@ import { expect, test } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
 test("diff adapts to its panel width with line numbers and syntax colors", async ({ page }) => {
+  const diffRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/src/features/sidePane/diffView.ts")) diffRequests.push(request.url());
+  });
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await page.evaluate(async () => {
@@ -17,10 +21,12 @@ test("diff adapts to its panel width with line numbers and syntax colors", async
     document.body.append(tab.body);
     paintChangesTab(tab, data);
   });
+  expect(diffRequests).toHaveLength(0);
   await page.locator('#testDiff [data-change-file="app.ts"]').click();
   const split = page.locator("#testDiff .diff-split");
   const unified = page.locator("#testDiff .diff-unified");
   await expect(split).toBeVisible();
+  expect(diffRequests).toHaveLength(1);
   await expect(unified).toBeHidden();
   await expect(split.locator('[data-line="3"]')).toHaveCount(2);
   await expect(split.locator(".tok-keyword").first()).toHaveText("const");
@@ -152,7 +158,7 @@ test("a later edit to the same file updates the live change counts", async ({ pa
       status: "ok",
     });
   });
-  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
+  const card = page.locator("#liveChanges");
   await expect(card).toContainText("+1");
   await page.evaluate(() => {
     const w = window as any;
@@ -229,6 +235,7 @@ test("a finished write shows its file indicator while the turn is still running"
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     const w = window as any;
+    w.__e2ePatch = "@@ -0,0 +1 @@\n+hello";
     w.__e2eChanges = {
       available: true,
       turns: [{ turn: 0, callIds: ["write-1"], files: [{ path: "index.html", status: "created" }] }],
@@ -252,14 +259,18 @@ test("a finished write shows its file indicator while the turn is still running"
       status: "ok",
     });
   });
-  await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toContainText("1 file");
+  await expect(page.locator("#liveChanges")).toContainText("1 file");
+  await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toHaveCount(0);
   await expect(page.locator("#sessionChangesBtn")).toContainText("1");
+  await page.locator("#liveChanges").click();
+  await expect(page.locator("#sidePane .change-diff")).toContainText("+");
 });
 
-test("a running turn shows its changes card as soon as it edits, before it persists", async ({ page }) => {
+test("a running turn shows a floating summary and a collapsed card after finishing", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     const w = window as any;
+    w.__e2ePatch = "@@ -0,0 +1 @@\n+hello";
     // A running turn has no transcript entry yet, so its change turn
     // carries no callIds: the card must still attach to the live row.
     w.__e2eChanges = {
@@ -268,8 +279,9 @@ test("a running turn shows its changes card as soon as it edits, before it persi
       files: [{ path: "core/a.go", status: "created" }],
     };
     w.__e2eRunTurn = (_params: any, handlers: any) =>
-      new Promise(() => {
+      new Promise((resolve) => {
         w.__changeHandlers = handlers;
+        w.__finishChanges = () => resolve({ reply: "Done.", index: 0 });
       });
   });
   await page.goto("/");
@@ -287,9 +299,9 @@ test("a running turn shows its changes card as soon as it edits, before it persi
       status: "ok",
     });
   });
-  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
-  await expect(card).toContainText("1 file");
-  await expect(card).toHaveAttribute("aria-expanded", "false");
+  const indicator = page.locator("#liveChanges");
+  await expect(indicator).toContainText("1 file");
+  await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toHaveCount(0);
   // A second write grows the same card without waiting for the turn end.
   await page.evaluate(() => {
     const changes = (window as any).__e2eChanges;
@@ -303,7 +315,19 @@ test("a running turn shows its changes card as soon as it edits, before it persi
       status: "ok",
     });
   });
+  await expect(indicator).toContainText("2 files");
+  await page.locator("#ideModeBtn").click();
+  await expect(indicator).toBeHidden();
+  await page.locator("#ideModeBtn").click();
+  await expect(indicator).toContainText("2 files");
+  await expect(page.locator('#messages .turn-changes[data-change-turn="0"]')).toHaveCount(0);
+  await page.evaluate(() => (window as any).__finishChanges());
+  await expect(indicator).toBeHidden();
+  const card = page.locator('#messages .turn-changes[data-change-turn="0"]');
   await expect(card).toContainText("2 files");
+  await expect(card).toHaveAttribute("aria-expanded", "false");
+  await card.locator(".turn-change-view").click();
+  await expect(page.locator("#sidePane .change-diff")).toContainText("+");
 });
 
 test("a finished turn shows its file changes even with no live call id", async ({ page }) => {
@@ -344,6 +368,42 @@ test("a finished turn shows its file changes even with no live call id", async (
   });
   expect(order.s).toBeGreaterThanOrEqual(0);
   expect(order.c).toBeGreaterThan(order.s);
+});
+
+test("the live indicator follows the running session when switching chats", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    w.__e2eExtraSessions = [
+      { sessionId: "other-session", cwd: "/home/tester/project", title: "Other", messageCount: 0 },
+    ];
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 6, files: [{ path: "a.txt", status: "modified" }], callIds: ["w1"] }],
+      files: [{ path: "a.txt", status: "modified" }],
+    };
+    w.__e2ePatch = "@@ -1 +1 @@\n-old\n+new";
+    w.__e2eRunTurn = (_params: unknown, handlers: any) =>
+      new Promise(() => {
+        w.__changeHandlers = handlers;
+      });
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.locator('[data-session="sess-notify-1"]').first().click();
+  await page.fill("#promptInput", "edit a file");
+  await page.click("#sendBtn");
+  await page.waitForFunction(() => Boolean((window as any).__changeHandlers));
+  await page.evaluate(() =>
+    (window as any).__changeHandlers.onTool({ id: "w1", name: "edit", arguments: "{}", result: "{}", status: "ok" }),
+  );
+  await expect(page.locator("#liveChanges")).toBeVisible();
+  await showSidebar(page);
+  await page.locator('[data-session="other-session"]').first().click();
+  await expect(page.locator("#liveChanges")).toBeHidden();
+  await showSidebar(page);
+  await page.locator('[data-session="sess-notify-1"]').first().click();
+  await expect(page.locator("#liveChanges")).toContainText("1 file");
 });
 
 test("the collapsed card spans the conversation and does not repaint while a turn runs", async ({ page }) => {
@@ -404,7 +464,7 @@ test("the collapsed card spans the conversation and does not repaint while a tur
   await expect(card).toHaveAttribute("aria-expanded", "false");
 });
 
-test("the card sits close to the Context strip below it", async ({ page }) => {
+test("the card sits close to the composer below it", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     const w = window as any;
@@ -445,21 +505,27 @@ test("the card sits close to the Context strip below it", async ({ page }) => {
   await expect(card).toContainText("Edited 1 file");
   const gap = await page.evaluate(() => {
     const card = document.querySelector("#messages .turn-changes") as HTMLElement;
-    const ctx = document.getElementById("contextBox") as HTMLElement;
+    // The plan bar (#todoHat) is drawn inside the composer's frame but sits above .composer-float.
+    const stack = ["#todoHat", ".composer-float"]
+      .map((sel) => document.querySelector<HTMLElement>(sel))
+      .filter((el): el is HTMLElement => !!el && getComputedStyle(el).display !== "none");
+    const composer = stack.reduce((top, el) =>
+      el.getBoundingClientRect().top < top.getBoundingClientRect().top ? el : top,
+    );
     const chat = document.getElementById("chatView") as HTMLElement;
     // The card only joins the composer stack when it is the last thing
     // in the transcript, so make sure the pane is scrolled to the end.
     chat.scrollTop = chat.scrollHeight;
     const cardBox = card.getBoundingClientRect();
-    const ctxBox = ctx.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
     return {
-      // The visible gap from the card's bottom edge to the Context strip:
-      // 8px, matching the strip's gap above the composer.
-      gap: ctxBox.top - cardBox.bottom,
+      // The visible gap from the card's bottom edge to the top of the
+      // composer stack: 8px.
+      gap: composerBox.top - cardBox.bottom,
       marginTop: parseFloat(getComputedStyle(card).marginTop),
-      // And the two floaters still share an edge, so the smaller gap
-      // reads as a pair rather than a misalignment.
-      sameWidth: Math.abs(cardBox.width - ctxBox.width) < 40,
+      // And the two still share an edge, so the small gap reads as a
+      // pair rather than a misalignment.
+      sameWidth: Math.abs(cardBox.width - composerBox.width) < 40,
     };
   });
   expect(gap.gap).toBeGreaterThanOrEqual(7);
@@ -586,7 +652,7 @@ test("a stale diff failure cannot overwrite the cleared selection", async ({ pag
   expect(result).toBe("Select a file to view its changes.");
 });
 
-test("the edits card, context strip and composer stack tightly", async ({ page }) => {
+test("the edits card and composer stack tightly", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 520 });
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
@@ -606,7 +672,6 @@ test("the edits card, context strip and composer stack tightly", async ({ page }
     chat.scrollTop = chat.scrollHeight;
   });
   const cardBox = (await card.boundingBox())!;
-  const context = (await page.locator("#contextBox").boundingBox())!;
   // The plan bar (#todoHat) is drawn inside the composer's frame but sits above .composer-float.
   const composerTop = await page.evaluate(() => {
     const tops = ["#todoHat", ".composer-float"]
@@ -615,10 +680,60 @@ test("the edits card, context strip and composer stack tightly", async ({ page }
       .map((e) => e.getBoundingClientRect().top);
     return Math.min(...tops);
   });
-  expect(context.y - (cardBox.y + cardBox.height)).toBeLessThanOrEqual(12);
-  expect(composerTop - (context.y + context.height)).toBeLessThanOrEqual(12);
+  expect(composerTop - (cardBox.y + cardBox.height)).toBeLessThanOrEqual(12);
   // The thinking toggle sits right above the prompt text, not a line apart.
   const toggle = (await page.locator(".think-inline").boundingBox())!;
   const prompt = (await page.locator("#promptInput").boundingBox())!;
   expect(prompt.y - (toggle.y + toggle.height)).toBeLessThanOrEqual(2);
+});
+
+// A compaction after a finished turn is a boundary between turns. Reloaded
+// from history, the turn's stats and its change card must come before the
+// summary, never after it: the card used to land below the summary.
+test("a compaction after a finished turn leaves its stats and card above the summary", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(() => {
+    const w = window as any;
+    const at = Math.floor(Date.now() / 1000);
+    w.__e2eHistory = [
+      { role: "user", content: "make the change", createdAt: at, index: 0 },
+      {
+        role: "assistant",
+        content: "done",
+        createdAt: at,
+        stats: { durationMs: 4000, tokens: 100, genMs: 3000 },
+      },
+      {
+        role: "system",
+        kind: "compaction",
+        content: "## Summary\n\n- kept the change",
+        createdAt: at,
+        compaction: { tokensBefore: 1000, tokensAfter: 300, reason: "manual" },
+      },
+    ];
+    w.__e2eChanges = {
+      available: true,
+      turns: [{ turn: 0, files: [{ path: "a.txt", status: "modified" }], callIds: [] }],
+      files: [{ path: "a.txt", status: "modified" }],
+    };
+  });
+  await page.goto("/");
+  await showSidebar(page);
+  await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  await expect(page.locator('#messages .turn-change-card[data-change-turn="0"]')).toHaveCount(1);
+
+  // Top-level order of the transcript: the turn, its stats, its card, then the divider.
+  const order = await page.evaluate(() =>
+    Array.from(document.getElementById("messages")!.children).map((el) => {
+      const child = el as HTMLElement;
+      if (child.classList.contains("turn-stats")) return "stats";
+      if (child.classList.contains("turn-change-card")) return "card";
+      if (child.dataset.notice === "compaction") return "divider";
+      return child.dataset.turnIndex !== undefined ? "turn" : "other";
+    }),
+  );
+  const at = (kind: "stats" | "card" | "divider") => order.indexOf(kind);
+  expect(at("stats")).toBeGreaterThan(-1);
+  expect(at("card")).toBe(at("stats") + 1);
+  expect(at("divider")).toBe(at("card") + 1);
 });

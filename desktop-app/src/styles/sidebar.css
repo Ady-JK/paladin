@@ -53,6 +53,52 @@
   background: var(--color-slate-800);
 }
 
+/* Every session says which engine runs it: Paladin, or an external agent (Codex). */
+#sessionList .session-harness {
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--color-slate-500);
+  background: var(--color-slate-100);
+}
+
+.dark #sessionList .session-harness {
+  color: var(--color-slate-400);
+  background: var(--color-slate-800);
+}
+
+#sessionList .session-harness[data-engine="codex"] {
+  color: var(--color-accent-700);
+  background: color-mix(in srgb, var(--color-accent-600) 12%, transparent);
+}
+
+.dark #sessionList .session-harness[data-engine="codex"] {
+  color: var(--color-accent-400);
+  background: color-mix(in srgb, var(--color-accent-500) 18%, transparent);
+}
+
+/* Codex compacts its own context and has no provider catalog to refresh. */
+body.harness-codex .context-control,
+body.harness-codex #modelRefresh,
+body.harness-codex #modelProviderFilter {
+  display: none;
+}
+
+/* A Codex session keeps the composer to what Codex has: a model, thinking,
+   permissions. Paladin's own tool switches, MCP, budget, worktree, plan
+   mode and skills do not reach it. */
+body.harness-codex .tools-wrap,
+body.harness-codex .mcp-chip,
+body.harness-codex .budget-wrap,
+body.harness-codex .wt-chip,
+body.harness-codex .wt-bar,
+body.harness-codex #skillChipSlot {
+  display: none;
+}
+
 #sessionList .session-row {
   border-color: transparent;
   border-radius: 8px;

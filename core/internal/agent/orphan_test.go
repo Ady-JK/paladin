@@ -14,7 +14,7 @@ import (
 func assistantCalls(ids ...string) transcript.Message {
 	calls := make([]transcript.ToolCall, 0, len(ids))
 	for _, id := range ids {
-		calls = append(calls, transcript.ToolCall{ID: id, Name: "read", Arguments: "{}"})
+		calls = append(calls, transcript.ToolCall{ID: id, Name: "read", Arguments: `{"reason":"test"}`})
 	}
 	return transcript.Message{Role: transcript.RoleAssistant, CreatedAt: time.Now().UTC(), ToolCalls: &calls}
 }
@@ -139,9 +139,9 @@ func (s stopperTool) Call(json.RawMessage, *tools.ToolCtx) (string, error) {
 
 func TestStopMidToolsPersistsAbortedResults(t *testing.T) {
 	prov := &mockProvider{streams: []streamScript{{chunks: []inference.Chunk{{ToolCalls: []inference.ToolCall{
-		{ID: "a", Name: "stopper", Arguments: "{}"},
-		{ID: "b", Name: "read", Arguments: "{}"},
-		{ID: "c", Name: "read", Arguments: "{}"},
+		{ID: "a", Name: "stopper", Arguments: `{"reason":"test"}`},
+		{ID: "b", Name: "read", Arguments: `{"reason":"test"}`},
+		{ID: "c", Name: "read", Arguments: `{"reason":"test"}`},
 	}}}}}}
 	a, sess, tx, done := testAgent(t, prov)
 	defer close(done)

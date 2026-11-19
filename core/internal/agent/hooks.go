@@ -129,7 +129,7 @@ func (a *Agent) preToolHooks(call *tools.ToolCall) (verdict hooks.Decision, cont
 			Content: string(jsonx.MustMarshal(map[string]string{"error": msg}))}
 	}
 	if out.UpdatedInput != nil {
-		call.Arguments = string(out.UpdatedInput)
+		call.Arguments = a.tools.KeepReason(call, out.UpdatedInput)
 	}
 	return out.Decision, hookContext(hooks.PreToolUse, out.Context), nil
 }

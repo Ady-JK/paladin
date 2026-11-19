@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 )
 
@@ -33,10 +31,8 @@ type Approval struct {
 	MCPTool string `json:"mcpTool,omitempty"`
 	Args    string `json:"args,omitempty"`
 	// Host and URL describe a web request.
-	Host string `json:"host,omitempty"`
-	URL  string `json:"url,omitempty"`
-	// Sandbox is the shell policy the approved command will receive.
-	Sandbox     string   `json:"sandbox,omitempty"`
+	Host        string   `json:"host,omitempty"`
+	URL         string   `json:"url,omitempty"`
 	Reasons     []string `json:"reasons"`
 	Destructive bool     `json:"destructive,omitempty"`
 	Choices     []string `json:"choices"`
@@ -120,11 +116,6 @@ type Gate struct {
 	SessionID string
 	Store     *Store
 	Broker    *Broker
-	// SandboxKind is sandbox.Kind(); "" means approvals only.
-	SandboxKind string
-	// ExtraWritable are more folders sandboxed shell calls may write,
-	// e.g. the shared git dir of a worktree session.
-	ExtraWritable []string
 	// Readable are folders the session owns (its own data folder with
 	// spilled tool output, job logs and screenshots): reads there run
 	// without a card. Deny rules still apply.
@@ -151,8 +142,6 @@ type Auth struct {
 	Run bool
 	// Content is the tool result to record when Run is false.
 	Content string
-	// Sandbox confines a shell call; nil runs it unconfined.
-	Sandbox *sandbox.Policy
 }
 
 func refusal(msg string) string {
@@ -162,6 +151,11 @@ func refusal(msg string) string {
 
 // Authorize decides one call, asking the user (and blocking) if needed.
 func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.RawMessage, notify func(Approval)) Auth {
+	// Browser actions and visual generation may change state without a file
+	// path or shell command, so read-only mode blocks their whole tool surface.
+	if g.Preset == ReadOnly && (name == "browser" || name == "visual") {
+		return Auth{Content: refusal("read-only mode: switch to Full Access to use " + name)}
+	}
 	req, gated := Classify(name, args, g.Workspace)
 	if !gated && g.MCP != nil {
 		if info, ok := g.MCP(name); ok {
@@ -193,6 +187,9 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 	}
 	switch d.Verdict {
 	case Deny:
+		if d.Rule == nil && len(d.Reasons) > 0 {
+			return Auth{Content: refusal(strings.Join(d.Reasons, "; "))}
+		}
 		what := "this call"
 		if d.Rule != nil {
 			what = fmt.Sprintf("%s rule %q", d.Rule.Tool, d.Rule.Pattern)
@@ -202,20 +199,11 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 		}
 		return Auth{Content: refusal("blocked by a permission rule (" + what + "). Do not retry it; choose another approach or ask the user.")}
 	case Allow:
-		return Auth{Run: true, Sandbox: g.policy(req, d.Sandbox)}
+		return Auth{Run: true}
 	}
 	card := Approval{ID: callID, Tool: name, Kind: req.Kind, Command: req.Command, Path: req.Path,
 		Server: req.Server, MCPTool: req.MCPTool, Args: req.Args, Host: req.Host, URL: req.URL,
 		Reasons: d.Reasons, Destructive: d.Destructive, Choices: d.Choices, Remember: d.Remember, State: StatePending}
-	if req.Kind == KindShell {
-		if g.SandboxKind == "" {
-			card.Sandbox = "unavailable"
-		} else if d.Sandbox == sandbox.ModeNone {
-			card.Sandbox = "none"
-		} else {
-			card.Sandbox = string(d.Sandbox)
-		}
-	}
 	reply, err := g.ask(ctx, card, notify)
 	if err != nil {
 		return Auth{Content: refusal("interrupted while waiting for the user's approval; it did not run")}
@@ -224,7 +212,7 @@ func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.Raw
 		return Auth{Content: refusal("denied by the user: they declined this " + describe(req) + ". Do not retry it; continue another way or ask the user what they want.")}
 	}
 	g.remember(reply, d.Remember)
-	return Auth{Run: true, Sandbox: g.policy(req, d.Sandbox)}
+	return Auth{Run: true}
 }
 
 // owns reports whether a read stays inside one of the session's own
@@ -251,84 +239,10 @@ func (g *Gate) remember(reply string, rules []Rule) {
 	_ = g.Store.Add(scope, g.Workspace, g.SessionID, rules...)
 }
 
-// Blocked is a shell call the sandbox stopped: the policy it ran under
-// and what it printed.
-type Blocked struct {
-	Policy *sandbox.Policy
-	Output string
-}
-
-// Escalation is the user's answer to a sandbox block. Run with a nil
-// Sandbox reruns unconfined; with a policy it reruns confined to it.
-type Escalation struct {
-	Run     bool
-	Sandbox *sandbox.Policy
-}
-
-// Escalate asks what to do about a shell call the sandbox blocked.
-// When the output names the denied path, the card offers to grant its
-// folder (as a write rule, so it also covers the write/edit tools) and
-// rerun still sandboxed; "once" reruns without the sandbox.
-func (g *Gate) Escalate(ctx context.Context, callID, name string, args json.RawMessage, b Blocked, notify func(Approval)) Escalation {
-	if g.Preset == FullAccess || g.SandboxKind == "" || b.Policy == nil {
-		return Escalation{}
-	}
-	req, gated := Classify(name, args, g.Workspace)
-	if !gated || req.Kind != KindShell {
-		return Escalation{}
-	}
-	card := Approval{ID: callID, Tool: name, Kind: KindEscalate, Command: req.Command,
-		Reasons: []string{"blocked by the sandbox"}, Destructive: req.Destructive,
-		Choices: []string{ReplyOnce, ReplyDeny}, State: StatePending}
-	grant := ""
-	if !req.Destructive {
-		grant = grantFor(sandbox.BlockedPath(b.Output), b.Policy)
-	}
-	if grant != "" {
-		card.Path = grant
-		card.Remember = []Rule{{Tool: ToolWrite, Pattern: grant, Action: ActionAllow}}
-		card.Choices = []string{ReplySession, ReplyFolder, ReplyGlobal, ReplyOnce, ReplyDeny}
-	}
-	reply, err := g.ask(ctx, card, notify)
-	if err != nil || reply == ReplyDeny {
-		return Escalation{}
-	}
-	if reply == ReplyOnce || grant == "" {
-		return Escalation{Run: true}
-	}
-	g.remember(reply, card.Remember)
-	pol := *b.Policy
-	pol.Granted = append(append([]string(nil), b.Policy.Granted...), grant)
-	return Escalation{Run: true, Sandbox: &pol}
-}
-
 func defaultHomeDir() (string, error) { return os.UserHomeDir() }
 
 // homeDir is swapped in tests.
 var homeDir = defaultHomeDir
-
-// grantFor is the folder to offer for a blocked path: its parent, or
-// the path itself when the parent is too broad to hand out (/, a
-// top-level dir, the home folder or its parent). "" when there is no
-// path or the policy already covers it, so the block had another cause.
-func grantFor(path string, pol *sandbox.Policy) string {
-	if path == "" || !filepath.IsAbs(path) {
-		return ""
-	}
-	path = filepath.Clean(path)
-	roots := append(append([]string(nil), pol.Granted...), pol.Writable...)
-	for _, r := range roots {
-		if pathMatches(r, path) {
-			return ""
-		}
-	}
-	dir := filepath.Dir(path)
-	home, _ := homeDir()
-	if dir == "/" || filepath.Dir(dir) == "/" || (home != "" && (dir == home || dir == filepath.Dir(home))) {
-		return path
-	}
-	return dir
-}
 
 // TrustProject decides whether tool, which the workspace itself ships (a
 // formatter or language server in node_modules/.bin or a virtualenv, or
@@ -337,6 +251,9 @@ func grantFor(path string, pol *sandbox.Policy) string {
 // refusal for the session, so it does not ask again. Full access trusts
 // everything a deny rule does not stop.
 func (g *Gate) TrustProject(ctx context.Context, callID, tool string, notify func(Approval)) bool {
+	if g.Preset == ReadOnly {
+		return false
+	}
 	var rules []Rule
 	if g.Store != nil {
 		rules = g.Store.Effective(g.Workspace, g.SessionID)
@@ -396,41 +313,6 @@ func (g *Gate) ask(ctx context.Context, card Approval, notify func(Approval)) (s
 	return reply, nil
 }
 
-func (g *Gate) policy(req Request, mode sandbox.Mode) *sandbox.Policy {
-	if req.Kind != KindShell || mode == sandbox.ModeNone || g.SandboxKind == "" {
-		return nil
-	}
-	return &sandbox.Policy{Mode: mode, Writable: append([]string{g.Workspace}, g.ExtraWritable...), Granted: g.granted()}
-}
-
-// granted are the folders allow-write rules open to sandboxed commands:
-// one notion of "where the agent may write" for every tool. "*" never
-// lifts the sandbox, and a folder overlapping a deny-write rule stays
-// shut (Landlock cannot carve a denied hole out of a granted folder).
-func (g *Gate) granted() []string {
-	if g.Store == nil {
-		return nil
-	}
-	rules := g.Store.Effective(g.Workspace, g.SessionID)
-	var out []string
-	for _, r := range rules {
-		if r.Tool != ToolWrite || r.Action != ActionAllow || !filepath.IsAbs(r.Pattern) {
-			continue
-		}
-		denied := false
-		for _, d := range rules {
-			if d.Tool == ToolWrite && d.Action == ActionDeny && (pathMatches(d.Pattern, r.Pattern) || pathMatches(r.Pattern, d.Pattern)) {
-				denied = true
-				break
-			}
-		}
-		if !denied {
-			out = append(out, r.Pattern)
-		}
-	}
-	return out
-}
-
 func describe(req Request) string {
 	switch req.Kind {
 	case KindWrite:
@@ -463,7 +345,7 @@ func WithHookVerdict(ctx context.Context, verdict string) context.Context {
 }
 
 // applyHookVerdict lets a hook skip a prompt ("allow") or force one
-// ("ask"). Deny rules still win, and an allowed call keeps its sandbox.
+// ("ask"). Deny rules still win.
 func applyHookVerdict(ctx context.Context, d Decision) Decision {
 	verdict, _ := ctx.Value(hookVerdictKey{}).(string)
 	switch {

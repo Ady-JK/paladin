@@ -45,7 +45,7 @@ func hookChunks(chunks []ChatChunk) []hooks.Note {
 }
 
 func TestPreToolUseExitTwoBlocksTheCall(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"x.txt"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"x.txt"}`), textRound("ok")}}
 	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	withHooks(t, a, `{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"command":`+hookScript(t, `echo "reads are off today" >&2; exit 2`)+`}]}]}}`)
@@ -63,7 +63,7 @@ func TestPreToolUseExitTwoBlocksTheCall(t *testing.T) {
 }
 
 func TestPreToolUseUpdatedInputRewritesTheCall(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"wrong.txt"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"wrong.txt"}`), textRound("ok")}}
 	a, sess, _, done := testAgent(t, prov)
 	defer close(done)
 	if err := os.WriteFile(filepath.Join(sess.Meta.Cwd, "right.txt"), []byte("the-right-file"), 0o644); err != nil {
@@ -80,7 +80,7 @@ func TestPreToolUseUpdatedInputRewritesTheCall(t *testing.T) {
 }
 
 func TestPostToolUseContextJoinsTheToolResult(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"x.txt"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"x.txt"}`), textRound("ok")}}
 	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	withHooks(t, a, `{"hooks":{"PostToolUse":[{"matcher":"read","hooks":[{"command":"echo '{\"hookSpecificOutput\":{\"additionalContext\":\"remember the lint rules\"}}'"}]}]}}`)
@@ -95,7 +95,7 @@ func TestPostToolUseContextJoinsTheToolResult(t *testing.T) {
 func TestPostToolUseReceivesTheResult(t *testing.T) {
 	sess := testSession(t, "00000000-0000-4000-8000-000000000001")
 	x := filepath.Join(sess.Meta.Cwd, "x.txt")
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"`+x+`"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"`+x+`"}`), textRound("ok")}}
 	a, _, done := newAgentForTest(t, prov, sess, "hi", false, true)
 	defer close(done)
 	if err := os.WriteFile(x, []byte("payload-123"), 0o644); err != nil {
@@ -220,7 +220,7 @@ func TestStopHookContinuationsAreCapped(t *testing.T) {
 }
 
 func TestContinueFalseEndsTheTurnAfterTools(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"x.txt"}`), textRound("never")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"x.txt"}`), textRound("never")}}
 	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	withHooks(t, a, `{"hooks":{"PostToolUse":[{"hooks":[{"command":"echo '{\"continue\":false,\"stopReason\":\"budget review\"}'"}]}]}}`)
@@ -273,7 +273,7 @@ func TestCompactHooksAddInstructionsAndRun(t *testing.T) {
 }
 
 func TestNoHooksMeansNoHookChunks(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"path":"x.txt"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "read", `{"reason":"test","path":"x.txt"}`), textRound("ok")}}
 	a, _, tx, done := testAgent(t, prov)
 	defer close(done)
 	if _, err := a.Run(); err != nil {
@@ -287,7 +287,7 @@ func TestNoHooksMeansNoHookChunks(t *testing.T) {
 // Hooks match the tool that runs, not the spelling the model used: a
 // "Read" matcher fires for "functions.read" and sees the repaired input.
 func TestToolHooksSeeTheResolvedTool(t *testing.T) {
-	prov := &mockProvider{streams: []streamScript{callRound("c1", "functions.read", `{"path":"x.txt","offset":"2"}`), textRound("ok")}}
+	prov := &mockProvider{streams: []streamScript{callRound("c1", "functions.read", `{"reason":"test","path":"x.txt","offset":"2"}`), textRound("ok")}}
 	a, _, _, done := testAgent(t, prov)
 	defer close(done)
 	log := filepath.Join(t.TempDir(), "seen.json")

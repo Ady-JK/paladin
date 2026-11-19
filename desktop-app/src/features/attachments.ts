@@ -75,10 +75,10 @@ export function hasAttachments(): boolean {
 export async function uploadAttachments(
   sessionId: string,
   cwd: string,
-): Promise<{ ids: string[]; images: api.SessionAttachment[]; consume: () => void }> {
+): Promise<{ ids: string[]; attachments: api.SessionAttachment[]; consume: () => void }> {
   const batch = [...pending];
   const ids: string[] = [];
-  const images: api.SessionAttachment[] = [];
+  const attachments: api.SessionAttachment[] = [];
   for (const entry of batch) {
     if (!entry.saved || entry.savedSessionId !== sessionId) {
       const bytes = new Uint8Array(await entry.file.arrayBuffer());
@@ -86,11 +86,11 @@ export async function uploadAttachments(
       entry.savedSessionId = sessionId;
     }
     ids.push(entry.saved.id);
-    if (entry.saved.image) images.push(entry.saved);
+    attachments.push(entry.saved);
   }
   return {
     ids,
-    images,
+    attachments,
     consume: () => {
       for (const entry of batch) {
         const index = pending.indexOf(entry);

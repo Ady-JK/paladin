@@ -126,13 +126,13 @@ function openWizard(wizard: Wizard): void {
   active = wizard;
   const { overlay } = wizard;
   overlay.id = "askModal";
-  overlay.className = "modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4";
+  overlay.className = "ask-panel";
   overlay.classList.add("is-open");
   overlay.innerHTML =
-    `<div class="modal-card w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">` +
-    `<div class="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">` +
-    `<h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Answer needed</h3>` +
-    `<button type="button" data-ask="close" class="text-slate-400 hover:text-slate-200 dark:hover:text-slate-100" aria-label="Cancel">✕</button>` +
+    `<div class="question-card">` +
+    `<div class="question-head">` +
+    `<h3><span aria-hidden="true">ⓘ</span> Question</h3>` +
+    `<button type="button" data-ask="close" class="question-close" aria-label="Cancel question">✕</button>` +
     `</div><div data-ask="body"></div></div>`;
   const body = overlay.querySelector<HTMLElement>('[data-ask="body"]');
   if (!body) {
@@ -182,7 +182,8 @@ function openWizard(wizard: Wizard): void {
     }
   };
   document.addEventListener("keydown", wizard.onKey, true);
-  document.body.append(overlay);
+  const stack = document.querySelector(".composer-stack");
+  (stack ?? document.body).prepend(overlay);
   paintWizard();
 }
 
@@ -323,28 +324,11 @@ async function submitWizard(): Promise<void> {
 }
 
 function optionCheckbox(questionIdx: number, text: string, optionIdx: number, checked: boolean): string {
-  const ring = checked
-    ? "border-accent-500 bg-accent-500/10 text-slate-900 dark:text-slate-100"
-    : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300";
-  return (
-    `<button type="button" role="checkbox" aria-checked="${checked}" data-ask-opt="${questionIdx}:${optionIdx}" ` +
-    `class="ask-opt flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs ${ring}">` +
-    `<span class="ask-check${checked ? " is-on" : ""}" aria-hidden="true">${checked ? "✓" : ""}</span>` +
-    `<span class="min-w-0 flex-1 break-words">${escapeHtml(text)}</span>` +
-    `<span class="text-[10px] text-slate-400">${optionIdx + 1}</span></button>`
-  );
+  return `<button type="button" role="checkbox" aria-checked="${checked}" data-ask-opt="${questionIdx}:${optionIdx}" data-number="${optionIdx + 1}" class="question-option${checked ? " is-picked" : ""}">${escapeHtml(text)}</button>`;
 }
 
 function optionButton(questionIdx: number, text: string, optionIdx: number, selected: boolean): string {
-  const ring = selected
-    ? "border-accent-500 bg-accent-500/10 text-slate-900 dark:text-slate-100"
-    : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300";
-  return (
-    `<button type="button" data-ask-opt="${questionIdx}:${optionIdx}" ` +
-    `class="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs ${ring}">` +
-    `<span class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-[9px] font-bold">${selected ? "●" : `${optionIdx + 1}`}</span>` +
-    `<span class="min-w-0 flex-1 break-words">${escapeHtml(text)}</span></button>`
-  );
+  return `<button type="button" aria-pressed="${selected}" data-ask-opt="${questionIdx}:${optionIdx}" data-number="${optionIdx + 1}" class="question-option${selected ? " is-picked" : ""}">${escapeHtml(text)}</button>`;
 }
 
 // paintWizard renders the current question or the review screen.
@@ -370,12 +354,12 @@ function paintWizard(focusCustom = false): void {
   const chosen = wizard.chosen[wizard.index] ?? new Set<number>();
   const n1 = q.options.length;
   wizard.body.innerHTML =
-    `<div class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Question ${wizard.index + 1} of ${n}</div>` +
-    `<div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">${escapeHtml(q.question)}</div>` +
+    (n > 1 ? `<div class="question-progress">Question ${wizard.index + 1} of ${n}</div>` : "") +
+    `<div class="question-text">${escapeHtml(q.question)}</div>` +
     (n1 > 0
-      ? `<div class="mt-1 text-[11px] text-slate-400">${multi ? "Pick any that apply" : "Pick one"} — or type your own</div>`
+      ? `<div class="question-progress">${multi ? "Pick any that apply" : "Pick one"} — or type your own</div>`
       : "") +
-    `<div class="mt-3 space-y-2">` +
+    `<div class="question-options">` +
     q.options
       .map((opt, i) =>
         multi ? optionCheckbox(wizard.index, opt, i, chosen.has(i)) : optionButton(wizard.index, opt, i, picked === i),
@@ -383,11 +367,11 @@ function paintWizard(focusCustom = false): void {
       .join("") +
     `</div>` +
     `<input data-ask="custom" type="text" placeholder="${multi ? "Add something else…" : "Type your own answer…"}" value="${escapeHtml(custom)}" spellcheck="false" ` +
-    `class="mt-2 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs text-slate-800 focus:border-accent-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" />` +
-    `<div class="mt-4 flex items-center justify-between">` +
-    `<button type="button" data-ask="back" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400" ${wizard.index === 0 ? "disabled" : ""}>← Back</button>` +
+    `class="question-input" />` +
+    `<div class="question-actions">` +
+    `<button type="button" data-ask="back" class="question-action" ${wizard.index === 0 ? "disabled" : ""}>← Back</button>` +
     `<span class="text-[10px] text-slate-400">← → move · Enter next${n1 ? ` · 1–${n1} ${multi ? "toggle" : "pick"}` : ""}</span>` +
-    `<button type="button" data-ask="next" class="rounded-lg bg-accent-500 px-3 py-1.5 text-xs font-semibold text-white">${wizard.index === n - 1 ? "Review →" : "Next →"}</button>` +
+    `<button type="button" data-ask="next" class="question-action question-primary">${wizard.index === n - 1 ? "Review →" : "Next →"}</button>` +
     `</div>`;
   wizard.body.querySelectorAll("[data-ask-opt]").forEach((el) => {
     el.addEventListener("click", () => {
@@ -428,9 +412,9 @@ function paintReview(wizard: Wizard): void {
   wizard.body.innerHTML =
     `<div class="text-[11px] font-medium uppercase tracking-wide text-slate-400">Review — click a question to edit</div>` +
     `<div class="mt-2 max-h-72 space-y-2 overflow-auto">${rows}</div>` +
-    `<div class="mt-4 flex items-center justify-between">` +
-    `<button type="button" data-ask="back" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">← Back</button>` +
-    `<button type="button" data-ask="submit" class="rounded-lg bg-accent-500 px-4 py-1.5 text-xs font-semibold text-white">Submit answers (Enter)</button>` +
+    `<div class="question-actions">` +
+    `<button type="button" data-ask="back" class="question-action">← Back</button>` +
+    `<button type="button" data-ask="submit" class="question-action question-primary">Submit answers (Enter)</button>` +
     `</div>`;
   wizard.body.querySelectorAll("[data-ask-jump]").forEach((el) => {
     el.addEventListener("click", () => {

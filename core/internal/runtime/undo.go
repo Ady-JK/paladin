@@ -289,6 +289,10 @@ func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, ve
 	if err := advanceUndoFloor(sess.Dir, history.starts, false); err != nil {
 		return RevertResult{}, fmt.Errorf("save undo retention boundary: %w", err)
 	}
+	// A Codex session's thread goes back to the same point. Every check has
+	// passed, and this comes before files are touched, as in t3code; it never
+	// blocks the undo.
+	r.codexRewind(&sess, index)
 	out := RevertResult{Index: index, Message: text, Restored: []string{}, Deleted: []string{}, Skipped: []string{}}
 	if plan != nil {
 		out.Snapshots = true
@@ -312,6 +316,7 @@ func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, ve
 	if err := sess.Truncate(index); err != nil {
 		return RevertResult{}, err
 	}
+	syncRecalled(sess)
 	pruneTurnSnapshots(sess.Dir, index)
 	if err := pruneProtection(sess.Dir, index); err != nil {
 		log.Printf("undo: prune protection status: %v", err)
@@ -369,6 +374,7 @@ func (r *AgentRuntime) commitRevert(sess *transcript.Session) error {
 	if err := sess.Truncate(rv.Index); err != nil {
 		return err
 	}
+	syncRecalled(*sess)
 	pruneTurnSnapshots(sess.Dir, rv.Index)
 	sess.Meta.Revert = nil
 	return sess.SaveMeta()

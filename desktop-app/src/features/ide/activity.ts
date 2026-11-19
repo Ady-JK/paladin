@@ -17,18 +17,28 @@ export function initIDEActivity(): void {
     const rows = state.sessions
       .filter((session) => !session.subagent && (session.cwd === state.cwd || session.worktree?.origin === state.cwd))
       .map((session) => ({
-        session,
+        id: session.sessionId,
+        title: session.title || "Untitled chat",
         status: liveActivity(session.sessionId),
         browser: hasAgentBrowser(session.sessionId),
       }))
-      .filter((item) => item.status || item.browser);
+      .filter((item) => item.status || item.browser || item.id === state.sessionId);
+    // The open session can be older than the currently loaded sidebar page.
+    if (state.sessionId && !state.subagent && !rows.some((item) => item.id === state.sessionId)) {
+      rows.unshift({
+        id: state.sessionId,
+        title: "Current session",
+        status: liveActivity(state.sessionId),
+        browser: hasAgentBrowser(state.sessionId),
+      });
+    }
     button.querySelector(".rail-activity-label")!.textContent = rows.length ? `Activity ${rows.length}` : "Activity";
     button.setAttribute("aria-label", rows.length ? `Activity ${rows.length}` : "Activity");
     const html = rows.length
       ? rows
           .map(
-            ({ session, status, browser }) =>
-              `<button type="button" data-activity-session="${escapeAttr(session.sessionId)}"><strong>${escapeHtml(session.title || "Untitled chat")}</strong><small>${escapeHtml([status, browser ? "Browser open" : ""].filter(Boolean).join(" · "))}</small></button>`,
+            ({ id, title, status, browser }) =>
+              `<button type="button" data-activity-session="${escapeAttr(id)}"><strong>${escapeHtml(title)}</strong><small>${escapeHtml([status || (id === state.sessionId ? "Current session" : ""), browser ? "Browser open" : ""].filter(Boolean).join(" · "))}</small></button>`,
           )
           .join("")
       : `<p>No active sessions in this workspace.</p>`;

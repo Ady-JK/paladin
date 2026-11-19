@@ -1,6 +1,6 @@
 // subagents.go runs child agents for a parent session. A child is a
 // persistent sibling session (transcript.Meta.Subagent links it back)
-// whose turns go through the same hub, permission gate, hooks, sandbox
+// whose turns go through the same hub, permission gate and hooks
 // and budget as any other turn. The manager tracks which children are
 // in flight, delivers each finished child's result to its parent
 // exactly once (wait_agent, a mid-turn notice, or an idle wake), and

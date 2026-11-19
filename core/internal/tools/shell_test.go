@@ -61,8 +61,8 @@ func TestShellCommandParamAndLegacyCmd(t *testing.T) {
 		args string
 		want string
 	}{
-		{"command", `{"command":"echo new"}`, "new\n"},
-		{"legacy cmd", `{"cmd":"echo old"}`, "old\n"},
+		{"command", `{"reason":"test","command":"echo new"}`, "new\n"},
+		{"legacy cmd", `{"reason":"test","cmd":"echo old"}`, "old\n"},
 		{"command wins", `{"command":"echo new","cmd":"echo old"}`, "new\n"},
 	}
 	for _, tc := range cases {
@@ -108,8 +108,8 @@ func TestShellRegistryAcceptsBothNames(t *testing.T) {
 		args string
 		want string
 	}{
-		{"command", `{"command":"echo new"}`, "new\n"},
-		{"legacy cmd", `{"cmd":"echo old"}`, "old\n"},
+		{"command", `{"reason":"test","command":"echo new"}`, "new\n"},
+		{"legacy cmd", `{"reason":"test","cmd":"echo old"}`, "old\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res := reg.Call(&ToolCall{ID: "c1", Name: "shell", Arguments: tc.args}, ctx)
@@ -450,7 +450,7 @@ func TestShellDrainsBothStreamsAndPreservesOutputEnds(t *testing.T) {
 		t.Fatal("oversized output was not truncated")
 	}
 	code := 0
-	encoded, failure := finishSync(bytes, wasTruncated, path, waitResult{code: &code}, false)
+	encoded, failure := finishSync(bytes, wasTruncated, path, waitResult{code: &code})
 	if failure != nil {
 		t.Fatal(failure)
 	}

@@ -32,7 +32,7 @@ func writeTodos(t *testing.T, dir, raw string) {
 	}
 }
 
-func todoArgs(raw string) string { return `{"todos":` + raw + `}` }
+func todoArgs(raw string) string { return `{"reason":"test","todos":` + raw + `}` }
 
 func countNudges(prov *mockProvider) (int, string) {
 	if len(prov.streamMsgs) == 0 {
@@ -155,7 +155,7 @@ func TestPlanNudgeResetsAfterProgress(t *testing.T) {
 		scripts = append(scripts, textRound("still working"))
 		if i < stalls-1 {
 			// Real work between stalls: the reminder budget restarts.
-			scripts = append(scripts, callRound("r", "read", `{"path":"/nonexistent"}`))
+			scripts = append(scripts, callRound("r", "read", `{"reason":"test","path":"/nonexistent"}`))
 		}
 	}
 	scripts = append(scripts,
@@ -247,7 +247,7 @@ func TestNoCheckNudgeAfterEditing(t *testing.T) {
 	a.tools.Register(&tools.WriteTool{})
 	a.toolDefs = append(a.toolDefs, inference.ToolDefinition{Name: "write", Description: "w"})
 	prov.streams = []streamScript{
-		callRound("w", "write", `{"path":"`+filepath.Join(ws.Dir, "x.go")+`","content":"package x"}`),
+		callRound("w", "write", `{"reason":"test","path":"`+filepath.Join(ws.Dir, "x.go")+`","content":"package x"}`),
 		textRound("done"),
 	}
 	if _, err := a.Run(); err != nil {

@@ -303,3 +303,146 @@ test("escape closes the analytics dashboard", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.locator("#usageModal")).toBeHidden();
 });
+
+// A harness (Codex) reports its own context: the gauge is those tokens over
+// the window it really runs with, and the hover shows that, not the last
+// call's input.
+test("the usage pill shows the context a harness reported", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eUsage = {
+      sessionId: "sess-notify-1",
+      model: "gpt-5.6-luna",
+      contextWindow: 258400,
+      contextKnown: true,
+      calls: 2,
+      promptTokens: 2600,
+      completionTokens: 60,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 2660,
+      lastInputTokens: 1600,
+      contextTokens: 18300,
+      cost: 0,
+      listCost: 0,
+      hasCost: false,
+      fillPercent: 7.08,
+      models: [],
+    };
+  });
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+
+  await expect(page.locator("#usageLabel")).toHaveText("7.1%");
+  const title = (await page.locator("#usagePill").getAttribute("title")) ?? "";
+  expect(title).toContain("18,300 context tokens / 258,400");
+  expect(title).toContain("7.1%");
+  expect(title).not.toContain("1,600");
+});
+
+// A Codex plan has usage windows; the pill's hover lists how much of each is used.
+test("the usage pill lists the plan's limits", async ({ page }) => {
+  await page.evaluate(() => {
+    const at = Math.floor(Date.now() / 1000);
+    (window as any).__e2eUsage = {
+      sessionId: "sess-notify-1",
+      model: "gpt-5.6-luna",
+      contextWindow: 258400,
+      contextKnown: true,
+      calls: 1,
+      promptTokens: 18000,
+      completionTokens: 5,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 18005,
+      lastInputTokens: 18000,
+      contextTokens: 18005,
+      cost: 0,
+      listCost: 0,
+      hasCost: false,
+      fillPercent: 7,
+      limits: [
+        { label: "Session", usedPercent: 42, resetsAt: at + 7500 },
+        { label: "Weekly", usedPercent: 100 },
+      ],
+      models: [],
+    };
+  });
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+  await expect(page.locator("#usageLabel")).toHaveText("7%");
+  const title = (await page.locator("#usagePill").getAttribute("title")) ?? "";
+  expect(title).toMatch(/Session: 42% used, resets in 2h \d+m/);
+  expect(title).toContain("Weekly: 100% used");
+  expect(title).not.toMatch(/Weekly: 100% used, resets/);
+});
+
+// A Copilot Claude session: 1.0M of input per call is nearly all cache. The cache
+// hit is the average of each call's own share (two calls, 99% and 80%), not the
+// pooled share, and "Input tokens" is what was sent uncached, not the whole prompt.
+test("the dashboard averages the cache hit per call and splits cached input out", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eUsage = {
+      sessionId: "sess-copilot-1",
+      model: "claude-sonnet-5.5",
+      contextWindow: 936000,
+      contextKnown: true,
+      calls: 2,
+      promptTokens: 1_000_000 + 100_000,
+      completionTokens: 2_000,
+      reasoningTokens: 0,
+      cacheReadTokens: 990_000 + 80_000,
+      cacheWriteTokens: 8_000,
+      totalTokens: 1_102_000,
+      lastInputTokens: 100_000,
+      cacheHitSum: 0.99 + 0.8,
+      cacheHitCalls: 2,
+      cost: 0,
+      listCost: 1.5,
+      hasCost: true,
+      costEstimated: true,
+      fillPercent: 10.7,
+      models: [],
+    };
+  });
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+  await page.click("#usagePill");
+  const body = page.locator("#usageBody");
+  const hero = body.locator("div", { hasText: /^Prompt cache hit/ }).first();
+  await expect(body).toContainText("Prompt cache hit");
+  await expect(body).toContainText("89.5%");
+  // 1,100,000 sent, 1,070,000 read and 8,000 written: 22,000 went in uncached.
+  await expect(body).toContainText("22,000");
+  await expect(body).toContainText("Context fill");
+  await expect(hero).toBeVisible();
+});
+
+test("a ledger with no per-call cache record shows no cache hit instead of a made-up one", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eUsage = {
+      sessionId: "sess-plain-1",
+      model: "beam-free",
+      contextWindow: 200000,
+      contextKnown: true,
+      calls: 3,
+      promptTokens: 3000,
+      completionTokens: 60,
+      reasoningTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 3060,
+      lastInputTokens: 1000,
+      cost: 0,
+      listCost: 0,
+      hasCost: false,
+      fillPercent: 0.5,
+      models: [],
+    };
+  });
+  await page.fill("#promptInput", "hello agent");
+  await page.click("#sendBtn");
+  await page.click("#usagePill");
+  await expect(page.locator("#usageBody")).toContainText("no cache data");
+});

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 )
 
 // The runner is the Node side of a warm plugin: it imports the module
@@ -123,11 +125,11 @@ func (p *Pool) runnerScript() (string, error) {
 			return
 		}
 		path := filepath.Join(dir, "runner.mjs")
-		if err := os.WriteFile(path, []byte(runnerSource), 0o600); err != nil {
+		if err := atomicfile.Write(path, []byte(runnerSource)); err != nil {
 			p.scriptErr = err
 			return
 		}
-		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"type":"module"}`), 0o600); err != nil {
+		if err := atomicfile.Write(filepath.Join(dir, "package.json"), []byte(`{"type":"module"}`)); err != nil {
 			p.scriptErr = err
 			return
 		}

@@ -62,6 +62,10 @@ test("a frame gets its HTML and relative assets with a strict CSP", async () => 
   expect(page.status).toBe(200);
   expect(page.headers.get("content-type")).toContain("text/html");
   expect(page.headers.get("content-security-policy")).toContain("connect-src 'none'");
+  // Sources are this plugin's own host, never every plugin: scheme.
+  const viewCsp = page.headers.get("content-security-policy") ?? "";
+  expect(viewCsp).toContain("script-src 'self'");
+  expect(viewCsp).not.toMatch(/\bplugin:(?!\/\/)/);
   expect(page.headers.get("x-content-type-options")).toBe("nosniff");
   expect(await page.text()).toContain("board");
 
@@ -181,13 +185,19 @@ test("cards are served as a document and its script", async () => {
   const doc = await host.handle(new Request("plugin://board/__card__/lookup/index.html"));
   expect(doc.status).toBe(200);
   expect(doc.headers.get("content-type")).toContain("text/html");
-  expect(doc.headers.get("content-security-policy")).toContain("script-src 'self' plugin:");
+  const cardCsp = doc.headers.get("content-security-policy") ?? "";
+  expect(cardCsp).toContain("script-src 'self' 'unsafe-inline'");
+  expect(cardCsp).not.toMatch(/\bplugin:(?!\/\/)/);
   const html = await doc.text();
   expect(html).toContain('src="card.js"');
   expect(html).toContain("__paladin_card");
   const script = await host.handle(new Request("plugin://board/__card__/lookup/card.js"));
   expect(script.status).toBe(200);
   expect(script.headers.get("content-type")).toContain("text/javascript");
+  expect(script.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(script.headers.get("content-security-policy")).toContain("default-src 'none'");
+  // The card bridge only listens to the frame that embeds it.
+  expect(html).toContain("event.source !== parent");
   expect(await script.text()).toContain("__paladin_card");
   expect((await host.handle(new Request("plugin://board/__card__/other/index.html"))).status).toBe(404);
   expect((await host.handle(new Request("plugin://other/__card__/lookup/index.html"))).status).toBe(404);

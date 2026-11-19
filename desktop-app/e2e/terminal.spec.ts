@@ -223,3 +223,30 @@ test("the shared terminal button reopens the existing terminal in Agent mode", a
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
   await expect(page.locator("#sidePane .pane-terminal")).toHaveCount(1);
 });
+
+test("the terminal's last row sits inside its surface, not cut off at the bottom", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await page.locator("#ideTerminalToggle").click();
+  const surface = page.locator("#ideTerminalDock .terminal-surface:visible").first();
+  await expect(surface.locator(".xterm-screen")).toBeVisible();
+  // The last row plus the terminal's bottom padding must fit the surface.
+  const { gap, padding } = await surface.evaluate((el) => {
+    const screen = el.querySelector(".xterm-screen")!.getBoundingClientRect();
+    const pad = (node: Element) => parseFloat(getComputedStyle(node).paddingBottom) || 0;
+    return {
+      gap: el.getBoundingClientRect().bottom - screen.bottom,
+      padding: pad(el) + pad(el.querySelector(".xterm")!),
+    };
+  });
+  expect(gap).toBeGreaterThanOrEqual(padding);
+});
+
+test("the terminal has no black frame: its scroll viewport lets the pane background through", async ({ page }) => {
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator("#ideWorkspace")).toBeVisible();
+  await page.locator("#ideTerminalToggle").click();
+  const viewport = page.locator("#ideTerminalDock .xterm-viewport:visible").first();
+  await expect(viewport).toBeVisible();
+  await expect(viewport).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+});

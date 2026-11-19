@@ -54,11 +54,11 @@ func TestParallelSafeCallsRunConcurrentlyInOrder(t *testing.T) {
 	var live, peak int32
 	log := &traceLog{}
 	calls := []inference.ToolCall{
-		{ID: "p1", Name: "peek", Arguments: `{"tag":"p1"}`},
-		{ID: "p2", Name: "peek", Arguments: `{"tag":"p2"}`},
-		{ID: "p3", Name: "peek", Arguments: `{"tag":"p3"}`},
-		{ID: "x1", Name: "poke", Arguments: `{"tag":"x1"}`},
-		{ID: "p4", Name: "peek", Arguments: `{"tag":"p4"}`},
+		{ID: "p1", Name: "peek", Arguments: `{"reason":"test","tag":"p1"}`},
+		{ID: "p2", Name: "peek", Arguments: `{"reason":"test","tag":"p2"}`},
+		{ID: "p3", Name: "peek", Arguments: `{"reason":"test","tag":"p3"}`},
+		{ID: "x1", Name: "poke", Arguments: `{"reason":"test","tag":"x1"}`},
+		{ID: "p4", Name: "peek", Arguments: `{"reason":"test","tag":"p4"}`},
 	}
 	prov := &mockProvider{streams: []streamScript{
 		{chunks: []inference.Chunk{{ToolCalls: calls}}},

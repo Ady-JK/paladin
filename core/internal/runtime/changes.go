@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
+	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
@@ -16,6 +17,40 @@ const maxSessionDiff = 256 * 1024
 type ChangedFile struct {
 	Path   string `json:"path"`
 	Status string `json:"status"`
+}
+
+func canChangeFiles(name, args string) bool {
+	switch name {
+	case "read", "glob", "grep", "list", "web_fetch", "browser", "ask", "todo", "memory", "visual", "report_findings", "skill", "session_search":
+		return false
+	case "shell":
+		return !tools.ShellReadOnly(args)
+	default:
+		return true
+	}
+}
+
+// A replayed message is a copy a compaction re-recorded from the kept tail:
+// its original is already attributed to the turn it belongs to, so it is
+// skipped here. Counting it again would credit that turn's tool calls (and
+// file edits) to whichever turn the copy lands in after the compaction.
+func turnCanChangeFiles(msgs []transcript.Message, turns []TurnSnapshot) map[int]bool {
+	out := make(map[int]bool, len(turns))
+	ti := -1
+	for i, msg := range msgs {
+		for ti+1 < len(turns) && turns[ti+1].Turn <= i {
+			ti++
+		}
+		if ti < 0 || msg.Replay || msg.Role != transcript.RoleAssistant || msg.ToolCalls == nil {
+			continue
+		}
+		for _, call := range *msg.ToolCalls {
+			if canChangeFiles(call.Name, call.Arguments) {
+				out[turns[ti].Turn] = true
+			}
+		}
+	}
+	return out
 }
 
 type ChangeTurn struct {
@@ -73,10 +108,11 @@ func (r *AgentRuntime) visibleTurns(sessionID, cwd string) (*snapshot.Repo, []Tu
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	msgs, err := sess.History()
+	history, err := r.historyCache.read(sess)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	msgs, _ := transcript.Flatten(history)
 	msgs = visibleMessages(sess.Meta, msgs)
 	if rv := sess.Meta.Revert; rv != nil {
 		kept := turns[:0]
@@ -103,7 +139,7 @@ func turnCallIDs(msgs []transcript.Message, turns []TurnSnapshot) map[int][]stri
 		for ti+1 < len(turns) && turns[ti+1].Turn <= i {
 			ti++
 		}
-		if ti < 0 || m.Role != transcript.RoleAssistant || m.ToolCalls == nil {
+		if ti < 0 || m.Replay || m.Role != transcript.RoleAssistant || m.ToolCalls == nil {
 			continue
 		}
 		for _, call := range *m.ToolCalls {
@@ -140,9 +176,7 @@ func turnStates(ctx context.Context, repo *snapshot.Repo, from, to string) (map[
 	return states, nil
 }
 
-// SessionChanges groups files by the user turn that changed them. A
-// turn is compared with the next turn's snapshot, and the last turn
-// with the folder now, so no separate "after" snapshot is needed.
+// SessionChanges groups files by turn using completed turn snapshots.
 func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView, error) {
 	r.undoMu.Lock()
 	defer r.undoMu.Unlock()
@@ -156,16 +190,28 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 		return view, nil
 	}
 	callIDs := turnCallIDs(msgs, turns)
+	mutating := turnCanChangeFiles(msgs, turns)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	current, err := repo.Snapshot(ctx)
-	if err != nil {
-		return view, err
-	}
+	var current string
+	all := map[string]fileState{}
 	for i, ts := range turns {
-		to := current
-		if i+1 < len(turns) {
+		// A completed turn with no tool calls cannot have edited files.
+		if !mutating[ts.Turn] && !(i == len(turns)-1 && r.hub.runningCanChangeFiles(sessionID)) {
+			continue
+		}
+		to := ts.After
+		if to == "" && i+1 < len(turns) {
 			to = turns[i+1].Tree
+		}
+		if to == "" {
+			if current == "" {
+				current, err = repo.Snapshot(ctx)
+				if err != nil {
+					return view, err
+				}
+			}
+			to = current
 		}
 		states, err := turnStates(ctx, repo, ts.Tree, to)
 		if err != nil {
@@ -173,11 +219,18 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 		}
 		if len(states) > 0 {
 			view.Turns = append(view.Turns, ChangeTurn{Turn: ts.Turn, Files: changeFiles(states), CallIDs: callIDs[ts.Turn]})
+			for path, state := range states {
+				if previous, ok := all[path]; ok {
+					state.first = previous.first
+				}
+				all[path] = state
+			}
 		}
 	}
-	all, err := turnStates(ctx, repo, turns[0].Tree, current)
-	if err != nil {
-		return view, err
+	for path, state := range all {
+		if state.first == state.last {
+			delete(all, path)
+		}
 	}
 	view.Files = changeFiles(all)
 	return view, nil
@@ -194,7 +247,7 @@ func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string)
 	if turn < -1 {
 		return SessionDiffView{}, fmt.Errorf("invalid turn %d", turn)
 	}
-	repo, turns, _, err := r.visibleTurns(sessionID, cwd)
+	repo, turns, msgs, err := r.visibleTurns(sessionID, cwd)
 	if err != nil {
 		return SessionDiffView{}, err
 	}
@@ -203,28 +256,44 @@ func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	current, err := repo.Snapshot(ctx)
-	if err != nil {
-		return SessionDiffView{}, err
+	mutating := turnCanChangeFiles(msgs, turns)
+	var from, to, current string
+	for i, ts := range turns {
+		if !mutating[ts.Turn] && !(i == len(turns)-1 && r.hub.runningCanChangeFiles(sessionID)) {
+			continue
+		}
+		if turn >= 0 && ts.Turn != turn {
+			continue
+		}
+		end := ts.After
+		if end == "" && i+1 < len(turns) {
+			end = turns[i+1].Tree
+		}
+		if end == "" {
+			if current == "" {
+				current, err = repo.Snapshot(ctx)
+				if err != nil {
+					return SessionDiffView{}, err
+				}
+			}
+			end = current
+		}
+		paths, err := repo.Changed(ctx, ts.Tree, end)
+		if err != nil {
+			return SessionDiffView{}, err
+		}
+		for _, changed := range paths {
+			if changed == path {
+				if from == "" {
+					from = ts.Tree
+				}
+				to = end
+				break
+			}
+		}
 	}
-	from := turns[0].Tree
-	to := current
-	if turn >= 0 {
-		found := false
-		for i, ts := range turns {
-			if ts.Turn != turn {
-				continue
-			}
-			from, found = ts.Tree, true
-			to = current
-			if i+1 < len(turns) {
-				to = turns[i+1].Tree
-			}
-			break
-		}
-		if !found {
-			return SessionDiffView{}, fmt.Errorf("file was not changed by this session in the selected scope")
-		}
+	if from == "" {
+		return SessionDiffView{}, fmt.Errorf("file was not changed by this session in the selected scope")
 	}
 	changed, err := repo.Changed(ctx, from, to)
 	if err != nil {

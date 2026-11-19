@@ -108,7 +108,7 @@ function sourceCard(src: HookSource): string {
     : "";
   const untrusted =
     folder && src.exists && handlers.length && !src.trusted
-      ? `<div class="hook-untrusted">${icon("sl-shield", "h-3.5 w-3.5")}<span>These hooks run commands on your machine, outside the sandbox, so they stay off until you trust this file. Trust is pinned to its current content.</span></div>`
+      ? `<div class="hook-untrusted">${icon("sl-shield", "h-3.5 w-3.5")}<span>These hooks run commands with your account privileges, so they stay off until you trust this file. Trust is pinned to its current content.</span></div>`
       : "";
   const error = src.error
     ? `<div class="mcp-config-error">${icon("sl-shield-off", "h-3.5 w-3.5")}<span>${escapeHtml(src.error)}</span></div>`
@@ -159,7 +159,7 @@ function paint(): void {
   const sel = area ? [area.selectionStart, area.selectionEnd, area.scrollTop] : null;
   const focused = !!area && document.activeElement === area;
   hooksBodyEl.innerHTML =
-    `<div class="mem-intro"><span>Hooks run your own commands before or after a tool call, when you send a message, when a turn ends and around compaction. They run outside the sandbox.</span>` +
+    `<div class="mem-intro"><span>Hooks run your own commands with your account privileges before or after a tool call, when you send a message, when a turn ends and around compaction.</span>` +
     `<span class="mcp-head-actions"><button type="button" class="mem-refresh" data-hook-refresh>${icon("repeat", "h-3.5 w-3.5")}Refresh</button></span></div>` +
     section("global", overview) +
     (loadedCwd ? section("folder", overview) : "");

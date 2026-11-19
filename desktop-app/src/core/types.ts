@@ -92,6 +92,38 @@ export type SessionInfo = {
   children?: string[];
   // damaged says why the host could not read this session.
   damaged?: string;
+  // harness names the external agent that runs the session ("codex").
+  harness?: string;
+};
+
+// CodexModel is one model the Codex CLI offers.
+type CodexModel = {
+  id: string;
+  displayName: string;
+  description?: string;
+  defaultEffort?: string;
+  efforts: string[];
+  isDefault: boolean;
+};
+
+// CodexStatus is codexStatus: whether the Codex CLI can run sessions.
+export type CodexStatus = {
+  installed: boolean;
+  version?: string;
+  loggedIn: boolean;
+  account?: string;
+  models: CodexModel[];
+  // permissions are the permission presets Codex accepts on this machine.
+  permissions: PermissionPreset[];
+  error?: string;
+};
+
+// CodexSkill is a skill Codex has for the folder (codexSkills).
+export type CodexSkill = {
+  name: string;
+  title?: string;
+  description?: string;
+  scope?: string;
 };
 
 export type AgentStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
@@ -199,6 +231,7 @@ export type OpenedSession = {
   model: string;
   worktree?: WorktreeInfo;
   subagent?: SubagentLink;
+  harness?: string;
 };
 
 // UsageModel is one model's slice of a session's usage. FillPercent is
@@ -216,8 +249,15 @@ type UsageModel = {
   reasoningTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  // cacheHitSum adds each call's own cache share (0..1) over the cacheHitCalls
+  // calls that reported their cache; their ratio is the average hit rate.
+  cacheHitSum?: number;
+  cacheHitCalls?: number;
   totalTokens: number;
   lastInputTokens?: number;
+  // contextTokens is what a harness (Codex) reported its conversation holds;
+  // when present the fill is measured on it, not on lastInputTokens.
+  contextTokens?: number;
   cost: number;
   listCost: number;
   hasCost: boolean;
@@ -249,6 +289,14 @@ export type SkillEntry = {
   path: string;
 };
 
+// UsageLimit is one usage window of a plan: how much of it is used and when it
+// renews (unix seconds; absent when unknown).
+export type UsageLimit = {
+  label: string;
+  usedPercent: number;
+  resetsAt?: number;
+};
+
 // SessionUsage is the client-facing usage view from `sessionUsage`.
 // FillPercent is the last call's input tokens over the context window;
 // absent when the model's window is unknown. LastInputTokens is absent
@@ -266,8 +314,18 @@ export type SessionUsage = {
   reasoningTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  // cacheHitSum adds each call's own cache share (0..1) over the cacheHitCalls
+  // calls that reported their cache; their ratio is the average hit rate.
+  cacheHitSum?: number;
+  cacheHitCalls?: number;
   totalTokens: number;
   lastInputTokens?: number;
+  // contextTokens is what a harness (Codex) reported its conversation holds;
+  // when present the fill is measured on it, not on lastInputTokens.
+  contextTokens?: number;
+  // limits are the plan's usage windows (a Codex account's five hours and
+  // week), when the session's harness reports them.
+  limits?: UsageLimit[];
   cost: number;
   listCost: number;
   hasCost: boolean;
@@ -291,6 +349,10 @@ export type DailyPoint = {
   reasoningTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  // cacheHitSum adds each call's own cache share (0..1) over the cacheHitCalls
+  // calls that reported their cache; their ratio is the average hit rate.
+  cacheHitSum?: number;
+  cacheHitCalls?: number;
   totalTokens: number;
   cost: number;
   listCost: number;
@@ -316,6 +378,10 @@ type OverallSessionEntry = {
   reasoningTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  // cacheHitSum adds each call's own cache share (0..1) over the cacheHitCalls
+  // calls that reported their cache; their ratio is the average hit rate.
+  cacheHitSum?: number;
+  cacheHitCalls?: number;
   totalTokens: number;
   cost: number;
   listCost: number;
@@ -338,6 +404,10 @@ export type OverallUsage = {
   reasoningTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  // cacheHitSum adds each call's own cache share (0..1) over the cacheHitCalls
+  // calls that reported their cache; their ratio is the average hit rate.
+  cacheHitSum?: number;
+  cacheHitCalls?: number;
   totalTokens: number;
   cost: number;
   listCost: number;
@@ -357,6 +427,8 @@ export type MessageInfo = {
   content: string;
   createdAt: number;
   name?: string;
+  // toolCallId links a tool row to its call.
+  toolCallId?: string;
   arguments?: string;
   status?: string;
   // kind tags special rows: "compaction" is a context-compaction
@@ -549,6 +621,7 @@ export type TurnInfo = {
   cwd: string;
   message: string;
   display?: string;
+  attachments?: MessageInfo["attachments"];
   skill?: string;
   command?: string;
   mode?: string;
@@ -577,6 +650,8 @@ export type TurnInfo = {
 // TurnEvent is any chat/* or turn/* line, for any session.
 export type TurnEvent = {
   event: string;
+  // host/failed only: why the app stopped restarting the agent host.
+  message?: string;
   // mcp/status only (it has no sessionId).
   server?: MCPServerStatus;
   // tools/pending only: new tools the session holds back.
@@ -597,11 +672,16 @@ export type TurnEvent = {
   steer?: SteerInfo;
   budget?: BudgetNotice;
   hook?: HookNote;
+  notice?: TurnNotice;
   turn?: TurnInfo;
   // agents/changed only (it has no sessionId).
   parentSessionId?: string;
   agent?: AgentInfo;
 };
+
+// TurnNotice is chat/notice: something the harness running the turn wants the
+// user to know (a warning, a model switch, a server that failed to start).
+export type TurnNotice = { kind: "info" | "warning" | "error"; text: string };
 
 // HookNote is chat/hook: a user hook ran and did something worth showing.
 type HookOutcome = "blocked" | "context" | "error" | "stopped" | "message";
@@ -677,7 +757,7 @@ export type ThinkingView = {
 };
 
 // Permission presets, rules and the approval card the gate sends.
-export type PermissionPreset = "read-only" | "auto" | "full-access";
+export type PermissionPreset = "read-only" | "full-access";
 export type ApprovalDecision = "once" | "session" | "folder" | "global" | "deny";
 
 export type PermissionRule = {
@@ -689,7 +769,7 @@ export type PermissionRule = {
 export type Approval = {
   id: string;
   tool: string;
-  kind: "shell" | "write" | "read" | "escalate" | "mcp" | "web" | "project" | "extension" | string;
+  kind: "shell" | "write" | "read" | "permissions" | "mcp" | "web" | "project" | "extension" | string;
   command?: string;
   path?: string;
   // MCP calls: the server, its own tool name and the JSON arguments.
@@ -699,7 +779,6 @@ export type Approval = {
   // Web requests (web_fetch, browser open): the site and full URL.
   host?: string;
   url?: string;
-  sandbox?: "workspace-write" | "read-only" | "unavailable" | "none";
   reasons?: string[];
   destructive?: boolean;
   choices?: ApprovalDecision[];
@@ -713,7 +792,6 @@ export type PermissionsView = {
   folder: PermissionRule[];
   session: PermissionRule[];
   folders: { cwd: string; rules: PermissionRule[] }[];
-  sandbox: { kind: string };
   presets: PermissionPreset[];
 };
 

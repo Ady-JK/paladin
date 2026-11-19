@@ -27,6 +27,37 @@
   display: none;
 }
 
+/* Keep the turn status without reserving a context strip above the composer. */
+.context-box:not(:has(.working-status:not(.hidden))) {
+  display: none;
+}
+.context-box:has(.working-status:not(.hidden)) {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.context-box .context-toggle,
+.context-box .context-list {
+  display: none;
+}
+.thinking-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+.thinking-row .think-inline {
+  padding: 0 12px;
+}
+.thinking-row .context-box-slot {
+  margin-left: auto;
+  padding-right: 12px;
+}
+.thinking-row .context-head {
+  padding: 0;
+}
+
 .context-head {
   display: flex;
   align-items: center;

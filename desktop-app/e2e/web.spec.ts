@@ -53,6 +53,16 @@ test("window buttons fill the top-right corner", async ({ page }) => {
   expect(Math.abs(minimize!.height - close!.height)).toBeLessThanOrEqual(1);
 });
 
+test("browser menu remains inside the window", async ({ page }) => {
+  await openMenu(page);
+  const menu = (await page.locator("#webMenu").boundingBox())!;
+  const windowWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  expect(menu.x).toBeGreaterThanOrEqual(0);
+  expect(menu.x + menu.width).toBeLessThanOrEqual(windowWidth);
+  const remove = (await page.locator("#webMenu .web-site-del").first().boundingBox())!;
+  expect(remove.x + remove.width).toBeLessThanOrEqual(menu.x + menu.width);
+});
+
 test("the Web menu lists the saved sites and opens one beside the agent", async ({ page }) => {
   await startSession(page);
   await openMenu(page);

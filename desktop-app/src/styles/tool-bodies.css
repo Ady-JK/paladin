@@ -142,6 +142,11 @@
   white-space: nowrap;
 }
 
+.tool-run.is-open .term-head[aria-expanded="false"] .term-cmd {
+  white-space: pre-wrap;
+  overflow: visible;
+}
+
 .term-prompt {
   flex-shrink: 0;
   color: var(--color-accent-500);

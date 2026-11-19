@@ -129,3 +129,57 @@ test("stored screenshots render small and open in the session image viewer", asy
   await page.keyboard.press("Escape");
   await expect(page.locator("#sessionImageViewer")).toBeHidden();
 });
+
+test("aligns files and collapses more than three sent images into a browsable thumbnail", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eRunTurn = () => new Promise(() => {});
+    const transfer = new DataTransfer();
+    for (let i = 1; i <= 4; i++)
+      transfer.items.add(
+        new File([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])], `image-${i}.png`, { type: "image/png" }),
+      );
+    document
+      .querySelector(".composer-float")!
+      .dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  });
+  await page.fill("#promptInput", "@src/ma");
+  await expect(page.locator("#mentionPopup")).toContainText("src/main.go");
+  await page.keyboard.press("Enter");
+  await page.fill("#promptInput", "Review these");
+  await page.click("#sendBtn");
+  const strip = page.locator("#messages .user-images");
+  const visibleImages = strip.locator(".session-image-thumb:visible");
+  await expect(visibleImages).toHaveCount(1);
+  await expect(visibleImages.first()).toContainText("+3");
+  // Both rectangles are read in one synchronous call: the row slides in over
+  // 260ms, so two separate reads on a busy machine would catch it mid-move and
+  // report a skew that is not in the layout.
+  const offset = await strip.evaluate((el) => {
+    const image = el.querySelector(".session-image-thumb:not([hidden])")!.getBoundingClientRect();
+    const file = el.querySelector(".session-file-card")!.getBoundingClientRect();
+    return Math.abs(image.y - file.y);
+  });
+  expect(offset).toBeLessThanOrEqual(1);
+  await visibleImages.first().click();
+  await expect(page.locator("#sessionImageViewer .image-viewer-count")).toHaveText("1 / 4");
+  await page.locator("#sessionImageViewer .image-viewer-next").click();
+  await expect(page.locator("#sessionImageViewer .image-viewer-count")).toHaveText("2 / 4");
+});
+
+test("shows all three images without a counter", async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__e2eRunTurn = () => new Promise(() => {});
+    const transfer = new DataTransfer();
+    for (let i = 1; i <= 3; i++)
+      transfer.items.add(
+        new File([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])], `image-${i}.png`, { type: "image/png" }),
+      );
+    document
+      .querySelector(".composer-float")!
+      .dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  });
+  await page.fill("#promptInput", "Review these");
+  await page.click("#sendBtn");
+  await expect(page.locator("#messages .user-images .session-image-thumb:visible")).toHaveCount(3);
+  await expect(page.locator("#messages .user-image-count")).toHaveCount(0);
+});

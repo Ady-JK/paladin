@@ -1,6 +1,7 @@
 // format.ts holds pure string, date, and JSON helpers.
 // It has no DOM or backend dependencies so any module can use it.
 
+import katex from "katex";
 import type { ProviderInfo, TurnStats } from "./types";
 
 // formatTurnStats renders a finished turn's cost: "10m 9s · 103.9
@@ -52,13 +53,54 @@ export function escapeAttr(text: string): string {
   return escapeHtml(text);
 }
 
+// Math uses Pandoc's delimiters: $...$ is inline math when the opening $
+// is followed by a non-space and the closing $ is preceded by one and not
+// followed by a digit, so "$5 and $10" stays text. $$...$$ is display
+// math, and \$ is a literal dollar sign. Code spans and fences are matched
+// first and returned unchanged, so a $ inside code is never math.
+const MATH_TOKEN =
+  /```[\s\S]*?(?:```|$)|``.+?``|`[^`\n]+?`|\\\$|\$\$([\s\S]+?)\$\$|(?<![\\$])\$(?=[^\s$])([^$\n]*?[^\s$\\])\$(?!\d)/g;
+
+// Held values are replaced by a run of private-use markers around a
+// letters-only index (digits would collide with the inline stash).
+const HELD_OPEN = "\uE000";
+const HELD_CLOSE = "\uE001";
+const HELD_DIGITS = "abcdefghij";
+const HELD_TOKEN = /\uE000([a-j]+)\uE001/g;
+
+// protectMath renders math with KaTeX and swaps it, and \$, for held
+// placeholders before the text is escaped and parsed. LaTeX keeps its
+// raw characters (<, &, |, *, _) and never meets the Markdown rules.
+// KaTeX's own output is the only HTML that bypasses escapeHtml, and
+// KaTeX keeps it trusted (no \href or \includegraphics by default).
+function protectMath(text: string, held: string[]): string {
+  return text.replace(MATH_TOKEN, (match: string, display?: string, inline?: string) => {
+    if (match === "\\$") {
+      return hold(held, "$");
+    }
+    if (display === undefined && inline === undefined) {
+      return match;
+    }
+    const tex = (display ?? inline ?? "").trim();
+    return hold(held, katex.renderToString(tex, { displayMode: display !== undefined, throwOnError: false }));
+  });
+}
+
+function hold(held: string[], html: string): string {
+  held.push(html);
+  const index = [...String(held.length - 1)].map((d) => HELD_DIGITS[Number(d)]).join("");
+  return HELD_OPEN + index + HELD_CLOSE;
+}
+
 // renderMarkdown renders agent output as Markdown HTML: fenced code,
 // headings, bold/italic/strikethrough, inline code, nested lists with
-// task items, blockquotes, tables, rules, and links. The input is
-// HTML-escaped first, so the tags below are the only markup in the
+// task items, blockquotes, tables, rules, links, and LaTeX math. The input
+// is HTML-escaped first, so the tags below are the only markup in the
 // output — agent text can never inject elements or attributes.
 export function renderMarkdown(text: string): string {
-  const parts = escapeHtml(text).split(/```/);
+  const held: string[] = [];
+  const protectedText = protectMath(text.replace(/[\uE000\uE001]/g, ""), held);
+  const parts = escapeHtml(protectedText).split(/```/);
   let out = "";
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 1) {
@@ -67,18 +109,38 @@ export function renderMarkdown(text: string): string {
     }
     out += renderBlocks(parts[i]);
   }
-  return out;
+  return out.replace(HELD_TOKEN, (_m, index: string) => {
+    const at = Number([...index].map((c) => HELD_DIGITS.indexOf(c)).join(""));
+    return held[at] ?? "";
+  });
 }
 
-// renderFence renders one ``` block: an optional language tag on the
-// first line becomes a label chip, the rest is literal code. An
-// unclosed fence (still streaming) renders the same way.
+// dedent strips the indentation every line shares (a fence nested in a
+// list item keeps its list indent) and the blank lines around the code,
+// so a one-line block is one tight line.
+function dedent(code: string): string {
+  const lines = code
+    .replace(/\s+$/, "")
+    .replace(/^(?:[ \t]*\n)+/, "")
+    .split("\n");
+  let indent = Infinity;
+  for (const line of lines) {
+    if (line.trim()) {
+      indent = Math.min(indent, /^[ \t]*/.exec(line)![0].length);
+    }
+  }
+  return indent && Number.isFinite(indent) ? lines.map((line) => line.slice(indent)).join("\n") : lines.join("\n");
+}
+
+// renderFence renders one ``` block. The language tag on the first line
+// is not shown; a copy button takes its corner instead. An unclosed
+// fence (still streaming) renders the same way.
 function renderFence(block: string): string {
   const nl = block.indexOf("\n");
-  const lang = (nl === -1 ? block : block.slice(0, nl)).trim().replace(/[^a-z0-9+#-]/gi, "");
-  const code = (nl === -1 ? "" : block.slice(nl + 1)).replace(/^\n/, "");
-  const label = lang ? `<span class="md-lang">${lang}</span>` : "";
-  return `<pre class="md-pre"><code>${code}</code>${label}</pre>`;
+  const code = dedent(nl === -1 ? "" : block.slice(nl + 1));
+  const copy = `<button type="button" class="md-copy" data-copy-code title="Copy" aria-label="Copy code"></button>`;
+  const one = code.includes("\n") ? "" : " is-oneline";
+  return `<pre class="md-pre${one}"><code>${code}</code>${copy}</pre>`;
 }
 
 // renderBlocks parses block structure: headings, rules, quotes,

@@ -11,7 +11,8 @@ import type { DailyPoint, OverallUsage } from "../core/types";
 import { icon } from "../icons";
 import {
   areaChart,
-  cacheHitRate,
+  cacheHitText,
+  uncachedInput,
   compactTokens,
   donut,
   estimatedSpend,
@@ -66,7 +67,7 @@ function banner(u: OverallUsage): string {
       <div class="mt-0.5 font-mono text-[10px] text-slate-400">${sub}</div>
     </div>`;
   return `<div class="glass-panel grid grid-cols-2 gap-3 rounded-2xl p-4 font-mono sm:grid-cols-3 lg:grid-cols-5">
-    ${cell(PALETTE.blue, "Input tokens", u.promptTokens.toLocaleString(), `${share(u.promptTokens)} of total`)}
+    ${cell(PALETTE.blue, "Input tokens", uncachedInput(u).toLocaleString(), `${share(uncachedInput(u))} · not cached`)}
     ${cell(PALETTE.purple, "Output tokens", u.completionTokens.toLocaleString(), `${share(u.completionTokens)} of total`)}
     ${cell(PALETTE.rose, "Reasoning tokens", u.reasoningTokens.toLocaleString(), u.reasoningTokens > 0 ? `${share(u.reasoningTokens)} of total` : "no thinking billed")}
     ${cell(PALETTE.emerald, "Cache read tokens", u.cacheReadTokens.toLocaleString(), u.cacheReadTokens > 0 ? `${share(u.cacheReadTokens)} · 90% off` : "no cache hits")}
@@ -125,7 +126,6 @@ function sessionsTable(u: OverallUsage, filter: string): string {
   }
   const body = rows
     .map((s) => {
-      const hit = cacheHitRate(s);
       const title = s.title || s.sessionId.slice(0, 8);
       const badge = isEstimatedSpend(s)
         ? `<span class="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-400">EST.</span>`
@@ -136,7 +136,7 @@ function sessionsTable(u: OverallUsage, filter: string): string {
         <td class="py-2.5 pr-3 font-semibold text-accent-400">${escapeHtml(s.sessionId.slice(0, 8))}<div class="max-w-44 truncate text-[10px] font-normal text-slate-500">${escapeHtml(title)}</div></td>
         <td class="py-2.5 pr-3 text-slate-200">${escapeHtml(s.model || "—")}<div class="text-[10px] text-slate-500">${s.calls} calls</div></td>
         <td class="py-2.5 pr-3 font-bold text-slate-100">${compactTokens(s.totalTokens)}</td>
-        <td class="py-2.5 pr-3 text-emerald-400">${trimNum(roundTo(hit, 0))}%</td>
+        <td class="py-2.5 pr-3 text-emerald-400">${cacheHitText(s, 0)}</td>
         <td class="py-2.5 pr-3 font-bold text-slate-200">${s.hasCost ? formatCost(estimatedSpend(s)) : "—"}</td>
         <td class="py-2.5 text-right">${badge}</td>
       </tr>`;
@@ -188,7 +188,6 @@ function render(u: OverallUsage): void {
           models: (u.models ?? []).filter((m) => m.model === modelFilter),
           sessions: (u.sessions ?? []).filter((s) => s.model === modelFilter),
         };
-  const hit = cacheHitRate(filtered);
   const kpis = [
     hero({
       label: isEstimatedSpend(filtered) ? "Est. total cost" : "Total cost",
@@ -217,11 +216,11 @@ function render(u: OverallUsage): void {
     }),
     hero({
       label: "Prompt cache hit",
-      value: `${trimNum(roundTo(hit, 1))}%`,
+      value: cacheHitText(filtered),
       sub:
-        filtered.cacheReadTokens > 0
-          ? `${compactTokens(filtered.cacheReadTokens)} read · 90% off`
-          : "no cache hits recorded",
+        (filtered.cacheHitCalls ?? 0) > 0
+          ? `average over ${filtered.cacheHitCalls} calls · ${compactTokens(filtered.cacheReadTokens)} read`
+          : "no cache data",
       iconName: "zap",
       glow: "amber",
     }),

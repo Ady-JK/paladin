@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -177,8 +176,8 @@ func grepFileHits(path string, re *regexp.Regexp, context, limit int) (hits []gr
 	if err != nil || info.Size() > searchMaxFileBytes {
 		return nil, 0, false
 	}
-	data, err := io.ReadAll(f)
-	if err != nil || bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
+	data, err := readUpTo(f, searchMaxFileBytes+1)
+	if err != nil || len(data) > searchMaxFileBytes || bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
 		return nil, 0, false
 	}
 	lines := strings.Split(string(data), "\n")

@@ -11,6 +11,7 @@
 @import "@fontsource/geist/500.css";
 @import "@fontsource/geist/600.css";
 @import "@fontsource/jetbrains-mono/400.css";
+@import "katex/dist/katex.min.css";
 
 @import "./styles/base.css";
 @import "./styles/motion.css";
@@ -47,3 +48,5 @@
 @import "./styles/ide.css";
 
 @import "./styles/model-pricing.css";
+@import "./styles/attachment-strip.css";
+@import "./adapters/adapters.css";

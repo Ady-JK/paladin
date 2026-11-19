@@ -1,10 +1,9 @@
-// toolRun.ts groups consecutive tool calls of one turn. A lone call is
-// a plain row (a command is its own terminal card); from the second call
-// on, the run folds behind a summary that expands to the rows.
+// toolRun.ts groups consecutive tool calls of one turn. Commands and
+// multiple calls fold behind a summary that expands to the detailed rows.
 
 import type { ToolInfo, ToolView } from "../core/types";
 import { icon } from "../icons";
-import { createToolActivity, runLabel, toolLabel } from "./tools";
+import { createToolActivity, runLabel, toolIcon, toolLabel, toolReason } from "./tools";
 
 // setGlyph swaps the icon slot only when its kind changes, so a live
 // spinner keeps rotating across updates instead of restarting.
@@ -14,6 +13,55 @@ function setGlyph(slot: HTMLElement, kind: string, html: () => string): void {
   }
   slot.dataset.glyph = kind;
   slot.innerHTML = html();
+}
+
+// Step is one call inside an expanded group: a head showing the model's
+// reason for the call (tool icon, one line, chevron) over the full tool
+// row, which unfolds when the head is clicked. A call with no reason has
+// no head and shows its tool row directly (see .tool-step in chat.css).
+type Step = { el: HTMLElement; head: HTMLButtonElement; ico: HTMLElement; text: HTMLElement; fail: HTMLElement };
+
+function createStep(view: ToolView): Step {
+  const el = document.createElement("div");
+  el.className = "tool-step";
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "tool-step-head";
+  head.setAttribute("aria-expanded", "false");
+  head.innerHTML =
+    `<span class="tool-ico"></span><span class="tool-step-text"></span><span class="tool-fail" hidden></span>` +
+    `<span class="tool-step-caret">${icon("chevron-right", "h-3.5 w-3.5")}</span>`;
+  const body = document.createElement("div");
+  body.className = "tool-step-body";
+  body.append(view.el);
+  head.addEventListener("click", () => {
+    const open = !el.classList.contains("is-open");
+    el.classList.toggle("is-open", open);
+    head.setAttribute("aria-expanded", String(open));
+  });
+  el.append(head, body);
+  return {
+    el,
+    head,
+    ico: head.querySelector<HTMLElement>(".tool-ico")!,
+    text: head.querySelector<HTMLElement>(".tool-step-text")!,
+    fail: head.querySelector<HTMLElement>(".tool-fail")!,
+  };
+}
+
+function paintStep(step: Step, tool: ToolInfo): void {
+  const reason = toolReason(tool);
+  step.el.classList.toggle("has-reason", reason !== "");
+  step.el.dataset.status = tool.status;
+  setText(step.text, reason);
+  step.head.title = reason;
+  const glyph = tool.status === "running" ? "spin" : toolIcon(tool.name);
+  setGlyph(step.ico, glyph, () =>
+    tool.status === "running" ? '<span class="tool-spin"></span>' : icon(toolIcon(tool.name), "h-4 w-4"),
+  );
+  const failed = tool.status === "failed";
+  setText(step.fail, failed ? "failed" : "");
+  step.fail.hidden = !failed;
 }
 
 export class ToolRun {
@@ -26,6 +74,7 @@ export class ToolRun {
   private readonly now: HTMLElement;
   private readonly fail: HTMLElement;
   private readonly views = new Map<string, ToolView>();
+  private readonly steps = new Map<string, Step>();
   private readonly infos = new Map<string, ToolInfo>();
   private open = false;
   private queued = false;
@@ -75,9 +124,12 @@ export class ToolRun {
       existing.update(tool);
     } else {
       const view = createToolActivity(tool);
+      const step = createStep(view);
       this.views.set(tool.id, view);
-      this.inner.append(view.el);
+      this.steps.set(tool.id, step);
+      this.inner.append(step.el);
     }
+    paintStep(this.steps.get(tool.id)!, tool);
     this.schedule();
   }
 
@@ -102,9 +154,13 @@ export class ToolRun {
   private paint(): void {
     this.queued = false;
     const tools = [...this.infos.values()];
-    const grouped = tools.length > 1;
+    const grouped = tools.length > 1 || (tools.length === 1 && tools[0].name === "shell");
     this.el.classList.toggle("is-group", grouped);
     this.el.classList.toggle("is-open", grouped && this.open);
+    this.el.classList.toggle(
+      "has-reasons",
+      tools.some((tool) => toolReason(tool) !== ""),
+    );
     this.list.classList.toggle("is-folded", grouped && !this.open);
     this.list.setAttribute("aria-hidden", String(grouped && !this.open));
     this.list.inert = grouped && !this.open;

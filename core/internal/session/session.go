@@ -72,6 +72,8 @@ type SessionInfo struct {
 	// Damaged says why the session could not be read (it can still be
 	// deleted).
 	Damaged string `json:"damaged,omitempty"`
+	// Harness names the external agent running the session ("codex").
+	Harness string `json:"harness,omitempty"`
 }
 
 // SubagentInfo is the client view of a child session's link and state.
@@ -158,7 +160,17 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 		Worktree:     WorktreeView(meta.Worktree),
 		Subagent:     SubagentView(meta.Subagent),
 		Children:     meta.Children,
+		Harness:      HarnessName(meta.Harness),
 	}
+}
+
+// HarnessName is the client view of a session's harness ("" for Paladin's
+// own loop).
+func HarnessName(h *transcript.Harness) string {
+	if h == nil {
+		return ""
+	}
+	return h.Name
 }
 
 // TodoFileName is the on-disk activity list; kept here so the runtime

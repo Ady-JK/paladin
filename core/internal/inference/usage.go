@@ -76,14 +76,6 @@ func (u *Usage) Add(o Usage) {
 	}
 }
 
-// addUsage folds u into acc, tolerating a nil report (providers that
-// stayed silent contribute nothing).
-func addUsage(acc *Usage, u *Usage) {
-	if u != nil {
-		acc.Add(*u)
-	}
-}
-
 // opencodeExtras is the gateway cost envelope nested under usage.
 // OpenCode sends {"cost":…,"opencode":{"list_cost":…,"tokens":{…}}};
 // OpenRouter sends {"cost":…} with cache detail in

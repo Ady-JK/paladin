@@ -56,7 +56,7 @@ function errorOf(tool: ToolInfo, result: unknown): string | null {
     return result.error;
   }
   if (tool.status === "failed") {
-    return typeof result === "string" && result ? result : "the call failed";
+    return typeof result === "string" && result ? result : "the tool failed and recorded no error message";
   }
   return null;
 }
@@ -74,6 +74,9 @@ function shellStatus(tool: ToolInfo, args: Obj, result: unknown): { text: string
   }
   const status = str(result.status);
   const code = num(result.exit_code);
+  if (status === "unknown") {
+    return { text: "status unavailable", tone: "is-warn" };
+  }
   if (status === "running") {
     return args.background === true && str(args.action || "run") === "run"
       ? { text: "running in background", tone: "is-run" }

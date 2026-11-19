@@ -1,7 +1,7 @@
 package main
 
 // User terminals run with the user's normal OS permissions. They are
-// separate from the agent's sandboxed shell tool and its transcript.
+// separate from the agent's permission-gated shell tool and its transcript.
 import (
 	"context"
 	"encoding/base64"
@@ -18,6 +18,9 @@ import (
 	"github.com/creack/pty"
 	"github.com/google/uuid"
 )
+
+// maxTerminalsPerSession keeps one session from using every terminal slot.
+const maxTerminalsPerSession = 8
 
 type terminalEvent struct {
 	Event      string `json:"event"`
@@ -101,7 +104,16 @@ func (h *terminalHub) start(sessionID, dir string, cols, rows uint16) (string, e
 		h.mu.Unlock()
 		return "", errors.New("too many open terminals")
 	}
+	open := 0
+	for _, entry := range h.entries {
+		if entry.sessionID == sessionID {
+			open++
+		}
+	}
 	h.mu.Unlock()
+	if open >= maxTerminalsPerSession {
+		return "", errors.New("too many open terminals for this session")
+	}
 	cmd := exec.Command(terminalShell(), "-il")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
@@ -226,6 +238,8 @@ func terminalRun(command, dir string) (terminalResult, error) {
 	}
 	cmd := exec.CommandContext(ctx, shell, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "SHELL_SESSIONS_DISABLE=1")
+	detachFromTerminal(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	output := &limitedOutput{}
 	cmd.Stdout, cmd.Stderr = output, output

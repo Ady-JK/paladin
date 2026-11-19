@@ -41,12 +41,6 @@
 .dark .perm-chip[data-preset="read-only"] {
   color: var(--color-accent-400);
 }
-.perm-chip-warn {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: #e0a800;
-}
 .perm-menu {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -132,24 +126,6 @@
 }
 
 /* ============ Settings → Permissions ============ */
-.perm-sandbox {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 5px;
-  border-radius: 9999px;
-  padding: 2px 9px;
-  font-size: 11px;
-  font-weight: 500;
-}
-.perm-sandbox.is-on {
-  color: var(--color-agent-emerald, #059669);
-  background: rgb(16 185 129 / 0.1);
-}
-.perm-sandbox.is-off {
-  color: #b58900;
-  background: rgb(224 168 0 / 0.12);
-}
 .perm-segs {
   display: inline-flex;
   gap: 2px;

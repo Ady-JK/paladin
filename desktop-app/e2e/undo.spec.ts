@@ -82,6 +82,20 @@ test("Revert to here previews, restores files and the conversation", async ({ pa
   await expect(page.locator("#messages .bubble-user")).toHaveCount(1);
 });
 
+test("the recovery option disappears once the next message is sent", async ({ page }) => {
+  await boot(page);
+  await openDemo(page);
+  const row = page.locator("#messages .turn-row:has(.bubble-user)").first();
+  await row.hover();
+  await row.locator("[data-revert]").click();
+  await page.locator("#revertConfirmBtn").click();
+  await expect(page.locator("#recoverLatestBtn")).toBeVisible();
+  await page.locator("#promptInput").fill("a different request");
+  await page.click("#sendBtn");
+  await expect(page.locator("#recoveryBar")).toBeHidden();
+  expect(await get(page, "__e2eRecoveryAvailable")).toBe(false);
+});
+
 test("Cancel leaves everything alone; untracked folders note conversation-only", async ({ page }) => {
   await boot(page);
   await set(page, { __e2ePreview: { snapshots: false } });

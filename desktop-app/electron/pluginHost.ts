@@ -61,9 +61,12 @@ const MIME: Record<string, string> = {
   ".ttf": "font/ttf",
 };
 
+// 'self' is this plugin's own host (plugin://<name>), so a view can load
+// its own files and never another plugin's; a bare "plugin:" source would
+// allow every plugin.
 const CSP =
-  "default-src 'none'; script-src 'self' plugin:; style-src 'self' 'unsafe-inline' plugin:; " +
-  "img-src 'self' data: blob: plugin:; font-src 'self' data: plugin:; media-src 'self' data: blob: plugin:; " +
+  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; " +
   "connect-src 'none'; frame-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 export type HostedView = {
@@ -251,7 +254,7 @@ export class PluginHost {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "content-security-policy":
-            "default-src 'none'; script-src 'self' plugin: 'unsafe-inline'; style-src 'unsafe-inline'; " +
+            "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; " +
             "img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; " +
             "base-uri 'none'; form-action 'none'",
           "x-content-type-options": "nosniff",
@@ -268,6 +271,7 @@ export class PluginHost {
           status: 200,
           headers: {
             "content-type": "text/javascript; charset=utf-8",
+            "content-security-policy": "default-src 'none'",
             "x-content-type-options": "nosniff",
             "cache-control": "no-store",
           },
@@ -467,7 +471,7 @@ function cardDocument(card: HostedCard): string {
   return (
     `<!doctype html><html data-theme="dark"><head><meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; ` +
-    `script-src 'self' plugin: 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; ` +
+    `script-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; ` +
     `frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">` +
     `<style>html,body{margin:0;background:transparent;color:#94a3b8;font:12px/1.45 ui-sans-serif,system-ui,sans-serif}` +
     `body{padding:6px 8px}#root{min-height:32px}pre{margin:0;white-space:pre-wrap;font:11px/1.4 ui-monospace,monospace}</style>` +
@@ -485,7 +489,7 @@ const height = () => {
 };
 window.addEventListener("message", (event) => {
   const data = event.data;
-  if (!data || data.type !== "paladin:card") return;
+  if (event.source !== parent || !data || data.type !== "paladin:card") return;
   const card = window.__paladin_card;
   try {
     if (data.status === "running") { root.textContent = "Running…"; height(); return; }

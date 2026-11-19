@@ -29,3 +29,32 @@ test("remote connection rejects command injection in target and path", () => {
   const command = hostCommand(validateConnection({ mode: "ssh", target: "host", binary: "/path/it's/host" }), "local");
   expect(command.args.at(-1)).toBe("exec '/path/it'\\''s/host'");
 });
+
+test("an SSH target never starts with a dash, on either side of the @", () => {
+  for (const target of ["-v", "-J", "-user@host", "user@-host", "@host", "user@", "a@b@c"]) {
+    expect(() => validateConnection({ mode: "ssh", target, binary: "/bin/host" }), target).toThrow();
+  }
+  for (const target of ["host", "dev@example.internal", "u_1@h-2.example.com", "10.0.0.5"]) {
+    expect(validateConnection({ mode: "ssh", target, binary: "/bin/host" })).toMatchObject({ target });
+  }
+});
+
+test("the host does not inherit the app's Electron or Node-injection variables", () => {
+  const base = {
+    PATH: "/usr/bin",
+    OPENAI_API_KEY: "kept-for-the-host",
+    NODE_OPTIONS: "--require /tmp/inject.js",
+    ELECTRON_START_URL: "http://localhost:5173",
+    ELECTRON_ENABLE_LOGGING: "1",
+    ELECTRON_RUN_AS_NODE: "1",
+  };
+  for (const connection of [{ mode: "local" } as const, { mode: "ssh", target: "h", binary: "/b" } as const]) {
+    const env = hostEnv(connection, base, "/app/electron");
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.OPENAI_API_KEY).toBe("kept-for-the-host");
+    for (const name of ["NODE_OPTIONS", "ELECTRON_START_URL", "ELECTRON_ENABLE_LOGGING", "ELECTRON_RUN_AS_NODE"]) {
+      expect(env[name], name).toBeUndefined();
+    }
+  }
+  expect(hostEnv({ mode: "local" }, base, "/app/electron").ELECTRON_NODE).toBe("/app/electron");
+});

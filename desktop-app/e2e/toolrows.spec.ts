@@ -45,6 +45,14 @@ async function emit(page: Page, steps: Array<string | Tool>): Promise<void> {
 
 const runs = (page: Page) => page.locator("#messages [data-tool-run]");
 
+test("a command without a final result does not claim failure", async ({ page }) => {
+  await setup(page);
+  await emit(page, [tool("unknown", "shell", { command: "sleep 30" }, "ok", { status: "unknown" })]);
+  await runs(page).locator(".tool-run-head").click();
+  await expect(page.locator('.tool-row[data-tool="shell"]')).toContainText("status unavailable");
+  await expect(runs(page)).not.toContainText("failed");
+});
+
 test("an open edit card updates its diff and line counts when the tool changes", async ({ page }) => {
   await setup(page);
   const result = { replacements: 1, match_start_line: 1 };
@@ -116,12 +124,18 @@ test("text streamed right before a tool call is kept", async ({ page }) => {
   await expect(page.locator("#messages")).not.toContainText("thinking");
 });
 
-test("a completed command is one collapsed terminal card", async ({ page }) => {
+test("a completed command stays behind a concise summary", async ({ page }) => {
   await setup(page);
   const command = `printf '${"a".repeat(150)}'`;
   await emit(page, [tool("1", "shell", { command }, "ok", { output: "result", exit_code: 0 })]);
-  await expect(page.locator(".tool-run-head")).toHaveCount(0);
+  const summary = page.locator(".tool-run-head");
+  await expect(summary).toHaveText("Ran 1 command");
+  await expect(summary).not.toContainText(command);
   const card = page.locator('.tool-row[data-tool="shell"]');
+  await expect(card).toBeHidden();
+  await summary.click();
+  await expect(card).toBeVisible();
+  await expect(card.locator(".term-cmd")).toHaveCSS("white-space", "pre-wrap");
   const head = card.locator(".term-head");
   await expect(head.locator(".term-cmd")).toHaveText(command);
   await expect(head.locator(".term-status")).toHaveText("exit 0");
@@ -135,7 +149,7 @@ test("a completed command is one collapsed terminal card", async ({ page }) => {
   await expect(card.locator(".tool-body")).toBeHidden();
 });
 
-test("a lone command is a terminal card while a lone read remains a row", async ({ page }) => {
+test("a lone command is summarized while a lone read remains a row", async ({ page }) => {
   await setup(page);
   await emit(page, [
     tool("1", "shell", { cmd: "pytest -q" }),
@@ -143,7 +157,8 @@ test("a lone command is a terminal card while a lone read remains a row", async 
     tool("2", "read", { path: "src/conf.py" }),
   ]);
   await expect(runs(page)).toHaveCount(2);
-  await expect(page.locator(".tool-run-head")).toHaveCount(0);
+  await expect(runs(page).nth(0).locator(".tool-run-head")).toHaveText("Ran 1 command");
+  await runs(page).nth(0).locator(".tool-run-head").click();
   await expect(runs(page).nth(0).locator(".term-cmd")).toHaveText("pytest -q");
   const read = runs(page).nth(1).locator(".tool-row");
   await expect(read.locator(".tool-verb")).toHaveText("Read");
@@ -197,6 +212,7 @@ test("a row expands to its input and output", async ({ page }) => {
   await setup(page);
   await emit(page, [tool("1", "shell", { cmd: "echo hi" }, "ok", { output: "hi-from-shell" })]);
   const row = page.locator('.tool-row[data-tool="shell"]');
+  await runs(page).locator(".tool-run-head").click();
   await expect(row).not.toContainText("hi-from-shell");
   await row.locator(".term-head").click();
   await expect(row.locator(".term-head")).toHaveAttribute("aria-expanded", "true");
@@ -266,7 +282,8 @@ test("history transcripts group calls the same way", async ({ page }) => {
   await expect(page.locator("#messages")).toContainText("All good.");
   await expect(runs(page)).toHaveCount(2);
   await expect(runs(page).nth(0).locator(".tool-run-head")).toHaveText(/Read 3 files/);
-  await expect(runs(page).nth(1).locator(".tool-run-head")).toHaveCount(0);
+  await expect(runs(page).nth(1).locator(".tool-run-head")).toHaveText("Ran 1 command");
+  await runs(page).nth(1).locator(".tool-run-head").click();
   await expect(runs(page).nth(1).locator(".term-cmd")).toHaveText("go test ./...");
   await expect(runs(page).nth(1).locator(".term-out")).toHaveCount(0);
 });

@@ -40,7 +40,7 @@ func TestDecideRead(t *testing.T) {
 	target := filepath.Join(other, "secret")
 	os.WriteFile(target, []byte("s"), 0o644)
 	req, _ := readReq(t, target, ws)
-	d := Decide(Auto, req, nil)
+	d := Decide(Review, req, nil)
 	if d.Verdict != Ask || len(d.Choices) != 5 || len(d.Remember) != 1 ||
 		d.Remember[0].Tool != ToolRead || d.Remember[0].Pattern != other {
 		t.Fatalf("outside read asks with a folder grant: %+v", d)
@@ -49,7 +49,7 @@ func TestDecideRead(t *testing.T) {
 		{Tool: ToolRead, Pattern: other, Action: ActionAllow},
 		{Tool: ToolWrite, Pattern: other, Action: ActionAllow},
 	} {
-		if d := Decide(Auto, req, []Rule{rule}); d.Verdict != Allow {
+		if d := Decide(Review, req, []Rule{rule}); d.Verdict != Allow {
 			t.Fatalf("%s rule should allow: %+v", rule.Tool, d)
 		}
 	}
@@ -64,7 +64,7 @@ func TestDecideRead(t *testing.T) {
 	defer swapHome(home)()
 	os.WriteFile(filepath.Join(home, ".netrc"), []byte("x"), 0o600)
 	req, _ = readReq(t, filepath.Join(home, ".netrc"), ws)
-	d = Decide(Auto, req, nil)
+	d = Decide(Review, req, nil)
 	if len(d.Remember) != 1 || !strings.HasSuffix(d.Remember[0].Pattern, ".netrc") {
 		t.Fatalf("home grant too broad: %+v", d.Remember)
 	}
@@ -83,7 +83,7 @@ func TestGateRememberedReadGrant(t *testing.T) {
 	ws, other := t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(other, "a"), []byte("a"), 0o644)
 	os.WriteFile(filepath.Join(other, "b"), []byte("b"), 0o644)
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	g.Workspace = ws
 	rec := &recorder{}
 	answer(t, g.Broker, "s1", "r1", ReplySession)
@@ -115,7 +115,7 @@ func TestShellReadsOutsideWorkspaceAsk(t *testing.T) {
 	defer swapHome(home)()
 	inside := []string{"cat README.md", "ls -la", "grep -r foo src", "cat " + filepath.Join(ws, "x"), "grep foo /dev/null", "ls ./sub/../sub"}
 	for _, c := range inside {
-		if d := Decide(Auto, shellIn(c, ws), nil); d.Verdict != Allow {
+		if d := Decide(Review, shellIn(c, ws), nil); d.Verdict != Allow {
 			t.Fatalf("%q should run: %+v", c, d)
 		}
 	}
@@ -127,7 +127,7 @@ func TestShellReadsOutsideWorkspaceAsk(t *testing.T) {
 		"cat a.txt && cat /etc/x": "/etc/x",
 	}
 	for c, want := range outside {
-		d := Decide(Auto, shellIn(c, ws), nil)
+		d := Decide(Review, shellIn(c, ws), nil)
 		if d.Verdict != Ask || !strings.Contains(strings.Join(d.Reasons, " "), "outside the workspace") {
 			t.Fatalf("%q should ask: %+v", c, d)
 		}
@@ -140,12 +140,12 @@ func TestShellReadsOutsideWorkspaceAsk(t *testing.T) {
 		}
 	}
 	// A variable can't be resolved: ask once, never remember.
-	d := Decide(Auto, shellIn("echo $HOME", ws), nil)
+	d := Decide(Review, shellIn("echo $HOME", ws), nil)
 	if d.Verdict != Ask || len(d.Remember) != 0 || strings.Join(d.Choices, ",") != "once,deny" {
 		t.Fatalf("variable read %+v", d)
 	}
 	// Read grants let it through; deny-read rules block it.
-	if d := Decide(Auto, shellIn("cat /etc/hosts", ws), []Rule{{Tool: ToolRead, Pattern: "/etc", Action: ActionAllow}}); d.Verdict != Allow {
+	if d := Decide(Review, shellIn("cat /etc/hosts", ws), []Rule{{Tool: ToolRead, Pattern: "/etc", Action: ActionAllow}}); d.Verdict != Allow {
 		t.Fatalf("granted read %+v", d)
 	}
 	if d := Decide(FullAccess, shellIn("cat /etc/hosts", ws), []Rule{{Tool: ToolRead, Pattern: "/etc", Action: ActionDeny}}); d.Verdict != Deny {
@@ -181,7 +181,7 @@ func TestSearchToolsGateOutsideRoots(t *testing.T) {
 			t.Fatalf("%s outside: %+v %v", name, req, gated)
 		}
 		// A folder search is granted that folder, not its parent.
-		d := Decide(Auto, req, nil)
+		d := Decide(Review, req, nil)
 		if d.Verdict != Ask || len(d.Remember) != 1 || d.Remember[0].Pattern != root {
 			t.Fatalf("%s grant: %+v", name, d)
 		}
@@ -200,7 +200,7 @@ func TestGateReadsTheSessionsOwnFiles(t *testing.T) {
 	spill := filepath.Join(sess, "tool-output", "c1.txt")
 	os.MkdirAll(filepath.Dir(spill), 0o755)
 	os.WriteFile(spill, []byte("full"), 0o644)
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	g.Workspace = ws
 	g.Readable = []string{sess}
 	for _, call := range []struct {

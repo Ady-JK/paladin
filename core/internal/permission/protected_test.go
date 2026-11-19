@@ -29,7 +29,7 @@ func TestWritesToProtectedFoldersAsk(t *testing.T) {
 		".paladin/hooks.json", ".paladin/mcp.json", ".claude/settings.json",
 		"node_modules/.bin/prettier", "node_modules/prettier/index.js", ".venv/bin/ruff", "venv/bin/black",
 	} {
-		d := Decide(Auto, writeIn(t, ws, rel), nil)
+		d := Decide(Review, writeIn(t, ws, rel), nil)
 		if d.Verdict != Ask || len(d.Reasons) == 0 || len(d.Choices) != 3 || d.Choices[2] != ReplyDeny {
 			t.Errorf("%s: %+v", rel, d)
 		}
@@ -38,24 +38,24 @@ func TestWritesToProtectedFoldersAsk(t *testing.T) {
 		}
 	}
 	for _, rel := range []string{"src/main.go", ".github/workflows/ci.yml", "venv2/x.py", "docs/node_modules.md", "gitconfig"} {
-		if d := Decide(Auto, writeIn(t, ws, rel), nil); d.Verdict != Allow {
+		if d := Decide(Review, writeIn(t, ws, rel), nil); d.Verdict != Allow {
 			t.Errorf("%s asks: %+v", rel, d)
 		}
 	}
 	// The answer remembers only that folder, and only for the session.
-	d := Decide(Auto, writeIn(t, ws, ".git/config"), nil)
+	d := Decide(Review, writeIn(t, ws, ".git/config"), nil)
 	if len(d.Remember) != 1 || d.Remember[0].Pattern != filepath.Join(ws, ".git") {
 		t.Fatalf("remember %+v", d.Remember)
 	}
 	session := []Rule{{Tool: ToolWrite, Pattern: filepath.Join(ws, ".git"), Action: ActionAllow}}
-	if d := Decide(Auto, writeIn(t, ws, ".git/hooks/x"), session); d.Verdict != Allow {
+	if d := Decide(Review, writeIn(t, ws, ".git/hooks/x"), session); d.Verdict != Allow {
 		t.Fatalf("an allowed protected folder: %+v", d)
 	}
 	// A broader rule (the whole workspace, or everything) does not cover
 	// a protected folder inside it.
 	for _, broad := range []string{ws, "*"} {
 		rules := []Rule{{Tool: ToolWrite, Pattern: broad, Action: ActionAllow}}
-		if d := Decide(Auto, writeIn(t, ws, ".claude/settings.json"), rules); d.Verdict != Ask {
+		if d := Decide(Review, writeIn(t, ws, ".claude/settings.json"), rules); d.Verdict != Ask {
 			t.Fatalf("rule %q covered a protected folder: %+v", broad, d)
 		}
 	}
@@ -68,7 +68,7 @@ func TestProtectedFolderThroughASymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(ws, ".git", "hooks"), filepath.Join(ws, "hooks-link")); err != nil {
 		t.Skip(err)
 	}
-	if d := Decide(Auto, writeIn(t, ws, "hooks-link/pre-commit"), nil); d.Verdict != Ask {
+	if d := Decide(Review, writeIn(t, ws, "hooks-link/pre-commit"), nil); d.Verdict != Ask {
 		t.Fatalf("through a symlink: %+v", d)
 	}
 }

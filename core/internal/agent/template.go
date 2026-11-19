@@ -111,7 +111,7 @@ type Deps struct {
 	Done      <-chan struct{}
 	// PersistGate, when set, wraps the end-of-turn transcript write.
 	PersistGate func(persist func() error)
-	// Gate, when set, authorizes and sandboxes each tool call.
+	// Gate, when set, authorizes each tool call.
 	Gate ToolGate
 	// Hooks runs the user's hook scripts; nil runs none. SessionStart is
 	// "startup" or "resume" when this turn opens the session.

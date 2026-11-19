@@ -10,7 +10,7 @@ import (
 // win. Rules now speak the new grammar: "<plugin>", "<plugin>/<tool>",
 // "<plugin>/*" or "*"; a bare name is a plugin name, not a tool name.
 func TestExtensionRulesLetACallRun(t *testing.T) {
-	g := newGate(t, Auto)
+	g := newGate(t, Review)
 	g.Extension = func(name string) (ExtensionRef, bool) {
 		if name == "extension__jira__lookup" {
 			return ExtensionRef{Plugin: "jira", Tool: "lookup"}, true
@@ -76,7 +76,7 @@ func TestExtensionRuleMatching(t *testing.T) {
 	}
 	req := extensionReq("jira", "lookup")
 	for _, tc := range cases {
-		d := Decide(Auto, req, []Rule{{Tool: ToolExtension, Pattern: tc.pattern, Action: ActionAllow}})
+		d := Decide(Review, req, []Rule{{Tool: ToolExtension, Pattern: tc.pattern, Action: ActionAllow}})
 		if (d.Verdict == Allow) != tc.allow {
 			t.Errorf("allow %q for jira/lookup: %+v", tc.pattern, d)
 		}
@@ -102,7 +102,7 @@ func TestLegacyExtensionRuleStillMatches(t *testing.T) {
 	if d.Verdict != Allow {
 		t.Fatalf("legacy rule: %+v", d)
 	}
-	if d := Decide(Auto, req, nil); d.Verdict != Ask || len(d.Remember) != 1 ||
+	if d := Decide(Review, req, nil); d.Verdict != Ask || len(d.Remember) != 1 ||
 		d.Remember[0].Pattern != "extension__hello__hello" {
 		t.Fatalf("legacy remember: %+v", d)
 	}

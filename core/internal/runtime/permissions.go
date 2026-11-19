@@ -4,22 +4,15 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/permission"
-	"github.com/Ady-JK/paladin/core/internal/sandbox"
 )
 
-// PermissionsView is the settings pane's snapshot: saved rules, the
-// OS sandbox in use ("" means approvals only) and the presets.
+// PermissionsView is the settings pane snapshot of saved rules and presets.
 type PermissionsView struct {
 	Global  []permission.Rule        `json:"global"`
 	Folder  []permission.Rule        `json:"folder"`
 	Session []permission.Rule        `json:"session"`
 	Folders []permission.FolderRules `json:"folders"`
-	Sandbox SandboxInfo              `json:"sandbox"`
 	Presets []string                 `json:"presets"`
-}
-
-type SandboxInfo struct {
-	Kind string `json:"kind"`
 }
 
 func nonNil[T any](s []T) []T {
@@ -52,8 +45,7 @@ func (r *AgentRuntime) PermissionsGet(cwd string, sessionID ...string) (Permissi
 		Folder:  nonNil(folder),
 		Session: nonNil(sess),
 		Folders: nonNil(r.perms.Folders()),
-		Sandbox: SandboxInfo{Kind: sandbox.Kind()},
-		Presets: []string{string(permission.ReadOnly), string(permission.Auto), string(permission.FullAccess)},
+		Presets: []string{string(permission.ReadOnly), string(permission.FullAccess)},
 	}, nil
 }
 

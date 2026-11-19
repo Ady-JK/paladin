@@ -1,259 +1,97 @@
-# paladin desktop (Electron + agent-host sidecar)
+# Paladin desktop
 
-## Architecture
+The desktop application is an Electron shell and a vanilla TypeScript renderer. Electron owns the operating-system window, the core connection and native surfaces; the renderer owns the interactive UI. The Go core owns sessions, agent execution, provider requests and tools. The [root README](../README.md) shows the full system, the [core README](../core/README.md) describes the agent runtime, and [PROTOCOL.md](PROTOCOL.md) defines the JSONL and IPC interfaces.
 
-```
-desktop-app/
-├── electron/
-│   ├── main.ts      # window + sidecar spawn + JSONL bridge + WebContentsViews
-│   ├── pluginHost.ts # sandboxed plugin:// panels and cards
-│   └── preload.ts   # window.paladin bridge (stream demux, views, shell, windows)
-├── src/             # renderer: the classic paladin UI (Tailwind, vanilla TS)
-│   ├── main.ts      # bootstrap (imports styles.css so dev picks up utilities)
-│   ├── core/        # api (bridge invoke), bridge (bridge probe+types), dom/format/state/types
-│   ├── features/    # chat, sessions, models, web, sidePane, pluginPanels, settings, …
-│   ├── ui/          # toast, status
-│   ├── styles.css   # stylesheet entry: imports the sheets below in cascade order
-│   └── styles/      # Tailwind v4 theme (base.css) + one sheet per feature
-├── e2e/             # Playwright suite (paladin-stub.js fakes window.paladin)
-└── PROTOCOL.md      # JSONL wire spec (Electron main <-> agent-host)
+## Process and source layout
+
+```mermaid
+flowchart LR
+  UI["Renderer: src/"] -->|"api.ts → window.paladin"| Preload["electron/preload.ts"]
+  Preload -->|"Electron IPC"| Main["electron/main.ts"]
+  Main -->|"sidecar.ts: JSONL"| Host["local or SSH agent-host"]
+  Main --> Browser["WebContentsViews and agent browser"]
+  Main --> Voice["voice utility process"]
+  Main --> Plugin["plugin:// iframe host"]
+  UI -->|"turns and events"| Chat["live.ts / turnView.ts"]
 ```
 
-`core/cmd/agent-host` is the stdio sidecar (Go): one JSON object per line on
-stdin, responses + `chat/delta` / `chat/tool` events on stdout, logs on
-stderr. See `PROTOCOL.md`.
+| Path | Responsibility |
+| --- | --- |
+| `index.html` | Single-window markup, CSP and startup shell. |
+| `src/main.ts` | Initializes features, loads workspace and sessions, and connects to the core. |
+| `src/core/api.ts` | Renderer wrapper for core RPCs and desktop bridge operations. |
+| `src/core/state.ts`, `dom.ts`, `types.ts` | Shared state, element references and contract types. |
+| `src/features/` | Chat, sessions, model selection, IDE, settings, voice and side-pane behavior. |
+| `src/styles.css`, `src/styles/` | Tailwind entry, theme tokens and feature stylesheets. Import order affects the cascade. |
+| `electron/main.ts`, `preload.ts` | Window, trusted IPC, lifecycle and the context-isolated renderer bridge. |
+| `electron/sidecar.ts`, `remote.ts` | Local or SSH host startup, JSONL requests, event delivery and reconnection. |
+| `electron/browser*.ts`, `plugin*.ts`, `voice.ts` | Native browser, plugin and on-device voice boundaries. |
+| `e2e/` | Playwright tests, renderer stub and opt-in live tests. |
 
-## Run
+There is no React framework or client-side router. Features manipulate DOM and shared state directly. The application uses one main window; the agent conversation and side surfaces are views within it.
 
-```sh
-make app-dev    # quick loop: debug sidecar + Electron main/preload, Vite + Electron
-make test       # Go tests, UI typecheck and the Playwright UI suite
-make fmt        # format Go and UI sources
-make lint       # golangci-lint, deadcode, eslint, knip, prettier --check
-make clean      # remove every build output
-```
+## Renderer state and events
 
-The Makefile works with GNU make on macOS, Linux and Windows. Go lint
-tools are found in `$(go env GOPATH)/bin`; override with
-`GOLANGCI_LINT=…` / `DEADCODE=…`. The UI tests use, in order,
-`PALADIN_E2E_BROWSER`, Brave on Linux, Playwright's own Chromium, then
-the newest headless shell already in the Playwright cache.
+`src/main.ts` initializes the feature modules and connects to the core. Feature code uses `src/core/api.ts` rather than invoking the preload bridge directly. `chat.ts` handles composer input, slash routes, file tags and attachment submission. The model picker tracks provider and model, exposes catalog metadata and saves session-specific context/compaction choices. The core, not the composer, decides when to compact.
 
-Headed Electron needs an X server. Headless smoke (CI-friendly):
+`live.ts` routes turn events by session and keeps a detached DOM root per session. `turnView.ts` paints streaming text, reasoning, tool activity, approvals and compaction notices. Sequence numbers prevent a reattachment snapshot and live events from painting the same update twice. Delta updates are coalesced, and detached sessions can repaint on attachment. The sidebar uses turn lifecycle events for running, queued and approval indicators.
 
-```sh
-cd desktop-app
-./node_modules/.bin/electron . --smoke-test --headless --disable-gpu --no-sandbox
-# [smoke] PASS: renderer loaded, agent-host ping ok
-```
+When a session opens, `attach` supplies a page of persisted history plus the live turn, queue, buffered events and sequence. `sessionHistoryPage` loads older history. Finished turns fetch the small amount of additional session data they need rather than repeatedly loading the entire transcript. Copied image attachments are shown in the user turn and restored from session history; tagged workspace paths remain available to the agent.
 
-`--smoke-test` loads the window, fails on renderer load errors /
-uncaught exceptions, pings the sidecar over JSONL, and exits 0/1.
+The Sessions and Files controls share the left rail across agent and IDE modes. The IDE feature is loaded on demand and provides workspace navigation, file editing, diagnostics, changes and a terminal dock. Opening a rail drawer does not itself require a mode change. Settings, model selection, context controls and other overlays live in the renderer.
 
-## Local browser testing
+### Feature boundaries
 
-The shipped `litellm` provider uses the usual `http://127.0.0.1:4000/v1`
-address as an editable starting point. In Settings → Providers, connect it
-with your proxy URL and key, refresh its model list, and choose a model before
-starting an agent turn. The proxy and its credentials remain under your
-control; Paladin does not start or bundle a LiteLLM server.
+| Renderer area | Main modules and connections |
+| --- | --- |
+| Conversation | `chat.ts` submits messages; `live.ts`, `turnView.ts`, `toolRun.ts` and `chatView.ts` render events and history. |
+| Sessions and context | `sessions.ts` and `sessions/history.ts` attach and page history; `contextBox.ts`, `models.ts`, `thinking.ts` and `usage.ts` render current controls and accounting. |
+| IDE and changes | `ide.ts` and `features/ide/` own editor, explorer and diagnostics; side-pane change modules display session diffs. |
+| Side surfaces | `sidePane.ts` coordinates session tabs; `sidePane/` implements browser, web, terminal, side-chat, agent and changes tabs. |
+| Configuration | `settings.ts` and feature-specific modules call the core for providers, permissions, memory, tools, MCP and related settings. |
+| Input | `mentions.ts`, `tags.ts` and `attachments.ts` prepare file references and copied uploads before `chat.ts` submits a turn. |
 
-Each Agent session has its own browser tab in the side pane. Open a local URL
-there, or let the agent use the `browser` tool to open it, inspect an accessible
-snapshot, interact with the page, and take screenshots. The agent's `read`
-tool also accepts PNG, JPEG, GIF, and WebP files up to 4 MB and sends them as
-image input to a vision-capable model. Browser screenshots are saved under the
-session's `browser/screenshots/` directory and sent to the model visually.
+The preload bridge exposes named desktop capabilities as well as the generic host RPC entry point. Electron validates privileged IPC against the main frame. Renderer state is presentation state: a sidecar restart or session reattachment must obtain authoritative turn and history state from the core.
 
-The Agent header keeps the new side chat, Web menu, local browser, terminal,
-history, and close actions visible in either layout, even when the side pane is
-closed. The history menu contains the Split/Tabs choice: split shows the agent
-chat beside a side view, while tabs show one full-width view at a time. Tabs mode
-includes the Agent conversation, side chats, subagents, terminals, web tabs, and
-the session browser; switching layouts keeps their state. Clicking an
-`http://localhost` or `http://127.0.0.1` link in an agent message opens that
-session's local browser tab inside Paladin. Other `https` links open in a web tab
-(the integrated browser below); non-http schemes still go to the system.
+## Local and remote core
 
-The local browser is separate from the integrated web tabs. Its navigation is
-limited to `http://localhost` and `http://127.0.0.1`; session pages use separate
-in-memory partitions; a hidden parking window keeps each page interactive while
-another session is visible. Electron opens a random Chromium debugging port bound
-to `127.0.0.1` for the life of the app so bundled Playwright can control those
-pages. Software on the same computer with access to that port can inspect other
-open Electron pages.
+For a local connection, Electron launches the built `agent-host` binary with piped stdio. `sidecar.ts` associates JSONL responses with pending calls and forwards events to the renderer. It monitors the process, applies request deadlines and attempts to restart a failed host with backoff. The core reserves stdout for JSONL and sends diagnostic output to stderr.
 
-`build:electron` copies the installed, lockfile-resolved `playwright-core` into
-the packaged Electron output. Electron supplies Chromium, so this feature does
-not download a separate browser. The real browser smoke can be run with:
+For an SSH connection, `remote.ts` starts the configured absolute host binary with `ssh -T`, batch authentication and strict host-key checking. The same JSONL protocol flows through SSH; Paladin does not create a separate core HTTP server. The remote host uses its own workspace, data directory, keys, toolchain and processes. A desktop connection is not a shared multi-client server. Browser and voice capabilities remain on the desktop; a remote development server needs a separate port forward before opening it locally.
 
-```sh
-cd desktop-app
-pnpm build:electron && pnpm build:renderer
-pnpm exec electron . --smoke-browser
-```
+## Browser surfaces and overlays
 
-## Workspace terminal
+Paladin has two browser paths:
 
-Open the side pane and click the terminal icon to start an interactive shell in
-the current session's workspace. Each terminal tab has its own PTY, supports
-normal terminal programs, and runs with your OS permissions outside the agent
-sandbox. Closing the tab stops its shell. The terminal emulator loads only when
-you open a terminal.
+- **Web tabs** are user-facing `https` sites in the side pane. They use Electron `WebContentsView`s and share the persistent `persist:paladin-sites` partition. Tabs are associated with a session; open tabs are not restored after restart, while saved sites and the persistent login partition remain. Navigation events update the toolbar and tab title.
+- **The agent browser** is controlled through the `browser` tool and the browser side-pane tab. It uses isolated, in-memory session partitions and a local Chromium debugging connection for the bundled Playwright client. Its navigation and egress controls, site permissions, element picker and screenshot flow are implemented in `electron/browser*.ts` and the core browser tool. Localhost and approved web navigation follow those controls; it does not share the web tabs' login partition.
 
-At the start of the main composer, `! command` runs the command in the session
-workspace and starts an agent turn with its command, exit code, and output.
-`!! command` runs and displays the output without starting an agent turn or
-adding it to the agent's conversation. Both forms show their output in the
-terminal pane. These composer commands are separate from the interactive
-terminal shell; they run in the workspace selected for the session.
+Native views render above HTML, so ordinary CSS z-index cannot put a renderer menu or drawer over them. When an overlay intersects an active native surface, `sidePane.ts` captures a still image and hides the live view; after the overlap ends it restores the live view. This keeps menus, modals and drawers visible without discarding the underlying page. The browser egress guard and trusted-main-frame IPC checks are separate from this visual behavior.
 
-## OpenCode Go
+Conversation links route to the appropriate browser surface according to their URL. Browser screenshots are stored under the session and can be sent to a vision-capable model. `build:electron` copies the lockfile-resolved `playwright-core` client into `dist-electron/vendor/`; Electron supplies Chromium, so a separate browser download is not needed for the agent browser.
 
-The seeded `Opencode Go` provider targets OpenCode's OpenAI-compatible endpoint
-(`https://opencode.ai/inference/go/openai/v1`; the `/zen/go/v1` alias also works).
-Every request sends `User-Agent: paladin/1.0` and `x-opencode-session` set to the
-transcript session id. Chat requests also send that id as `prompt_cache_key`, so
-all rounds of one conversation share OpenCode's routing and prompt-cache bucket.
-The model catalog is derived from the configured base URL rather than a hardcoded
-gateway URL. Models that OpenCode only exposes over the Responses, Anthropic
-Messages, or Google Generative Language APIs are routed to those dialects
-automatically; Gemini thought signatures are round-tripped through the
-transcript so tool follow-up rounds stay valid.
+## Terminals and plugins
 
-## Web embeds
+Interactive terminal tabs use a Go-hosted PTY in the chosen workspace. The renderer uses xterm and loads the terminal implementation when needed. These shells run with the user's OS permissions and are distinct from the agent's permission-gated shell tool. In the composer, `!` runs a command and shares its result with a subsequent agent turn; `!!` runs it without adding an agent turn.
 
-The app has one window. There is no separate Chat window; websites are tabs in
-the agent side pane.
+Plugin panels and result cards are sandboxed `plugin://` iframes, not native web views. A panel receives a limited plugin bridge; tool calls still go through the host permission gate. Cards have a narrower surface. Plugin UI is local-only when the core is remote. See [PLUGIN-UI.md](../docs/PLUGIN-UI.md) and the [extension reference](../core/internal/extension/README.md).
 
-- **Web tabs** are for logged-in chat sites (Gemini, ChatGPT, Claude, DeepSeek)
-  and any `https` address. The title bar's **Web** menu opens a saved site or a
-  blank address bar; each tab has back/forward, reload, an address bar and
-  open-in-system-browser. In split layout the page sits beside the agent; in
-  tabs layout either takes the full width. The conversation tab is labelled
-  **Agent**.
-- **One shared login jar.** Web tabs share one persistent partition
-  (`persist:paladin-sites`), so a Google login in one page carries over to
-  "Sign in with Google" in any other and survives restarts. Per-page partitions
-  isolated `accounts.google.com` cookies, forcing a second login; the old
-  `persist:paladin-gemini` / `persist:paladin-chatgpt` jars are abandoned, which
-  costs one re-login.
-- **Every open tab stays alive.** Switching away detaches and throttles the
-  `WebContentsView` but keeps its renderer and JS state, so a chat can finish
-  answering while you read the agent and switching back is instant. Closing the
-  tab destroys the view; reloading the renderer drops every `web:` view. Open
-  tabs are per session and are not restored across app restarts; the saved site
-  list and logins are.
-- **Truthful toolbar.** Main reports `views:state` (`name,url,title,canGoBack,
-  canGoForward`) after navigations, so link clicks and SPA route changes update
-  the tab title and address bar instead of snapping back to the original URL.
-  `views:back` / `views:forward` drive the real navigation history.
-- **Saved sites** live in `localStorage` under `paladin.sites`, with
-  `paladin.sites.seeded` so deleting a default keeps it deleted. A fresh profile
-  seeds Gemini, ChatGPT, Claude and DeepSeek; all are ordinary, removable
-  entries. Only `https` URLs are accepted.
-- **The local browser is separate.** The globe button opens the agent's local
-  browser tab: localhost/local apps, an empty in-memory per-session partition,
-  element picking and pass-to-agent. It never shares cookies with web tabs.
-  Conversation `https` links open web tabs; `localhost` links open this browser.
-- **Guest pages cannot hijack the mouse:** a `dom-ready` stylesheet forces
-  `-webkit-app-region: no-drag` on every guest, so a page-declared drag region
-  (ChatGPT's logged-in header) can never swallow real clicks browser-side; our
-  own title bar stays the drag handle.
-- **Bounds** come from the active tab's surface rect in the renderer. A native
-  view always paints above the renderer's HTML, so modals hide it while they are
-  open. The sidebar is a floating drawer over the full-width main card (closes
-  on an outside click, Escape, a session pick, or clicking the Agent rail button
-  again; there is no separate sidebar button).
-- **Plugin UI is not a WebContentsView.** Enabled plugins can add side-pane
-  panels and tool-result cards; they are sandboxed iframes served over
-  `plugin://` with a strict CSP, a `window.paladin.plugins` bridge, host-rendered
-  approvals and per-plugin rate limits. See `docs/PLUGIN-UI.md`.
-- The window is frameless: the renderer draws the header and the
-  minimize/maximize/close buttons, and `views:setTheme` keeps every guest
-  view's pre-paint background in the shell colour so opening a page never
-  flashes white in dark mode.
+## On-device voice
 
-## Release
+The renderer captures microphone audio and sends mono float32 chunks through preload/IPC. `electron/voice.ts` manages a utility process running `voice-worker/worker.mjs`, which loads the Moonshine WebAssembly runtime and the selected local speech model. Recognition events return through IPC and update the composer. The worker is kept warm briefly after use and then exits; audio transcription does not require a model-provider request.
 
-```sh
-make app       # clean, then a static stripped sidecar + minified renderer + electron-builder
-```
+`make voice` prepares the vendored runtime archive and default Tiny model into the app's voice asset layout. `make voice-all` also prepares the other registered models and can require network access. The extracted runtime, copied worker and generated notices are build output. Models can also be discovered in the user data directory. See the [voice worker README](voice-worker/README.md) for the worker protocol and asset details.
 
-`make app` builds the sidecar with `CGO_ENABLED=0 -trimpath -ldflags "-s -w"`
-and packages with maximum compression into `desktop-app/release/`
-(dmg on macOS, NSIS on Windows, deb on Linux). The sidecar ships as
-`agent-host` (`agent-host.exe` on Windows) under the app resources.
-# Headless and remote core
+## Packaging and isolation
 
-`core/bin/agent-host` is a headless JSONL process. It reads one request per
-line from stdin and writes replies and events to stdout; stderr is reserved
-for logs. For example, after building the core:
+The Vite build emits the renderer with relative asset paths so it can load from the packaged `file:` URL. TypeScript compiles the Electron main and preload files into `dist-electron/`; the packaging helper adds the Playwright client used for browser automation. `electron-builder.json` packages those outputs with the sidecar binary and prepared voice resources. The core protocol remains the same in a packaged build.
 
-```sh
-printf '%s\n' '{"id":1,"method":"ping","params":{}}' | core/bin/agent-host
-```
+The main renderer uses a content security policy and a context-isolated preload. Plugin frames receive a different, restricted bridge; remote websites do not gain the host's renderer privileges. Browser site isolation and tool-level permission checks address different boundaries. Native tools and approved shell commands run without an OS sandbox.
 
-The desktop's **Settings → Connection** page can select **Remote over SSH**.
-Enter an SSH target such as `user@host` and the absolute path to `agent-host`
-on that machine. The desktop starts one remote headless process through `ssh
--T`; the same JSONL protocol carries chat, browser, terminal, and tool events
-in both directions. The host key must already be trusted and key-based login
-must work without a password prompt. Paladin uses `BatchMode=yes` and
-`StrictHostKeyChecking=yes`, does not change SSH configuration, and does not
-open a listening port. Quitting Paladin stops the remote process. The
-remote core uses its own data directory, provider keys, workspace paths, and
-installed tools. Each desktop connection starts its own process; shared remote
-data directories are not a multi-client session server.
+## Build and test flow
 
-The agent browser stays in Electron on the desktop. To preview a development
-server running on the remote machine, forward that server's port separately
-over SSH to `127.0.0.1` on the desktop, then open that local URL in Paladin.
+From the repository root, `make app-dev` prepares voice assets, builds the core and Electron code, and starts Vite on the fixed port 5173 plus Electron. `make app` prepares voice assets, cleans generated build outputs, compiles the release sidecar, builds the renderer and Electron main/preload, then invokes electron-builder. Packages and unpacked output go to `desktop-app/release/`. The build script also repairs recoverable stale pnpm hoisted links in a relocated dependency tree.
 
-# Local extension plugins
+Within `desktop-app/`, `pnpm typecheck` checks renderer, Electron and E2E TypeScript; `pnpm lint` runs ESLint, knip and Prettier; `pnpm test:build` checks packaging helpers; and `pnpm exec playwright test` runs the suite. The root `make test` and `make lint` also cover the Go core. Renderer tests generally use `e2e/paladin-stub.js`; Electron tests exercise native integration. Live LiteLLM tests are opt-in and require the local proxy, key and a real built sidecar; ordinary UI tests do not prove provider behavior.
 
-Extensions add tools of your own. They live under Paladin's data directory
-(`PALADIN_DATA_DIR` picks it): a **plugin folder** per extension, with its own
-module, its own `node_modules` if it needs dependencies, and an optional
-`paladin-plugin.json` manifest.
-
-```sh
-core/bin/agent-host extensions init               # hello.ts + paladin.d.ts + extensions.json
-core/bin/agent-host extensions init --example-plugin   # also scaffolds hello/
-```
-
-Nothing runs until its name is in `config/extensions.json`:
-
-```json
-{"enabled":["hello"]}
-```
-
-A plugin folder is `config/extensions/hello/` with an `index.ts` (or
-`index.js`) whose default export is `{tools: [...], onActivate?, onDeactivate?}`.
-Each tool needs a unique `name`, a `description`, an object JSON Schema in
-`parameters`, and an `execute(args, context)` function. A folder plugin gets
-one long-lived Node process, started on its first call and reused across tool
-calls and turns: it is reaped when idle, restarted after a crash, and asked to
-shut down when the app exits. Loose files (`hello.ts` listed directly) still
-work through the older spawn-per-call path and log a deprecation notice;
-moving one into a folder of the same name keeps its tool names.
-
-Tools appear as `extension__<folder>__<tool>` in the model tool list and
-Paladin's Tools settings, where each plugin also shows its declared
-capabilities, its warm process and any load error, next to a **Reload plugins**
-button (the `toolsReload` RPC). Existing sessions still hold back newly
-introduced tools until accepted.
-
-Node resolution: the plugin's own `node` from its manifest, then the app's
-Electron binary (its bundled Node 24, used when no separate Node is
-installed), then `PALADIN_NODE`, then `node` on `PATH` (24 or newer).
-
-Extensions run with the core user's OS permissions, which is why every call
-asks until a permission rule allows the plugin (`jira`), one of its tools
-(`jira/lookup`) or everything (`*`); the manifest's `permissions` list is
-informational only. A failed plugin is skipped and logged, never blocking the
-built-in tools. Each call has a timeout (120 s by default, set per plugin) and
-a 1 MiB reply cap. TypeScript support is for erasable types; Node's type
-stripping does not compile enums or TS path aliases. Extension code runs on
-the remote machine when the core is remote. See
-`core/internal/extension/README.md` for the full reference.
+Generated `node_modules/`, `dist/`, `dist-electron/`, `release/` and Playwright reports are not source. Dependency installation must use the existing approved internal registry configuration.

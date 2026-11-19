@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Ady-JK/paladin/core/internal/atomicfile"
 	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
@@ -64,7 +65,7 @@ func writeSpill(path, text string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(text), 0o600)
+	return atomicfile.Write(path, []byte(text))
 }
 
 // safeFileName keeps the characters of a call id that are safe in a

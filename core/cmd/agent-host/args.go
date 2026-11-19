@@ -62,7 +62,7 @@ func (a args) decode(v any) error {
 }
 
 func (a args) openOpts() runtime.OpenOpts {
-	return runtime.OpenOpts{Worktree: a.flag("worktree"), Name: a.str("name")}
+	return runtime.OpenOpts{Worktree: a.flag("worktree"), Name: a.str("name"), Harness: a.str("harness"), Model: a.str("model")}
 }
 
 // ChatParams are submitChat's params.
@@ -87,6 +87,7 @@ type ChatParams struct {
 	// Permissions is "read-only", "auto" (default) or "full-access".
 	Permissions   string   `json:"permissions"`
 	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	TaggedPaths   []string `json:"taggedPaths,omitempty"`
 }
 
 func (p ChatParams) request() agent.Request {
@@ -97,7 +98,7 @@ func (p ChatParams) request() agent.Request {
 		Skill: p.Skill, Command: p.Command, Mode: p.Mode,
 		Compact: p.Compact, Display: p.Display,
 		Permissions:   p.Permissions,
-		AttachmentIDs: p.AttachmentIDs,
+		AttachmentIDs: p.AttachmentIDs, TaggedPaths: p.TaggedPaths,
 	}
 }
 

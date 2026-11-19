@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
+	"github.com/Ady-JK/paladin/core/internal/harness"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
 	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
@@ -242,6 +243,24 @@ var methods = map[string]handler{
 		return rt.ContextSources(a.str("cwd")), nil
 	},
 
+	// Codex harness
+	"codexStatus": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CodexStatus(a.flag("deep")), nil
+	},
+
+	"codexThreads": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CodexThreads(runtime.CodexThreadQuery{Cwd: a.str("cwd"), Search: a.str("search"), Cursor: a.str("cursor")})
+	},
+	"deleteCodexThread": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return nil, rt.DeleteCodexThread(a.str("threadId"))
+	},
+	"codexSkills": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.CodexSkills(a.str("cwd"))
+	},
+	"importCodexThread": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ImportCodexThread(a.str("threadId"), a.str("cwd"))
+	},
+
 	// Sessions
 	"openSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.OpenSessionWith(a.str("sessionId"), a.str("cwd"), a.openOpts())
@@ -331,6 +350,13 @@ var methods = map[string]handler{
 	"sessionChanges": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionChanges(a.str("sessionId"), a.str("cwd"))
 	},
+	"syncSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.SyncSession(a.str("sessionId"), a.str("cwd"))
+	},
+	"startCodexDiscovery": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		rt.StartCodexDiscovery()
+		return true, nil
+	},
 	"sessionDiff": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.SessionDiff(a.str("sessionId"), a.str("cwd"), a.num("turn", -1), a.str("path"))
 	},
@@ -406,12 +432,27 @@ var methods = map[string]handler{
 		}
 		return rt.AnswerAsk(p.SessionID, p.CallID, p.Answers)
 	},
+	// A question an agent (Codex) asked without stopping its work. The answer is a
+	// message in the agent's own reply format: it steers the running turn, or
+	// begins one. The params are submitChat's, so the turn keeps the composer's settings.
+	"answerQuestion": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		var p struct {
+			ChatParams
+			CallID  string           `json:"callId"`
+			Answers []harness.Answer `json:"answers"`
+		}
+		if err := a.decode(&p); err != nil {
+			return nil, err
+		}
+		return rt.AnswerQuestion(p.request(), p.CallID, p.Answers)
+	},
 	"cancelAsk": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.CancelAsk(a.str("sessionId"), a.str("callId")), nil
 	},
 	"answerApproval": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.AnswerApproval(a.str("sessionId"), a.str("callId"), a.str("decision"))
 	},
+	// Native tool permissions expose Read-Only/Full Access and rules; no OS sandbox status.
 	"permissionsGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.PermissionsGet(a.str("cwd"), a.str("sessionId"))
 	},

@@ -151,6 +151,12 @@ type ModelMeta struct {
 	// described this model's thinking, so an empty list really means it
 	// has none to pick from.
 	ThinkingKnown bool `json:"thinkingKnown,omitempty"`
+	// AdaptiveThinking marks a Claude model that decides its own thinking
+	// depth (Messages API thinking type "adaptive"); Min/MaxThinkingBudget
+	// are the token budget range of a model that thinks on a fixed budget.
+	AdaptiveThinking  bool  `json:"adaptiveThinking,omitempty"`
+	MinThinkingBudget int64 `json:"minThinkingBudget,omitempty"`
+	MaxThinkingBudget int64 `json:"maxThinkingBudget,omitempty"`
 	// Prices are USD per million tokens.
 	PriceInput      float64 `json:"priceInput,omitempty"`
 	PriceOutput     float64 `json:"priceOutput,omitempty"`
@@ -178,7 +184,7 @@ type PriceTier struct {
 // Empty reports whether the listing said nothing about the model.
 func (m ModelMeta) Empty() bool {
 	return m.ContextWindow == 0 && m.MaxInput == 0 && m.DefaultInput == 0 && !m.LongContextSurcharge && m.MaxOutput == 0 && m.Protocol == "" &&
-		len(m.ThinkingLevels) == 0 && !m.ThinkingKnown && m.PriceInput == 0 && m.PriceOutput == 0 &&
+		len(m.ThinkingLevels) == 0 && !m.ThinkingKnown && !m.AdaptiveThinking && m.MinThinkingBudget == 0 && m.MaxThinkingBudget == 0 && m.PriceInput == 0 && m.PriceOutput == 0 &&
 		m.PriceCacheRead == 0 && m.PriceCacheWrite == 0 && m.Pricing == nil
 }
 
