@@ -217,3 +217,49 @@ func BenchmarkListLimited(b *testing.B) {
 		}
 	}
 }
+
+// A workspace namespace that cannot be read right now (a folder being
+// created or removed while a listing runs) must not fail the whole
+// listing: the sidebar would render "no sessions yet" and every other
+// session would disappear until the next refresh.
+func TestListToleratesAnUnreadableNamespace(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(root)
+	sess, err := store.Create("/p", "prov", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.AppendTurn([]Message{UserMessage("hello")}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A namespace directory the process cannot read right now. This is the
+	// race the guard covers: a folder being created, removed or rewritten
+	// while the listing walks it. ReadDir fails with EACCES here, which is
+	// the same error class as the transient ENOENT/ENOTDIR of a real race.
+	locked := filepath.Join(root, "locked-workspace")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("cannot make a directory unreadable here (running as root?)")
+	}
+
+	infos, err := store.List("", 0)
+	if err != nil {
+		t.Fatalf("one unreadable namespace must not fail the listing: %v", err)
+	}
+	found := false
+	for _, info := range infos {
+		if info.Meta.SessionID == sess.Meta.SessionID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("session missing from %d listed: %+v", len(infos), infos)
+	}
+}

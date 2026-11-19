@@ -52,14 +52,39 @@ import {
   syncSidePane,
 } from "./sidePane";
 
+// refreshSeq orders overlapping refreshes. A burst of subagent turns can
+// start several listSessions calls; without this an older reply that lands
+// late paints over a newer one.
+let refreshSeq = 0;
+
+// emptyStreak counts consecutive replies that listed nothing. The sidebar
+// only clears a populated list once an empty answer is confirmed, so one
+// read that races a namespace rewrite cannot empty the pane.
+let emptyStreak = 0;
+const EMPTY_CONFIRMATIONS = 2;
+
 export async function refreshSessions(): Promise<void> {
   // The sidebar shows every workspace's sessions, not just the current
   // folder's: filtering by cwd hid old sessions whenever the workspace
   // changed (e.g. after New Session picked another folder).
+  const seq = ++refreshSeq;
   try {
-    state.sessions = await api.listSessions(null, 0);
+    const list = await api.listSessions(null, 0);
+    if (seq !== refreshSeq) return; // a newer refresh owns the list now
+    if (list.length === 0 && state.sessions.length > 0) {
+      // Sessions do not vanish on their own: an empty answer while the
+      // pane shows sessions is a read taken mid-write. Hold the current
+      // list until a second reply agrees, then clear for real.
+      if (++emptyStreak < EMPTY_CONFIRMATIONS) return;
+    }
+    emptyStreak = 0;
+    state.sessions = list;
   } catch (error) {
     console.warn(`refreshSessions failed: ${String(error)}`);
+    // Keep what the sidebar already shows. A transient failure (a session
+    // folder being written while the list is read, or the host restarting
+    // mid-turn) must never look like "no sessions yet".
+    if (seq === refreshSeq && state.sessions.length > 0) return;
     state.sessions = [];
   }
 

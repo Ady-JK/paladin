@@ -98,10 +98,12 @@ func (s *Store) entries(cwd string) ([]sessionEntry, error) {
 		legacy := cwd != "" && dir != filepath.Join(s.Root, EncodeCwd(cwd))
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("io: session: read %s: %w", dir, err)
+			// A workspace folder that is being created or removed races
+			// this read. One unreadable namespace must not fail the whole
+			// listing: the caller would render "no sessions yet" and every
+			// other session would vanish from the sidebar. The root read
+			// above still reports a genuinely broken store.
+			continue
 		}
 		for _, e := range entries {
 			name := e.Name()
