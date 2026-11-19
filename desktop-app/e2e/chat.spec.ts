@@ -156,7 +156,7 @@ test("a token inside a table cell never splits mid-word", async ({ page }) => {
     const range = document.createRange();
     range.selectNodeContents(code);
     // A one-line reference: the version cell holds plain text on one line.
-    const ref = document.querySelector("#messages .md-td:nth-of-type(2)") as HTMLElement | null;
+    const ref = document.querySelector<HTMLElement>("#messages .md-td:nth-of-type(2)");
     const oneLine = Math.min(
       el.getBoundingClientRect().height,
       ref?.getBoundingClientRect().height ?? el.getBoundingClientRect().height,
