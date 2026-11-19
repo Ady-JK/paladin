@@ -737,3 +737,71 @@ test("a compaction after a finished turn leaves its stats and card above the sum
   expect(at("card")).toBe(at("stats") + 1);
   expect(at("divider")).toBe(at("card") + 1);
 });
+
+// One file the snapshot cannot diff must not hide the counts of the rest.
+// A git add that refuses a path that already vanished (or a patch cut off
+// at the size cap) used to drop every +x -y from the card, leaving status
+// words only — which is what a turn full of edits looked like.
+for (const failMode of ["error", "truncated"] as const) {
+  test(`the card keeps +x -y when one diff ${failMode === "error" ? "fails" : "is truncated"}`, async ({ page }) => {
+    await page.addInitScript({ path: "e2e/paladin-stub.js" });
+    await page.addInitScript(
+      (o) => {
+        const w = window as any;
+        const base = w.__paladinBaseInvoke;
+        w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+          if (cmd === "sessionChanges")
+            return {
+              available: true,
+              files: o.turn.files,
+              turns: [o.turn],
+            };
+          if (cmd === "sessionDiff") {
+            const patches: Record<string, string> = o.patches;
+            const patch = patches[args.path as string];
+            if (patch === undefined) {
+              if (o.failMode === "error") {
+                throw new Error("snapshot: git add: exit status 128: fatal: pathspec did not match any files");
+              }
+              return { path: args.path, patch: "+a\n+b\n", truncated: true };
+            }
+            return { path: args.path, patch, truncated: false };
+          }
+          return base(cmd, args);
+        };
+      },
+      {
+        failMode,
+        patches: {
+          "core/internal/transcript/store.go": "@@ -1,3 +1,4 @@\n-old line\n+new line\n+another line\n shared\n",
+          "desktop-app/e2e/sessionList.spec.ts": "@@ -0,0 +1,2 @@\n+one\n+two\n",
+        },
+        turn: {
+          turn: 0,
+          callIds: ["c1"],
+          files: [
+            { path: "core/internal/transcript/store.go", status: "modified" },
+            { path: "desktop-app/e2e/sessionList.spec.ts", status: "created" },
+            { path: "graphify-out/.gfy-2nevgs1r.tmp", status: "created" },
+          ],
+        },
+      },
+    );
+    await page.goto("/");
+    await expect(page.locator("#promptInput")).toBeVisible();
+    await page.fill("#promptInput", "change stuff");
+    await page.click("#sendBtn");
+    const card = page.locator('.turn-changes[data-change-turn="0"]').first();
+    await expect(card).toContainText("Edited 3 files");
+    // The turn total and both readable files keep their counts.
+    await expect(card.locator(".turn-change-heading .tool-add")).toHaveText("+4");
+    await expect(card.locator(".turn-change-heading .tool-del")).toHaveText("-1");
+    const rows = card.locator(".turn-change-file");
+    await expect(rows.nth(0).locator(".tool-add")).toHaveText("+2");
+    await expect(rows.nth(0).locator(".tool-del")).toHaveText("-1");
+    await expect(rows.nth(1).locator(".tool-add")).toHaveText("+2");
+    // The undiffable file says what happened instead of a wrong count.
+    await expect(rows.nth(2)).toContainText("created");
+    await expect(rows.nth(2).locator(".tool-add")).toHaveCount(0);
+  });
+}

@@ -43,17 +43,23 @@ export async function turnTotal(sessionId: string, turn: SessionChanges["turns"]
   const entries = session;
   const pending = (async (): Promise<ChangeTotal | null> => {
     try {
-      const patches = await Promise.all(
+      // One file whose diff cannot be read (git refuses a path that already
+      // vanished, or the patch is cut off at the size cap) must not hide the
+      // counts of the rest: the card would drop every +x -y and fall back to
+      // status words, which is what a turn full of edits looked like.
+      const patches = await Promise.allSettled(
         turn.files.map((file) => api.sessionDiff(sessionId, null, turn.turn, file.path)),
       );
-      if (patches.some((patch) => patch.truncated)) return null;
       const total: ChangeTotal = { added: 0, removed: 0, files: {} };
       for (const patch of patches) {
-        const count = countPatch(patch.patch);
+        if (patch.status !== "fulfilled" || patch.value.truncated) continue;
+        const count = countPatch(patch.value.patch);
         total.added += count.added;
         total.removed += count.removed;
-        total.files![patch.path] = count;
+        total.files![patch.value.path] = count;
       }
+      // Nothing diffable at all: report unknown rather than a false +0 -0.
+      if (Object.keys(total.files!).length === 0) return null;
       return total;
     } catch {
       return null;
