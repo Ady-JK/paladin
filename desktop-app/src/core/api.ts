@@ -617,6 +617,11 @@ export function mcpRestart(scope: MCPScope, cwd: string | null, name: string): P
   return invoke<MCPOverview>("mcpRestart", { scope, cwd, name });
 }
 
+// mcpRemove deletes a server from its mcp.json and stops it.
+export function mcpRemove(scope: MCPScope, cwd: string | null, name: string): Promise<MCPOverview> {
+  return invoke<MCPOverview>("mcpRemove", { scope, cwd, name });
+}
+
 // mcpTrust approves (or revokes) the folder's mcp.json as shown:
 // fingerprint is the overview's folderFingerprint.
 export function mcpTrust(cwd: string, trust: boolean, fingerprint = ""): Promise<MCPOverview> {

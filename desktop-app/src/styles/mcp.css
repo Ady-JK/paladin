@@ -150,6 +150,33 @@
 .mcp-switch:disabled {
   cursor: progress;
 }
+/* Remove: red only on hover, so a working server does not read as a
+   warning until the user actually reaches for the trash. */
+.mcp-trash:hover {
+  background: rgb(220 38 38 / 0.12);
+  color: #dc2626;
+}
+.dark .mcp-trash:hover {
+  background: rgb(248 113 113 / 0.16);
+  color: #fb7185;
+}
+.mcp-remove-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mcp-remove-go {
+  border-color: #dc2626;
+  color: #dc2626;
+  font-weight: 600;
+}
+.dark .mcp-remove-go {
+  border-color: #fb7185;
+  color: #fb7185;
+}
+.mcp-remove-go:hover {
+  background: rgb(220 38 38 / 0.12);
+}
 
 /* switch */
 .mcp-switch {
@@ -348,11 +375,28 @@
   opacity: 0.6;
   cursor: progress;
 }
+/* settings.css styles every textarea under #settingsContentBody with
+   `#settingsContentBody :is(… textarea …)` — an ID plus :is() specificity —
+   and is imported after this file, so the editor's height has to outrank
+   it. Two IDs do that. */
+#settingsContentBody #settingsPaneMcp .mcp-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#settingsContentBody #settingsPaneMcp .mcp-editor textarea {
+  min-height: 300px;
+  height: auto;
+  flex: 1 1 auto;
+}
 .mcp-editor {
   margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  /* Editing mcp.json is the main job of this pane, so the editor takes
+     the height the server list would have used instead of a 180px box. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .mcp-editor-path {
   font-family: var(--font-mono);
@@ -360,7 +404,8 @@
   color: var(--color-slate-400);
 }
 .mcp-editor textarea {
-  min-height: 180px;
+  min-height: 260px;
+  flex: 1 1 auto;
   width: 100%;
   resize: vertical;
   border-radius: 8px;

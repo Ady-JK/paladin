@@ -66,7 +66,7 @@ var methodClass = map[string]runClass{
 	"ideSaveFile": runGlobal, "ideLayoutSet": runGlobal, "ideExplorerSettingsSet": runGlobal, "setWorkspace": runGlobal, "setPrompt": runGlobal, "resetPrompt": runGlobal,
 	"memorySet": runGlobal, "permissionsSet": runGlobal, "hooksSetConfig": runGlobal,
 	"hooksTrust": runGlobal, "hooksToggle": runGlobal, "mcpSetConfig": runGlobal,
-	"mcpSetEnabled": runGlobal, "mcpRestart": runGlobal, "mcpTrust": runGlobal,
+	"mcpSetEnabled": runGlobal, "mcpRestart": runGlobal, "mcpRemove": runGlobal, "mcpTrust": runGlobal,
 	"mcpAdd": runGlobal, "toolsSet": runGlobal, "toolsAccept": runGlobal, "toolBehaviorSet": runGlobal,
 	// Reload stops the warm plugin runners, so it is a global mutation.
 	"toolsReload": runGlobal,

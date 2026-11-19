@@ -119,6 +119,7 @@ separate setup command, not a JSONL method.
 | `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
 | `mcpSetEnabled` | `{scope,cwd?,name,enabled}` | `MCPOverview`; sets the server's `enabled` flag in its file (a trusted folder file stays trusted) |
 | `mcpRestart` | `{scope,cwd?,name}` | `MCPOverview`; stops the server, clears its failure and starts it |
+| `mcpRemove` | `{scope,cwd?,name}` | `MCPOverview`; deletes the server from its `mcp.json` (every other entry and its formatting are kept) and stops it. A trusted folder file stays trusted |
 | `mcpTrust` | `{cwd,trust,fingerprint}` | `MCPOverview`; approves (or revokes) the folder's `mcp.json`; `fingerprint` is the listed `folderFingerprint`, and trust fails if the file changed since |
 | `mcpParse` | `{text}` | `{servers: {name, config}[]}`: servers read from pasted text — launch commands (`npx`/`uvx`/`docker run`/…, `KEY=value` prefixes, one per line), a Streamable HTTP URL, `claude`/`codex mcp add …` lines or `mcp.json` JSON. Nothing is saved |
 | `mcpAdd` | `{scope,cwd?,servers,replace?}` | `MCPOverview`; adds `{name, config}[]` to one `mcp.json` (existing names fail unless `replace`) and starts them. A new or trusted folder file is trusted afterwards; an untrusted one stays untrusted |

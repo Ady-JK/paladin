@@ -142,7 +142,7 @@ function section(scope: HookScope, o: HooksOverview): string {
   const sources = o.sources.filter((s) => s.scope === scope && (s.exists || s.editable));
   const title =
     scope === "global"
-      ? `<div class="mem-title">Everywhere</div><div class="mem-blurb">Run in every folder.</div>`
+      ? `<div class="mem-title">Global</div><div class="mem-blurb">Run in every workspace.</div>`
       : `<div class="mem-title">This folder <span class="mem-cwd" title="${escapeHtml(loadedCwd)}">${escapeHtml(shortPath(loadedCwd))}</span></div>` +
         `<div class="mem-blurb">Paladin, Codex and Claude Code hook files in this folder. Each needs your trust before it runs.</div>`;
   return (

@@ -282,7 +282,7 @@ async function refreshExtensionTargets(): Promise<void> {
 function rulesSection(scope: "global" | "folder", rules: PermissionRule[]): string {
   const head =
     scope === "global"
-      ? `<div class="mem-title">Everywhere</div><div class="mem-blurb">Rules for every folder. Deny rules win over everything, even Full access.</div>`
+      ? `<div class="mem-title">Global</div><div class="mem-blurb">Rules for every workspace. Deny rules win over everything, even Full access.</div>`
       : `<div class="mem-title">This folder <span class="mem-cwd" title="${escapeHtml(folderCwd)}">${escapeHtml(shortPath(folderCwd))}</span></div>` +
         `<div class="mem-blurb">“Always allow in this folder” on an approval card adds here.</div>`;
   const rows = rules.length ? rules.map(ruleRow).join("") : `<li class="mem-none">No rules yet.</li>`;

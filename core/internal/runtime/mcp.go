@@ -121,6 +121,14 @@ func (r *AgentRuntime) MCPRestart(scope, cwd, name string) (MCPOverview, error) 
 	return r.MCPList(cwd), nil
 }
 
+// MCPRemove deletes one server from its config file and stops it.
+func (r *AgentRuntime) MCPRemove(scope, cwd, name string) (MCPOverview, error) {
+	if err := r.mcp.RemoveServer(scope, cwd, name); err != nil {
+		return MCPOverview{}, err
+	}
+	return r.MCPList(cwd), nil
+}
+
 // MCPTrust approves or revokes the folder's mcp.json.
 func (r *AgentRuntime) MCPTrust(cwd string, trust bool, fingerprint string) (MCPOverview, error) {
 	if err := r.mcp.Trust(cwd, trust, fingerprint); err != nil {

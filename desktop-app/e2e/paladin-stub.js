@@ -208,6 +208,7 @@ async function __paladinBaseInvoke(cmd, args) {
     case "mcpSetConfig":
     case "mcpSetEnabled":
     case "mcpRestart":
+    case "mcpRemove":
     case "mcpTrust":
     case "mcpParse":
     case "mcpAdd":
@@ -1152,6 +1153,12 @@ window.__e2eMcpInvoke = (cmd, args) => {
       const s = find();
       if (!s) throw new Error("no server " + args.name);
       Object.assign(s, { state: "ready", error: "" });
+      return overview();
+    }
+    case "mcpRemove": {
+      const s = find();
+      if (!s) throw new Error("no server " + args.name);
+      m.servers = m.servers.filter((x) => x.name !== args.name);
       return overview();
     }
     case "mcpParse": {

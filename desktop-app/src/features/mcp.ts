@@ -38,6 +38,9 @@ let loading = 0;
 let editor: Editor | null = null;
 let paste: Paste | null = null;
 const busy = new Set<string>();
+// pendingRemove is the server whose row is asking "Remove ?". It keeps a
+// single misclick on the trash icon from stopping a working server.
+let pendingRemove = "";
 let refreshTimer = 0;
 let chip: HTMLButtonElement | null = null;
 let openPane: () => void = () => {};
@@ -157,7 +160,7 @@ function pasteHtml(p: Paste): string {
     `<ul class="mcp-preview-list">${rows}</ul>` +
     err +
     `<div class="mcp-editor-actions">` +
-    `<label class="mcp-paste-scope">Save to <select data-field="scope" aria-label="Where to save"><option value="global"${p.scope === "global" ? " selected" : ""}>Everywhere</option>${folderOpt}</select></label>` +
+    `<label class="mcp-paste-scope">Save to <select data-field="scope" aria-label="Where to save"><option value="global"${p.scope === "global" ? " selected" : ""}>Global</option>${folderOpt}</select></label>` +
     `<button type="button" class="mcp-btn" data-mcp-paste-back>Back</button>` +
     `<button type="button" class="mcp-btn is-primary" data-mcp-add${p.busy ? " disabled" : ""}>${p.busy ? "Adding…" : "Add"}</button>` +
     `</div></div>`
@@ -193,6 +196,15 @@ function serverCard(s: MCPServerStatus): string {
   const restart = canRestart
     ? `<button type="button" class="mcp-icon-btn" data-mcp-restart title="Restart ${escapeHtml(s.name)}" aria-label="Restart ${escapeHtml(s.name)}"${pending ? " disabled" : ""}>${icon("repeat", "h-3.5 w-3.5")}</button>`
     : "";
+  // Delete asks once in place: the row turns into "Remove ? Cancel / Delete"
+  // so a misclick on a trash icon cannot stop a working server.
+  const confirmRemove =
+    pendingRemove === key
+      ? `<span class="mcp-remove-confirm">` +
+        `<button type="button" class="mcp-btn mcp-remove-cancel" data-mcp-remove-cancel>Cancel</button>` +
+        `<button type="button" class="mcp-btn mcp-remove-go" data-mcp-remove="${escapeHtml(s.name)}">Delete</button>` +
+        `</span>`
+      : `<button type="button" class="mcp-icon-btn mcp-trash" data-mcp-remove-ask title="Remove ${escapeHtml(s.name)} from mcp.json" aria-label="Remove ${escapeHtml(s.name)}"${pending ? " disabled" : ""}>${icon("trash", "h-3.5 w-3.5")}</button>`;
   const toggle =
     `<button type="button" class="mcp-switch" role="switch" data-mcp-toggle aria-checked="${on}" ` +
     `aria-label="${on ? "Disable" : "Enable"} ${escapeHtml(s.name)}" title="${on ? "Disable" : "Enable"}"${pending ? " disabled" : ""}><span></span></button>`;
@@ -209,7 +221,7 @@ function serverCard(s: MCPServerStatus): string {
     `<span class="mcp-state">${STATE_LABEL[s.state] ?? escapeHtml(s.state)}${count}</span>` +
     restarts +
     shadow +
-    `<span class="mcp-actions">${restart}${toggle}</span>` +
+    `<span class="mcp-actions">${restart}${confirmRemove}${toggle}</span>` +
     `</div>` +
     error +
     toolChips(s) +
@@ -222,7 +234,7 @@ function editorHtml(e: Editor): string {
   return (
     `<div class="mcp-editor" data-scope="${e.scope}">` +
     `<div class="mcp-editor-path" title="${escapeHtml(e.path)}">${escapeHtml(shortPath(e.path))}</div>` +
-    `<textarea spellcheck="false" aria-label="${e.scope} mcp.json">${escapeHtml(e.text)}</textarea>` +
+    `<textarea spellcheck="false" rows="14" aria-label="${e.scope} mcp.json">${escapeHtml(e.text)}</textarea>` +
     (e.error ? `<div class="mcp-editor-error">${escapeHtml(e.error)}</div>` : "") +
     `<div class="mcp-editor-actions">` +
     `<span class="mcp-editor-hint">stdio: <code>command</code>, <code>args</code>, <code>env</code> · http: <code>url</code>, <code>headers</code></span>` +
@@ -237,7 +249,7 @@ function section(scope: MCPScope, o: MCPOverview): string {
   const path = scope === "global" ? o.globalPath : (o.folderPath ?? "");
   const title =
     scope === "global"
-      ? `<div class="mem-title">Everywhere</div><div class="mem-blurb">Servers from <code>${escapeHtml(shortPath(path))}</code>, available in every folder.</div>`
+      ? `<div class="mem-title">Global</div><div class="mem-blurb">Servers from <code>${escapeHtml(shortPath(path))}</code>, in every workspace.</div>`
       : `<div class="mem-title">This folder <span class="mem-cwd" title="${escapeHtml(loadedCwd)}">${escapeHtml(shortPath(loadedCwd))}</span></div>` +
         `<div class="mem-blurb">Servers from <code>.paladin/mcp.json</code>; one with a global server's name replaces it here.</div>`;
   const trustedTag =
@@ -512,6 +524,21 @@ function onClick(event: MouseEvent): void {
   const name = card.dataset.mcpServer ?? "";
   const key = `${scope}:${name}`;
   if (busy.has(key)) return;
+  if (t.closest("[data-mcp-remove-ask]")) {
+    pendingRemove = key;
+    paintPane();
+    return;
+  }
+  if (t.closest("[data-mcp-remove-cancel]")) {
+    pendingRemove = "";
+    paintPane();
+    return;
+  }
+  if (t.closest("[data-mcp-remove]")) {
+    pendingRemove = "";
+    void act(key, () => api.mcpRemove(scope, cwdArg(), name), `remove ${name}`);
+    return;
+  }
   if (t.closest("[data-mcp-restart]")) {
     void act(key, () => api.mcpRestart(scope, cwdArg(), name), `restart ${name}`);
   } else if (t.closest("[data-mcp-toggle]")) {

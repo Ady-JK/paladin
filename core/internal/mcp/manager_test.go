@@ -470,3 +470,74 @@ func TestTrustNeedsTheReviewedContent(t *testing.T) {
 		t.Fatalf("revoke needs no fingerprint: %v", err)
 	}
 }
+
+// RemoveServer deletes one entry and keeps the rest of the file intact,
+// including entries the app does not manage and the file's own ordering.
+func TestRemoveServerKeepsTheOtherEntries(t *testing.T) {
+	m, dataDir, _ := newTestManager(t, nil)
+	path := GlobalPath(dataDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Hand-written config with a third entry the manager knows nothing
+	// about, to prove removing one server rewrites nothing else.
+	body := `{"mcpServers":{"keep":{"command":"/bin/keep"},"drop":{"command":"/bin/drop"},"other":{"command":"/bin/other"}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RemoveServer(ScopeGlobal, "", "drop"); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Servers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("written file is not valid JSON: %v\n%s", err, raw)
+	}
+	if _, gone := doc.Servers["drop"]; gone {
+		t.Fatalf("drop still present: %s", raw)
+	}
+	for _, name := range []string{"keep", "other"} {
+		if _, ok := doc.Servers[name]; !ok {
+			t.Fatalf("%q was removed with it: %s", name, raw)
+		}
+	}
+	// The overview no longer lists it.
+	for _, s := range m.Status("") {
+		if s.Name == "drop" {
+			t.Fatalf("removed server still listed: %+v", s)
+		}
+	}
+}
+
+// Removing the only server leaves a valid file rather than a broken one.
+func TestRemoveOnlyServerLeavesValidJSON(t *testing.T) {
+	m, dataDir, _ := newTestManager(t, map[string]ServerConfig{"one": {Command: "/bin/one"}})
+	path := GlobalPath(dataDir)
+	if err := m.RemoveServer(ScopeGlobal, "", "one"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(raw) {
+		t.Fatalf("empty config is not valid JSON: %s", raw)
+	}
+	if !strings.Contains(string(raw), "mcpServers") {
+		t.Fatalf("mcpServers key disappeared: %s", raw)
+	}
+}
+
+// Removing a name that is not in the file is an error, not a silent write.
+func TestRemoveServerUnknownNameFails(t *testing.T) {
+	m, _, _ := newTestManager(t, map[string]ServerConfig{"one": {Command: "/bin/one"}})
+	if err := m.RemoveServer(ScopeGlobal, "", "nope"); err == nil {
+		t.Fatal("removing an unknown server must fail")
+	}
+}

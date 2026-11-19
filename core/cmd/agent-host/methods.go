@@ -524,6 +524,9 @@ var methods = map[string]handler{
 	"mcpRestart": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.MCPRestart(a.str("scope"), a.str("cwd"), a.str("name"))
 	},
+	"mcpRemove": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.MCPRemove(a.str("scope"), a.str("cwd"), a.str("name"))
+	},
 	"mcpTrust": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.MCPTrust(a.str("cwd"), a.flag("trust"), a.str("fingerprint"))
 	},

@@ -347,6 +347,47 @@ func (m *Manager) SetEnabled(scope, folder, name string, enabled bool) error {
 	return m.write(scope, folder, buf.Bytes(), trusted)
 }
 
+// RemoveServer deletes one server from its mcp.json and stops it. The
+// file keeps every other entry, its formatting and the servers the app
+// does not manage; removing the last one leaves a valid empty object
+// rather than a dangling comma.
+func (m *Manager) RemoveServer(scope, folder, name string) error {
+	folder = cleanFolder(folder)
+	if scope == ScopeGlobal {
+		folder = ""
+	}
+	path, err := m.path(scope, folder)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("no MCP server %q in %s", name, path)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var doc map[string]any
+	if err := dec.Decode(&doc); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	list, _ := doc["mcpServers"].(map[string]any)
+	if _, ok := list[name].(map[string]any); !ok {
+		return fmt.Errorf("no MCP server %q in %s", name, path)
+	}
+	delete(list, name)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(doc); err != nil {
+		return err
+	}
+	// A folder file the user already trusted stays trusted: deleting a
+	// server must not lock the rest of the file behind another prompt.
+	trusted := scope == ScopeGlobal || m.trust.Trusted(folder, Fingerprint(data))
+	return m.write(scope, folder, buf.Bytes(), trusted)
+}
+
 func (m *Manager) write(scope, folder string, data []byte, trust bool) error {
 	path, err := m.path(scope, folder)
 	if err != nil {
