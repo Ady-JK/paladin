@@ -25,6 +25,7 @@ import { TerminalDock } from "./ide/terminalDock";
 import { newWebTab, normalizeWebUrl, setWebStatus, webHost } from "./sidePane/webTab";
 import { navigateBrowser, newBrowserTab, stopBrowserPick, updateBrowserToolbar } from "./sidePane/browserTab";
 import { loadChangeDiff, newChangesTab, paintChangesTab } from "./sidePane/changesTab";
+import { wireSplitResize } from "./sidePane/splitResize";
 import {
   clearChangeTotals,
   paintTurnMarker,
@@ -1402,6 +1403,19 @@ async function deleteChat(chatId: string, row: HTMLElement): Promise<void> {
 
 export function initSidePane(): void {
   registerChangesLink({ has: hasSessionChange, open: openChangeAt });
+  // The draggable border between the conversation and the pane. It is
+  // created here rather than in index.html so it lives next to the pane
+  // it sizes.
+  const splitHandle = document.createElement("div");
+  splitHandle.id = "paneSplitResize";
+  splitHandle.className = "pane-split-resize";
+  splitHandle.tabIndex = 0;
+  splitHandle.setAttribute("role", "separator");
+  splitHandle.setAttribute("aria-orientation", "vertical");
+  splitHandle.setAttribute("aria-label", "Resize the side pane");
+  splitHandle.title = "Resize the side pane";
+  sidePaneEl.before(splitHandle);
+  wireSplitResize(splitHandle, $<HTMLElement>("#agentSplit"), sidePaneEl);
   if (hasBridge()) {
     bridge().onEvent?.(browserEvent);
     bridge().onEvent?.((event) => terminalEvent(event, sets));

@@ -2,6 +2,58 @@
    parent bar of a subagent's session, and subagent rows. */
 
 /* ---- split pane ---- */
+
+/* The draggable border. A thin hit area straddling the pane's left edge:
+   6px wide so it is easy to grab, with a 1px line drawn by the pane's own
+   border so the layout does not shift when the handle appears. */
+.pane-split-resize {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 6px;
+  width: 6px;
+  margin-right: -6px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+.pane-split-resize::after {
+  position: absolute;
+  inset-block: 0;
+  left: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  content: "";
+  transition: background-color 120ms ease;
+}
+.pane-split-resize:hover::after,
+.pane-split-resize:focus-visible::after,
+body.is-splitting .pane-split-resize::after {
+  background: var(--color-accent-500);
+}
+.pane-split-resize:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: -2px;
+}
+
+/* The line that follows the cursor during a drag. It is the only thing
+   moving while the pointer is down: a native browser page cannot be
+   re-laid out per frame without lagging behind the cursor, so the real
+   width is committed once, on release. */
+.pane-split-preview {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  width: 0;
+  border-left: 2px solid var(--color-accent-500);
+  pointer-events: none;
+}
+body.is-splitting {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .side-pane {
   position: relative;
   display: flex;
@@ -12,6 +64,11 @@
   background: #fff;
 }
 .side-pane[hidden] {
+  display: none;
+}
+/* Nothing to drag when the pane is closed or the layout is stacked. */
+#agentSplit:has(#sidePane[hidden]) .pane-split-resize,
+#agentView.is-tab-layout .pane-split-resize {
   display: none;
 }
 .dark .side-pane {
