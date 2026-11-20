@@ -30,7 +30,8 @@ test("split and tabs preserve the active side chat and make each view full width
   // gets the whole split.
   await expect(page.locator("#paneTabsDrawer")).toBeVisible();
   await expect(page.locator("#titleBar .pane-strip")).toHaveCount(0);
-  await expect(page.locator("#sidePane .pane-strip")).toHaveCount(0);
+  // The pane carries no strip in tabs layout: the drawer is the navigation.
+  await expect(page.locator("#sidePane .pane-strip")).toBeHidden();
   await expect(page.locator("#agentSplit > .pane-strip")).toHaveCount(0);
   await expect(layout).toHaveAttribute("aria-label", "Switch to split layout");
   await expect(page.locator("#agentMain")).toBeHidden();
@@ -43,7 +44,7 @@ test("split and tabs preserve the active side chat and make each view full width
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#agentMain")).toBeVisible();
   await expect(page.locator("#sidePane .pane-body")).toBeHidden();
-  await page.locator('#paneTabs .pane-tab[data-key^="t"] .pane-tab-pick').first().click();
+  await page.locator('#paneDrawerTabs .pane-tab[data-key^="t"] .pane-tab-pick').first().click();
   await expect(page.locator("#sidePane .side-chat")).toBeVisible();
 
   await switchLayout(page);
@@ -69,7 +70,7 @@ test("clicking a localhost chat link opens the session browser in either layout"
   await page.locator('#messages a[data-ext="http://localhost:3000"]').click();
   await expect(page.locator("#agentMain")).toBeHidden();
   await expect(page.locator("#sidePane .pane-browser")).toBeVisible();
-  await expect(page.locator("#paneTabs [data-browser]")).toHaveCount(1);
+  await expect(page.locator("#paneDrawerTabs [data-browser]")).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserOpens?.length ?? 0)).toBe(2);
 });
 
@@ -95,7 +96,7 @@ test("browser tab expands to full width and the layout survives a reload", async
     .toBeGreaterThan(splitWidth + 100);
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBe(null);
-  await page.locator("#paneTabs [data-browser] .pane-tab-pick").click();
+  await page.locator("#paneDrawerTabs [data-browser] .pane-tab-pick").click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBeTruthy();
 
   await page.reload();

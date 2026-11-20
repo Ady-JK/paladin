@@ -59,8 +59,8 @@ body.is-splitting {
   display: flex;
   /* The split proportion, set by splitResize. Percentages, not pixels, so
      the split keeps its shape when the window changes size. */
-  flex: 0 0 var(--side-pane-width, 50%);
-  min-width: 0;
+  flex: 0 1 var(--side-pane-width, 50%);
+  min-width: 240px;
   flex-direction: column;
   border-left: 1px solid var(--color-slate-200);
   background: #fff;
@@ -1551,5 +1551,25 @@ body.is-splitting {
   }
   .diff-unified {
     display: none;
+  }
+}
+
+/* Tabs layout navigates through the drawer, so the pane carries no strip of
+   its own; split layout keeps the horizontal strip (without Agent) there. */
+#agentView.is-tab-layout .side-pane > .pane-strip {
+  display: none;
+}
+
+/* Split layout always has its right pane, so there is nothing to close. */
+#agentView:not(.is-tab-layout) .pane-inner-close {
+  display: none;
+}
+
+/* The pane is always there in split layout, so on a narrow window it gives
+   way before the conversation does: the composer toolbar needs about this
+   much room, or its buttons are cut off. */
+@media (min-width: 1100px) {
+  #agentView:not(.is-tab-layout) #agentSplit:not(.ide-mode) > #agentMain {
+    min-width: 680px;
   }
 }

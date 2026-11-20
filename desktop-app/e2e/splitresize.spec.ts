@@ -26,26 +26,28 @@ test("the pane opens at half the split by default", async ({ page }) => {
   await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeLessThan(available * 0.55);
 });
 
-test("opening a panel while the pane is closed keeps the split at half", async ({ page }) => {
+test("opening a panel while the pane is hidden in tabs layout keeps the split at half", async ({ page }) => {
   // Regression: a window resize used to re-measure the pane. A closed pane
   // is 0px wide, so any panel dispatching "resize" while it was shut (the
   // sessions drawer does exactly that) saved "0" and the pane reopened at
   // its minimum width instead of half.
   await page.setViewportSize({ width: 1400, height: 900 });
   await openPane(page);
-  await page.locator("#paneCloseBtn").click();
+  // Split always shows its pane, so it is only hidden in tabs layout.
+  await page.locator("#paneLayoutBtn").click();
+  await page.locator('#paneDrawerTabs [data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#sidePane")).toBeHidden();
   await showSidebar(page);
   await page.locator("#agentTab").click();
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await page.locator("#paneLayoutBtn").click();
   await expect(page.locator("#sidePane")).toBeVisible();
   const available = await page.locator("#agentSplit").evaluate((el) => el.getBoundingClientRect().width);
   await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeGreaterThan(available * 0.4);
 });
 
 test("dragging the border resizes the side pane", async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 900 });
+  // Wide enough that the conversation's minimum width leaves room to widen the pane.
+  await page.setViewportSize({ width: 1900, height: 900 });
   await openPane(page);
   const before = await paneWidth(page);
   const handle = page.locator("#paneSplitResize");
@@ -104,7 +106,8 @@ test("the pane cannot swallow the conversation", async ({ page }) => {
 });
 
 test("double-clicking the border returns the split to half", async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 900 });
+  // Wide enough that the conversation's minimum width leaves room to widen the pane.
+  await page.setViewportSize({ width: 1900, height: 900 });
   await openPane(page);
   const handle = page.locator("#paneSplitResize");
   const box = (await handle.boundingBox())!;

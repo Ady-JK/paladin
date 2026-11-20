@@ -146,7 +146,7 @@ test("the browser shortcut opens the browser menu", async ({ page }) => {
   await expect(menu).toContainText("Open an address");
 });
 
-test("the agent shortcut leaves the side pane and focuses the prompt", async ({ page }) => {
+test("the agent shortcut focuses the prompt and the split keeps its right pane", async ({ page }) => {
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
   await page.locator("#paneNewChatBtn").click();
@@ -159,7 +159,7 @@ test("the agent shortcut leaves the side pane and focuses the prompt", async ({ 
   await expect(page.locator("#sidePane .side-chat .side-input")).toBeFocused();
   await press(page, "h", false);
   await expect(page.locator("#promptInput")).toBeFocused();
-  await expect(page.locator("#sidePane")).toBeHidden();
+  await expect(page.locator("#sidePane")).toBeVisible();
 });
 
 test("a shortcut typed into the prompt does not leak text or send a turn", async ({ page }) => {

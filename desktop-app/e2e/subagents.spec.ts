@@ -215,7 +215,6 @@ test("a child opens in its own pane window, with a way into the main view", asyn
   await expect(page.locator("#parentBar")).toContainText("explore-1");
   await expect(page.locator("#parentBar .agent-status")).toHaveAttribute("data-status", "running");
   await expect(page.locator("#promptInput")).toBeDisabled();
-  await expect(pane).toBeHidden();
   await expect(page.locator("#messages .revert-btn")).toHaveCount(0);
 
   await page.locator("#parentBackBtn").click();
@@ -227,7 +226,6 @@ test("a child opens in its own pane window, with a way into the main view", asyn
 test("every working child gets a pane window without a click", async ({ page }) => {
   await showSidebar(page);
   await page.locator('[data-session="sess-parent"]').click();
-  await expect(page.locator("#sidePane")).toBeHidden();
 
   // Opening the pane any way at all shows the child's tab already there.
   await page.locator("#paneNewChatBtn").click();
@@ -347,7 +345,6 @@ test("a spawn_agent row opens the child live in the side pane", async ({ page })
   const row = page.locator('.tool-row[data-tool="spawn_agent"]');
   await expect(row).toContainText("Spawned");
   await expect(row).toContainText("explore-1");
-  await expect(page.locator("#sidePane")).toBeHidden();
 
   await row.locator("[data-open-agent]").click();
   const pane = page.locator("#sidePane");
@@ -423,10 +420,9 @@ test("deleting a parent drops its and its children's views, even with a child op
   await page.locator('.tool-row[data-tool="spawn_agent"] [data-open-agent]').click();
   await expect(page.locator('.pane-agent[data-agent="sess-child-1"]')).toContainText("Child found login.go.");
   await expect(page.locator('#paneTabs [data-agent="sess-child-1"]')).toHaveCount(1);
-  // Open the child in the main view: the pane gives way to it.
+  // Open the child in the main view.
   await page.locator('.pane-agent[data-agent="sess-child-1"] .pane-agent-open').click();
   await expect(page.locator("#parentBar")).toBeVisible();
-  await expect(page.locator("#sidePane")).toBeHidden();
 
   await showSidebar(page);
   const row = page.locator('#sessionList .session-row:has([data-session="sess-parent"])');

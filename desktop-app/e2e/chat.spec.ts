@@ -53,6 +53,9 @@ test("agent markdown renders while the user bubble stays plain", async ({ page }
 
 test("the conversation and composer share a centered reading width", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  // Tabs layout gives the conversation the whole window; split halves it.
+  await page.locator("#paneLayoutBtn").click();
+  await page.locator("#paneRailToggle").click();
   await page.fill("#promptInput", "hello");
   await page.click("#sendBtn");
   await expect(page.locator("#messages .turn-row").first()).toBeVisible();

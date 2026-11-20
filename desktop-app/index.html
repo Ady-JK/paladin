@@ -143,11 +143,10 @@
             id="paneRailToggle"
             type="button"
             class="rail-btn"
-            title="Tabs"
-            aria-label="Tabs"
+            title="Browser and open tabs"
+            aria-label="Browser and open tabs"
             aria-expanded="false"
             aria-pressed="false"
-            hidden
           >
             <span data-icon="layout-tabs" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
           </button>
@@ -286,7 +285,11 @@
             <span data-icon="xmark"></span>
           </button>
         </header>
-        <div id="paneTabsDrawerBody" class="tabs-drawer-body"></div>
+        <div id="paneTabsDrawerBody" class="tabs-drawer-body">
+          <div class="pane-strip is-vertical">
+            <div id="paneDrawerTabs" class="pane-tabs" role="tablist" aria-label="Open tabs"></div>
+          </div>
+        </div>
       </aside>
 
       <!-- ==================== MAIN ==================== -->

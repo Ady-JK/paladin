@@ -48,9 +48,8 @@ import type {
 } from "./sidePane/types";
 
 const tabsEl = $("#paneTabs");
-const stripEl = tabsEl.parentElement!;
+const drawerTabsEl = $("#paneDrawerTabs");
 const tabsDrawerEl = $("#paneTabsDrawer");
-const tabsDrawerBodyEl = $("#paneTabsDrawerBody");
 const tabsDrawerCloseBtn = $<HTMLButtonElement>("#paneTabsDrawerClose");
 const bodyEl = $("#paneBody");
 const historyBtn = $<HTMLButtonElement>("#paneNewChatBtn");
@@ -80,14 +79,25 @@ function visibleSessionId(): string {
 const changesCache = new Map<string, SessionChanges>();
 let paneOpen = false;
 let layoutMode: "split" | "tabs" = loadText(layoutKey) === "tabs" ? "tabs" : "split";
-// In tabs layout the tab list is its own drawer column, opened from the
-// rail, exactly like Sessions and Files. It is not a strip inside the split:
-// a column there would shrink the native page's surface, and a native page
-// cannot be clipped, so the page would stick out past its panel while the
-// column animated. A shell column keeps every native surface a plain
-// rectangle.
-const tabsDrawerKey = "paladin.tabsDrawer";
-let tabsDrawerOpen = loadText(tabsDrawerKey) !== "closed";
+// The tab list is its own drawer column, opened from the rail button that
+// is present in both layouts, exactly like Sessions and Files. It is not a
+// strip inside the split: a column there would shrink the native page's
+// surface, and a native page cannot be clipped, so the page would stick out
+// past its panel while the column animated. A shell column keeps every
+// native surface a plain rectangle. Agent is always the first entry.
+// Each layout remembers its own choice: tabs layout navigates through the
+// drawer so it starts open; split layout has the horizontal strip, so the
+// drawer starts closed.
+const tabsDrawerKeys = { split: "paladin.tabsDrawer.split", tabs: "paladin.tabsDrawer" } as const;
+const tabsDrawerOpen = {
+  split: loadText(tabsDrawerKeys.split) === "open",
+  tabs: loadText(tabsDrawerKeys.tabs) !== "closed",
+};
+// Split layout always shows the right pane: the agent is the left half and
+// the right half is where terminals, pages, changes and side chats live. A
+// user who wants the agent at full width switches to the tabs layout. IDE
+// mode has its own arrangement and keeps its own rules.
+paneOpen = layoutMode === "split";
 let nextKey = 0;
 let ideTerminalMode = false;
 let ideBrowserKey = "";
@@ -189,6 +199,10 @@ export function setIDETerminalMode(on: boolean): void {
     paneOpen = true;
   }
   ideTerminalMode = on;
+  // IDE mode lays out its own panels, and its terminals and pages live in the
+  // dock, so the pane is only there when something else is open in it.
+  if (on && !tabSet.tabs.some((tab) => tab.kind !== "terminal" && !isBrowserPage(tab))) paneOpen = false;
+  if (!on && layoutMode === "split") paneOpen = true;
   hideLiveChanges(state.sessionId);
   terminalDock.setEnabled(on);
   render();
@@ -1164,28 +1178,47 @@ function tabHtml(tab: Tab, active: boolean): string {
   );
 }
 
-// mainTabHtml is the Agent tab: the conversation, pinned at position 0.
-// Selecting it shows the chat at full width and keeps the strip, the way a
-// browser keeps its tab bar when you pick the first tab. It used to close
-// the whole pane, which made it a mode toggle wearing a tab's clothes.
+// mainTabHtml is the Agent entry: the conversation, pinned at the top of
+// the drawer list. It is not in the split pane's strip, because the agent is
+// the left half there and never needs a tab. Selecting it shows the chat
+// (full width in tabs layout) and keeps the list, the way a browser keeps
+// its tab bar when you pick the first tab.
 function mainTabHtml(): string {
-  const active = !paneOpen;
+  const active = layoutMode === "split" || !paneOpen;
   return `<div class="pane-tab pane-main-tab${active ? " is-active" : ""}" data-key="main"><button type="button" role="tab" aria-selected="${active}" class="pane-tab-pick" title="Agent chat">${icon("rl-agent", "h-3 w-3")}<span>Agent</span></button></div>`;
 }
 
-let tabsHtml = "";
+const emptyPaneEl = document.createElement("div");
+emptyPaneEl.className = "side-empty";
+emptyPaneEl.innerHTML = `<span class="side-empty-ico">${icon("layout-tabs", "h-5 w-5")}</span><p class="side-empty-title">Nothing open</p><p class="side-empty-text">Open a terminal, a page, the changes or a side chat from the toolbar or the rail.</p>`;
 
+let stripHtml: string | null = null;
+let drawerHtml: string | null = null;
+
+// resetTabsCache forces the next paint to rewrite both tab lists.
+function resetTabsCache(): void {
+  stripHtml = null;
+  drawerHtml = null;
+}
+
+// paintTabs writes the two views of one tab set: the horizontal strip
+// inside the split pane (no Agent entry), and the drawer's vertical list
+// (Agent first).
 function paintTabs(): void {
   const set = currentSet();
-  const html =
-    mainTabHtml() +
-    set.tabs
-      .filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)))
-      .map((t) => tabHtml(t, paneOpen && t.key === set.active))
-      .join("");
-  if (html === tabsHtml && tabsEl.innerHTML !== "") return;
-  tabsHtml = html;
-  tabsEl.innerHTML = html;
+  const tabs = set.tabs
+    .filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)))
+    .map((t) => tabHtml(t, paneOpen && t.key === set.active))
+    .join("");
+  const drawer = mainTabHtml() + tabs;
+  if (tabs !== stripHtml) {
+    stripHtml = tabs;
+    tabsEl.innerHTML = tabs;
+  }
+  if (drawer !== drawerHtml) {
+    drawerHtml = drawer;
+    drawerTabsEl.innerHTML = drawer;
+  }
 }
 
 // render paints the open session's tabs, keeping each tab's DOM.
@@ -1200,30 +1233,16 @@ function render(): void {
     toggle.title = visible ? "Hide terminal" : "Show terminal";
   }
   renderIDEPages(currentSet());
-  if (layoutMode === "tabs") {
-    // Tab view: the tab list is the "Open tabs" drawer, a shell column like
-    // Sessions and Files. Keeping it out of the card matters for native
-    // pages: a WebContentsView cannot be clipped, so a column inside the
-    // split would leave the page overhanging its own panel while the column
-    // slid in and out.
-    if (stripEl.parentElement !== tabsDrawerBodyEl) tabsDrawerBodyEl.append(stripEl);
-    stripEl.classList.add("is-vertical");
-  } else {
-    // Split view: the strip is horizontal and part of the pane, so it
-    // retracts with it. The Agent tab is still how you get back.
-    if (stripEl.parentElement !== sidePaneEl) sidePaneEl.insertBefore(stripEl, sidePaneEl.firstElementChild);
-    stripEl.classList.remove("is-vertical");
-  }
-  // The drawer exists only in tabs layout, and only when the user wants it:
-  // a page can have the whole window.
-  const drawerOpen = layoutMode === "tabs" && tabsDrawerOpen;
+  // The drawer list and the split pane's strip are separate elements, so
+  // both can be on screen at once. Tabs layout has no strip in the pane: the
+  // drawer is its only navigation.
+  const drawerOpen = tabsDrawerOpen[layoutMode];
   tabsDrawerEl.classList.toggle("is-closed", !drawerOpen);
-  tabsDrawerEl.hidden = layoutMode !== "tabs";
+  tabsDrawerEl.hidden = false;
   tabsDrawerEl.inert = !drawerOpen;
-  tabsRailBtn.hidden = layoutMode !== "tabs";
   tabsRailBtn.setAttribute("aria-pressed", String(drawerOpen));
   tabsRailBtn.setAttribute("aria-expanded", String(drawerOpen));
-  const tabsLabel = drawerOpen ? "Hide tabs" : "Show tabs";
+  const tabsLabel = drawerOpen ? "Hide browser and open tabs" : "Show browser and open tabs";
   tabsRailBtn.setAttribute("aria-label", tabsLabel);
   tabsRailBtn.title = tabsLabel;
   agentView.classList.toggle("is-tab-layout", layoutMode === "tabs");
@@ -1249,16 +1268,15 @@ function render(): void {
     syncNativeSurfaces();
     return;
   }
-  if (paneOpen && set.tabs.length === 0 && hasMainMessage()) {
+  if (paneOpen && layoutMode === "tabs" && set.tabs.length === 0 && hasMainMessage()) {
     const tab = newChatTab();
     set.tabs.push(tab);
     set.active = tab.key;
   }
   if (set.tabs.length && !activeTab(set)) set.active = set.tabs[0].key;
   paintTabs();
-  bodyEl.replaceChildren(
-    ...set.tabs.filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t))).map((t) => t.body),
-  );
+  const shown = set.tabs.filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)));
+  bodyEl.replaceChildren(...shown.map((t) => t.body), ...(shown.length || !paneOpen ? [] : [emptyPaneEl]));
   for (const tab of set.tabs) {
     if (ideTerminalMode && (tab.kind === "terminal" || isBrowserPage(tab))) continue;
     tab.body.hidden = !paneOpen || tab.key !== set.active;
@@ -1297,9 +1315,18 @@ function showPane(): void {
 // the tab list gone: persisting it would make the panel disappear on the
 // next start because they happened to look at their sessions once.
 function setTabsDrawer(open: boolean, remember = true): void {
-  if (tabsDrawerOpen === open) return;
-  tabsDrawerOpen = open;
-  if (remember) saveText(tabsDrawerKey, open ? "open" : "closed");
+  // A panel taking the slot closes the drawer in both layouts, so toggling
+  // the layout cannot bring back a second pushed column.
+  if (!open && !remember) {
+    const wasOpen = tabsDrawerOpen[layoutMode];
+    tabsDrawerOpen.split = false;
+    tabsDrawerOpen.tabs = false;
+    if (wasOpen) render();
+    return;
+  }
+  if (tabsDrawerOpen[layoutMode] === open) return;
+  tabsDrawerOpen[layoutMode] = open;
+  if (remember) saveText(tabsDrawerKeys[layoutMode], open ? "open" : "closed");
   // The pushing panels share one column slot, so opening this one closes
   // the sessions drawer and the file explorer.
   if (open) {
@@ -1310,6 +1337,12 @@ function setTabsDrawer(open: boolean, remember = true): void {
 }
 
 function closePane(): void {
+  // Split keeps its right pane; only tabs layout swaps it for the agent.
+  if (layoutMode === "split" && !ideTerminalMode) {
+    closeMenu();
+    render();
+    return;
+  }
   paneOpen = false;
   closeMenu();
   render();
@@ -1318,7 +1351,10 @@ function closePane(): void {
 function toggleLayout(): void {
   layoutMode = layoutMode === "split" ? "tabs" : "split";
   saveText(layoutKey, layoutMode);
-  tabsHtml = "";
+  // Tabs layout shows one body at a time, so it starts on the agent unless a
+  // tab is there to show; split always has its pane.
+  paneOpen = layoutMode === "split" || tabSet.tabs.length > 0;
+  resetTabsCache();
   render();
 }
 
@@ -1439,7 +1475,7 @@ export function disposeSidePanes(ids: string[]): void {
   tabSet.tabs.filter((tab) => !keep.includes(tab)).forEach(drop);
   tabSet.tabs = keep;
   if (!tabSet.tabs.some((tab) => tab.key === tabSet.active)) tabSet.active = tabSet.tabs[0]?.key ?? "";
-  tabsHtml = "";
+  resetTabsCache();
   render();
 }
 
@@ -1646,7 +1682,7 @@ export function initSidePane(): void {
   // The tab list is a drawer: the rail button opens and closes it, the way
   // the Sessions and Files buttons work. Closing it gives a page the window.
   tabsRailBtn.addEventListener("click", () => {
-    setTabsDrawer(!tabsDrawerOpen);
+    setTabsDrawer(!tabsDrawerOpen[layoutMode]);
   });
   tabsDrawerCloseBtn.addEventListener("click", () => {
     setTabsDrawer(false);
@@ -1699,13 +1735,15 @@ export function initSidePane(): void {
     if (target.closest(".pane-hist-del")) void deleteChat(chatId, row);
     else if (target.closest(".pane-hist-open")) void reopenChat(chatId);
   });
-  tabsEl.addEventListener("click", (event) => {
+  const onTabListClick = (event: Event): void => {
     const target = event.target as HTMLElement;
     const key = target.closest<HTMLElement>(".pane-tab")?.dataset.key;
     if (key === "main") {
-      // Selecting the Agent tab shows the conversation, it does not
-      // destroy the strip: that is what a tab does.
-      closePane();
+      // Agent is the left half of a split, so picking it only returns focus
+      // to the prompt. In tabs layout it shows the conversation in place of
+      // the page, without destroying the list.
+      if (layoutMode === "tabs") closePane();
+      else $<HTMLTextAreaElement>("#promptInput").focus();
       return;
     }
     const set = currentSet();
@@ -1716,7 +1754,9 @@ export function initSidePane(): void {
       set.active = key;
       showPane();
     }
-  });
+  };
+  tabsEl.addEventListener("click", onTabListClick);
+  drawerTabsEl.addEventListener("click", onTabListClick);
   document.addEventListener("mousedown", (event) => {
     const target = event.target as Node;
     if (!menuEl.hidden && !menuEl.contains(target) && !historyBtn.contains(target)) closeMenu();

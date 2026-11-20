@@ -217,8 +217,7 @@ test("the shared terminal button reopens the existing terminal in Agent mode", a
   const toggle = page.locator("#rail #ideTerminalToggle");
   await toggle.click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
-  await toggle.click();
-  await expect(page.locator("#sidePane")).toBeHidden();
+  // Split keeps its pane, so the button returns to the terminal instead of hiding it.
   await toggle.click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
   await expect(page.locator("#sidePane .pane-terminal")).toHaveCount(1);

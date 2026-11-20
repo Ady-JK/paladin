@@ -174,6 +174,7 @@ test("the history menu reopens and deletes saved side chats", async ({ page }) =
   expect(await page.evaluate(() => (window as any).__e2eSideDeletes.map((d: any) => d.chatId))).toEqual(["c-gone"]);
 
   await page.keyboard.press("Escape");
-  await page.locator("#paneCloseBtn").click();
-  await expect(pane).toBeHidden();
+  // Split keeps its pane: there is no close button to press.
+  await expect(page.locator("#paneCloseBtn")).toBeHidden();
+  await expect(pane).toBeVisible();
 });

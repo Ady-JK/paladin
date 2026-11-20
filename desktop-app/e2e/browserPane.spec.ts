@@ -116,21 +116,23 @@ test("page annotations hand off saved comments without a separate comment panel"
   expect(await page.evaluate(() => (window as any).__e2eSubmits.length)).toBe(1);
 });
 
-test("agent browser activity reopens its tab when the pane is closed", async ({ page }) => {
+test("agent browser activity reopens its tab when the agent is showing in tabs layout", async ({ page }) => {
   const sessionId = await page.evaluate(() => (window as any).__e2eSubmits[0].sessionId);
   await page.evaluate(
     (id) => (window as any).__e2eHub.emit({ event: "browser/opened", sessionId: id, url: "http://localhost:8080" }),
     sessionId,
   );
   await expect(page.locator("#sidePane .pane-browser")).toBeVisible();
-  await page.locator("#paneCloseBtn").click();
+  // Split always shows its pane; in tabs layout the pane gives way to the agent.
+  await page.locator("#paneLayoutBtn").click();
+  await page.locator('#paneDrawerTabs [data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#sidePane")).toBeHidden();
   await page.evaluate(
     (id) => (window as any).__e2eHub.emit({ event: "browser/activity", sessionId: id, url: "http://localhost:8080" }),
     sessionId,
   );
   await expect(page.locator("#sidePane .pane-browser")).toBeVisible();
-  await expect(page.locator("#paneTabs [data-browser]")).toBeVisible();
+  await expect(page.locator("#paneDrawerTabs [data-browser]")).toBeVisible();
 });
 
 test("background agent browsing is indicated in its chat without switching chats", async ({ page }) => {

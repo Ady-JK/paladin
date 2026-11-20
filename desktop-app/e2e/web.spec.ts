@@ -144,15 +144,16 @@ test("a web tab is side-by-side in split and full width in tabs", async ({ page 
   // Tab view gives the page the split, less the tabs drawer when it is
   // open. That is a fixed "+drawer" step, not a multiple, so the assertion
   // is written against the drawer width.
+  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
+  await page.waitForTimeout(500);
   const drawer = (await page.locator("#paneTabsDrawer").boundingBox())?.width ?? 0;
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width))
-    .toBeGreaterThan(split + (drawer ? 100 : split * 1.5));
+  expect(drawer).toBeGreaterThan(100);
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width)).toBeGreaterThan(split + 100);
 
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#agentMain")).toBeVisible();
   await expect.poll(() => viewShown(page)).toBe("agent");
-  await page.locator("#paneTabs .pane-tab[data-web] .pane-tab-pick").click();
+  await page.locator("#paneDrawerTabs .pane-tab[data-web] .pane-tab-pick").click();
   await expect(page.locator("#agentMain")).toBeHidden();
   await expect.poll(() => viewShown(page)).toBe("web:t1");
 });
@@ -183,7 +184,9 @@ test("a visible web page freezes the shell compositing", async ({ page }) => {
   expect(styles.animation).toBe("none");
   expect(styles.blur === "none" || styles.blur === "").toBe(true);
 
-  await page.click("#paneCloseBtn");
+  // Tabs layout shows the agent in place of the page.
+  await page.click("#paneLayoutBtn");
+  await page.locator('#paneDrawerTabs [data-key="main"] .pane-tab-pick').click();
   await expect.poll(() => page.evaluate(() => document.body.classList.contains("guest-visible"))).toBe(false);
 });
 
@@ -455,5 +458,32 @@ test("the sessions drawer opened over the page freezes it", async ({ page }) => 
   await expect.poll(() => viewShown(page)).toBe("agent");
   await page.click("#agentTab");
   await expect(page.locator("#sidebar")).toHaveClass(/is-closed/);
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+});
+
+test("ChatGPT opens in the right pane in split and is reachable from the drawer in both layouts", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await startSession(page);
+  await openSite(page, "https://chatgpt.com/");
+  // Split: the agent stays on the left, the page is a horizontal tab on the right.
+  await expect(page.locator("#agentMain")).toBeVisible();
+  await expect(page.locator("#paneTabs .pane-tab[data-web]")).toContainText("ChatGPT");
+  await expect(page.locator('#paneTabs .pane-tab[data-key="main"]')).toHaveCount(0);
+  await expect.poll(() => viewShown(page)).toBe("web:t1");
+
+  // The rail's browser button lists it under Agent, without leaving split.
+  await page.locator("#paneRailToggle").click();
+  await expect(page.locator("#paneDrawerTabs .pane-tab").first()).toHaveAttribute("data-key", "main");
+  await expect(page.locator("#paneDrawerTabs .pane-tab[data-web]")).toContainText("ChatGPT");
+
+  // Tab view: the same drawer is the only navigation.
+  await page.locator("#paneLayoutBtn").click();
+  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  await expect(page.locator("#sidePane .pane-strip")).toBeHidden();
+  await page.locator('#paneDrawerTabs .pane-tab[data-key="main"] .pane-tab-pick').click();
+  await expect(page.locator("#agentMain")).toBeVisible();
+  await expect.poll(() => viewShown(page)).toBe("agent");
+  await page.locator("#paneDrawerTabs .pane-tab[data-web] .pane-tab-pick").click();
+  await expect(page.locator("#agentMain")).toBeHidden();
   await expect.poll(() => viewShown(page)).toBe("web:t1");
 });
