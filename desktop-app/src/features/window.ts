@@ -51,9 +51,10 @@ export function toggleSidebarFromKey(): void {
   setDrawer(state.collapsed);
 }
 
-// paintSideVisibility shows the floating session drawer. The main card
-// keeps its full width whether the drawer is open or not, so nothing
-// reflows while it animates.
+// paintSideVisibility shows the sessions column. It is a real column in
+// the shell's flex row, so opening it narrows the main card instead of
+// covering it; the card animates its width with the panel rather than
+// reflowing the page under a floating overlay.
 function paintSideVisibility(): void {
   const open = !state.collapsed;
   sidebarEl.classList.toggle("is-closed", !open);
@@ -64,13 +65,12 @@ function paintSideVisibility(): void {
   agentTabEl.title = open ? "Hide sessions" : "Show sessions";
 }
 
-// The sidebar is a floating drawer over the agent view. pickTimer closes
-// it a beat after a session pick, so a double-click (rename) on the same
-// row can still land.
-let pickTimer = 0;
-
+// The sidebar is a column now, so nothing dismisses it behind the user's
+// back. A panel that vanishes because you clicked the conversation is a
+// surprise when it also resized it, and it makes selecting text or
+// dragging a file out of it impossible. The rail button, the close button
+// and Escape are the only ways out.
 function setDrawer(open: boolean): void {
-  window.clearTimeout(pickTimer);
   if (state.collapsed === !open) {
     return;
   }
@@ -83,23 +83,7 @@ function drawerOpen(): boolean {
   return !state.collapsed;
 }
 
-// Clicks on these never dismiss the drawer: the rail (the Sessions button
-// toggles it itself), and the
-// row menu and modals the drawer opens.
-const KEEP_OPEN = "#sidebar, #rail, #sessionRowMenu, .modal-overlay";
-
 function wireDrawer(): void {
-  document.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (!drawerOpen()) return;
-      const target = event.target as Element | null;
-      if (target?.closest?.(KEEP_OPEN)) return;
-      setDrawer(false);
-    },
-    true,
-  );
-
   // Escape closes the drawer only when nothing layered on top of it is
   // open, and then stops there so it doesn't also arm "stop the turn".
   window.addEventListener(
@@ -119,17 +103,15 @@ function wireDrawer(): void {
   sidebarEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target.closest("[data-row-menu], [data-fold], input.session-rename")) return;
+    // Picking a session keeps the column open: it is where the list of
+    // sessions lives, and closing it after every pick makes browsing
+    // several conversations a reopen-every-time job.
     if (target.closest("#newSessionBtn")) {
       window.dispatchEvent(new Event("paladin:ide-show-agent"));
-      setDrawer(false);
-    } else if (target.closest("[data-session], [data-recent]")) {
-      window.dispatchEvent(new Event("paladin:ide-show-agent"));
-      window.clearTimeout(pickTimer);
-      pickTimer = window.setTimeout(() => setDrawer(false), 250);
     }
   });
-  sidebarEl.addEventListener("dblclick", () => window.clearTimeout(pickTimer));
   agentTabEl.addEventListener("click", toggleSidebarFromKey);
+  // The two panels share one column slot, so opening one closes the other.
   window.addEventListener("paladin:ide-show-explorer", () => setDrawer(false));
   document.querySelector<HTMLElement>("#ideModeBtn")?.addEventListener("click", (event) => {
     if (!(event.currentTarget as HTMLElement).dataset.ideReplay) setDrawer(false);

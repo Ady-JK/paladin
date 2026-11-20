@@ -86,10 +86,19 @@ body {
     0 4px 12px -4px rgb(0 0 0 / 0.25);
 }
 
-/* The sidebar is a floating drawer beside the rail, over the main card.
-   The card never resizes for it, so the page under it doesn't reflow. */
-#sidebar.side-drawer,
-.dark #sidebar.side-drawer,
+/* The sessions drawer is a real column beside the main card: opening it
+   narrows the card, it does not cover it. A panel that floats over the
+   conversation makes selecting text or dragging a file a minefield, and
+   it hides the space the drawer is about to change.
+
+   Narrow windows cannot afford the column (below ~1100px the card would
+   drop under ~330px), so there the drawer falls back to the floating
+   panel it used to be. The switch is pure CSS: the shell is a flex row
+   and the drawer is `position: absolute` only in the narrow branch.
+
+   The file explorer keeps its floating panel for now: in IDE mode it has
+   to push the editor rather than the whole card, which is a separate
+   change. */
 .ide-explorer {
   position: absolute;
   top: 8px;
@@ -109,16 +118,11 @@ body {
     visibility 0s linear 0s;
 }
 
-.dark #sidebar.side-drawer,
-.dark .ide-explorer {
+.dark #sidebar.side-drawer {
   border-color: rgb(255 255 255 / 0.08);
   background: #18181b;
-  box-shadow:
-    0 2px 6px rgb(0 0 0 / 0.4),
-    0 24px 48px -16px rgb(0 0 0 / 0.7);
 }
 
-#sidebar.side-drawer.is-closed,
 .ide-explorer.is-closed {
   visibility: hidden;
   opacity: 0;
@@ -128,6 +132,72 @@ body {
     opacity 140ms ease,
     transform 160ms ease,
     visibility 0s linear 160ms;
+}
+
+#sidebar.side-drawer {
+  z-index: 40;
+  flex: 0 0 auto;
+  width: var(--drawer-width, 22rem);
+  max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
+  margin: 8px 0 8px 0;
+  border: 1px solid rgb(0 0 0 / 0.08);
+  border-radius: 14px;
+  background: var(--color-slate-100);
+  /* Collapsed it takes no width at all, so the card reclaims the space
+     instead of leaving a gap where the panel used to be. */
+  overflow: hidden;
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
+    width 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
+    margin 200ms cubic-bezier(0.32, 0.72, 0.28, 1);
+}
+
+/* Collapsed takes no width, so the card reclaims it. */
+#sidebar.side-drawer.is-closed {
+  width: 0;
+  max-width: 0;
+  margin-left: 0;
+  margin-right: 0;
+  border-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    width 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
+    margin 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
+    visibility 0s linear 200ms;
+}
+
+@media (max-width: 1099px) {
+  /* No room for a third column: float the drawer over the card again. */
+  #sidebar.side-drawer {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 3.5rem;
+    width: min(22rem, calc(100vw - 4rem));
+    max-width: min(22rem, calc(100vw - 4rem));
+    margin: 0;
+    box-shadow:
+      0 2px 6px rgb(0 0 0 / 0.08),
+      0 24px 48px -16px rgb(0 0 0 / 0.28);
+  }
+  .dark #sidebar.side-drawer {
+    box-shadow:
+      0 2px 6px rgb(0 0 0 / 0.4),
+      0 24px 48px -16px rgb(0 0 0 / 0.7);
+  }
+  #sidebar.side-drawer.is-closed {
+    width: min(22rem, calc(100vw - 4rem));
+    max-width: min(22rem, calc(100vw - 4rem));
+    transform: translateX(-12px);
+    transition:
+      opacity 140ms ease,
+      transform 160ms ease,
+      visibility 0s linear 160ms;
+  }
 }
 
 #mainCard {

@@ -94,18 +94,14 @@ test("editor find opens a readable search panel", async ({ page }) => {
 test("Explorer floats beside the rail without resizing the editor", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   const explorer = page.locator(".ide-explorer");
-  const sidebar = page.locator("#sidebar");
   const editor = page.locator(".ide-editor-area");
   const drawerBounds = (await explorer.boundingBox())!;
-  const sidebarStyle = await sidebar.evaluate((el) => {
-    const style = getComputedStyle(el);
-    return { left: style.left, top: style.top, borderRadius: style.borderRadius };
-  });
   const explorerStyle = await explorer.evaluate((el) => {
     const style = getComputedStyle(el);
     return { left: style.left, top: style.top, borderRadius: style.borderRadius, position: style.position };
   });
-  expect(explorerStyle).toEqual({ ...sidebarStyle, position: "absolute" });
+  // The explorer still floats: only the sessions drawer became a column.
+  expect(explorerStyle).toEqual({ left: "56px", top: "8px", borderRadius: "14px", position: "absolute" });
   const before = (await editor.boundingBox())!;
   expect(drawerBounds.x).toBeLessThan(before.x + before.width);
   await page.locator("#ideExplorerToggle").click();
@@ -139,7 +135,12 @@ test("Explorer uses the Sessions drawer transition and remains safe to toggle qu
     sidebar.classList.toggle("is-closed", wasClosed);
     return values;
   });
-  expect(transitions[1]).toEqual(transitions[0]);
+  // Both animate their entry; the drawer additionally animates width,
+  // because only it collapses to zero. A duration list always ends in a
+  // 0s visibility step, so check the longest value is not instant.
+  const longest = (d: string): number => Math.max(...d.split(",").map((part) => parseFloat(part) || 0));
+  expect(longest(transitions[0].duration)).toBeGreaterThan(0);
+  expect(longest(transitions[1].duration)).toBeGreaterThan(0);
   await page.locator("#ideExplorerToggle").click();
   await expect(explorer).toHaveClass(/is-closed/);
   await expect(explorer).toHaveAttribute("inert", "");
@@ -1006,7 +1007,8 @@ test("sessions lead the rail and both drawers fit narrow windows", async ({ page
   await page.locator("#agentTab").click();
   const sidebar = page.locator("#sidebar");
   await expect(sidebar).toBeVisible();
-  expect((await sidebar.boundingBox())!.width).toBeGreaterThan(300);
+  // The drawer animates its width from 0, so wait for the settled size.
+  await expect.poll(async () => (await sidebar.boundingBox())!.width, { timeout: 4000 }).toBeGreaterThan(300);
   await page.setViewportSize({ width: 375, height: 700 });
   const bounds = (await sidebar.boundingBox())!;
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(375);

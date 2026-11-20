@@ -136,20 +136,43 @@ test("the Sessions button opens and closes the drawer", async ({ page }) => {
   await expect(page.locator("#sessionList")).toBeVisible();
 });
 
-test("the sidebar floats over a main view that never resizes", async ({ page }) => {
+test("the sidebar pushes the main view instead of covering it", async ({ page }) => {
   await setup(page);
-  await expect(page.locator("#sidebar")).toBeVisible();
+  await showSidebar(page);
+  const sidebar = page.locator("#sidebar");
+  await expect(sidebar).toBeVisible();
+  // The column animates its width, so measure the settled state: a box
+  // read mid-transition reports a partial width and a shifted card.
+  await expect.poll(async () => (await sidebar.boundingBox())!.width, { timeout: 4000 }).toBeGreaterThan(300);
   const open = await page.locator("#mainCard").boundingBox();
-  const side = await page.locator("#sidebar").boundingBox();
+  const side = await sidebar.boundingBox();
   const rail = await page.locator("#rail").boundingBox();
-  // The panel sits on top of the card, not beside it.
-  expect(side!.x).toBeLessThan(open!.x + 40);
-  expect(open!.x).toBeLessThanOrEqual(rail!.x + rail!.width + 1);
+  // A real column: it ends where the card begins, and the card starts
+  // after the rail rather than underneath the panel. A sub-pixel
+  // tolerance, because the columns animate into place.
+  expect(side!.x).toBeGreaterThanOrEqual(rail!.x + rail!.width);
+  expect(side!.x + side!.width).toBeLessThanOrEqual(open!.x + 1.5);
 
   await page.click("#agentTab");
-  await expect(page.locator("#sidebar")).toBeHidden();
+  await expect(sidebar).toBeHidden();
+  await expect
+    .poll(async () => (await page.locator("#mainCard").boundingBox())!.x, { timeout: 4000 })
+    .toBeLessThan(open!.x);
   const closed = await page.locator("#mainCard").boundingBox();
-  expect(closed).toEqual(open);
+  // Closing the column gives the space back to the card.
+  expect(closed!.width).toBeGreaterThan(open!.width);
+});
+
+test("clicking outside the sidebar leaves it open", async ({ page }) => {
+  await setup(page);
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await page.click("#promptInput");
+  await expect(page.locator("#sidebar")).toBeVisible();
+  await page.locator("#messages").click({ position: { x: 5, y: 5 } });
+  await expect(page.locator("#sidebar")).toBeVisible();
+  // Escape is still the way out.
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#sidebar")).toBeHidden();
 });
 
 test("the main card has equal top and bottom insets", async ({ page }) => {
@@ -162,8 +185,9 @@ test("the main card has equal top and bottom insets", async ({ page }) => {
   expect(viewport!.height - card!.y - card!.height).toBe(8);
 });
 
-test("the drawer closes on an outside click, Escape, and a session pick", async ({ page }) => {
+test("the drawer stays open through an outside click and closes on Escape or the rail", async ({ page }) => {
   await setup(page);
+  await showSidebar(page);
   const side = page.locator("#sidebar");
   await expect(side).toBeVisible();
 
@@ -171,18 +195,27 @@ test("the drawer closes on an outside click, Escape, and a session pick", async 
   await page.click("#searchInput");
   await expect(side).toBeVisible();
 
+  // A column is not a popover: clicking the conversation must not hide it.
   await page.mouse.click(900, 300);
-  await expect(side).toBeHidden();
-
-  await page.click("#agentTab");
   await expect(side).toBeVisible();
+
   await page.keyboard.press("Escape");
   await expect(side).toBeHidden();
 
   await page.click("#agentTab");
   await expect(side).toBeVisible();
-  await page.locator('[data-recent="s-cli-1"]').click();
+  await page.click("#agentTab");
   await expect(side).toBeHidden();
+});
+
+test("picking a session keeps the sessions column open", async ({ page }) => {
+  await setup(page);
+  await showSidebar(page);
+  const side = page.locator("#sidebar");
+  await page.locator('[data-recent="s-cli-1"]').click();
+  // Reopening the list after every pick turned browsing into a chore.
+  await page.waitForTimeout(400);
+  await expect(side).toBeVisible();
   await expect(page.locator("#sessionLabel")).toHaveText("s-cli-1".slice(0, 8));
 });
 
