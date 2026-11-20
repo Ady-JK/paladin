@@ -35,7 +35,9 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  width: min(var(--ide-explorer-width, 22rem), calc(100vw - 4rem));
+  /* The same width as the other rail drawers until the user drags its own
+     splitter, which sets --ide-explorer-width. */
+  width: min(var(--ide-explorer-width, var(--drawer-width, 22rem)), calc(100vw - 4rem));
   overflow: hidden;
 }
 .ide-explorer-head,

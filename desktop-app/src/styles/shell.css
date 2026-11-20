@@ -7,6 +7,12 @@
   --panel-anim: 200ms;
   --panel-ease: cubic-bezier(0.32, 0.72, 0.28, 1);
   --panel-radius: 14px;
+  /* The three rail drawers are one family, so they are one width. A drawer
+     that is narrower than its neighbours reads as a different kind of
+     control rather than another column of the same shell. The explorer
+     override (--ide-explorer-width) is only set when the user drags its
+     splitter; until then it uses this too. */
+  --drawer-width: 22rem;
 }
 
 body {
@@ -147,11 +153,20 @@ body {
     bottom: 8px;
     left: 3.5rem;
     z-index: 40;
-    width: min(22rem, calc(100vw - 4rem));
-    max-width: min(22rem, calc(100vw - 4rem));
+    width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
+    max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     border: 1px solid rgb(0 0 0 / 0.08);
     border-radius: 14px;
     background: var(--color-slate-100);
+    /* Floating: the panel slides and fades over the card instead of pushing
+       it, so `width` is not something the user watches change. Keeping it
+       out of the transition list also lets the viewport clamps above apply
+       on the frame the window resizes, with no eased overshoot past the
+       window edge. */
+    transition:
+      opacity var(--panel-anim) ease,
+      transform var(--panel-anim) var(--panel-ease),
+      border-radius var(--panel-anim) var(--panel-ease);
     box-shadow:
       0 2px 6px rgb(0 0 0 / 0.08),
       0 24px 48px -16px rgb(0 0 0 / 0.28);
@@ -164,12 +179,12 @@ body {
       0 24px 48px -16px rgb(0 0 0 / 0.7);
   }
   .ide-explorer.is-closed {
-    width: min(22rem, calc(100vw - 4rem));
+    width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     transform: translateX(-12px);
     transition:
-      opacity 140ms ease,
-      transform 160ms ease,
-      visibility 0s linear 160ms;
+      opacity var(--panel-anim) ease,
+      transform var(--panel-anim) var(--panel-ease),
+      visibility 0s linear var(--panel-anim);
   }
 }
 
@@ -183,7 +198,6 @@ body {
 #appShell > .ide-explorer.is-closed {
   width: 0;
   min-width: 0;
-  flex-basis: 0;
   padding: 0;
   border-width: 0;
   opacity: 0;
@@ -192,6 +206,7 @@ body {
   transition:
     opacity var(--panel-anim) ease,
     width var(--panel-anim) var(--panel-ease),
+    border-width var(--panel-anim) var(--panel-ease),
     visibility 0s linear var(--panel-anim);
 }
 
@@ -215,7 +230,9 @@ body {
     opacity var(--panel-anim) ease,
     transform var(--panel-anim) var(--panel-ease),
     width var(--panel-anim) var(--panel-ease),
+    max-width var(--panel-anim) var(--panel-ease),
     margin var(--panel-anim) var(--panel-ease),
+    border-width var(--panel-anim) var(--panel-ease),
     border-radius var(--panel-anim) var(--panel-ease);
 }
 
@@ -226,7 +243,14 @@ body {
   border-bottom-right-radius: 0;
 }
 
-/* Collapsed takes no width, so the card reclaims it. */
+/* Collapsed takes no width, so the card reclaims it.
+
+   Every property that decides the width animates here, including
+   max-width and border-width: they used to snap to 0 (or to 2px of border)
+   on the first frame, which clamped the width transition to nothing and made
+   closing the drawer look like a cut even though the transition list said
+   otherwise. `visibility` is held back until the end so the panel stays
+   painted while it slides shut. */
 #sidebar.side-drawer.is-closed {
   width: 0;
   max-width: 0;
@@ -238,8 +262,12 @@ body {
   pointer-events: none;
   transition:
     opacity var(--panel-anim) ease,
+    transform var(--panel-anim) var(--panel-ease),
     width var(--panel-anim) var(--panel-ease),
+    max-width var(--panel-anim) var(--panel-ease),
     margin var(--panel-anim) var(--panel-ease),
+    border-width var(--panel-anim) var(--panel-ease),
+    border-radius var(--panel-anim) var(--panel-ease),
     visibility 0s linear var(--panel-anim);
 }
 
@@ -250,9 +278,16 @@ body {
     top: 8px;
     bottom: 8px;
     left: 3.5rem;
-    width: min(22rem, calc(100vw - 4rem));
-    max-width: min(22rem, calc(100vw - 4rem));
+    width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
+    max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     margin: 0;
+    /* Floating, so width is not the animated property: see the explorer
+       above. It must be free to re-clamp on the frame the window shrinks,
+       or the panel eases out past the edge. */
+    transition:
+      opacity var(--panel-anim) ease,
+      transform var(--panel-anim) var(--panel-ease),
+      border-radius var(--panel-anim) var(--panel-ease);
     box-shadow:
       0 2px 6px rgb(0 0 0 / 0.08),
       0 24px 48px -16px rgb(0 0 0 / 0.28);
@@ -263,24 +298,28 @@ body {
       0 24px 48px -16px rgb(0 0 0 / 0.7);
   }
   #sidebar.side-drawer.is-closed {
-    width: min(22rem, calc(100vw - 4rem));
-    max-width: min(22rem, calc(100vw - 4rem));
+    width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
+    max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     transform: translateX(-12px);
     transition:
-      opacity 140ms ease,
-      transform 160ms ease,
-      visibility 0s linear 160ms;
+      opacity var(--panel-anim) ease,
+      transform var(--panel-anim) var(--panel-ease),
+      visibility 0s linear var(--panel-anim);
   }
 }
 
 /* The "Open tabs" drawer in tabs layout. It is the same kind of column as
-   the sessions drawer, so it shares the width, radius and motion tokens:
-   every panel that pushes the card opens the same way. */
+   the sessions drawer and the files explorer, so it shares their width,
+   radius and motion — one family of panels, not three lookalikes.
+
+   Width animates only because this panel is docked: it is a column that
+   opens and closes as a column. The closed state is a separate rule below,
+   which is why the base rule leaves width/max-width in the list. */
 #paneTabsDrawer.side-drawer {
   z-index: 30;
   flex: 0 0 auto;
-  width: min(15rem, calc(100vw - 4rem));
-  max-width: min(15rem, calc(100vw - 4rem));
+  width: min(var(--drawer-width), calc(100vw - 4rem));
+  max-width: min(var(--drawer-width), calc(100vw - 4rem));
   margin: 8px 0;
   border: 1px solid rgb(0 0 0 / 0.08);
   border-radius: var(--panel-radius, 14px);
@@ -292,7 +331,9 @@ body {
     opacity var(--panel-anim) ease,
     transform var(--panel-anim) var(--panel-ease),
     width var(--panel-anim) var(--panel-ease),
+    max-width var(--panel-anim) var(--panel-ease),
     margin var(--panel-anim) var(--panel-ease),
+    border-width var(--panel-anim) var(--panel-ease),
     border-radius var(--panel-anim) var(--panel-ease);
 }
 
@@ -307,6 +348,10 @@ body {
   border-bottom-right-radius: 0;
 }
 
+/* Closing animates exactly like opening: max-width and border-width are in
+   the transition list, because snapping either of them to 0 on the first
+   frame clamps the width change and the panel disappears instead of sliding
+   shut. visibility waits for the animation to finish. */
 #paneTabsDrawer.side-drawer.is-closed {
   width: 0;
   max-width: 0;
@@ -318,8 +363,12 @@ body {
   pointer-events: none;
   transition:
     opacity var(--panel-anim) ease,
+    transform var(--panel-anim) var(--panel-ease),
     width var(--panel-anim) var(--panel-ease),
+    max-width var(--panel-anim) var(--panel-ease),
     margin var(--panel-anim) var(--panel-ease),
+    border-width var(--panel-anim) var(--panel-ease),
+    border-radius var(--panel-anim) var(--panel-ease),
     visibility 0s linear var(--panel-anim);
 }
 
@@ -366,15 +415,21 @@ body {
 
 @media (max-width: 1099px) {
   /* Same fallback as the other drawers: float over the card instead of
-     squeezing it to nothing. */
+     squeezing it to nothing, and slide out with the same motion. */
   #paneTabsDrawer.side-drawer {
     position: absolute;
     top: 8px;
     bottom: 8px;
     left: 3.5rem;
-    width: min(15rem, calc(100vw - 4rem));
-    max-width: min(15rem, calc(100vw - 4rem));
+    width: min(var(--drawer-width), calc(100vw - 4rem));
+    max-width: min(var(--drawer-width), calc(100vw - 4rem));
     margin: 0;
+    /* Floating, so width is not the animated property: it must re-clamp on
+       the frame the window shrinks instead of easing out past the edge. */
+    transition:
+      opacity var(--panel-anim) ease,
+      transform var(--panel-anim) var(--panel-ease),
+      border-radius var(--panel-anim) var(--panel-ease);
     box-shadow:
       0 2px 6px rgb(0 0 0 / 0.08),
       0 24px 48px -16px rgb(0 0 0 / 0.28);
@@ -385,13 +440,13 @@ body {
       0 24px 48px -16px rgb(0 0 0 / 0.7);
   }
   #paneTabsDrawer.side-drawer.is-closed {
-    width: min(15rem, calc(100vw - 4rem));
-    max-width: min(15rem, calc(100vw - 4rem));
+    width: min(var(--drawer-width), calc(100vw - 4rem));
+    max-width: min(var(--drawer-width), calc(100vw - 4rem));
     transform: translateX(-12px);
     transition:
-      opacity 140ms ease,
-      transform 160ms ease,
-      visibility 0s linear 160ms;
+      opacity var(--panel-anim) ease,
+      transform var(--panel-anim) var(--panel-ease),
+      visibility 0s linear var(--panel-anim);
   }
 }
 

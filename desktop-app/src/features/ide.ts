@@ -459,6 +459,12 @@ function syncPaneVisibility(): void {
   button.setAttribute("title", label);
   button.setAttribute("aria-pressed", String(explorerVisible));
   window.dispatchEvent(new Event("resize"));
+  // Only a panel that is actually opening takes the column slot, and it
+  // says so with its own event. The tabs drawer listens for this instead of
+  // for every ide-hide-explorer/ide-show-explorer dispatch: a close
+  // animation that finishes later than the user's next action used to close
+  // a panel that had just been opened.
+  if (explorerVisible) window.dispatchEvent(new Event("paladin:explorer-opened"));
 }
 
 function setEnabled(on: boolean): void {

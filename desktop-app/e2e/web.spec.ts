@@ -141,7 +141,13 @@ test("a web tab is side-by-side in split and full width in tabs", async ({ page 
 
   await page.locator("#paneLayoutBtn").click();
   await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width)).toBeGreaterThan(split * 1.5);
+  // Tab view gives the page the split, less the tabs drawer when it is
+  // open. That is a fixed "+drawer" step, not a multiple, so the assertion
+  // is written against the drawer width.
+  const drawer = (await page.locator("#paneTabsDrawer").boundingBox())?.width ?? 0;
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width))
+    .toBeGreaterThan(split + (drawer ? 100 : split * 1.5));
 
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#agentMain")).toBeVisible();

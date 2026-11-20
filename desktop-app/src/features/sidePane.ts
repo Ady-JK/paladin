@@ -1290,11 +1290,16 @@ function showPane(): void {
 }
 
 // setTabsDrawer opens or closes the "Open tabs" panel. It is a column of the
-// shell, so opening it narrows the card; the choice is remembered.
-function setTabsDrawer(open: boolean): void {
+// shell, so opening it narrows the card.
+//
+// `remember` separates a choice from a side effect. When another panel takes
+// the column slot this closes too, but that is not the user saying they want
+// the tab list gone: persisting it would make the panel disappear on the
+// next start because they happened to look at their sessions once.
+function setTabsDrawer(open: boolean, remember = true): void {
   if (tabsDrawerOpen === open) return;
   tabsDrawerOpen = open;
-  saveText(tabsDrawerKey, open ? "open" : "closed");
+  if (remember) saveText(tabsDrawerKey, open ? "open" : "closed");
   // The pushing panels share one column slot, so opening this one closes
   // the sessions drawer and the file explorer.
   if (open) {
@@ -1656,10 +1661,13 @@ export function initSidePane(): void {
     setTabsDrawer(false);
     tabsRailBtn.focus();
   });
-  // One panel per column slot: the sessions drawer and the explorer close
-  // this one when they open.
-  window.addEventListener("paladin:sessions-drawer-opened", () => setTabsDrawer(false));
-  window.addEventListener("paladin:ide-show-explorer", () => setTabsDrawer(false));
+  // One panel per column slot. The explorer announces that it is opening;
+  // the sessions drawer announces itself the same way, and opening this one
+  // closes both. Listening to each panel's *own* open event (rather than to
+  // every show/hide request) is what keeps a late close animation from
+  // shutting a panel the user just opened.
+  window.addEventListener("paladin:sessions-drawer-opened", () => setTabsDrawer(false, false));
+  window.addEventListener("paladin:explorer-opened", () => setTabsDrawer(false, false));
   $("#paneCloseBtn").addEventListener("click", closePane);
   historyBtn.addEventListener("click", (event) => {
     event.stopPropagation();

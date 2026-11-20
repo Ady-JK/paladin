@@ -88,9 +88,11 @@ test("browser tab expands to full width and the layout survives a reload", async
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserBounds?.width ?? 0)).toBeGreaterThan(100);
   const splitWidth = await page.evaluate(() => (window as any).__e2eBrowserBounds.width);
   await switchLayout(page);
+  // Tab view fills the split, minus the tabs drawer when it is open — not
+  // "1.5x the split", which stops being true once the drawer has width.
   await expect
     .poll(() => page.evaluate(() => (window as any).__e2eBrowserBounds?.width ?? 0))
-    .toBeGreaterThan(splitWidth * 1.5);
+    .toBeGreaterThan(splitWidth + 100);
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBe(null);
   await page.locator("#paneTabs [data-browser] .pane-tab-pick").click();
