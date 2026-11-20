@@ -96,26 +96,60 @@ body {
    panel it used to be. The switch is pure CSS: the shell is a flex row
    and the drawer is `position: absolute` only in the narrow branch.
 
-   The file explorer keeps its floating panel for now: in IDE mode it has
-   to push the editor rather than the whole card, which is a separate
-   change. */
+   The file explorer moves between two columns depending on mode (see
+   placeExplorer): inside the IDE workspace it narrows the editor, and in
+   Agent mode it is a column of the shell beside the chat. */
 .ide-explorer {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 3.5rem;
-  z-index: 40;
-  width: min(22rem, calc(100vw - 4rem));
+  flex: 0 0 auto;
+}
+
+/* Agent mode: a panel column of the shell. */
+#appShell > .ide-explorer {
+  margin: 8px 0;
   border: 1px solid rgb(0 0 0 / 0.08);
   border-radius: 14px;
   background: var(--color-slate-100);
-  box-shadow:
-    0 2px 6px rgb(0 0 0 / 0.08),
-    0 24px 48px -16px rgb(0 0 0 / 0.28);
-  transition:
-    opacity 160ms ease,
-    transform 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
-    visibility 0s linear 0s;
+  overflow: hidden;
+}
+
+.dark #appShell > .ide-explorer {
+  border-color: rgb(255 255 255 / 0.08);
+  background: #18181b;
+}
+
+@media (max-width: 1099px) {
+  /* No room for three columns: float the explorer over the editor, the
+     way it used to work, so the IDE keeps a usable editor width. */
+  .ide-explorer {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 3.5rem;
+    z-index: 40;
+    width: min(22rem, calc(100vw - 4rem));
+    max-width: min(22rem, calc(100vw - 4rem));
+    border: 1px solid rgb(0 0 0 / 0.08);
+    border-radius: 14px;
+    background: var(--color-slate-100);
+    box-shadow:
+      0 2px 6px rgb(0 0 0 / 0.08),
+      0 24px 48px -16px rgb(0 0 0 / 0.28);
+  }
+  .dark .ide-explorer {
+    border-color: rgb(255 255 255 / 0.08);
+    background: #18181b;
+    box-shadow:
+      0 2px 6px rgb(0 0 0 / 0.4),
+      0 24px 48px -16px rgb(0 0 0 / 0.7);
+  }
+  .ide-explorer.is-closed {
+    width: min(22rem, calc(100vw - 4rem));
+    transform: translateX(-12px);
+    transition:
+      opacity 140ms ease,
+      transform 160ms ease,
+      visibility 0s linear 160ms;
+  }
 }
 
 .dark #sidebar.side-drawer {
@@ -123,15 +157,25 @@ body {
   background: #18181b;
 }
 
-.ide-explorer.is-closed {
-  visibility: hidden;
+/* Collapsed it takes no width, so the editor reclaims the space. */
+.ide-explorer.is-closed,
+#appShell > .ide-explorer.is-closed {
+  width: 0;
+  min-width: 0;
+  flex-basis: 0;
+  padding: 0;
+  border-width: 0;
   opacity: 0;
-  transform: translateX(-12px);
+  visibility: hidden;
   pointer-events: none;
   transition:
     opacity 140ms ease,
-    transform 160ms ease,
-    visibility 0s linear 160ms;
+    width 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
+    visibility 0s linear 200ms;
+}
+
+.ide-explorer.is-closed > * {
+  display: none;
 }
 
 #sidebar.side-drawer {

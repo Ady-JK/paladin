@@ -427,10 +427,27 @@ function syncWorkspace(): void {
   if (enabled) void restoreLayout(root, workspaceEpoch);
 }
 
+// placeExplorer puts the panel where the current mode needs it. In IDE
+// mode it is a column of the workspace, so it narrows the editor and
+// leaves the chat and the card alone. In Agent mode there is no editor,
+// so it is a column of the shell beside the chat instead.
+function placeExplorer(): void {
+  const explorer = $(".ide-explorer");
+  const resize = $("#ideExplorerResize");
+  if (enabled) {
+    const workspace = $(".ide-workspace");
+    if (explorer.parentElement !== workspace) workspace.prepend(explorer, resize);
+    return;
+  }
+  const shell = $("#appShell");
+  if (explorer.parentElement !== shell) shell.insertBefore(explorer, $("#mainCard"));
+}
+
 function syncPaneVisibility(): void {
   if (!state.collapsed) explorerVisible = false;
   $("#agentSplit").classList.toggle("ide-agent-hidden", enabled && !agentVisible);
   const explorer = $(".ide-explorer");
+  placeExplorer();
   explorer.classList.toggle("is-closed", !explorerVisible);
   explorer.inert = !explorerVisible;
   $("#ideExplorerResize").hidden = !explorerVisible;
@@ -488,9 +505,13 @@ export function initIDE(): void {
   chatResize.setAttribute("aria-label", "Resize chat");
   chatResize.setAttribute("aria-orientation", "vertical");
   $("#agentSplit").prepend(root, chatResize);
+  // The explorer stays inside the IDE workspace, where it is a column of
+  // that flex row: opening it narrows the editor, and the chat and the
+  // card keep their widths. Pulling it out to the shell made it compete
+  // with the whole card, which squeezed the IDE until the terminal dock's
+  // head collapsed to nothing.
   const explorer = $(".ide-explorer");
   explorer.append($("#ideExplorerResize"));
-  $("#sidebar").before(explorer);
   explorer.classList.add("is-closed");
   explorer.inert = true;
   // Establish the closed state before the first request opens the drawer.

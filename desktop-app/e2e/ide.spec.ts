@@ -91,23 +91,22 @@ test("editor find opens a readable search panel", async ({ page }) => {
   await expect(page.locator("#ideEditor .cm-searchMatch").first()).toBeVisible();
 });
 
-test("Explorer floats beside the rail without resizing the editor", async ({ page }) => {
+test("Explorer pushes the editor instead of covering it", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   const explorer = page.locator(".ide-explorer");
   const editor = page.locator(".ide-editor-area");
+  // A column of the IDE workspace now, not a panel floating over it.
+  const explorerStyle = await explorer.evaluate((el) => getComputedStyle(el).position);
+  expect(explorerStyle).toBe("static");
   const drawerBounds = (await explorer.boundingBox())!;
-  const explorerStyle = await explorer.evaluate((el) => {
-    const style = getComputedStyle(el);
-    return { left: style.left, top: style.top, borderRadius: style.borderRadius, position: style.position };
-  });
-  // The explorer still floats: only the sessions drawer became a column.
-  expect(explorerStyle).toEqual({ left: "56px", top: "8px", borderRadius: "14px", position: "absolute" });
   const before = (await editor.boundingBox())!;
-  expect(drawerBounds.x).toBeLessThan(before.x + before.width);
+  // It ends where the editor begins: no overlap at all.
+  expect(drawerBounds.x + drawerBounds.width).toBeLessThanOrEqual(before.x + 1.5);
   await page.locator("#ideExplorerToggle").click();
+  await expect.poll(async () => (await editor.boundingBox())!.x, { timeout: 4000 }).toBeLessThan(before.x);
   const after = (await editor.boundingBox())!;
-  expect(after.x).toBe(before.x);
-  expect(after.width).toBe(before.width);
+  // Closing the column hands its width back to the editor.
+  expect(after.width).toBeGreaterThan(before.width);
   await page.locator("#ideExplorerToggle").click();
   await expect(explorer).toBeVisible();
   await page.locator("#ideEmpty").click();
@@ -119,33 +118,22 @@ test("Explorer floats beside the rail without resizing the editor", async ({ pag
   await expect(page.locator("#ideExplorerToggle")).toBeFocused();
 });
 
-test("Explorer uses the Sessions drawer transition and remains safe to toggle quickly", async ({ page }) => {
+test("Explorer collapses to no width and stays safe to toggle quickly", async ({ page }) => {
   await page.locator("#ideExplorerToggle").click();
   const explorer = page.locator(".ide-explorer");
   await expect(explorer).toBeVisible();
-  const transitions = await page.evaluate(() => {
-    const sidebar = document.querySelector("#sidebar")!;
-    const wasClosed = sidebar.classList.contains("is-closed");
-    sidebar.classList.remove("is-closed");
-    const get = (selector: string) => {
-      const style = getComputedStyle(document.querySelector(selector)!);
-      return { property: style.transitionProperty, duration: style.transitionDuration };
-    };
-    const values = [get("#sidebar"), get(".ide-explorer")];
-    sidebar.classList.toggle("is-closed", wasClosed);
-    return values;
-  });
-  // Both animate their entry; the drawer additionally animates width,
-  // because only it collapses to zero. A duration list always ends in a
-  // 0s visibility step, so check the longest value is not instant.
-  const longest = (d: string): number => Math.max(...d.split(",").map((part) => parseFloat(part) || 0));
-  expect(longest(transitions[0].duration)).toBeGreaterThan(0);
-  expect(longest(transitions[1].duration)).toBeGreaterThan(0);
+  // A collapsed column must take no space, or the editor would keep a
+  // blank strip where the panel used to be.
+  const width = (): Promise<number> => explorer.evaluate((el) => el.getBoundingClientRect().width);
+  await expect.poll(width, { timeout: 4000 }).toBeGreaterThan(300);
+  const before = await width();
   await page.locator("#ideExplorerToggle").click();
   await expect(explorer).toHaveClass(/is-closed/);
   await expect(explorer).toHaveAttribute("inert", "");
+  await expect.poll(width, { timeout: 4000 }).toBe(0);
   await page.locator("#ideExplorerToggle").click();
   await expect(explorer).toBeVisible();
+  await expect.poll(width, { timeout: 4000 }).toBe(before);
   await expect(explorer).not.toHaveAttribute("inert");
   await page.evaluate(() => document.documentElement.setAttribute("data-motion", "off"));
   await page.locator("#ideExplorerToggle").click();
