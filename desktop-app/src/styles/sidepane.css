@@ -279,7 +279,10 @@
   text-overflow: ellipsis;
 }
 
-/* In Tabs mode the pane strip joins the single app header. */
+/* In Tabs mode the pane strip joins the single app header. The header
+   keeps one height in both layouts: the strip is centred in it and the
+   tabs are capped to what fits, so switching layouts never moves the
+   bar or the window controls. */
 #titleBar:has(.pane-strip) {
   gap: 10px;
 }
@@ -287,19 +290,37 @@
   order: 1;
   flex: 1;
   min-width: 0;
+  /* Never taller than the action row beside it: the bar's height must
+     come from its contents, and both contents are 28px. */
+  height: 28px;
   min-height: 0;
   padding: 0;
   border: 0;
   background: transparent;
+  overflow: hidden;
+}
+#titleBar .pane-tabs {
+  gap: 4px;
+  height: 100%;
+  align-items: center;
+}
+#titleBar .pane-tab {
+  height: 28px;
+}
+#titleBar .pane-tab-pick,
+#titleBar .pane-main-tab .pane-tab-pick {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 0.8125rem;
+}
+#titleBar .pane-tab-close {
+  padding-block: 0;
 }
 #mainCard:has(#agentView.hidden) #titleBar .pane-strip {
   display: none;
 }
 #titleBar .pane-tab.is-active {
   border-radius: 10px;
-}
-#titleBar .pane-tabs {
-  gap: 4px;
 }
 #titleBar .pane-menu {
   top: calc(100% + 10px);

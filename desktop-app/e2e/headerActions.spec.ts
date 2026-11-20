@@ -52,3 +52,31 @@ test("browser has one entry and new side chats and terminals share a menu", asyn
   await page.getByRole("menuitem", { name: "New terminal" }).click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
 });
+
+// Switching layouts must not resize the header: the tab strip moves into
+// the title bar in tabs layout, and a taller strip used to grow the bar
+// (and with it the readings row and the window buttons) by six pixels.
+test("the header keeps one height across layouts", async ({ page }) => {
+  const bar = page.locator("#titleBar");
+  const measure = async (): Promise<{ bar: number; actions: number; close: number; closeY: number }> => ({
+    bar: Math.round((await bar.boundingBox())!.height),
+    actions: Math.round((await page.locator("#headerStatusActions").boundingBox())!.height),
+    close: Math.round((await page.locator("#windowCloseBtn").boundingBox())!.height),
+    closeY: Math.round((await page.locator("#windowCloseBtn").boundingBox())!.y),
+  });
+  const split = await measure();
+  await page.locator("#paneActions #paneNewChatBtn").click();
+  await page.getByRole("menuitem", { name: "New side chat" }).click();
+  await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
+  const splitWithPane = await measure();
+  await page.locator("#paneLayoutBtn").click();
+  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  await expect(page.locator("#titleBar .pane-strip")).toBeVisible();
+  const tabs = await measure();
+
+  expect(tabs.bar, "the bar must not grow in tabs layout").toBe(split.bar);
+  expect(splitWithPane.bar).toBe(split.bar);
+  expect(tabs.actions).toBe(split.actions);
+  expect(tabs.close).toBe(split.close);
+  expect(tabs.closeY).toBe(split.closeY);
+});
