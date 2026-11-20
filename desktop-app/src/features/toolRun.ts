@@ -2,6 +2,7 @@
 // multiple calls fold behind a summary that expands to the detailed rows.
 
 import type { ToolInfo, ToolView } from "../core/types";
+import { tryParseJson } from "../core/format";
 import { icon } from "../icons";
 import { createToolActivity, runLabel, toolIcon, toolLabel, toolReason } from "./tools";
 
@@ -112,6 +113,41 @@ export class ToolRun {
 
   has(id: string): boolean {
     return this.views.has(id);
+  }
+
+  // jobIDs lists the shell calls in this run that reported a job id and a
+  // running status: the ones whose badge can go stale when the job exits.
+  // A call's own result is the snapshot taken when the command detached,
+  // so it never learns that the process is gone.
+  runningJobIDs(): string[] {
+    const out: string[] = [];
+    for (const tool of this.infos.values()) {
+      if (tool.name !== "shell" || tool.status === "running") continue;
+      const result = tryParseJson(tool.result);
+      const res = result && typeof result === "object" ? result : null;
+      const id = typeof res?.job_id === "string" ? res.job_id : "";
+      if (id && res?.status === "running") out.push(id);
+    }
+    return out;
+  }
+
+  // markJobFinished repaints a call whose job is no longer running. The
+  // row keeps its command and log path; only the live status is replaced,
+  // so the terminal card reads as finished instead of still running.
+  markJobFinished(jobID: string): void {
+    for (const [id, tool] of this.infos) {
+      if (tool.name !== "shell") continue;
+      const result = tryParseJson(tool.result);
+      const res = result && typeof result === "object" ? result : null;
+      if (typeof res?.job_id !== "string" || res.job_id !== jobID || res.status !== "running") continue;
+      // `finished` is what the badge reads: the job left the running list
+      // but its exit code was never observed here, so it must not claim
+      // "exit 0".
+      const next: ToolInfo = { ...tool, result: JSON.stringify({ ...res, status: "done", finished: true }) };
+      this.infos.set(id, next);
+      this.views.get(id)?.update(next);
+    }
+    this.schedule();
   }
 
   // upsert adds a call or refreshes one already in the run. Rows are

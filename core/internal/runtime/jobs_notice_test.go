@@ -303,3 +303,30 @@ func TestBackgroundJobWithNotifyFalseIsNotWatched(t *testing.T) {
 		t.Fatalf("a monitor is running for a notify:false job: %v", rt.jobs.stops)
 	}
 }
+
+// A job that exits must tell the app, so a command card stops showing the
+// snapshot it took when the command detached. Without this the row reads
+// "running" forever: the call's own result is never rewritten, and job
+// records live in their own file rather than the transcript.
+func TestFinishedJobPublishesSessionRefresh(t *testing.T) {
+	rt, _ := testRuntime(t)
+	rt.jobs.mu.Lock()
+	rt.jobs.live["job-5"] = &JobRecord{ID: "job-5", SessionID: "sess-a", Workspace: "/w", Status: "running"}
+	rt.jobs.mu.Unlock()
+
+	got := make(chan TurnEvent, 8)
+	rt.hub.SetSink(func(ev TurnEvent) { got <- ev })
+	rt.jobs.JobFinished(tools.JobEvent{ID: "job-5", Status: "done"})
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-got:
+			if ev.Event == "session/refresh" && ev.SessionID == "sess-a" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a finished job did not publish session/refresh; the card keeps saying it is running")
+		}
+	}
+}

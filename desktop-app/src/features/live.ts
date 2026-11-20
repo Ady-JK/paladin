@@ -196,6 +196,33 @@ export function liveRoot(sessionId: string): HTMLElement {
   return entry(sessionId).root;
 }
 
+// settleJobs reconciles a session's visible command cards against the jobs
+// the runtime still has running. A shell call reports "running" when it
+// detaches, and nothing repaints that snapshot when the process exits, so
+// without this the card reads "running in background" indefinitely while
+// the running-jobs list (which is polled) is already empty.
+async function settleJobs(sessionId: string): Promise<void> {
+  let live: Set<string>;
+  try {
+    live = new Set((await api.runningJobs()).map((job) => job.id));
+  } catch {
+    return;
+  }
+  const e = entries.get(sessionId);
+  if (!e) {
+    if (sessionId === state.sessionId) reopen?.(sessionId);
+    return;
+  }
+  const gone = new Set<string>();
+  for (const view of new Set(e.views.values())) {
+    for (const id of view.runningJobIDs()) {
+      if (!live.has(id)) gone.add(id);
+    }
+  }
+  if (gone.size === 0) return;
+  for (const view of new Set(e.views.values())) view.jobFinished([...gone]);
+}
+
 export function queuedCount(sessionId: string): number {
   return entries.get(sessionId)?.queued.length ?? 0;
 }
@@ -685,9 +712,13 @@ function onEvent(ev: TurnEvent): void {
     return;
   }
   if (ev?.event === "session/refresh") {
-    // Something settled while no turn was running (a background command ended): a
-    // session on screen reads its history again.
+    // Something settled while no turn was running (a background command
+    // ended): the session's history is read again, which is where an
+    // updated command result comes from. Cards are also reconciled against
+    // the live job list, because a call's own stored result is the
+    // snapshot taken when its command detached and can still say "running".
     if (ev.sessionId && ev.sessionId === state.sessionId) reopen?.(ev.sessionId);
+    if (ev.sessionId) void settleJobs(ev.sessionId);
     return;
   }
   if (ev?.event === "sessions/changed") {

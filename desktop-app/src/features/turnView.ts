@@ -283,7 +283,26 @@ export class TurnView {
     this.tail();
   }
 
-  // card draws a card tool's call (a review's findings, a visual) as
+  // jobFinished repaints any call in this turn whose shell job has exited.
+  // The call's result is the snapshot from when the command detached, so
+  // without this its card keeps reading "running in background" after the
+  // process is gone.
+  jobFinished(jobIDs: readonly string[]): void {
+    const gone = new Set(jobIDs);
+    for (const run of new Set(this.tools.values())) {
+      for (const id of run.runningJobIDs()) {
+        if (gone.has(id)) run.markJobFinished(id);
+      }
+    }
+  }
+
+  // jobIDs lists the shell jobs this turn's cards still show as running.
+  runningJobIDs(): string[] {
+    const out: string[] = [];
+    for (const run of new Set(this.tools.values())) out.push(...run.runningJobIDs());
+    return out;
+  }
+
   // its own card in the flow (it closes the open tool group), updated in
   // place.
   private card(tool: ToolInfo): void {

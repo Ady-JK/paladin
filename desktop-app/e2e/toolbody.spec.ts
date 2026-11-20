@@ -355,3 +355,33 @@ test("an edit that left language server errors lists them", async ({ page }) => 
   await expect(rows.first()).toContainText("3:9");
   await expect(rows.first()).toContainText("undefined: y");
 });
+
+// A background job that finishes must stop reading "running in background".
+// The call's own result is a snapshot taken when it detached, so nothing
+// repaints the row when the job exits: the card sat on "still running"
+// long after the command was gone, while the running-jobs list (which is
+// polled) was already empty.
+test("a finished background job stops saying it is running", async ({ page }) => {
+  await setup(page);
+  const body = await open(
+    page,
+    tool("1", "shell", { cmd: "npm run dev", background: true }, "ok", {
+      job_id: "job-7",
+      status: "running",
+      log: "/tmp/job-7.log",
+    }),
+  );
+  const card = card_(body);
+  await expect(card.locator(".term-status")).toHaveText("running in background");
+
+  // The app asks the runtime which jobs still exist; job-7 is gone. The
+  // row must pick that up instead of showing its stale snapshot.
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__e2eRunningJobs = [];
+    const sid = w.__e2eHub.list()[0].sessionId;
+    w.__e2eHub.emit({ event: "session/refresh", sessionId: sid });
+  });
+  await expect(card.locator(".term-status")).toHaveText("finished");
+  await expect(card.locator(".term-status")).toHaveClass(/is-ok/);
+});

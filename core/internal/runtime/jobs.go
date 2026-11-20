@@ -182,6 +182,10 @@ func (b *jobBook) JobFinished(e tools.JobEvent) {
 	if err := writeJobRecord(rec); err != nil {
 		log.Printf("jobs: finalize %s: %v", e.ID, err)
 	}
+	// The card's own result is the snapshot taken when the command detached,
+	// so it would read "running" forever: tell the app the job is gone and
+	// let it read the session again.
+	b.rt.hub.PublishSession(sessionID, "session/refresh")
 	// A finished job's notice still has to reach an idle session.
 	if wake {
 		b.rt.wakeSession(sessionID, workspace)

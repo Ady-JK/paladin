@@ -94,6 +94,12 @@ function shellStatus(tool: ToolInfo, args: Obj, result: unknown): { text: string
   if (status === "failed") {
     return { text: "failed", tone: "is-bad" };
   }
+  // A job that has left the running list without an exit code: the process
+  // is gone, but its code was never observed, so it reads "finished" rather
+  // than claiming success.
+  if (isObj(result) && result.finished === true) {
+    return { text: "finished", tone: "is-ok" };
+  }
   return { text: status || "done", tone: "is-ok" };
 }
 

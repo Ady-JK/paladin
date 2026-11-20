@@ -1072,6 +1072,11 @@ async function __paladinBaseInvoke(cmd, args) {
         ],
       };
     }
+    case "runningJobs":
+      return window.__e2eRunningJobs || [];
+    case "killJob":
+      window.__e2eRunningJobs = (window.__e2eRunningJobs || []).filter((j) => j.id !== args.id);
+      return true;
     case "resources":
       return window.__e2eRes || { at: 0, supported: false, self: { cpu: 0, rss: 0, procs: 0 }, sessions: {} };
     default:
