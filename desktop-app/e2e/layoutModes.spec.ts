@@ -25,18 +25,20 @@ test("split and tabs preserve the active side chat and make each view full width
 
   await switchLayout(page);
   await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  // Tab view: the strip is its own column of the split, not part of the
-  // header and not inside the pane.
-  await expect(page.locator("#agentSplit > .pane-strip")).toBeVisible();
+  // Tab view: the tab list is the "Open tabs" drawer beside the card, not
+  // part of the header and no longer a column inside the split, so the body
+  // gets the whole split.
+  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
   await expect(page.locator("#titleBar .pane-strip")).toHaveCount(0);
   await expect(page.locator("#sidePane .pane-strip")).toHaveCount(0);
+  await expect(page.locator("#agentSplit > .pane-strip")).toHaveCount(0);
   await expect(layout).toHaveAttribute("aria-label", "Switch to split layout");
   await expect(page.locator("#agentMain")).toBeHidden();
-  // The body fills the split minus the vertical strip, so it no longer
-  // spans the whole width on its own.
-  const strip = (await page.locator("#agentSplit > .pane-strip").boundingBox())!.width;
+  // The body fills the whole split: the tab list moved out to the drawer,
+  // which is a shell column and narrows the card instead of the split.
   const body = (await page.locator("#sidePane").boundingBox())!.width;
-  expect(body + strip).toBeGreaterThanOrEqual(fullWidth - 2);
+  const split = (await page.locator("#agentSplit").boundingBox())!.width;
+  expect(body).toBeGreaterThanOrEqual(split - 2);
 
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#agentMain")).toBeVisible();

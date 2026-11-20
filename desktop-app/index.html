@@ -140,6 +140,18 @@
             <span data-icon="folder" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
           </button>
           <button
+            id="paneRailToggle"
+            type="button"
+            class="rail-btn"
+            title="Tabs"
+            aria-label="Tabs"
+            aria-expanded="false"
+            aria-pressed="false"
+            hidden
+          >
+            <span data-icon="layout-tabs" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+          </button>
+          <button
             id="sessionChangesBtn"
             type="button"
             class="rail-btn"
@@ -254,6 +266,27 @@
             </button>
           </div>
         </div>
+      </aside>
+
+      <!-- ==================== TABS DRAWER ====================
+           The vertical tab list in tabs layout. It is a column of the shell
+           like Sessions and Files, so the rail button that opens it is the
+           same kind of control: the panel pushes the card instead of
+           floating over a native page. -->
+      <aside id="paneTabsDrawer" class="side-drawer is-closed" aria-label="Open tabs" inert>
+        <header class="tabs-drawer-head">
+          <strong>Open tabs</strong>
+          <button
+            id="paneTabsDrawerClose"
+            type="button"
+            class="tabs-drawer-close"
+            title="Hide tabs"
+            aria-label="Hide tabs"
+          >
+            <span data-icon="xmark"></span>
+          </button>
+        </header>
+        <div id="paneTabsDrawerBody" class="tabs-drawer-body"></div>
       </aside>
 
       <!-- ==================== MAIN ==================== -->

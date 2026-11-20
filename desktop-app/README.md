@@ -37,7 +37,7 @@ There is no React framework or client-side router. Features manipulate DOM and s
 
 When a session opens, `attach` supplies a page of persisted history plus the live turn, queue, buffered events and sequence. `sessionHistoryPage` loads older history. Finished turns fetch the small amount of additional session data they need rather than repeatedly loading the entire transcript. Copied image attachments are shown in the user turn and restored from session history; tagged workspace paths remain available to the agent.
 
-The Sessions and Files controls share the left rail across agent and IDE modes. The IDE feature is loaded on demand and provides workspace navigation, file editing, diagnostics, changes and a terminal dock. Opening a rail drawer does not itself require a mode change. Settings, model selection, context controls and other overlays live in the renderer.
+The Sessions, Files and Tabs controls share the left rail across agent and IDE modes. The IDE feature is loaded on demand and provides workspace navigation, file editing, diagnostics, changes and a terminal dock. Opening a rail drawer does not itself require a mode change. Settings, model selection, context controls and other overlays live in the renderer.
 
 ### Feature boundaries
 

@@ -34,7 +34,7 @@ test("split view keeps a horizontal strip with Agent first", async ({ page }) =>
   expect(stripBox.width).toBeGreaterThan(firstTab.width);
 });
 
-test("tab view turns the strip vertical and keeps Agent at zero", async ({ page }) => {
+test("tab view moves the tab list into its own drawer", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await openSideChat(page);
@@ -42,12 +42,37 @@ test("tab view turns the strip vertical and keeps Agent at zero", async ({ page 
   const tabs = page.locator("#paneTabs");
   await expect.poll(() => tabs.evaluate((el) => getComputedStyle(el).flexDirection)).toBe("column");
   await expect(tabs.locator(".pane-tab").first()).toHaveAttribute("data-key", "main");
-  // The strip is a column of its own: 200px, beside the body, not above it.
-  const strip = (await page.locator(".pane-strip").boundingBox())!;
-  expect(strip.width).toBeLessThan(240);
-  expect(strip.height).toBeGreaterThan(strip.width);
+  // The list is the "Open tabs" drawer, a column of the shell beside the
+  // card, not a column inside the split.
+  const drawer = page.locator("#paneTabsDrawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.locator(".pane-strip")).toBeVisible();
+  const bounds = (await drawer.boundingBox())!;
+  const card = (await page.locator("#mainCard").boundingBox())!;
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(card.x + 1.5);
   // Full titles instead of truncated ones.
   await expect(tabs.locator(".pane-tab", { hasText: "Side chat" })).toBeVisible();
+});
+
+test("the tabs drawer opens from the rail and gives the page the whole window", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await openSideChat(page);
+  const railBtn = page.locator("#paneRailToggle");
+  // Split view has no tab list to show, so the button is not offered.
+  await expect(railBtn).toBeHidden();
+  await page.locator("#paneLayoutBtn").click();
+  await expect(railBtn).toBeVisible();
+  await expect(railBtn).toHaveAttribute("aria-pressed", "true");
+  const open = (await page.locator("#sidePane").boundingBox())!.width;
+
+  await railBtn.click();
+  await expect(railBtn).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#paneTabsDrawer")).toBeHidden();
+  await expect.poll(async () => (await page.locator("#sidePane").boundingBox())!.width).toBeGreaterThan(open + 100);
+
+  await railBtn.click();
+  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
 });
 
 test("picking the Agent tab shows the conversation and keeps the strip", async ({ page }) => {

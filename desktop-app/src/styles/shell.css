@@ -1,4 +1,14 @@
 /* ============ Shell: rail + panel + inset card (Codex-style) ============ */
+:root {
+  /* One open/close motion for every panel that pushes the main card: the
+     sessions drawer, the files explorer, the "Open tabs" drawer and the side
+     pane. They are columns of the same shell, so they move as one system;
+     different timings made them look unrelated. */
+  --panel-anim: 200ms;
+  --panel-ease: cubic-bezier(0.32, 0.72, 0.28, 1);
+  --panel-radius: 14px;
+}
+
 body {
   background: var(--color-slate-100);
 }
@@ -101,15 +111,26 @@ body {
    Agent mode it is a column of the shell beside the chat. */
 .ide-explorer {
   flex: 0 0 auto;
+  transition:
+    opacity var(--panel-anim) ease,
+    width var(--panel-anim) var(--panel-ease),
+    border-color var(--panel-anim) ease;
 }
 
 /* Agent mode: a panel column of the shell. */
 #appShell > .ide-explorer {
   margin: 8px 0;
   border: 1px solid rgb(0 0 0 / 0.08);
-  border-radius: 14px;
+  border-radius: var(--panel-radius, 14px);
   background: var(--color-slate-100);
   overflow: hidden;
+}
+
+/* Straight where it meets the card, round on the outside: the seam is one
+   edge shared by two panels, so both sides square off together. */
+#appShell:has(> #mainCard) > .ide-explorer:not(.is-closed) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .dark #appShell > .ide-explorer {
@@ -169,9 +190,9 @@ body {
   visibility: hidden;
   pointer-events: none;
   transition:
-    opacity 140ms ease,
-    width 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
-    visibility 0s linear 200ms;
+    opacity var(--panel-anim) ease,
+    width var(--panel-anim) var(--panel-ease),
+    visibility 0s linear var(--panel-anim);
 }
 
 .ide-explorer.is-closed > * {
@@ -185,16 +206,24 @@ body {
   max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
   margin: 8px 0 8px 0;
   border: 1px solid rgb(0 0 0 / 0.08);
-  border-radius: 14px;
+  border-radius: var(--panel-radius, 14px);
   background: var(--color-slate-100);
   /* Collapsed it takes no width at all, so the card reclaims the space
      instead of leaving a gap where the panel used to be. */
   overflow: hidden;
   transition:
-    opacity 160ms ease,
-    transform 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
-    width 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
-    margin 200ms cubic-bezier(0.32, 0.72, 0.28, 1);
+    opacity var(--panel-anim) ease,
+    transform var(--panel-anim) var(--panel-ease),
+    width var(--panel-anim) var(--panel-ease),
+    margin var(--panel-anim) var(--panel-ease),
+    border-radius var(--panel-anim) var(--panel-ease);
+}
+
+#sidebar.side-drawer:not(.is-closed) {
+  /* Straight where it meets the card, round on the outside: the seam is one
+     edge shared by two panels, so both sides square off together. */
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 /* Collapsed takes no width, so the card reclaims it. */
@@ -208,10 +237,10 @@ body {
   visibility: hidden;
   pointer-events: none;
   transition:
-    opacity 140ms ease,
-    width 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
-    margin 200ms cubic-bezier(0.32, 0.72, 0.28, 1),
-    visibility 0s linear 200ms;
+    opacity var(--panel-anim) ease,
+    width var(--panel-anim) var(--panel-ease),
+    margin var(--panel-anim) var(--panel-ease),
+    visibility 0s linear var(--panel-anim);
 }
 
 @media (max-width: 1099px) {
@@ -244,15 +273,173 @@ body {
   }
 }
 
+/* The "Open tabs" drawer in tabs layout. It is the same kind of column as
+   the sessions drawer, so it shares the width, radius and motion tokens:
+   every panel that pushes the card opens the same way. */
+#paneTabsDrawer.side-drawer {
+  z-index: 30;
+  flex: 0 0 auto;
+  width: min(15rem, calc(100vw - 4rem));
+  max-width: min(15rem, calc(100vw - 4rem));
+  margin: 8px 0;
+  border: 1px solid rgb(0 0 0 / 0.08);
+  border-radius: var(--panel-radius, 14px);
+  background: var(--color-slate-100);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition:
+    opacity var(--panel-anim) ease,
+    transform var(--panel-anim) var(--panel-ease),
+    width var(--panel-anim) var(--panel-ease),
+    margin var(--panel-anim) var(--panel-ease),
+    border-radius var(--panel-anim) var(--panel-ease);
+}
+
+#paneTabsDrawer.side-drawer[hidden] {
+  display: none;
+}
+
+/* Straight where it meets the card, round on the outside: the seam is one
+   edge shared by two panels, so both sides square off together. */
+#paneTabsDrawer.side-drawer:not(.is-closed) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+#paneTabsDrawer.side-drawer.is-closed {
+  width: 0;
+  max-width: 0;
+  margin-left: 0;
+  margin-right: 0;
+  border-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--panel-anim) ease,
+    width var(--panel-anim) var(--panel-ease),
+    margin var(--panel-anim) var(--panel-ease),
+    visibility 0s linear var(--panel-anim);
+}
+
+.dark #paneTabsDrawer.side-drawer {
+  border-color: rgb(255 255 255 / 0.08);
+  background: #18181b;
+}
+
+.tabs-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 8px 12px;
+  font-size: 0.8125rem;
+  color: var(--color-slate-700);
+}
+.dark .tabs-drawer-head {
+  color: var(--color-slate-200);
+}
+.tabs-drawer-close {
+  display: flex;
+  height: 24px;
+  width: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--color-slate-500);
+}
+.tabs-drawer-close:hover {
+  background: rgb(0 0 0 / 0.06);
+  color: var(--color-slate-800);
+}
+.dark .tabs-drawer-close:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--color-slate-100);
+}
+.tabs-drawer-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+@media (max-width: 1099px) {
+  /* Same fallback as the other drawers: float over the card instead of
+     squeezing it to nothing. */
+  #paneTabsDrawer.side-drawer {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 3.5rem;
+    width: min(15rem, calc(100vw - 4rem));
+    max-width: min(15rem, calc(100vw - 4rem));
+    margin: 0;
+    box-shadow:
+      0 2px 6px rgb(0 0 0 / 0.08),
+      0 24px 48px -16px rgb(0 0 0 / 0.28);
+  }
+  .dark #paneTabsDrawer.side-drawer {
+    box-shadow:
+      0 2px 6px rgb(0 0 0 / 0.4),
+      0 24px 48px -16px rgb(0 0 0 / 0.7);
+  }
+  #paneTabsDrawer.side-drawer.is-closed {
+    width: min(15rem, calc(100vw - 4rem));
+    max-width: min(15rem, calc(100vw - 4rem));
+    transform: translateX(-12px);
+    transition:
+      opacity 140ms ease,
+      transform 160ms ease,
+      visibility 0s linear 160ms;
+  }
+}
+
 #mainCard {
   margin: 8px 8px 8px 0;
-  border-radius: 14px;
+  border-radius: var(--panel-radius, 14px);
   border: 1px solid rgb(0 0 0 / 0.06);
   box-shadow:
     0 1px 1px rgb(0 0 0 / 0.03),
     0 4px 12px -2px rgb(0 0 0 / 0.06),
     0 18px 40px -12px rgb(0 0 0 / 0.12);
-  transition: box-shadow 240ms ease;
+  transition:
+    box-shadow 240ms ease,
+    border-radius var(--panel-anim) var(--panel-ease);
+}
+
+/* Where two panels meet, the seam is straight and the outside stays round.
+   Two adjacent round corners with a hairline gap between them read as a
+   second shape rather than one surface, so the junction is squared off on
+   both sides at once — and both sides animate the radius together, or the
+   seam visibly pops open mid-slide. `:has()` keys off the real open state,
+   so this follows the panels however they are toggled.
+
+   A drawer also squares its own right edge whenever *any* later panel is
+   open, not just the card: with Sessions and Open tabs both open, the
+   sessions drawer's right edge meets the tab drawer, so rounding it there
+   would double the seam the user is looking at. */
+#appShell:has(> .ide-explorer:not(.is-closed)) #mainCard,
+#appShell:has(> #sidebar.side-drawer:not(.is-closed)) #mainCard,
+#appShell:has(> #paneTabsDrawer.side-drawer:not(.is-closed)) #mainCard {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+#appShell:has(> .ide-explorer:not(.is-closed)) #sidebar.side-drawer,
+#appShell:has(> #paneTabsDrawer.side-drawer:not(.is-closed)) #sidebar.side-drawer {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* The tabs drawer squares whichever edge a neighbour is on. */
+#appShell:has(> .ide-explorer:not(.is-closed)) #paneTabsDrawer.side-drawer,
+#appShell:has(> #sidebar.side-drawer:not(.is-closed)) #paneTabsDrawer.side-drawer {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+#appShell:has(> .ide-explorer:not(.is-closed)) #paneTabsDrawer.side-drawer {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .dark #mainCard {

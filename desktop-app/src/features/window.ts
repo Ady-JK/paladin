@@ -75,7 +75,10 @@ function setDrawer(open: boolean): void {
     return;
   }
   state.collapsed = !open;
-  if (open) window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
+  if (open) {
+    window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
+    window.dispatchEvent(new Event("paladin:sessions-drawer-opened"));
+  }
   paintSideVisibility();
 }
 
@@ -116,8 +119,10 @@ function wireDrawer(): void {
     }
   });
   agentTabEl.addEventListener("click", toggleSidebarFromKey);
-  // The two panels share one column slot, so opening one closes the other.
+  // The pushing panels share the shell's column slot, so opening one closes
+  // the others: two drawers side by side would squeeze the card to nothing.
   window.addEventListener("paladin:ide-show-explorer", () => setDrawer(false));
+  window.addEventListener("paladin:tabs-drawer-opened", () => setDrawer(false));
   document.querySelector<HTMLElement>("#ideModeBtn")?.addEventListener("click", (event) => {
     if (!(event.currentTarget as HTMLElement).dataset.ideReplay) setDrawer(false);
   });

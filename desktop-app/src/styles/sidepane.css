@@ -57,11 +57,22 @@ body.is-splitting {
 .side-pane {
   position: relative;
   display: flex;
-  flex: 0 0 50%;
+  /* The split proportion, set by splitResize. Percentages, not pixels, so
+     the split keeps its shape when the window changes size. */
+  flex: 0 0 var(--side-pane-width, 50%);
   min-width: 0;
   flex-direction: column;
   border-left: 1px solid var(--color-slate-200);
   background: #fff;
+}
+
+/* The pane is a column of the card, not a floating card of its own: it
+   shares the card's rounded outer edge and stays square where the two
+   meet, so the header and the pane read as one surface. */
+#agentView:not(.is-tab-layout) #sidePane:not([hidden]) {
+  border-top-right-radius: var(--panel-radius, 14px);
+  border-bottom-right-radius: var(--panel-radius, 14px);
+  overflow: hidden;
 }
 .side-pane[hidden] {
   display: none;
@@ -383,26 +394,21 @@ body.is-splitting {
   top: calc(100% + 10px);
 }
 
-/* Tab view: the strip is a column of its own on the left, and the body is
-   whatever tab is selected. Vertical because the tabs are heterogeneous —
-   a shell, a running subagent, a site — and each needs a line of text, not
-   a truncated label in a row that runs out of room at five tabs. */
-#agentView.is-tab-layout #agentSplit {
-  flex-direction: row;
-}
-#agentView.is-tab-layout #agentSplit > .pane-strip {
+/* Tab view: the tab list is the "Open tabs" drawer, a column of the shell
+   beside the card, so the body always has the whole split. Vertical because
+   the tabs are heterogeneous — a shell, a running subagent, a site — and
+   each needs a line of text, not a truncated label in a row that runs out
+   of room at five tabs. */
+.pane-strip.is-vertical {
   display: flex;
-  flex: 0 0 200px;
-  width: 200px;
-  min-width: 0;
-  border-right: 1px solid var(--color-slate-200);
-  background: var(--color-slate-50);
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
+  padding: 0;
+  border-bottom: 0;
 }
-.dark #agentView.is-tab-layout #agentSplit > .pane-strip {
-  border-right-color: var(--color-slate-800);
-  background: var(--color-slate-950);
-}
-#agentView.is-tab-layout #paneTabs {
+.pane-strip.is-vertical > .pane-tabs {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -410,26 +416,26 @@ body.is-splitting {
   gap: 2px;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 6px;
+  padding: 0 6px 8px;
 }
-#agentView.is-tab-layout .pane-tab {
+.pane-strip.is-vertical .pane-tab {
   flex: 0 0 auto;
   max-width: none;
   width: 100%;
 }
-#agentView.is-tab-layout .pane-tab-pick {
+.pane-strip.is-vertical .pane-tab-pick {
   flex: 1;
   min-width: 0;
   justify-content: flex-start;
   padding: 7px 8px;
   font-size: 0.8125rem;
 }
-#agentView.is-tab-layout .pane-tab.is-active {
+.pane-strip.is-vertical .pane-tab.is-active {
   border-radius: 7px;
   background: var(--color-slate-200);
   box-shadow: none;
 }
-.dark #agentView.is-tab-layout .pane-tab.is-active {
+.dark .pane-strip.is-vertical .pane-tab.is-active {
   background: var(--color-slate-800);
 }
 #agentView.is-tab-layout #sidePane {

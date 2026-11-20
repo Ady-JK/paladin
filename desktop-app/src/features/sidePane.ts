@@ -49,16 +49,19 @@ import type {
 
 const tabsEl = $("#paneTabs");
 const stripEl = tabsEl.parentElement!;
+const tabsDrawerEl = $("#paneTabsDrawer");
+const tabsDrawerBodyEl = $("#paneTabsDrawerBody");
+const tabsDrawerCloseBtn = $<HTMLButtonElement>("#paneTabsDrawerClose");
 const bodyEl = $("#paneBody");
 const historyBtn = $<HTMLButtonElement>("#paneNewChatBtn");
 const menuEl = $("#paneHistoryMenu");
 const menuItemsEl = $("#paneHistoryItems");
 const layoutBtn = $<HTMLButtonElement>("#paneLayoutBtn");
+const tabsRailBtn = $<HTMLButtonElement>("#paneRailToggle");
 const changesBtn = $<HTMLButtonElement>("#sessionChangesBtn");
 const liveChangesBtn = $<HTMLButtonElement>("#liveChanges");
 const runningJobsBtn = $<HTMLButtonElement>("#runningJobsBtn");
 const runningJobsCount = $("#runningJobsCount");
-const agentSplitEl = $("#agentSplit");
 const agentView = $("#agentView");
 const layoutKey = "paladin.paneLayout";
 
@@ -77,6 +80,14 @@ function visibleSessionId(): string {
 const changesCache = new Map<string, SessionChanges>();
 let paneOpen = false;
 let layoutMode: "split" | "tabs" = loadText(layoutKey) === "tabs" ? "tabs" : "split";
+// In tabs layout the tab list is its own drawer column, opened from the
+// rail, exactly like Sessions and Files. It is not a strip inside the split:
+// a column there would shrink the native page's surface, and a native page
+// cannot be clipped, so the page would stick out past its panel while the
+// column animated. A shell column keeps every native surface a plain
+// rectangle.
+const tabsDrawerKey = "paladin.tabsDrawer";
+let tabsDrawerOpen = loadText(tabsDrawerKey) !== "closed";
 let nextKey = 0;
 let ideTerminalMode = false;
 let ideBrowserKey = "";
@@ -656,9 +667,123 @@ function modalCoveringPage(): boolean {
   });
 }
 
+// ---- native pages follow their surface while it moves ----
+//
+// Electron positions a WebContentsView by integer pixel bounds in another
+// process, and a view cannot be clipped to a rounded, sliding panel: it does
+// not inherit a CSS transition. Without help, the 200ms a panel spends
+// opening or closing leaves the page pinned at its old rectangle, sticking
+// out past the panel it belongs to and painting over its neighbours. So
+// while the surface is moving, its bounds are sent once per frame. Nothing
+// is sent for a frame that did not move, and the loop stops a while after
+// the rectangle settles.
+let followFrame = 0;
+let followSurfaceEl: HTMLElement | null = null;
+let followApply: ((bounds: PageBounds) => void) | null = null;
+
+type PageBounds = { x: number; y: number; width: number; height: number };
+
+// A transition starts slow, so the first frames of an ease can look still.
+// Counting a run of identical frames — not just two — is what tells "the
+// panel is easing out of its rest pose" apart from "it has finished".
+const FOLLOW_SETTLE_FRAMES = 10;
+// However slow a panel is, the loop gives up after this, so a stuck value
+// can never leave a frame loop running for the life of the window.
+const FOLLOW_MAX_MS = 1500;
+
+function stopFollow(): void {
+  if (followFrame) cancelAnimationFrame(followFrame);
+  followFrame = 0;
+  followSurfaceEl = null;
+  followApply = null;
+}
+
+// currentSurface is the native page's HTML surface while one is really on
+// screen. A closed pane keeps its tab bodies in the DOM (that is how a tab
+// survives switching away), so "the tab exists" is not enough: the surface
+// must have a size. Following an invisible one would leave the visible page
+// pinned where it was.
+function currentSurface(): { el: HTMLElement; apply: (bounds: PageBounds) => void } | null {
+  if (!paneOpen || !hasBridge()) return null;
+  const set = currentSet();
+  const tab = set && activeTab(set);
+  const el =
+    tab?.kind === "web"
+      ? tab.body.querySelector<HTMLElement>(".web-surface")
+      : tab?.kind === "browser"
+        ? tab.body.querySelector<HTMLElement>(".browser-surface")
+        : null;
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return null;
+  const bridgeBrowser = bridge().browser;
+  if (tab?.kind === "browser" && !bridgeBrowser) return null;
+  return {
+    el,
+    apply:
+      tab?.kind === "browser"
+        ? (b) => void bridgeBrowser?.setBounds(b).catch(() => undefined)
+        : (b) => void api.moveExternalPage(b).catch(() => undefined),
+  };
+}
+
+// nudgeFollow restarts the frame loop for whatever page is on screen. Panel
+// animations are CSS transitions owned by other modules, so they are found
+// through the transition events they raise rather than through calls.
+function nudgeFollow(): void {
+  if (followFrame) return;
+  const live = currentSurface();
+  if (live) followNative(live.el, live.apply);
+}
+
+// transitionrun fires once when a transition starts, including transitions
+// that originate inside a panel's own subtree. Any of them can move the
+// card, so any of them can move the page.
+document.addEventListener("transitionrun", nudgeFollow, true);
+window.addEventListener("resize", nudgeFollow);
+
+function followNative(surface: HTMLElement, apply: (bounds: PageBounds) => void): void {
+  followSurfaceEl = surface;
+  followApply = apply;
+  if (followFrame) return;
+  let last: PageBounds | null = null;
+  let steady = 0;
+  const startedAt = performance.now();
+  const step = (): void => {
+    followFrame = requestAnimationFrame(step);
+    const el = followSurfaceEl;
+    const send = followApply;
+    if (!el || !send || !el.isConnected || performance.now() - startedAt > FOLLOW_MAX_MS) {
+      stopFollow();
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) {
+      stopFollow();
+      return;
+    }
+    const next = { x: r.left, y: r.top, width: r.width, height: r.height };
+    const moved =
+      !last ||
+      Math.abs(next.x - last.x) > 0.5 ||
+      Math.abs(next.y - last.y) > 0.5 ||
+      Math.abs(next.width - last.width) > 0.5 ||
+      Math.abs(next.height - last.height) > 0.5;
+    if (!moved) {
+      if (++steady > FOLLOW_SETTLE_FRAMES) stopFollow();
+      return;
+    }
+    steady = 0;
+    last = next;
+    send(next);
+  };
+  followFrame = requestAnimationFrame(step);
+}
+
 function hideWebSurface(): void {
   if (!visibleWeb) return;
   visibleWeb = "";
+  stopFollow();
   void api.hideExternalPage().catch(() => undefined);
 }
 
@@ -840,13 +965,16 @@ function syncNativeSurfaces(): void {
     document.body.classList.add("guest-visible");
     const bounds = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
     if (visibleWeb === web.viewName) {
-      void api.moveExternalPage(bounds).catch(() => undefined);
+      followNative(surface!, (next) => {
+        void api.moveExternalPage(next).catch(() => undefined);
+      });
       return;
     }
     visibleWeb = web.viewName;
     setWebStatus(web, web.url);
     void api.showExternalPage(web.viewName, web.url, bounds).catch((error) => {
       visibleWeb = "";
+      stopFollow();
       setWebStatus(web, errorText(error));
       document.body.classList.remove("guest-visible");
     });
@@ -855,7 +983,8 @@ function syncNativeSurfaces(): void {
 
   if (!browser || !browserBridge) {
     nativeBrowserOn = false;
-    if (browserBridge) void browserBridge.show(null);
+    stopFollow();
+    void browserBridge?.show(null);
     document.body.classList.remove("guest-visible");
     return;
   }
@@ -863,6 +992,7 @@ function syncNativeSurfaces(): void {
   const rect = browserSurface.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) {
     nativeBrowserOn = false;
+    stopFollow();
     void browserBridge.show(null);
     document.body.classList.remove("guest-visible");
     return;
@@ -871,6 +1001,9 @@ function syncNativeSurfaces(): void {
   nativeBrowserOn = true;
   void browserBridge.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
   void browserBridge.show(browser.sessionId);
+  followNative(browserSurface, (next) => {
+    void browserBridge.setBounds(next).catch(() => undefined);
+  });
 }
 
 function activeTab(set: TabSet): Tab | undefined {
@@ -1068,16 +1201,31 @@ function render(): void {
   }
   renderIDEPages(currentSet());
   if (layoutMode === "tabs") {
-    // Tab view: the strip is its own column on the left of the split, so
-    // it stays put while the body shows the Agent or any other tab. It is
-    // not re-parented into the title bar any more: a row of tabs there
-    // cannot show a title and a status line per tab.
-    if (stripEl.parentElement !== agentSplitEl) agentSplitEl.insertBefore(stripEl, agentSplitEl.firstElementChild);
+    // Tab view: the tab list is the "Open tabs" drawer, a shell column like
+    // Sessions and Files. Keeping it out of the card matters for native
+    // pages: a WebContentsView cannot be clipped, so a column inside the
+    // split would leave the page overhanging its own panel while the column
+    // slid in and out.
+    if (stripEl.parentElement !== tabsDrawerBodyEl) tabsDrawerBodyEl.append(stripEl);
+    stripEl.classList.add("is-vertical");
   } else {
     // Split view: the strip is horizontal and part of the pane, so it
     // retracts with it. The Agent tab is still how you get back.
-    sidePaneEl.insertBefore(stripEl, sidePaneEl.firstElementChild);
+    if (stripEl.parentElement !== sidePaneEl) sidePaneEl.insertBefore(stripEl, sidePaneEl.firstElementChild);
+    stripEl.classList.remove("is-vertical");
   }
+  // The drawer exists only in tabs layout, and only when the user wants it:
+  // a page can have the whole window.
+  const drawerOpen = layoutMode === "tabs" && tabsDrawerOpen;
+  tabsDrawerEl.classList.toggle("is-closed", !drawerOpen);
+  tabsDrawerEl.hidden = layoutMode !== "tabs";
+  tabsDrawerEl.inert = !drawerOpen;
+  tabsRailBtn.hidden = layoutMode !== "tabs";
+  tabsRailBtn.setAttribute("aria-pressed", String(drawerOpen));
+  tabsRailBtn.setAttribute("aria-expanded", String(drawerOpen));
+  const tabsLabel = drawerOpen ? "Hide tabs" : "Show tabs";
+  tabsRailBtn.setAttribute("aria-label", tabsLabel);
+  tabsRailBtn.title = tabsLabel;
   agentView.classList.toggle("is-tab-layout", layoutMode === "tabs");
   agentView.classList.toggle("is-side-tab", layoutMode === "tabs" && paneOpen);
   sidePaneEl.hidden = !paneOpen;
@@ -1138,6 +1286,21 @@ onResync(() => {
 
 function showPane(): void {
   paneOpen = true;
+  render();
+}
+
+// setTabsDrawer opens or closes the "Open tabs" panel. It is a column of the
+// shell, so opening it narrows the card; the choice is remembered.
+function setTabsDrawer(open: boolean): void {
+  if (tabsDrawerOpen === open) return;
+  tabsDrawerOpen = open;
+  saveText(tabsDrawerKey, open ? "open" : "closed");
+  // The pushing panels share one column slot, so opening this one closes
+  // the sessions drawer and the file explorer.
+  if (open) {
+    window.dispatchEvent(new Event("paladin:tabs-drawer-opened"));
+    window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
+  }
   render();
 }
 
@@ -1475,6 +1638,28 @@ export function initSidePane(): void {
   layoutBtn.addEventListener("click", () => {
     toggleLayout();
   });
+  // The tab list is a drawer: the rail button opens and closes it, the way
+  // the Sessions and Files buttons work. Closing it gives a page the window.
+  tabsRailBtn.addEventListener("click", () => {
+    setTabsDrawer(!tabsDrawerOpen);
+  });
+  tabsDrawerCloseBtn.addEventListener("click", () => {
+    setTabsDrawer(false);
+    tabsRailBtn.focus();
+  });
+  // First Escape closes the tabs drawer, the way it closes the sessions
+  // drawer: a panel that pushed the card should be dismissable from the
+  // keyboard, and a second press then reaches whatever is behind it.
+  tabsDrawerEl.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    setTabsDrawer(false);
+    tabsRailBtn.focus();
+  });
+  // One panel per column slot: the sessions drawer and the explorer close
+  // this one when they open.
+  window.addEventListener("paladin:sessions-drawer-opened", () => setTabsDrawer(false));
+  window.addEventListener("paladin:ide-show-explorer", () => setTabsDrawer(false));
   $("#paneCloseBtn").addEventListener("click", closePane);
   historyBtn.addEventListener("click", (event) => {
     event.stopPropagation();

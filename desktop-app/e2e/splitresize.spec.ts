@@ -2,6 +2,7 @@
 // and the side pane: it resizes, it remembers the width, it clamps, and a
 // double-click returns it to half.
 import { expect, test, type Page } from "@playwright/test";
+import { showSidebar } from "./drawer";
 
 async function openPane(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -16,6 +17,32 @@ async function openPane(page: Page): Promise<void> {
 
 const paneWidth = (page: Page): Promise<number> =>
   page.locator("#sidePane").evaluate((el) => el.getBoundingClientRect().width);
+
+test("the pane opens at half the split by default", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await openPane(page);
+  const available = await page.locator("#agentSplit").evaluate((el) => el.getBoundingClientRect().width);
+  await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeGreaterThan(available * 0.45);
+  await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeLessThan(available * 0.55);
+});
+
+test("opening a panel while the pane is closed keeps the split at half", async ({ page }) => {
+  // Regression: a window resize used to re-measure the pane. A closed pane
+  // is 0px wide, so any panel dispatching "resize" while it was shut (the
+  // sessions drawer does exactly that) saved "0" and the pane reopened at
+  // its minimum width instead of half.
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await openPane(page);
+  await page.locator("#paneCloseBtn").click();
+  await expect(page.locator("#sidePane")).toBeHidden();
+  await showSidebar(page);
+  await page.locator("#agentTab").click();
+  await page.locator("#paneNewChatBtn").click();
+  await page.locator("[data-pane-new-chat]").click();
+  await expect(page.locator("#sidePane")).toBeVisible();
+  const available = await page.locator("#agentSplit").evaluate((el) => el.getBoundingClientRect().width);
+  await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeGreaterThan(available * 0.4);
+});
 
 test("dragging the border resizes the side pane", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
