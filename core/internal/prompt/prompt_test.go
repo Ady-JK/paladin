@@ -163,6 +163,14 @@ func TestShellGuidanceHasNoWaitAction(t *testing.T) {
 			"10 minutes",
 			"end your turn",
 			"There is no wait action; the call is refused",
+			// Waiting must not become a tool call of its own: the session
+			// that burned 95 wait_agent rounds started exactly here.
+			"Waiting is never a reason to make a model call",
+			"You have no subagents",
+			"never wait_agent purely to pass the time",
+			"calling status over and over",
+			"busy-wait through a slow job",
+			"Subagents report on their own too",
 		} {
 			if !strings.Contains(p, want) {
 				t.Fatalf("%s: shell guidance lost %q", goos, want)

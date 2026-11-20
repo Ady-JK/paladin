@@ -272,10 +272,13 @@ func waitDef() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name: "wait_agent",
 		Description: "Wait until one of your subagents finishes (or the timeout passes) and return statuses plus any new results. " +
-			"Results are delivered once: a result returned here will not be sent again. Only wait when you have nothing else useful to do.",
+			"Results are delivered once: a result returned here will not be sent again. " +
+			"With no subagents running this returns immediately with nothing to wait for — never call it to pause, pass the time, " +
+			"or wait for a shell job. A finishing job or subagent wakes you on its own, so while you are waiting for one the right " +
+			"move is to end your turn: that costs nothing, and the completion notice resumes you with the result.",
 		Parameters: objectSchema(map[string]any{
 			"targets": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
-				"description": "agent_ids or names to wait for; omit for all of your agents."},
+				"description": "agent_ids or names to wait for. Omit only when you have subagents of your own that are still running; with none, the call is a no-op that still costs a round."},
 			"timeout_ms": map[string]any{"type": "integer", "minimum": waitMin.Milliseconds(), "maximum": waitMax.Milliseconds(),
 				"description": fmt.Sprintf("How long to wait (default %d).", waitDefault.Milliseconds())},
 		}),

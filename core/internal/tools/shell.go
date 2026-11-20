@@ -443,7 +443,9 @@ func (ShellTool) Definition() ToolDefinition {
 			"Neither of those stops it; decide then whether to cancel it or let it run. " +
 			"While a job runs, do other work that does not depend on it, or end your turn. " +
 			"Status checks without blocking whether a job is still running; its output so far is in the log file named in the answer. Cancel stops a job. " +
-			"Never poll with a sleep command. Every command writes its whole output " +
+			"Never poll with a sleep command, never loop on status, and never re-read a job's log to see whether it moved: " +
+			"the job reports its own completion, so only waiting costs rounds. One status at a real decision (such as whether to cancel) is fine. " +
+			"Every command writes its whole output " +
 			"to the log file named in the answer. " +
 			"When a command exits, any processes it left behind are terminated; " +
 			"start servers with background true rather than '&'.",

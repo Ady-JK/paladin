@@ -1097,3 +1097,32 @@ func TestFollowupRespectsTheChildLimit(t *testing.T) {
 		t.Fatalf("refused follow-up changed the child to %s", st)
 	}
 }
+
+// TestWaitAgentDescriptionForbidsIdling pins the tool description that the
+// model reads at call time. wait_agent used to say "only wait when you have
+// nothing else useful to do", which invited using it as a sleep: a session
+// then spent 95 rounds calling it with no subagents, each one re-sending the
+// whole prompt to be told "You have no subagents". The description must now
+// say that an empty call is a no-op, and that ending the turn is the way to
+// wait because the work reports itself.
+func TestWaitAgentDescriptionForbidsIdling(t *testing.T) {
+	def := waitDef()
+	for _, want := range []string{
+		"With no subagents running this returns immediately with nothing to wait for",
+		"never call it to pause",
+		"end your turn",
+		"wakes you on its own",
+	} {
+		if !strings.Contains(def.Description, want) {
+			t.Fatalf("wait_agent description lost %q:\n%s", want, def.Description)
+		}
+	}
+	for _, stale := range []string{
+		"Only wait when you have nothing else useful to do",
+		"omit for all of your agents",
+	} {
+		if strings.Contains(def.Description, stale) {
+			t.Fatalf("wait_agent description still says %q", stale)
+		}
+	}
+}

@@ -550,6 +550,21 @@ Tools:
   becomes a second job with a second notice. Use status to see whether a job
   still runs (its output so far is in the log file named in the answer), and
   cancel work you no longer need.
+- Waiting is never a reason to make a model call. A slow job and a running
+  subagent both wake you when they are done: you do not know when that will
+  be, and you must not try to find out. Ending your turn is the correct way
+  to wait — it costs nothing and the completion notice resumes you with the
+  result. These are wrong, and each one burns a whole round re-sending this
+  prompt: re-running a job to check on the first one; a sleep before reading a
+  log; a chain of status calls; re-reading the same log to see whether it
+  moved; and wait_agent with no subagents or an empty targets list, which
+  returns instantly with "You have no subagents" and is a sleep in disguise.
+  One status call at a real decision point (say, to cancel) is fine. Never a
+  loop, and never wait_agent purely to pass the time.
+- Subagents report on their own too. Spawn them for independent work, keep
+  going, and let each final reply arrive; there is no need to wait_agent for
+  one unless you truly have nothing else to do and need its result to proceed.
+  A child never inherits your turn, so its result comes back as a notice.
 - Use the todo tool to track multi-step work: REQUIRED for multi-step
   tasks — break the task into a goal-based activity list with the todo
   tool BEFORE starting, update the statuses as you work, and finish by
@@ -739,6 +754,12 @@ subdirectory.
 - Wrong: {"command": "sleep 120; cat <log>"} to wait for a job. The sleep is
   a new command that becomes a second job with its own completion notice: you
   still do not have the result, and now two jobs are reporting.
+- Wrong: calling status over and over, or reading the job's log each round, to
+  see whether it finished. The job reports itself; waiting is not a thing you
+  do with a tool. Say what you are waiting for and end your turn.
+- Wrong: calling wait_agent with no subagents to busy-wait through a slow job.
+  It answers "You have no subagents" at once and still costs a whole round.
+  wait_agent is only for subagents you actually started.
 - Wrong: adding a timeout field; the shell has none. Nothing is killed on a
   timer. Use cancel to stop a job you no longer need.
 - Local web server for browser testing: {"action": "run",
