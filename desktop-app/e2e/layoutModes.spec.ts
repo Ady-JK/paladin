@@ -25,11 +25,18 @@ test("split and tabs preserve the active side chat and make each view full width
 
   await switchLayout(page);
   await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  await expect(page.locator("#titleBar .pane-strip")).toBeVisible();
+  // Tab view: the strip is its own column of the split, not part of the
+  // header and not inside the pane.
+  await expect(page.locator("#agentSplit > .pane-strip")).toBeVisible();
+  await expect(page.locator("#titleBar .pane-strip")).toHaveCount(0);
   await expect(page.locator("#sidePane .pane-strip")).toHaveCount(0);
   await expect(layout).toHaveAttribute("aria-label", "Switch to split layout");
   await expect(page.locator("#agentMain")).toBeHidden();
-  expect((await page.locator("#sidePane").boundingBox())!.width).toBeGreaterThan(fullWidth * 0.9);
+  // The body fills the split minus the vertical strip, so it no longer
+  // spans the whole width on its own.
+  const strip = (await page.locator("#agentSplit > .pane-strip").boundingBox())!.width;
+  const body = (await page.locator("#sidePane").boundingBox())!.width;
+  expect(body + strip).toBeGreaterThanOrEqual(fullWidth - 2);
 
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#agentMain")).toBeVisible();

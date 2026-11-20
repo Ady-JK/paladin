@@ -58,7 +58,7 @@ const changesBtn = $<HTMLButtonElement>("#sessionChangesBtn");
 const liveChangesBtn = $<HTMLButtonElement>("#liveChanges");
 const runningJobsBtn = $<HTMLButtonElement>("#runningJobsBtn");
 const runningJobsCount = $("#runningJobsCount");
-const titleBar = $("#titleBar");
+const agentSplitEl = $("#agentSplit");
 const agentView = $("#agentView");
 const layoutKey = "paladin.paneLayout";
 
@@ -1031,8 +1031,13 @@ function tabHtml(tab: Tab, active: boolean): string {
   );
 }
 
+// mainTabHtml is the Agent tab: the conversation, pinned at position 0.
+// Selecting it shows the chat at full width and keeps the strip, the way a
+// browser keeps its tab bar when you pick the first tab. It used to close
+// the whole pane, which made it a mode toggle wearing a tab's clothes.
 function mainTabHtml(): string {
-  return `<div class="pane-tab pane-main-tab${paneOpen ? "" : " is-active"}" data-key="main"><button type="button" role="tab" aria-selected="${!paneOpen}" class="pane-tab-pick" title="Agent chat">${icon("rl-agent", "h-3 w-3")}<span>Agent</span></button></div>`;
+  const active = !paneOpen;
+  return `<div class="pane-tab pane-main-tab${active ? " is-active" : ""}" data-key="main"><button type="button" role="tab" aria-selected="${active}" class="pane-tab-pick" title="Agent chat">${icon("rl-agent", "h-3 w-3")}<span>Agent</span></button></div>`;
 }
 
 let tabsHtml = "";
@@ -1040,13 +1045,11 @@ let tabsHtml = "";
 function paintTabs(): void {
   const set = currentSet();
   const html =
-    (layoutMode === "tabs" ? mainTabHtml() : "") +
-    (set
-      ? set.tabs
-          .filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)))
-          .map((t) => tabHtml(t, paneOpen && t.key === set.active))
-          .join("")
-      : "");
+    mainTabHtml() +
+    set.tabs
+      .filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)))
+      .map((t) => tabHtml(t, paneOpen && t.key === set.active))
+      .join("");
   if (html === tabsHtml && tabsEl.innerHTML !== "") return;
   tabsHtml = html;
   tabsEl.innerHTML = html;
@@ -1065,8 +1068,14 @@ function render(): void {
   }
   renderIDEPages(currentSet());
   if (layoutMode === "tabs") {
-    titleBar.insertBefore(stripEl, titleBar.lastElementChild);
+    // Tab view: the strip is its own column on the left of the split, so
+    // it stays put while the body shows the Agent or any other tab. It is
+    // not re-parented into the title bar any more: a row of tabs there
+    // cannot show a title and a status line per tab.
+    if (stripEl.parentElement !== agentSplitEl) agentSplitEl.insertBefore(stripEl, agentSplitEl.firstElementChild);
   } else {
+    // Split view: the strip is horizontal and part of the pane, so it
+    // retracts with it. The Agent tab is still how you get back.
     sidePaneEl.insertBefore(stripEl, sidePaneEl.firstElementChild);
   }
   agentView.classList.toggle("is-tab-layout", layoutMode === "tabs");
@@ -1076,8 +1085,11 @@ function render(): void {
   layoutBtn.setAttribute("aria-label", layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout");
   layoutBtn.title = layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout";
   if (!paneOpen && layoutMode === "split") {
+    // The strip keeps its tabs: selecting the Agent tab shows the
+    // conversation, it does not throw the other tabs away. Only the pane
+    // body gives up its space, so the native page is detached.
     closeMenu();
-    tabsEl.innerHTML = "";
+    paintTabs();
     bodyEl.replaceChildren();
     syncNativeSurfaces();
     return;
@@ -1498,6 +1510,8 @@ export function initSidePane(): void {
     const target = event.target as HTMLElement;
     const key = target.closest<HTMLElement>(".pane-tab")?.dataset.key;
     if (key === "main") {
+      // Selecting the Agent tab shows the conversation, it does not
+      // destroy the strip: that is what a tab does.
       closePane();
       return;
     }

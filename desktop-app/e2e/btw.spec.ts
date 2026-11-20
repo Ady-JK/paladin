@@ -24,14 +24,14 @@ test("a bare /btw opens a new side chat ready for a question", async ({ page }) 
   const pane = page.locator("#sidePane");
   await expect(pane).toBeVisible();
   await expect(page.locator("#promptInput")).toHaveValue("");
-  await expect(pane.locator(".pane-tab")).toHaveCount(1);
+  await expect(pane.locator('.pane-tab[data-key^="t"]')).toHaveCount(1);
   const input = pane.locator(".side-input");
   await expect(input).toBeFocused();
   expect(await sideCalls(page)).toEqual([]);
 
   // A second bare /btw reuses the empty chat rather than piling up tabs.
   await ask(page, "/btw");
-  await expect(pane.locator(".pane-tab")).toHaveCount(1);
+  await expect(pane.locator('.pane-tab[data-key^="t"]')).toHaveCount(1);
 });
 
 test("picking /btw from the slash menu opens a side chat at once", async ({ page }) => {
@@ -64,7 +64,7 @@ test("/btw opens a side chat tab while the turn keeps running", async ({ page })
   await ask(page, "/btw what are you doing?");
   const pane = page.locator("#sidePane");
   await expect(pane).toBeVisible();
-  await expect(pane.locator(".pane-tab")).toHaveCount(1);
+  await expect(pane.locator('.pane-tab[data-key^="t"]')).toHaveCount(1);
   await expect(pane.locator(".pane-tab.is-active")).toContainText("what are you doing?");
   const chat = pane.locator(".side-chat:visible");
   await expect(chat.locator('.side-msg[data-role="user"]')).toHaveText("what are you doing?");
@@ -94,7 +94,7 @@ test("/btw opens a side chat tab while the turn keeps running", async ({ page })
   await expect(chat.locator('.side-msg[data-role="assistant"]')).toHaveCount(2);
 
   await pane.locator(".pane-tab.is-active .pane-tab-close").click();
-  await expect(pane.locator(".pane-tab")).toHaveCount(0);
+  await expect(pane.locator('.pane-tab[data-key^="t"]')).toHaveCount(0);
   await page.evaluate(() => (window as any).__finish());
 });
 
@@ -118,9 +118,9 @@ test("/btw shows the error inline and the chat can retry", async ({ page }) => {
 
 test("/btw needs a session", async ({ page }) => {
   await ask(page, "/btw");
-  await expect(page.locator(".pane-tab")).toHaveCount(0);
+  await expect(page.locator('.pane-tab[data-key^="t"]')).toHaveCount(0);
   await ask(page, "/btw is anyone there?");
-  await expect(page.locator(".pane-tab")).toHaveCount(0);
+  await expect(page.locator('.pane-tab[data-key^="t"]')).toHaveCount(0);
   expect(await sideCalls(page)).toHaveLength(0);
 });
 

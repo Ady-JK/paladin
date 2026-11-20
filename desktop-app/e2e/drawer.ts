@@ -8,5 +8,10 @@ export async function showSidebar(page: Page): Promise<void> {
   if (await page.locator("#sidebar.is-closed").count()) {
     await page.click("#agentTab");
   }
-  await expect(page.locator("#sidebar:not(.is-closed)")).toBeVisible();
+  // Wait for the column to finish animating its width: it narrows the card
+  // as it opens, so a spec that measures geometry right after this call
+  // would otherwise read a mid-transition layout.
+  await expect
+    .poll(async () => (await page.locator("#sidebar").boundingBox())?.width ?? 0, { timeout: 4000 })
+    .toBeGreaterThan(300);
 }

@@ -71,7 +71,10 @@ test("the header keeps one height across layouts", async ({ page }) => {
   const splitWithPane = await measure();
   await page.locator("#paneLayoutBtn").click();
   await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  await expect(page.locator("#titleBar .pane-strip")).toBeVisible();
+  // The strip is its own column in tab view now, not part of the header,
+  // so the bar's height must not depend on the tabs at all.
+  await expect(page.locator("#titleBar .pane-strip")).toHaveCount(0);
+  await expect(page.locator("#agentSplit > .pane-strip")).toBeVisible();
   const tabs = await measure();
 
   expect(tabs.bar, "the bar must not grow in tabs layout").toBe(split.bar);

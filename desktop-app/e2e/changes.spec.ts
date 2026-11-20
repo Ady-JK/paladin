@@ -228,7 +228,25 @@ test("a turn's files open a snapshot diff and the header opens session changes",
   expect(await page.evaluate(() => (window as any).__e2eDiffCalls?.at(-1)?.turn)).toBe(-1);
   await page.locator("#paneLayoutBtn").click();
   await expect(page.locator("#sidePane .pane-changes")).toBeVisible();
-  expect((await page.locator("#sidePane").boundingBox())!.width).toBeGreaterThan(page.viewportSize()!.width * 0.8);
+  // Tab view: the changes body fills the split minus the vertical strip,
+  // so the visible area is the whole window either way.
+  await expect
+    .poll(
+      async () => {
+        const [pane, strip, split] = await Promise.all([
+          page.locator("#sidePane").boundingBox(),
+          page.locator("#agentSplit > .pane-strip").boundingBox(),
+          page.locator("#agentSplit").boundingBox(),
+        ]);
+        if (!pane || !strip || !split) return 0;
+        // The body plus the strip is the whole split, i.e. the tab view
+        // gives the changes body every pixel the pane can have. Measured
+        // against the split because the open sessions drawer pushes it.
+        return Math.round(pane.width + strip.width - split.width);
+      },
+      { timeout: 4000 },
+    )
+    .toBeGreaterThanOrEqual(-2);
 });
 
 test("a finished write shows its file indicator while the turn is still running", async ({ page }) => {

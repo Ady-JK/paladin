@@ -91,7 +91,12 @@ function wireDrawer(): void {
     (event) => {
       if (event.key !== "Escape" || !drawerOpen()) return;
       const layered = document.querySelector(
-        ".modal-overlay:not(.hidden), #sessionRowMenu, .perm-menu:not(.hidden), #thinkingMenu:not(.hidden), #modelMenu:not(.hidden), input.session-rename",
+        // Anything with its own Escape handling wins: the drawer must not
+        // swallow the key while a dialog, menu, rename field or the
+        // revert popover is open. Named selectors, not [role=dialog]:
+        // the sidebar itself contains dialogs, and matching one would
+        // make Escape stop working.
+        ".modal-overlay:not(.hidden), #sessionRowMenu, .perm-menu:not(.hidden), #thinkingMenu:not(.hidden), #modelMenu:not(.hidden), input.session-rename, #revertPop, #sessionImageViewer:not(.hidden), .image-viewer:not(.hidden)",
       );
       if (layered) return;
       event.stopImmediatePropagation();

@@ -339,7 +339,9 @@ test("Codex compaction without a summary shows a quiet divider live and after re
   await expect(divider).toHaveCount(1);
   await expect(divider.locator(".chat-divider-label")).toHaveText("Context compacted");
   await expect(page.locator("#messages .bubble-user")).toHaveText("/compact");
-  await expect(page.locator("#sidebar")).toBeHidden();
+  // The sessions column stays open after a pick now: it is a column, not a
+  // popover that dismisses itself.
+  await expect(page.locator("#sidebar")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("codex-compaction.png") });
 });
 
