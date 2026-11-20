@@ -346,7 +346,26 @@ export function updateVisualCard(card: HTMLElement, tool: ToolInfo): void {
   paintVisual(card, tool);
 }
 
+// setExpanded opens the card over the whole window. The card is moved to
+// <body> while expanded: an ancestor with `content-visibility: auto` (the
+// turn row, for cheap virtualization) or a transform becomes the
+// containing block for `position: fixed`, so an expanded card left in
+// place is laid out inside a skipped row — measured 20px tall and clipped
+// by the chat's scroll box instead of covering the viewport. The home
+// node remembers where it came from so closing restores it in order.
+const homes = new WeakMap<HTMLElement, { parent: Node; next: Node | null }>();
+
 function setExpanded(card: HTMLElement, on: boolean, v: Visual): void {
+  if (on && !homes.has(card)) {
+    homes.set(card, { parent: card.parentNode!, next: card.nextSibling });
+    document.body.append(card);
+  } else if (!on) {
+    const home = homes.get(card);
+    if (home) {
+      homes.delete(card);
+      home.parent.insertBefore(card, home.next);
+    }
+  }
   card.classList.toggle("is-expanded", on);
   card.querySelector("[data-visual-expand]")?.setAttribute("aria-label", on ? "Close" : "Open larger");
   if (on) card.setAttribute("tabindex", "-1");

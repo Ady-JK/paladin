@@ -224,10 +224,14 @@ test("source, open larger, and a failed visual", async ({ page }) => {
   await expect(card.locator(".visual-format")).toHaveText("SVG");
   await card.locator("[data-visual-source]").click();
   await expect(card.locator(".visual-source")).toContainText("<circle");
+  // While expanded the card is moved to <body> (see the note on
+  // setExpanded), so this state is matched by identity, not container.
   await card.locator("[data-visual-expand]").click();
-  await expect(card).toHaveClass(/is-expanded/);
+  const floating = page.locator('.visual-card[data-visual="v1"]');
+  await expect(floating).toHaveClass(/is-expanded/);
   await page.keyboard.press("Escape");
-  await expect(card).not.toHaveClass(/is-expanded/);
+  await expect(floating).not.toHaveClass(/is-expanded/);
+  await expect(card).toBeVisible();
   await page.evaluate(() =>
     (window as any).__h.onTool({
       id: "v2",
@@ -262,4 +266,57 @@ test("a visual in history is drawn again", async ({ page }) => {
   const card = page.locator("#messages .visual-card");
   await expect(card.locator(".visual-title")).toHaveText("Flow");
   await expect(page.frameLocator("#messages .visual-card iframe").locator("text")).toHaveText("Flow chart");
+});
+
+// "Open larger" must fill the window, not the turn row it sits in.
+// The row uses content-visibility: auto for cheap virtualization, which
+// makes it the containing block for position: fixed; the expanded card
+// was laid out inside that skipped row (20px tall, clipped by the chat's
+// scroll box) and the composer drew over it. The card is moved to <body>
+// while expanded and put back on close.
+test("open larger fills the window and returns to its row", async ({ page }) => {
+  await liveTurn(page);
+  await emit(page, "ok");
+  const card = page.locator('#messages .visual-card[data-visual="v1"]');
+  await expect(card).toBeVisible();
+  const inlineHeight = (await card.boundingBox())!.height;
+
+  await card.locator("[data-visual-expand]").click();
+  const floating = page.locator('.visual-card[data-visual="v1"]');
+  await expect(floating).toHaveClass(/is-expanded/);
+
+  const expanded = await page.evaluate(() => {
+    const el = document.querySelector(".visual-card.is-expanded") as HTMLElement;
+    const r = el.getBoundingClientRect();
+    return {
+      parent: el.parentElement?.tagName,
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+    };
+  });
+  // Out of the transcript, and covering the window (inset 40px 48px).
+  expect(expanded.parent).toBe("BODY");
+  expect(expanded.h).toBeGreaterThan(expanded.vh * 0.8);
+  expect(expanded.w).toBeGreaterThan(expanded.vw * 0.8);
+  expect(expanded.x).toBeLessThan(60);
+  expect(expanded.y).toBeLessThan(50);
+
+  await page.keyboard.press("Escape");
+  await expect(floating).not.toHaveClass(/is-expanded/);
+  // Back in its own turn row, at its inline size.
+  const restored = await page.evaluate(() => {
+    const el = document.querySelector('.visual-card[data-visual="v1"]') as HTMLElement;
+    return {
+      inMessages: !!el.closest("#messages"),
+      parent: el.parentElement?.classList.contains("turn-row"),
+      h: Math.round(el.getBoundingClientRect().height),
+    };
+  });
+  expect(restored.inMessages).toBe(true);
+  expect(restored.parent).toBe(true);
+  expect(restored.h).toBe(Math.round(inlineHeight));
 });
