@@ -2,6 +2,8 @@
 // arrow navigation, Enter to advance, review screen, submit answers.
 import { test, expect, type Page } from "@playwright/test";
 
+import { useLayout } from "./layout";
+
 const QUESTIONS = [
   { question: "Deploy where?", options: ["staging", "production"] },
   { question: "Region?", options: [] },
@@ -69,6 +71,8 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
+  // These specs dismiss the wizard around the native page in the side pane.
+  await useLayout(page, "split");
 });
 
 test("the wizard walks one question at a time and submits every answer", async ({ page }) => {

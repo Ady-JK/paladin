@@ -1,11 +1,16 @@
 import { expect, test } from "@playwright/test";
 
+import { useLayout } from "./layout";
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await page.fill("#promptInput", "start");
   await page.press("#promptInput", "Enter");
   await expect(page.locator("#messages")).toContainText("start");
+  // The app opens in tabs layout; these specs describe the pane beside the
+  // conversation, which is the split.
+  await useLayout(page, "split");
 });
 
 test("a session opens a local browser beside its conversation", async ({ page }) => {

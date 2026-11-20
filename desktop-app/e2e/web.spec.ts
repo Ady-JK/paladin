@@ -3,10 +3,14 @@
 // login profile, and view lifetime.
 import { expect, test, type Page } from "@playwright/test";
 
+import { useLayout } from "./layout";
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
+  // A web tab opens in the pane beside the agent; that is the split layout.
+  await useLayout(page, "split");
 });
 
 async function startSession(page: Page): Promise<void> {

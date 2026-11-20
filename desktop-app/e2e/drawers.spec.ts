@@ -7,6 +7,7 @@
 // first frame, clamped the width change, and the panel vanished instead of
 // sliding shut — while the open direction looked fine.
 import { expect, test, type Page } from "@playwright/test";
+import { useLayout } from "./layout";
 
 async function start(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -85,10 +86,14 @@ test("the tabs drawer animates both open and closed", async ({ page }) => {
   await start(page);
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-chat]").click();
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "tabs");
   await expect(page.locator("#paneRailToggle")).toBeVisible();
   const rail = page.locator("#paneRailToggle");
-  await page.waitForTimeout(250);
+  // Open first, so the close below has something to animate: the first click
+  // must not be the one that ends with the drawer already shut.
+  if ((await rail.getAttribute("aria-pressed")) === "false") await rail.click();
+  await expect(rail).toHaveAttribute("aria-pressed", "true");
+  await page.waitForTimeout(400);
 
   const closing = await slid(page, "#paneTabsDrawer", () => rail.click());
   expect(closing[closing.length - 1]).toBe(0);
@@ -125,7 +130,7 @@ test("the three rail drawers are the same width", async ({ page }) => {
   // slot, exactly as Sessions does — so this opens it from the rail.
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-chat]").click();
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "tabs");
   await expect(rail).toBeVisible();
   if ((await rail.getAttribute("aria-pressed")) === "false") await rail.click();
   await expect(page.locator("#paneTabsDrawer")).toBeVisible();

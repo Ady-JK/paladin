@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { showSidebar } from "./drawer";
+import { useLayout } from "./layout";
 
 test("diff adapts to its panel width with line numbers and syntax colors", async ({ page }) => {
   const diffRequests: string[] = [];
@@ -199,6 +200,9 @@ test("a turn's files open a snapshot diff and the header opens session changes",
   await page.goto("/");
   await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  // The pane beside the conversation is the split layout; the app opens in
+  // tabs, where the changes body takes the whole window instead.
+  await useLayout(page, "split");
 
   await expect(page.locator("#sessionChangesBtn")).toContainText("2");
   const turnChange = page.locator('#messages .turn-changes[data-change-turn="0"]');
@@ -226,7 +230,7 @@ test("a turn's files open a snapshot diff and the header opens session changes",
   await expect(page.locator("#sidePane .change-scope")).toContainText("Session changes");
   await page.locator('#sidePane [data-change-file="page2.html"]').click();
   expect(await page.evaluate(() => (window as any).__e2eDiffCalls?.at(-1)?.turn)).toBe(-1);
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "tabs");
   await expect(page.locator("#sidePane .pane-changes")).toBeVisible();
   // Tab view: the tab list is a shell drawer, so the changes body gets the
   // whole split, exactly like the conversation beside it.

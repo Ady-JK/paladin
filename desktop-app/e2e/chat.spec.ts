@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+import { useLayout } from "./layout";
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
@@ -53,9 +55,9 @@ test("agent markdown renders while the user bubble stays plain", async ({ page }
 
 test("the conversation and composer share a centered reading width", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  // Tabs layout gives the conversation the whole window; split halves it.
-  await page.locator("#paneLayoutBtn").click();
-  await page.locator("#paneRailToggle").click();
+  // Split layout narrows the conversation, which is what gives it a reading
+  // width instead of the whole window.
+  await useLayout(page, "split");
   await page.fill("#promptInput", "hello");
   await page.click("#sendBtn");
   await expect(page.locator("#messages .turn-row").first()).toBeVisible();
@@ -67,7 +69,16 @@ test("the conversation and composer share a centered reading width", async ({ pa
   const composer = await width("footer > div");
   expect(row).toBeCloseTo(messages, 0);
   expect(composer).toBeCloseTo(messages, 0);
-  expect(messages).toBeLessThan(chat - 90);
+  // Centered and inset from its column, rather than the exact pixels of one
+  // split ratio: the two side gaps are both present and roughly equal.
+  const chatBox = (await page.locator("#chatView").first().boundingBox())!;
+  const msgBox = (await page.locator("#messages").first().boundingBox())!;
+  const left = msgBox.x - chatBox.x;
+  const right = chatBox.x + chatBox.width - (msgBox.x + msgBox.width);
+  expect(left).toBeGreaterThan(20);
+  expect(right).toBeGreaterThan(20);
+  expect(Math.abs(left - right)).toBeLessThan(4);
+  expect(messages).toBeLessThan(chat);
   expect(messages).toBeLessThanOrEqual(1100);
 });
 

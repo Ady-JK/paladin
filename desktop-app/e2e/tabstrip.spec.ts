@@ -3,7 +3,11 @@
 //    lists only the right-hand tabs. The rail's browser button opens the
 //    "Open tabs" drawer (Agent first) in either layout.
 //  - Tabs: the drawer is the only navigation, vertical, Agent at the top.
+//
+// The app opens in tabs layout, so every split test asks for split first.
 import { expect, test, type Page } from "@playwright/test";
+
+import { useLayout } from "./layout";
 
 async function start(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -22,6 +26,7 @@ async function openSideChat(page: Page): Promise<void> {
 test("split view keeps a horizontal strip of right-side tabs, without Agent", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
+  await useLayout(page, "split");
   await openSideChat(page);
   const strip = page.locator("#sidePane .pane-strip");
   const tabs = page.locator("#paneTabs");
@@ -39,6 +44,7 @@ test("split view keeps a horizontal strip of right-side tabs, without Agent", as
 test("the browser button is always on the rail and its drawer lists Agent first in split view", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
+  await useLayout(page, "split");
   await openSideChat(page);
   const railBtn = page.locator("#paneRailToggle");
   const drawer = page.locator("#paneTabsDrawer");
@@ -69,6 +75,7 @@ test("the browser button is always on the rail and its drawer lists Agent first 
 test("picking a tab in the split drawer selects it in the right pane", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
+  await useLayout(page, "split");
   await openSideChat(page);
   await openSideChat(page);
   const strip = page.locator("#paneTabs .pane-tab");
@@ -85,7 +92,7 @@ test("tab view navigates through the drawer, Agent at the top", async ({ page })
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await openSideChat(page);
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "tabs");
   const tabs = page.locator("#paneDrawerTabs");
   await expect.poll(() => tabs.evaluate((el) => getComputedStyle(el).flexDirection)).toBe("column");
   await expect(tabs.locator(".pane-tab").first()).toHaveAttribute("data-key", "main");
@@ -106,8 +113,8 @@ test("the tabs drawer opens from the rail and gives the page the whole window", 
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await openSideChat(page);
+  await useLayout(page, "tabs");
   const railBtn = page.locator("#paneRailToggle");
-  await page.locator("#paneLayoutBtn").click();
   await expect(railBtn).toBeVisible();
   await expect(railBtn).toHaveAttribute("aria-pressed", "true");
   // Tabs layout opens its drawer with a slide; measure once it has settled.
@@ -128,7 +135,7 @@ test("picking the Agent entry shows the conversation and keeps the list", async 
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await openSideChat(page);
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "tabs");
   const before = await page.locator("#paneDrawerTabs .pane-tab").count();
   expect(before).toBeGreaterThan(1);
 
@@ -146,6 +153,7 @@ test("picking the Agent entry shows the conversation and keeps the list", async 
 test("split view always has its right pane, empty or not", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
+  await useLayout(page, "split");
   const pane = page.locator("#sidePane");
   // Nothing is open yet, but the pane is there and says so.
   await expect(pane).toBeVisible();
@@ -162,8 +170,7 @@ test("split view always has its right pane, empty or not", async ({ page }) => {
   await expect(page.locator("#agentMain")).toBeVisible();
 
   // Agent-only width is a layout choice: tabs layout hides the pane behind the drawer.
-  await page.locator("#paneLayoutBtn").click();
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  await useLayout(page, "tabs");
   await expect(pane).toBeHidden();
   await expect(page.locator("#agentMain")).toBeVisible();
 });

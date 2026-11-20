@@ -3,6 +3,8 @@
 // or deleted from the pane's history menu.
 import { test, expect, type Page } from "@playwright/test";
 
+import { useLayout } from "./layout";
+
 const sideCalls = (page: Page) => page.evaluate(() => ((window as any).__e2eSideCalls || []) as any[]);
 
 async function ask(page: Page, line: string): Promise<void> {
@@ -14,6 +16,8 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
+  // A /btw chat is a tab in the pane beside the conversation, which is split.
+  await useLayout(page, "split");
 });
 
 test("a bare /btw opens a new side chat ready for a question", async ({ page }) => {

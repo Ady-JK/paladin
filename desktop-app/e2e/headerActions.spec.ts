@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { useLayout } from "./layout";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -8,14 +9,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("header menu opens side chats and preserves layout controls", async ({ page }) => {
+  await useLayout(page, "split");
   const actions = page.locator("#titleBar #paneActions");
   await expect(actions).toBeVisible();
   await expect(actions.locator("#paneLayoutBtn")).toBeVisible();
   await actions.locator("#paneNewChatBtn").click();
   await page.getByRole("menuitem", { name: "New side chat" }).click();
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
-  await page.locator("#paneLayoutBtn").click();
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  await useLayout(page, "tabs");
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
 });
 
@@ -57,6 +58,7 @@ test("browser has one entry and new side chats and terminals share a menu", asyn
 // the title bar in tabs layout, and a taller strip used to grow the bar
 // (and with it the readings row and the window buttons) by six pixels.
 test("the header keeps one height across layouts", async ({ page }) => {
+  await useLayout(page, "split");
   const bar = page.locator("#titleBar");
   const measure = async (): Promise<{ bar: number; actions: number; close: number; closeY: number }> => ({
     bar: Math.round((await bar.boundingBox())!.height),
@@ -69,8 +71,7 @@ test("the header keeps one height across layouts", async ({ page }) => {
   await page.getByRole("menuitem", { name: "New side chat" }).click();
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
   const splitWithPane = await measure();
-  await page.locator("#paneLayoutBtn").click();
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  await useLayout(page, "tabs");
   // The tab list is its own shell drawer now, not part of the header and
   // not a column inside the split, so the bar's height must not depend on
   // the tabs at all.

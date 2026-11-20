@@ -1,9 +1,17 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+import { useLayout } from "./layout";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
 });
+
+// The pane's terminal lives beside the conversation, which is the split
+// layout: the app opens in tabs, where a terminal has the whole window.
+async function startSplit(page: Page): Promise<void> {
+  await useLayout(page, "split");
+}
 
 test("IDE terminals can be renamed, split and closed independently", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
@@ -40,11 +48,11 @@ test("selected IDE terminal output can be added to the agent draft", async ({ pa
   // The Explorer overlay covers the left of the terminal; close it so the drag reaches the text.
   await page.locator("#ideExplorerToggle").click();
   await expect(page.locator(".ide-explorer")).toHaveClass(/is-closed/);
+  // Triple-click the row: xterm selects the whole logical line, so the
+  // assertion does not depend on where the glyphs start within the row (a
+  // drag from the row's bounding box starts on a cell that scrolls the line).
   const box = (await row.boundingBox())!;
-  await page.mouse.move(box.x + 3, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 170, box.y + box.height / 2, { steps: 8 });
-  await page.mouse.up();
+  await page.mouse.click(box.x + 8, box.y + box.height / 2, { clickCount: 3 });
   await page.getByRole("button", { name: "Add selected output to agent" }).click();
   await expect(page.locator("#promptInput")).toHaveValue(/Terminal output:[\s\S]*\/home\/tester\/project/);
   expect(await page.evaluate(() => (window as any).__e2eSubmits?.length ?? 0)).toBe(0);
@@ -66,6 +74,7 @@ test("bang runs a workspace command then starts a turn with its result", async (
 });
 
 test("double bang shows output without adding agent history", async ({ page }) => {
+  await startSplit(page);
   await page.locator("#promptInput").fill("!! pwd");
   await page.locator("#promptInput").press("Enter");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalRuns?.length ?? 0)).toBe(1);
@@ -75,6 +84,7 @@ test("double bang shows output without adding agent history", async ({ page }) =
 });
 
 test("terminal button opens a full terminal tab beside chat", async ({ page }) => {
+  await startSplit(page);
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
   await page.locator("#paneNewChatBtn").click();
@@ -91,6 +101,7 @@ test("terminal button opens a full terminal tab beside chat", async ({ page }) =
 });
 
 test("an interactive terminal works before the first chat message", async ({ page }) => {
+  await startSplit(page);
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-terminal]").click();
   await expect(page.locator(".pane-terminal .xterm")).toBeVisible();
@@ -164,6 +175,7 @@ test("a terminal exiting before its start reply shows its output and exit", asyn
 });
 
 test("a terminal opened before the first message remains usable after starting a chat", async ({ page }) => {
+  await startSplit(page);
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-terminal]").click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
@@ -214,6 +226,7 @@ test("a standalone terminal follows the user when opening an existing chat", asy
 });
 
 test("the shared terminal button reopens the existing terminal in Agent mode", async ({ page }) => {
+  await startSplit(page);
   const toggle = page.locator("#rail #ideTerminalToggle");
   await toggle.click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();

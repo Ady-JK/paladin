@@ -108,6 +108,12 @@ test("the native page keeps up with its surface while a panel slides", async () 
     await expect(page.locator("#webMenu")).toBeVisible();
     await page.locator('[data-web-open="https://chatgpt.com/"]').click();
     await expect(page.locator(".web-surface")).toBeVisible();
+    // This spec describes the pane beside the conversation being pushed by a
+    // drawer, which is the split layout; the app opens in tabs.
+    if ((await page.locator("#paneLayoutBtn").getAttribute("data-layout")) !== "split") {
+      await page.locator("#paneLayoutBtn").click();
+    }
+    await expect(page.locator("#paneLayoutBtn")).toHaveAttribute("data-layout", "split");
     // Wait for the page to be up at its final width, not mid-attach, or the
     // "it widened" assertion below compares against a half-placed view.
     await expect.poll(() => boundsOf(app).then((b) => b[2])).toBeGreaterThan(400);

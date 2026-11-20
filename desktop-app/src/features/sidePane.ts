@@ -78,7 +78,12 @@ function visibleSessionId(): string {
 }
 const changesCache = new Map<string, SessionChanges>();
 let paneOpen = false;
-let layoutMode: "split" | "tabs" = loadText(layoutKey) === "tabs" ? "tabs" : "split";
+// Tabs layout is the default: a session opens on the conversation alone, and
+// the browser, terminals, changes and side chats live behind the drawer. Split
+// is the opt-in, and the only layout that is remembered — a stored "split"
+// sticks, anything else (including a first run, where the key is absent) starts
+// in tabs.
+let layoutMode: "split" | "tabs" = loadText(layoutKey) === "split" ? "split" : "tabs";
 // The tab list is its own drawer column, opened from the rail button that
 // is present in both layouts, exactly like Sessions and Files. It is not a
 // strip inside the split: a column there would shrink the native page's
@@ -97,6 +102,10 @@ const tabsDrawerOpen = {
 // the right half is where terminals, pages, changes and side chats live. A
 // user who wants the agent at full width switches to the tabs layout. IDE
 // mode has its own arrangement and keeps its own rules.
+//
+// Tabs layout starts with no pane open. `paneOpen` is true only when a tab is
+// actually there to show, which is what the renderer already computes from
+// `tabSet.tabs.length` whenever it opens a session, so nothing else changes.
 paneOpen = layoutMode === "split";
 let nextKey = 0;
 let ideTerminalMode = false;

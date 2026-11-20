@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
+import { useLayout } from "./layout";
 
 // Every app shortcut is Cmd on macOS and Ctrl elsewhere.
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
@@ -147,6 +148,7 @@ test("the browser shortcut opens the browser menu", async ({ page }) => {
 });
 
 test("the agent shortcut focuses the prompt and the split keeps its right pane", async ({ page }) => {
+  await useLayout(page, "split");
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
   await page.locator("#paneNewChatBtn").click();

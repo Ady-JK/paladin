@@ -98,10 +98,23 @@ test("Explorer pushes the editor instead of covering it", async ({ page }) => {
   // A column of the IDE workspace now, not a panel floating over it.
   const explorerStyle = await explorer.evaluate((el) => getComputedStyle(el).position);
   expect(explorerStyle).toBe("static");
-  const drawerBounds = (await explorer.boundingBox())!;
+  // Both rectangles in one read: the drawer animates its width, so two
+  // separate boundingBox() calls can land on different frames and compare a
+  // wide drawer against an editor that has already reflowed.
+  const geometry = (): Promise<{ drawerEnd: number; editorX: number }> =>
+    page.evaluate(() => {
+      const drawer = document.querySelector(".ide-explorer")!.getBoundingClientRect();
+      const area = document.querySelector(".ide-editor-area")!.getBoundingClientRect();
+      return { drawerEnd: drawer.x + drawer.width, editorX: area.x };
+    });
+  // It ends where the editor begins: no overlap at all, once it settles.
+  await expect
+    .poll(async () => {
+      const { drawerEnd, editorX } = await geometry();
+      return drawerEnd <= editorX + 1.5;
+    })
+    .toBe(true);
   const before = (await editor.boundingBox())!;
-  // It ends where the editor begins: no overlap at all.
-  expect(drawerBounds.x + drawerBounds.width).toBeLessThanOrEqual(before.x + 1.5);
   await page.locator("#ideExplorerToggle").click();
   await expect.poll(async () => (await editor.boundingBox())!.x, { timeout: 4000 }).toBeLessThan(before.x);
   const after = (await editor.boundingBox())!;

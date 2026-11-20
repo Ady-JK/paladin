@@ -1,8 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
+// layoutModes.spec.ts pins the two layouts and what survives a switch.
+// The app opens in tabs layout, so a test that describes split asks for it.
+import { expect, test } from "@playwright/test";
 
-async function switchLayout(page: Page): Promise<void> {
-  await page.locator("#paneLayoutBtn").click();
-}
+import { useLayout } from "./layout";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -12,19 +12,27 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#messages")).toContainText("start");
 });
 
+test("a fresh start opens in the tabs layout", async ({ page }) => {
+  const layout = page.locator("#paneLayoutBtn");
+  await expect(layout).toHaveAttribute("data-layout", "tabs");
+  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  // The conversation is the whole window; the pane waits behind the drawer.
+  await expect(page.locator("#agentMain")).toBeVisible();
+  await expect(page.locator("#sidePane")).toBeHidden();
+  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
+});
+
 test("split and tabs preserve the active side chat and make each view full width", async ({ page }) => {
   const layout = page.locator("#paneLayoutBtn");
+  await useLayout(page, "split");
   await expect(page.locator("#paneNewChatBtn")).toBeVisible();
-  await expect(layout).toBeVisible();
-  await expect(layout).toHaveAttribute("data-layout", "split");
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-chat]").click();
   const splitWidth = (await page.locator("#sidePane").boundingBox())!.width;
   const fullWidth = (await page.locator("#agentSplit").boundingBox())!.width;
   expect(splitWidth).toBeLessThan(fullWidth * 0.7);
 
-  await switchLayout(page);
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
+  await useLayout(page, "tabs");
   // Tab view: the tab list is the "Open tabs" drawer beside the card, not
   // part of the header and no longer a column inside the split, so the body
   // gets the whole split.
@@ -47,13 +55,14 @@ test("split and tabs preserve the active side chat and make each view full width
   await page.locator('#paneDrawerTabs .pane-tab[data-key^="t"] .pane-tab-pick').first().click();
   await expect(page.locator("#sidePane .side-chat")).toBeVisible();
 
-  await switchLayout(page);
+  await useLayout(page, "split");
   await expect(page.locator("#sidePane .pane-strip")).toBeVisible();
   await expect(page.locator("#agentMain")).toBeVisible();
   await expect(page.locator("#sidePane .side-chat")).toBeVisible();
 });
 
 test("clicking a localhost chat link opens the session browser in either layout", async ({ page }) => {
+  await useLayout(page, "split");
   await page.locator("#messages").evaluate((el) => {
     el.insertAdjacentHTML(
       "beforeend",
@@ -65,7 +74,7 @@ test("clicking a localhost chat link opens the session browser in either layout"
   await expect(page.locator("#sidePane .browser-url")).toHaveValue("http://localhost:3000");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserOpens?.length ?? 0)).toBe(1);
 
-  await switchLayout(page);
+  await useLayout(page, "tabs");
   await page.locator('[data-key="main"] .pane-tab-pick').click();
   await page.locator('#messages a[data-ext="http://localhost:3000"]').click();
   await expect(page.locator("#agentMain")).toBeHidden();
@@ -75,6 +84,7 @@ test("clicking a localhost chat link opens the session browser in either layout"
 });
 
 test("browser tab expands to full width and the layout survives a reload", async ({ page }) => {
+  await useLayout(page, "split");
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-chat]").click();
   await page.evaluate(() =>
@@ -88,7 +98,7 @@ test("browser tab expands to full width and the layout survives a reload", async
   await page.locator("#sidePane .browser-open").click();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserBounds?.width ?? 0)).toBeGreaterThan(100);
   const splitWidth = await page.evaluate(() => (window as any).__e2eBrowserBounds.width);
-  await switchLayout(page);
+  await useLayout(page, "tabs");
   // Tab view fills the split, minus the tabs drawer when it is open — not
   // "1.5x the split", which stops being true once the drawer has width.
   await expect
@@ -105,7 +115,7 @@ test("browser tab expands to full width and the layout survives a reload", async
 });
 
 test("saved side chat menu stays usable in the unified header", async ({ page }) => {
-  await switchLayout(page);
+  await useLayout(page, "tabs");
   await page.locator("#paneNewChatBtn").click();
   await expect(page.locator("#paneHistoryMenu")).toBeVisible();
   await expect(page.locator("#paneHistoryMenu")).toContainText("No saved side chats");

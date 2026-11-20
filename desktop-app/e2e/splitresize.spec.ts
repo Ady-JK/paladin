@@ -3,6 +3,7 @@
 // double-click returns it to half.
 import { expect, test, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
+import { useLayout } from "./layout";
 
 async function openPane(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -10,6 +11,9 @@ async function openPane(page: Page): Promise<void> {
   await page.fill("#promptInput", "start");
   await page.press("#promptInput", "Enter");
   await expect(page.locator("#messages")).toContainText("start");
+  // The border and the half/half split only exist in split layout, which the
+  // app no longer opens in.
+  await useLayout(page, "split");
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-chat]").click();
   await expect(page.locator("#sidePane")).toBeVisible();
@@ -34,12 +38,12 @@ test("opening a panel while the pane is hidden in tabs layout keeps the split at
   await page.setViewportSize({ width: 1400, height: 900 });
   await openPane(page);
   // Split always shows its pane, so it is only hidden in tabs layout.
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "tabs");
   await page.locator('#paneDrawerTabs [data-key="main"] .pane-tab-pick').click();
   await expect(page.locator("#sidePane")).toBeHidden();
   await showSidebar(page);
   await page.locator("#agentTab").click();
-  await page.locator("#paneLayoutBtn").click();
+  await useLayout(page, "split");
   await expect(page.locator("#sidePane")).toBeVisible();
   const available = await page.locator("#agentSplit").evaluate((el) => el.getBoundingClientRect().width);
   await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeGreaterThan(available * 0.4);

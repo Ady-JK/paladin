@@ -3,6 +3,7 @@
 // the session's Changes diff, and Fix filling the composer.
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
+import { useLayout } from "./layout";
 
 const REPORT = {
   verdict: "merge_after_fixes",
@@ -62,6 +63,8 @@ async function openReview(page: Page): Promise<void> {
   await page.goto("/");
   await showSidebar(page);
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();
+  // A finding's diff opens in the pane beside the conversation: the split.
+  await useLayout(page, "split");
 }
 
 test("a review's findings show as a card in history", async ({ page }) => {
