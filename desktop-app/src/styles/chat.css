@@ -537,8 +537,10 @@
   align-items: center;
   justify-content: center;
   gap: 22px;
-  background: rgb(8 9 15 / 0.72);
-  backdrop-filter: blur(12px);
+  /* Shared with an opened visual, so both fullscreen views blur the page
+     behind them the same way. */
+  background: var(--overlay-scrim);
+  backdrop-filter: var(--overlay-blur);
 }
 .image-viewer img {
   max-width: min(82vw, 1100px);
@@ -554,9 +556,19 @@
   flex: none;
   place-items: center;
   border-radius: 50%;
-  background: rgb(255 255 255 / 0.16);
-  color: white;
+  /* Neutral rather than white: the scrim is light in the light theme, so
+     white controls would vanish into it. */
+  background: rgb(127 127 127 / 0.32);
+  color: var(--color-white);
   font-size: 28px;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+html.light .image-viewer button {
+  color: var(--color-slate-800);
+  text-shadow: none;
+}
+.image-viewer button:hover {
+  background: rgb(127 127 127 / 0.46);
 }
 .image-viewer-close {
   position: absolute;
@@ -566,8 +578,13 @@
 .image-viewer-count {
   position: absolute;
   bottom: 20px;
-  color: white;
+  color: var(--color-white);
   font-size: 12px;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+}
+html.light .image-viewer-count {
+  color: var(--color-slate-700);
+  text-shadow: none;
 }
 .session-file-card {
   max-width: 260px;

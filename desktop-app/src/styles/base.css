@@ -6,6 +6,13 @@
   --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
 
+  /* Fullscreen overlays (the session image viewer, an opened visual):
+     the page behind them is dimmed and blurred by the same amount, so
+     both overlays read the same. The dim stays light enough that the
+     blur is what the eye sees — a heavy scrim hides it completely. */
+  --overlay-scrim: rgb(8 9 15 / 0.45);
+  --overlay-blur: blur(16px);
+
   /* Readability: one step up from stock (xs 12->13, sm 14->15). */
   --text-xs: 0.8125rem;
   --text-xs--line-height: 1.25rem;
@@ -377,4 +384,10 @@
   .panel {
     @apply flex flex-col overflow-hidden bg-slate-900;
   }
+}
+
+/* The overlay scrim follows the theme: the same ink that dims a dark page
+   turns a light one grey, so light mode dims with white instead. */
+html.light {
+  --overlay-scrim: rgb(248 250 252 / 0.55);
 }

@@ -113,7 +113,11 @@
   font-size: 12px;
   color: var(--color-slate-500);
 }
-/* Opened larger: the card floats over the chat until closed. */
+/* Opened larger: the card floats over the chat until closed. The page
+   behind it is dimmed and blurred exactly like the image viewer's
+   backdrop, so both fullscreen views read the same. The blur sits on a
+   pseudo-element because the card itself is opaque: a backdrop-filter on
+   an opaque box has nothing to show through. */
 .visual-card.is-expanded {
   position: fixed;
   inset: 40px 48px;
@@ -123,6 +127,14 @@
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
   background: var(--color-white);
   animation: none;
+}
+.visual-card.is-expanded::before {
+  content: "";
+  position: fixed;
+  inset: -40px -48px;
+  z-index: -1;
+  background: var(--overlay-scrim);
+  backdrop-filter: var(--overlay-blur);
 }
 .dark .visual-card.is-expanded {
   background: var(--color-slate-900);

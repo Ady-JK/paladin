@@ -304,6 +304,17 @@ test("open larger fills the window and returns to its row", async ({ page }) => 
   expect(expanded.w).toBeGreaterThan(expanded.vw * 0.8);
   expect(expanded.x).toBeLessThan(60);
   expect(expanded.y).toBeLessThan(50);
+  // The page behind the opened visual is blurred like the image viewer's
+  // backdrop; the card itself is opaque, so the blur rides a scrim layer
+  // behind it rather than on the card.
+  const backdrop = await page.evaluate(() => {
+    const el = document.querySelector(".visual-card.is-expanded") as HTMLElement;
+    const cs = getComputedStyle(el, "::before");
+    return { blur: cs.backdropFilter, scrim: cs.backgroundColor, z: cs.zIndex };
+  });
+  expect(backdrop.blur).toMatch(/blur\((1[0-9]|[2-9][0-9])px\)/);
+  expect(backdrop.scrim).toMatch(/0\.4|0\.5|0\.6/);
+  expect(backdrop.z).toBe("-1");
 
   await page.keyboard.press("Escape");
   await expect(floating).not.toHaveClass(/is-expanded/);

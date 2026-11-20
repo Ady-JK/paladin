@@ -126,6 +126,14 @@ test("stored screenshots render small and open in the session image viewer", asy
   await expect(page.locator("#sessionImageViewer .image-viewer-count")).toHaveText("1 / 2");
   await page.locator("#sessionImageViewer .image-viewer-next").click();
   await expect(page.locator("#sessionImageViewer .image-viewer-count")).toHaveText("2 / 2");
+  // The page behind the image is blurred, not just dimmed: the blur has
+  // to be visible, so the scrim stays light and the filter carries it.
+  const backdrop = await page.evaluate(() => {
+    const cs = getComputedStyle(document.getElementById("sessionImageViewer")!);
+    return { blur: cs.backdropFilter, scrim: cs.backgroundColor };
+  });
+  expect(backdrop.blur).toMatch(/blur\((1[0-9]|[2-9][0-9])px\)/);
+  expect(backdrop.scrim).toMatch(/0\.4|0\.5|0\.6/);
   await page.keyboard.press("Escape");
   await expect(page.locator("#sessionImageViewer")).toBeHidden();
 });
