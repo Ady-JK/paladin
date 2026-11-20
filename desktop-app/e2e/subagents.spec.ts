@@ -102,6 +102,15 @@ async function childEmit(page: Page, ev: Record<string, unknown>): Promise<void>
 }
 
 const opens = (page: Page) => page.evaluate(() => ((window as any).__e2eOpens || []).map((o: any) => o.sessionId));
+
+// The subagents list is collapsed by default, so a spec that reaches a
+// child row opens its parent's list first (no-op when already open).
+async function openKids(page: Page, parent = "sess-parent"): Promise<void> {
+  await showSidebar(page);
+  const kids = page.locator(`.session-children[data-kids-of="${parent}"]`);
+  if (await kids.isHidden()) await page.locator(`[data-kids-toggle="${parent}"]`).click();
+  await expect(kids).toBeVisible();
+}
 const emit = (page: Page, ev: Record<string, unknown>) => page.evaluate((e) => (window as any).__e2eHub.emit(e), ev);
 
 test.beforeEach(async ({ page }) => {
@@ -121,19 +130,29 @@ test("children nest under their parent, not as sessions of their own", async ({ 
   await expect(page.locator("#recentList")).not.toContainText("explore-1");
 
   const kids = page.locator('.session-children[data-kids-of="sess-parent"]');
-  // A running child keeps its parent's children open.
+  const toggle = page.locator('[data-kids-toggle="sess-parent"]');
+  // Collapsed by default, even with a child running: a long run can spawn
+  // many subagents, and keeping them listed pushes the rest of the
+  // sidebar away. The toggle still reports the count and the activity.
+  await expect(kids).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toContainText("2 subagents");
+  await expect(toggle.locator(".agent-dot")).toHaveAttribute("data-status", "running");
+
+  // Opening it lists the children with their own status.
+  await showSidebar(page);
+  await toggle.click();
   await expect(kids).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const explore = kids.locator('[data-child="sess-child-1"]');
   await expect(explore).toContainText("explore-1");
   await expect(explore.locator(".agent-status")).toHaveAttribute("data-status", "running");
   await expect(kids.locator('[data-child="sess-child-2"] .agent-status')).toHaveAttribute("data-status", "completed");
 
+  // The user's choice is remembered for that parent.
   await showSidebar(page);
-  await page.locator('[data-kids-toggle="sess-parent"]').click();
+  await toggle.click();
   await expect(kids).toBeHidden();
-  await showSidebar(page);
-  await page.locator('[data-kids-toggle="sess-parent"]').click();
-  await expect(kids).toBeVisible();
 });
 
 test("a tool card opens a child using its short agent ID", async ({ page }) => {
@@ -171,7 +190,7 @@ test("a tool card opens a child using its short agent ID", async ({ page }) => {
 });
 
 test("a child opens in its own pane window, with a way into the main view", async ({ page }) => {
-  await showSidebar(page);
+  await openKids(page);
   await page.locator('[data-child="sess-child-1"]').click();
 
   const pane = page.locator("#sidePane");
@@ -238,7 +257,7 @@ test("every working child gets a pane window without a click", async ({ page }) 
 });
 
 test("a message typed into a running child steers its turn", async ({ page }) => {
-  await showSidebar(page);
+  await openKids(page);
   await page.locator('[data-child="sess-child-1"]').click();
   // A real running turn, as the sidecar would have started. The runner
   // never resolves, so the child stays busy while the user types.
@@ -266,6 +285,7 @@ test("a message typed into a running child steers its turn", async ({ page }) =>
 
 test("a finished child is read-only in its window", async ({ page }) => {
   await showSidebar(page);
+  await openKids(page);
   await page.locator('[data-child="sess-child-2"]').click();
   const agent = page.locator('.pane-agent[data-agent="sess-child-2"]');
   await expect(agent).toContainText("Reviewer done.");
@@ -287,6 +307,7 @@ test("agents/changed repaints a child's status and finds new children", async ({
       updatedAt: now,
     },
   });
+  await openKids(page);
   await expect(page.locator('[data-child="sess-child-1"] .agent-status')).toHaveAttribute("data-status", "completed");
 
   await page.evaluate(
@@ -370,7 +391,7 @@ test("a spawn_agent row opens the child live in the side pane", async ({ page })
   await expect(page.locator("#messages")).toContainText("scanning handlers");
   await page.locator("#parentBackBtn").click();
   await expect(page.locator("#parentBar")).toBeHidden();
-  await showSidebar(page);
+  await openKids(page);
   await page.locator('[data-child="sess-child-1"]').click();
   await expect(pane.locator(".pane-tab.is-active")).toContainText("explore-1");
   await childEmit(page, { event: "chat/delta", delta: " and routes" });

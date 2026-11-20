@@ -122,8 +122,11 @@ function toggleFold(cwd: string): void {
   saveJson(FOLD_KEY, [...folded]);
 }
 
-// kidsOpen remembers a parent's children toggle the user clicked; by
-// default they show while the parent is open or a child is at work.
+// kidsOpen remembers a parent's children toggle the user clicked. The
+// list is collapsed by default: a long run can spawn many subagents, and
+// keeping them all on screen pushes the rest of the sidebar away. The
+// toggle keeps a dot while any child is at work, so activity stays
+// visible without the list being open.
 const kidsOpen = new Map<string, boolean>();
 
 const AGENT_STATUS_TEXT: Record<AgentStatus, string> = {
@@ -164,8 +167,8 @@ function childRow(child: SessionInfo): string {
 function childrenBlock(parent: SessionInfo, kids: SessionInfo[]): string {
   if (kids.length === 0) return "";
   const busy = kids.some((k) => ["running", "queued"].includes(agentStatus(k)));
-  const near = parent.sessionId === state.sessionId || kids.some((k) => k.sessionId === state.sessionId);
-  const open = kidsOpen.get(parent.sessionId) ?? (busy || near || kids.some((kid) => hasAgentBrowser(kid.sessionId)));
+  // Collapsed unless the user opened it for this parent.
+  const open = kidsOpen.get(parent.sessionId) ?? false;
   const id = escapeAttr(parent.sessionId);
   return `
     <button type="button" class="session-kids-toggle" data-kids-toggle="${id}" aria-expanded="${open}">
