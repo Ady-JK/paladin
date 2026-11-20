@@ -26,19 +26,13 @@ function terminalExited(tab: TerminalTab, code?: number): void {
   tab.closed = true;
 }
 
-export function terminalEvent(raw: unknown, sets: Map<string, TabSet>): void {
+export function terminalEvent(raw: unknown, set: TabSet): void {
   if (!raw || typeof raw !== "object") return;
   const e = raw as { event?: string; sessionId?: string; terminalId?: string; data?: string; exitCode?: number };
   if (!e.event?.startsWith("terminal/") || !e.terminalId || !e.sessionId) return;
-  const findTab = (set: TabSet | undefined): TerminalTab | undefined =>
-    set?.tabs.find((t): t is TerminalTab => t.kind === "terminal" && t.terminalId === e.terminalId);
-  let tab = findTab(sets.get(e.sessionId));
-  if (!tab) {
-    for (const set of sets.values()) {
-      tab = findTab(set);
-      if (tab) break;
-    }
-  }
+  // One strip per window: find the terminal by its id, whatever session
+  // started it. That is also what keeps a terminal alive across a switch.
+  const tab = set.tabs.find((t): t is TerminalTab => t.kind === "terminal" && t.terminalId === e.terminalId);
   if (e.event === "terminal/data" && e.data) {
     if (!tab) {
       const pending = pendingEvents(e.terminalId);

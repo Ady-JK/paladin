@@ -63,7 +63,12 @@ const agentView = $("#agentView");
 const layoutKey = "paladin.paneLayout";
 
 export const STANDALONE_PANE_SESSION = "__standalone_pane__";
-const sets = new Map<string, TabSet>();
+// One tab strip for the window, not one per session. Switching session
+// must not swap the strip out from under the user: a browser page you
+// opened, or a terminal you started, is still there afterwards. Each tab
+// remembers the session it was created for (tab.sessionId), which is what
+// lookups below filter on.
+const tabSet: TabSet = { tabs: [], active: "" };
 const pendingBrowserSessions = new Set<string>();
 
 function visibleSessionId(): string {
@@ -144,16 +149,17 @@ export function setIDETerminalMode(on: boolean): void {
     });
     terminalDock = new TerminalDock({
       workspace: () => state.cwd,
+      // The dock shows every terminal running in this workspace, whichever
+      // chat started it: a shell outlives the conversation that opened it,
+      // and switching chat must not hide a command that is still running.
       terminals: () =>
-        sets
-          .get(visibleSessionId())
-          ?.tabs.filter((tab): tab is TerminalTab => tab.kind === "terminal" && tab.cwd === state.cwd) ?? [],
+        tabSet.tabs.filter((tab): tab is TerminalTab => tab.kind === "terminal" && tab.cwd === state.cwd),
       create: () => openTerminalTab(visibleSessionId()),
       close: (key) => closeTab(key),
     });
   }
-  const set = sets.get(visibleSessionId());
-  const selected = set && activeTab(set);
+  const set = currentSet();
+  const selected = activeTab(set);
   if (on && selected && isBrowserPage(selected) && paneOpen) {
     window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
     paneOpen = false;
@@ -178,40 +184,29 @@ export function setIDETerminalMode(on: boolean): void {
   if (state.sessionId) void refreshChanges(state.sessionId);
 }
 
-// Standalone terminals keep their PTY owner while following the visible chat.
+// Standalone terminals keep their PTY owner while following the visible
+// chat. With one strip per window there is nothing to migrate: the tab is
+// already here, so "following" is just re-tagging it to the session now on
+// screen, for the same workspace.
 function attachStandaloneTerminals(sessionId: string): void {
-  const targetId = sessionId || STANDALONE_PANE_SESSION;
-  for (const [sourceId, source] of [...sets]) {
-    if (sourceId === targetId) continue;
-    const terminals = source.tabs.filter(
-      (tab): tab is TerminalTab =>
-        tab.kind === "terminal" && tab.sessionId === STANDALONE_PANE_SESSION && tab.cwd === state.cwd,
-    );
-    if (!terminals.length) continue;
-    const target = browserSet(targetId);
-    target.tabs.push(...terminals);
-    if (terminals.some((tab) => tab.key === source.active)) target.active = source.active;
-    else if (!target.active) target.active = terminals[0].key;
-    const moving = new Set(terminals.map((tab) => tab.key));
-    source.tabs = source.tabs.filter((tab) => !moving.has(tab.key));
-    if (!source.tabs.length) sets.delete(sourceId);
-    else if (!source.tabs.some((tab) => tab.key === source.active)) source.active = source.tabs[0].key;
+  if (!sessionId || sessionId === STANDALONE_PANE_SESSION) return;
+  for (const tab of tabSet.tabs) {
+    if (tab.kind !== "terminal" || tab.sessionId !== STANDALONE_PANE_SESSION) continue;
+    if (tab.cwd !== state.cwd) continue;
+    tab.sessionId = sessionId;
   }
 }
 
 export function showTerminalResult(sessionId: string, cwd: string, command: string, result: api.TerminalResult): void {
-  let paneSession = sessionId;
-  if (sessionId === STANDALONE_PANE_SESSION) {
-    if (state.cwd === cwd) paneSession = visibleSessionId();
-    else {
-      for (const [id, set] of sets) {
-        if (set.tabs.some((tab) => tab.kind === "terminal" && tab.sessionId === sessionId && tab.cwd === cwd)) {
-          paneSession = id;
-          break;
-        }
-      }
-    }
-  }
+  // A standalone result belongs to whichever tab is running in that
+  // workspace; find the tab itself rather than a set that owns it.
+  const standalone = sessionId === STANDALONE_PANE_SESSION;
+  const match = tabSet.tabs.find((tab): tab is TerminalTab => tab.kind === "terminal" && tab.cwd === cwd);
+  const paneSession = standalone
+    ? state.cwd === cwd
+      ? visibleSessionId()
+      : (match?.sessionId ?? sessionId)
+    : sessionId;
   const set = browserSet(paneSession);
   const visible = visibleSessionId() === paneSession && state.cwd === cwd;
   const selected = ideTerminalMode && visible ? terminalDock?.active() : undefined;
@@ -229,23 +224,21 @@ export function showTerminalResult(sessionId: string, cwd: string, command: stri
   else tab.pendingText.push(text);
 }
 
-function currentSet(): TabSet | null {
-  if (!state.sessionId) return sets.get(STANDALONE_PANE_SESSION) ?? null;
-  let set = sets.get(state.sessionId);
-  if (!set) {
-    set = { tabs: [], active: "" };
-    sets.set(state.sessionId, set);
-  }
-  return set;
+// currentSet is the window's tab strip. It always exists: with one set
+// there is no "this session has no tabs yet" state to special-case.
+function currentSet(): TabSet {
+  return tabSet;
 }
 
-function browserSet(sessionId: string): TabSet {
-  let set = sets.get(sessionId);
-  if (!set) {
-    set = { tabs: [], active: "" };
-    sets.set(sessionId, set);
-  }
-  return set;
+// browserSet is kept as a name because call sites read as "the set that
+// belongs to this session"; with one strip per window it is the same one.
+function browserSet(_sessionId: string): TabSet {
+  return tabSet;
+}
+
+// tabsFor narrows the strip to the tabs created for one session.
+function tabsFor(sessionId: string): Tab[] {
+  return tabSet.tabs.filter((tab) => tab.sessionId === sessionId);
 }
 
 function openBrowserTab(sessionId: string, url = ""): void {
@@ -283,7 +276,7 @@ function openBrowserTab(sessionId: string, url = ""): void {
 }
 
 export function hasAgentBrowser(sessionId: string): boolean {
-  return sets.get(sessionId)?.tabs.some((tab) => tab.kind === "browser") ?? false;
+  return tabsFor(sessionId).some((tab) => tab.kind === "browser");
 }
 
 // Chat links use the same one-browser-per-session view as the agent tool.
@@ -306,7 +299,7 @@ function browserEvent(raw: unknown): void {
     openBrowserTab(e.sessionId, e.url ?? "");
     return;
   }
-  const tab = sets.get(e.sessionId)?.tabs.find((t): t is BrowserTab => t.kind === "browser");
+  const tab = tabsFor(e.sessionId).find((t): t is BrowserTab => t.kind === "browser");
   if (!tab) return;
   if (e.event === "browser/annotations") {
     tab.noteCount = Math.max(0, e.count ?? 0);
@@ -318,8 +311,7 @@ function browserEvent(raw: unknown): void {
     stopBrowserPick(tab);
     if (state.sessionId === e.sessionId) closeTab(tab.key, false);
     else {
-      const set = sets.get(e.sessionId)!;
-      set.tabs = set.tabs.filter((t) => t !== tab);
+      tabSet.tabs = tabSet.tabs.filter((t) => t !== tab);
       tab.body.remove();
     }
     renderSessions();
@@ -429,7 +421,7 @@ export async function refreshChanges(
         paintTurnMarker(liveRow, turn.turn, turn.files, totals.get(turn.turn));
       else if (turn && activeRow) paintTurnMarker(liveRow, turn.turn, []);
     }
-    const tab = sets.get(sessionId)?.tabs.find((t): t is ChangesTab => t.kind === "changes");
+    const tab = tabsFor(sessionId).find((t): t is ChangesTab => t.kind === "changes");
     if (tab) paintChangesTab(tab, data);
   } catch {
     if (sessionId === state.sessionId && request === changeRequest) paintChangesHeader(undefined);
@@ -458,7 +450,7 @@ function openChangeAt(sessionId: string, rel: string, start: number, end: number
 function openChangesTab(turn: number | null, selectFirst = false): void {
   const sessionId = state.sessionId;
   if (!sessionId) return;
-  const set = currentSet()!;
+  const set = currentSet();
   let tab = set.tabs.find((t): t is ChangesTab => t.kind === "changes");
   if (!tab) {
     tab = newChangesTab(sessionId, `t${++nextKey}`, () => changesCache.get(sessionId));
@@ -481,7 +473,7 @@ function openChangesTab(turn: number | null, selectFirst = false): void {
 let runningJobs: RunningJob[] = [];
 
 function jobsTab(sessionId: string): JobsTab | undefined {
-  return sets.get(sessionId)?.tabs.find((t): t is JobsTab => t.kind === "jobs");
+  return tabsFor(sessionId).find((t): t is JobsTab => t.kind === "jobs");
 }
 
 function newJobsTab(sessionId: string): JobsTab {
@@ -581,24 +573,21 @@ function webState(raw: unknown): void {
     canGoForward?: unknown;
   };
   if (typeof stateEvent.name !== "string") return;
-  for (const set of sets.values()) {
-    const tab = set.tabs.find((t): t is WebTab => t.kind === "web" && t.viewName === stateEvent.name);
-    if (!tab) continue;
-    if (typeof stateEvent.url === "string" && /^https?:/i.test(stateEvent.url) && stateEvent.url !== tab.url) {
-      tab.url = stateEvent.url;
-      const input = tab.body.querySelector<HTMLInputElement>(".web-url");
-      if (input && document.activeElement !== input) input.value = stateEvent.url;
-      setWebStatus(tab, stateEvent.url);
-    }
-    if (typeof stateEvent.title === "string" && stateEvent.title.trim()) tab.title = stateEvent.title.trim();
-    const back = tab.body.querySelector<HTMLButtonElement>(".web-back");
-    const forward = tab.body.querySelector<HTMLButtonElement>(".web-forward");
-    if (back) back.disabled = stateEvent.canGoBack !== true;
-    if (forward) forward.disabled = stateEvent.canGoForward !== true;
-    paintTabs();
-    if (ideTerminalMode) renderIDEPages(currentSet());
-    return;
+  const tab = tabSet.tabs.find((t): t is WebTab => t.kind === "web" && t.viewName === stateEvent.name);
+  if (!tab) return;
+  if (typeof stateEvent.url === "string" && /^https?:/i.test(stateEvent.url) && stateEvent.url !== tab.url) {
+    tab.url = stateEvent.url;
+    const input = tab.body.querySelector<HTMLInputElement>(".web-url");
+    if (input && document.activeElement !== input) input.value = stateEvent.url;
+    setWebStatus(tab, stateEvent.url);
   }
+  if (typeof stateEvent.title === "string" && stateEvent.title.trim()) tab.title = stateEvent.title.trim();
+  const back = tab.body.querySelector<HTMLButtonElement>(".web-back");
+  const forward = tab.body.querySelector<HTMLButtonElement>(".web-forward");
+  if (back) back.disabled = stateEvent.canGoBack !== true;
+  if (forward) forward.disabled = stateEvent.canGoForward !== true;
+  paintTabs();
+  if (ideTerminalMode) renderIDEPages(currentSet());
 }
 
 function navigateWeb(tab: WebTab, raw: string): void {
@@ -653,10 +642,8 @@ export function openWebTab(sessionId: string, url: string, title = ""): WebTab |
 // deletes that saved site.
 export function closeWebTabsForUrl(url: string): void {
   if (!url) return;
-  for (const [sessionId, set] of [...sets]) {
-    for (const tab of [...set.tabs]) {
-      if (tab.kind === "web" && tab.url === url) closeTab(tab.key, true, sessionId);
-    }
+  for (const tab of [...tabSet.tabs]) {
+    if (tab.kind === "web" && tab.url === url) closeTab(tab.key, true, tab.sessionId);
   }
 }
 
@@ -725,9 +712,9 @@ function overlayOver(surface: HTMLElement): boolean {
 // nativeTarget is the native page the pane wants on screen right now,
 // before any overlay is taken into account.
 function nativeTarget(): { web: WebTab | null; browser: BrowserTab | null; surface: HTMLElement | null } {
-  const set = sets.get(visibleSessionId());
-  const idePage = ideTerminalMode && set?.tabs.find((item) => item.key === ideBrowserKey && isBrowserPage(item));
-  const tab = idePage || (set && activeTab(set));
+  const set = currentSet();
+  const idePage = ideTerminalMode && set.tabs.find((item) => item.key === ideBrowserKey && isBrowserPage(item));
+  const tab = idePage || activeTab(set);
   const pageVisible = !!idePage || (paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
   const web = pageVisible && tab?.kind === "web" && tab.url !== "" ? tab : null;
   const browser = pageVisible && tab?.kind === "browser" ? tab : null;
@@ -893,7 +880,7 @@ function activeTab(set: TabSet): Tab | undefined {
 // ---- side chats ----
 
 function newChatTab(chatId: string | null = null, title = "Side chat", messages: SideChatMessage[] = []): ChatTab {
-  return createChatTab(`t${++nextKey}`, paintTabs, chatId, title, messages);
+  return createChatTab(`t${++nextKey}`, paintTabs, visibleSessionId(), chatId, title, messages);
 }
 
 // blankChatTab shows the pane on an empty side chat: the one on
@@ -1000,9 +987,8 @@ export function autoOpenChildTabs(): void {
 
 // paintAgentTabs refreshes the heads of the agent tabs on screen.
 export function paintAgentTabs(): void {
-  const set = state.sessionId ? sets.get(state.sessionId) : undefined;
-  if (!set) return;
-  for (const tab of set.tabs) {
+  if (!state.sessionId) return;
+  for (const tab of tabsFor(state.sessionId)) {
     if (tab.kind === "agent") paintHead(tab);
   }
   if (paneOpen) paintTabs();
@@ -1131,7 +1117,7 @@ function render(): void {
 // After a resync the shown agent tab re-attaches to fetch the events
 // the host dropped.
 onResync(() => {
-  const set = paneOpen && state.sessionId ? sets.get(state.sessionId) : undefined;
+  const set = paneOpen && state.sessionId ? currentSet() : undefined;
   const tab = set && activeTab(set);
   if (tab?.kind !== "agent") return;
   liveRoot(tab.agentId).remove();
@@ -1199,8 +1185,8 @@ export function toggleLayoutFromKey(): void {
   toggleLayout();
 }
 
-function closeTab(key: string, dropBrowser = true, sessionId = visibleSessionId()): void {
-  const set = sessionId ? sets.get(sessionId) : undefined;
+function closeTab(key: string, dropBrowser = true, _sessionId = visibleSessionId()): void {
+  const set = currentSet();
   if (!set) return;
   const at = set.tabs.findIndex((t) => t.key === key);
   if (at < 0) return;
@@ -1227,16 +1213,12 @@ function closeTab(key: string, dropBrowser = true, sessionId = visibleSessionId(
     removed.term?.dispose();
   }
   if (set.tabs.length === 0) {
-    if (sessionId === STANDALONE_PANE_SESSION) sets.delete(sessionId);
-    if (sessionId === visibleSessionId()) {
-      closePane();
-    } else {
-      sets.delete(sessionId);
-    }
+    // With one strip per window, an empty strip is just a closed pane.
+    if (_sessionId === visibleSessionId()) closePane();
     return;
   }
   if (set.active === key) set.active = set.tabs[Math.min(at, set.tabs.length - 1)].key;
-  if (sessionId === visibleSessionId()) render();
+  if (_sessionId === visibleSessionId()) render();
 }
 
 // disposeSidePanes drops the tab sets of deleted sessions, and any
@@ -1266,22 +1248,17 @@ export function disposeSidePanes(ids: string[]): void {
     }
     tab.body.remove();
   };
-  for (const [id, set] of sets) {
-    if (gone.has(id)) {
-      for (const tab of set.tabs) {
-        if (tab.kind === "terminal" && tab.sessionId === STANDALONE_PANE_SESSION) {
-          const standalone = browserSet(STANDALONE_PANE_SESSION);
-          standalone.tabs.push(tab);
-          if (!standalone.active) standalone.active = tab.key;
-        } else drop(tab);
-      }
-      sets.delete(id);
-      continue;
-    }
-    const keep = set.tabs.filter((t) => t.kind !== "agent" || !gone.has(t.agentId));
-    set.tabs.filter((t) => !keep.includes(t)).forEach(drop);
-    set.tabs = keep;
-  }
+  // One strip: drop the tabs of deleted sessions and any subagent tab in
+  // any session whose child is gone. Standalone terminals survive, the
+  // same way they did when each session owned its own set.
+  const keep = tabSet.tabs.filter((tab) => {
+    if (tab.kind === "agent") return !gone.has(tab.agentId);
+    if (tab.kind === "terminal" && tab.sessionId === STANDALONE_PANE_SESSION) return true;
+    return !gone.has(tab.sessionId);
+  });
+  tabSet.tabs.filter((tab) => !keep.includes(tab)).forEach(drop);
+  tabSet.tabs = keep;
+  if (!tabSet.tabs.some((tab) => tab.key === tabSet.active)) tabSet.active = tabSet.tabs[0]?.key ?? "";
   tabsHtml = "";
   render();
 }
@@ -1292,7 +1269,7 @@ export function disposeSidePanes(ids: string[]): void {
  * @public
  */
 export function paneSessionIds(): string[] {
-  return [...sets.keys()];
+  return [...new Set(tabSet.tabs.map((tab) => tab.sessionId))];
 }
 
 // syncSidePane follows the main view to another session.
@@ -1302,7 +1279,7 @@ export function syncSidePane(): void {
   closeMenu();
   attachStandaloneTerminals(state.sessionId);
   if (pendingBrowserSessions.delete(state.sessionId)) {
-    const tab = sets.get(state.sessionId)?.tabs.find((item) => item.kind === "browser");
+    const tab = tabsFor(state.sessionId).find((item) => item.kind === "browser");
     if (ideTerminalMode && tab) {
       ideBrowserKey = tab.key;
       window.dispatchEvent(new CustomEvent("paladin:ide-browser-active", { detail: true }));
@@ -1418,12 +1395,12 @@ export function initSidePane(): void {
   wireSplitResize(splitHandle, $<HTMLElement>("#agentSplit"), sidePaneEl);
   if (hasBridge()) {
     bridge().onEvent?.(browserEvent);
-    bridge().onEvent?.((event) => terminalEvent(event, sets));
+    bridge().onEvent?.((event) => terminalEvent(event, tabSet));
     bridge().views?.onState?.(webState);
   }
   const observer = new ResizeObserver(() => {
     syncNativeSurfaces();
-    const set = state.sessionId ? sets.get(state.sessionId) : null;
+    const set = state.sessionId ? currentSet() : null;
     const tab = set && activeTab(set);
     if (paneOpen && tab?.kind === "terminal") tab.fit?.fit();
   });

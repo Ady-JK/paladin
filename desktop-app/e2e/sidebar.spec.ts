@@ -144,23 +144,34 @@ test("the sidebar pushes the main view instead of covering it", async ({ page })
   // The column animates its width, so measure the settled state: a box
   // read mid-transition reports a partial width and a shifted card.
   await expect.poll(async () => (await sidebar.boundingBox())!.width, { timeout: 4000 }).toBeGreaterThan(300);
-  const open = await page.locator("#mainCard").boundingBox();
-  const side = await sidebar.boundingBox();
-  const rail = await page.locator("#rail").boundingBox();
   // A real column: it ends where the card begins, and the card starts
-  // after the rail rather than underneath the panel. A sub-pixel
-  // tolerance, because the columns animate into place.
-  expect(side!.x).toBeGreaterThanOrEqual(rail!.x + rail!.width);
-  expect(side!.x + side!.width).toBeLessThanOrEqual(open!.x + 1.5);
+  // after the rail rather than underneath the panel. Measured through a
+  // poll so a box read mid-animation cannot fail the test: the columns
+  // animate their width into place.
+  await expect
+    .poll(
+      async () => {
+        const [card, drawer, bar] = await Promise.all([
+          page.locator("#mainCard").boundingBox(),
+          sidebar.boundingBox(),
+          page.locator("#rail").boundingBox(),
+        ]);
+        if (!card || !drawer || !bar) return Number.NaN;
+        const startsAfterRail = drawer.x >= bar.x + bar.width - 1;
+        const endsBeforeCard = drawer.x + drawer.width <= card.x + 1.5;
+        return startsAfterRail && endsBeforeCard;
+      },
+      { timeout: 4000 },
+    )
+    .toBe(true);
 
+  const openWidth = (await page.locator("#mainCard").boundingBox())!.width;
   await page.click("#agentTab");
   await expect(sidebar).toBeHidden();
-  await expect
-    .poll(async () => (await page.locator("#mainCard").boundingBox())!.x, { timeout: 4000 })
-    .toBeLessThan(open!.x);
-  const closed = await page.locator("#mainCard").boundingBox();
   // Closing the column gives the space back to the card.
-  expect(closed!.width).toBeGreaterThan(open!.width);
+  await expect
+    .poll(async () => (await page.locator("#mainCard").boundingBox())!.width, { timeout: 4000 })
+    .toBeGreaterThan(openWidth);
 });
 
 test("clicking outside the sidebar leaves it open", async ({ page }) => {

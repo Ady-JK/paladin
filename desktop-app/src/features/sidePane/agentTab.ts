@@ -45,6 +45,7 @@ export function createAgentTab(agentId: string, key: string, closePane: () => vo
   const tab: AgentTab = {
     kind: "agent",
     key,
+    sessionId: state.sessionId || "",
     agentId,
     title: child?.subagent?.name || child?.title || agentId.slice(0, 8),
     body,

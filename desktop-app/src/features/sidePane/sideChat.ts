@@ -24,6 +24,7 @@ function chatMessage(msg: Pick<SideChatMessage, "role" | "content" | "model">): 
 export function createChatTab(
   key: string,
   paintTabs: () => void,
+  sessionId: string,
   chatId: string | null = null,
   title = "Side chat",
   messages: SideChatMessage[] = [],
@@ -43,7 +44,7 @@ export function createChatTab(
     `</form>`;
   const list = body.querySelector<HTMLElement>(".side-msgs")!;
   for (const msg of messages) list.append(chatMessage(msg));
-  const tab: ChatTab = { kind: "chat", key, chatId, title, body, busy: false };
+  const tab: ChatTab = { kind: "chat", key, sessionId, chatId, title, body, busy: false };
   if (chatId) body.dataset.chat = chatId;
 
   const input = body.querySelector<HTMLTextAreaElement>(".side-input")!;

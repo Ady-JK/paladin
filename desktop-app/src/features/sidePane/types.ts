@@ -5,6 +5,9 @@ export type ChatTab = {
   kind: "chat";
   key: string;
   chatId: string | null;
+  // sessionId is the conversation this tab was opened for. With one strip
+  // per window it is what tells a tab which session it belongs to.
+  sessionId: string;
   title: string;
   body: HTMLElement;
   busy: boolean;
@@ -13,6 +16,8 @@ export type ChatTab = {
 export type AgentTab = {
   kind: "agent";
   key: string;
+  // sessionId is the parent session this subagent tab was opened under.
+  sessionId: string;
   agentId: string;
   title: string;
   body: HTMLElement;
