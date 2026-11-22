@@ -31,6 +31,7 @@ import { initIDESessions, syncIDESessions } from "./ide/sessions";
 import { activateIDEFile, setIDETerminalMode } from "./sidePane";
 import { openNewSession } from "./sessionDialog";
 import { toast } from "../ui/toast";
+import { setAppMode } from "./appMode";
 
 const buffers = new Map<string, IDEBuffer>();
 const diskStatuses = new Map<string, string>();
@@ -486,6 +487,7 @@ function setEnabled(on: boolean): void {
   }
   window.dispatchEvent(new Event("resize"));
   window.dispatchEvent(new Event("paladin:ide-mode-changed"));
+  if (on) window.dispatchEvent(new Event("paladin:enter-ide-done"));
 }
 
 export function initIDE(): void {
@@ -569,7 +571,26 @@ export function initIDE(): void {
     },
   );
   $("#ideModeBtn").addEventListener("click", () => {
-    setEnabled(!enabled);
+    // Ask appMode for the mode; the listeners below are what actually toggle
+    // the workspace, so there is exactly one place that decides. Use
+    // setAppMode (not syncMode) so the mode change is announced and every
+    // listener runs, including this module's own.
+    setAppMode(enabled ? "agent" : "ide");
+  });
+  // The rail's mode buttons are the single source of "which mode am I in".
+  // Entering IDE through them enables this workspace; leaving IDE (any other
+  // mode) turns it off so the app view can take the window.
+  window.addEventListener("paladin:enter-ide", () => {
+    if (!enabled) setEnabled(true);
+  });
+  window.addEventListener("paladin:exit-ide", () => {
+    if (enabled) setEnabled(false);
+  });
+  // The rail's Agent/Browser buttons are a plain "leave IDE" too, and they do
+  // not dispatch exit-ide themselves (appMode only announces the new mode).
+  window.addEventListener("paladin:app-mode-changed", (event) => {
+    const mode = (event as CustomEvent<string>).detail;
+    if (mode !== "ide" && enabled) setEnabled(false);
   });
   window.addEventListener("paladin:ide-toggle-explorer", () => {
     explorerVisible = !explorerVisible;

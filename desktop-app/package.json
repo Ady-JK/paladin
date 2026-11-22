@@ -1,6 +1,6 @@
 {
   "name": "paladin-desktop",
-  "version": "0.10.80",
+  "version": "0.10.81",
   "private": true,
   "description": "Paladin desktop (Electron + agent-host sidecar)",
   "author": "paladin",

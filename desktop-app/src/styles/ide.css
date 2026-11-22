@@ -454,14 +454,10 @@
   }
 }
 
-/* Keep the editor and chat visible when the regular pane uses tab layout. */
-#agentView.is-tab-layout #agentSplit.ide-mode {
+/* The IDE keeps its editor and chat side by side in a row. */
+#agentView #agentSplit.ide-mode {
   flex-direction: row;
 }
-#agentView.is-tab-layout.is-side-tab #agentSplit.ide-mode #agentMain {
-  display: flex;
-}
-#agentView.is-tab-layout #agentSplit.ide-mode #sidePane,
 #agentSplit.ide-mode > #sidePane {
   order: 0;
   width: auto;

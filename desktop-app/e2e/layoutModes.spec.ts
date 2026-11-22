@@ -1,8 +1,9 @@
-// layoutModes.spec.ts pins the two layouts and what survives a switch.
-// The app opens in tabs layout, so a test that describes split asks for it.
+// layoutModes.spec.ts pins the app's two views. Agent mode is the conversation
+// (with or without the side pane); Browser mode gives the pages the whole
+// window and its own bar. The old split/tabs layout toggle is gone.
 import { expect, test } from "@playwright/test";
 
-import { useLayout } from "./layout";
+import { hidePane, showPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -12,111 +13,67 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#messages")).toContainText("start");
 });
 
-test("a fresh start opens in the tabs layout", async ({ page }) => {
-  const layout = page.locator("#paneLayoutBtn");
-  await expect(layout).toHaveAttribute("data-layout", "tabs");
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  // The conversation is the whole window; the pane waits behind the drawer.
+test("a fresh start opens in Agent mode with the pane closed", async ({ page }) => {
+  await expect(page.locator("#modeAgentBtn")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#agentView")).toBeVisible();
+  await expect(page.locator("#browserView")).toBeHidden();
+  // The conversation is the whole card until something opens the pane.
   await expect(page.locator("#agentMain")).toBeVisible();
   await expect(page.locator("#sidePane")).toBeHidden();
-  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
 });
 
-test("split and tabs preserve the active side chat and make each view full width", async ({ page }) => {
-  const layout = page.locator("#paneLayoutBtn");
-  await useLayout(page, "split");
-  await expect(page.locator("#paneNewChatBtn")).toBeVisible();
+test("the pane narrows the conversation and gives it back when closed", async ({ page }) => {
+  const chat = page.locator("#agentMain");
+  const wide = (await chat.boundingBox())!.width;
+  await showPane(page);
+  const narrow = (await chat.boundingBox())!.width;
+  expect(narrow).toBeLessThan(wide - 100);
+  await hidePane(page);
+  await expect.poll(async () => Math.round((await chat.boundingBox())!.width)).toBeGreaterThan(narrow + 100);
+});
+
+test("a side chat keeps working across open and close", async ({ page }) => {
+  await showPane(page);
   await page.locator("#paneNewChatBtn").click();
   await page.locator("[data-pane-new-chat]").click();
+  await expect(page.locator("#sidePane .side-chat")).toBeVisible();
   const splitWidth = (await page.locator("#sidePane").boundingBox())!.width;
   const fullWidth = (await page.locator("#agentSplit").boundingBox())!.width;
   expect(splitWidth).toBeLessThan(fullWidth * 0.7);
 
-  await useLayout(page, "tabs");
-  // Tab view: the tab list is the "Open tabs" drawer beside the card, not
-  // part of the header and no longer a column inside the split, so the body
-  // gets the whole split.
-  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
-  await expect(page.locator("#titleBar .pane-strip")).toHaveCount(0);
-  // The pane carries no strip in tabs layout: the drawer is the navigation.
-  await expect(page.locator("#sidePane .pane-strip")).toBeHidden();
-  await expect(page.locator("#agentSplit > .pane-strip")).toHaveCount(0);
-  await expect(layout).toHaveAttribute("aria-label", "Switch to split layout");
-  await expect(page.locator("#agentMain")).toBeHidden();
-  // The body fills the whole split: the tab list moved out to the drawer,
-  // which is a shell column and narrows the card instead of the split.
-  const body = (await page.locator("#sidePane").boundingBox())!.width;
-  const split = (await page.locator("#agentSplit").boundingBox())!.width;
-  expect(body).toBeGreaterThanOrEqual(split - 2);
-
-  await page.locator('[data-key="main"] .pane-tab-pick').click();
-  await expect(page.locator("#agentMain")).toBeVisible();
-  await expect(page.locator("#sidePane .pane-body")).toBeHidden();
-  await page.locator('#paneDrawerTabs .pane-tab[data-key^="t"] .pane-tab-pick').first().click();
-  await expect(page.locator("#sidePane .side-chat")).toBeVisible();
-
-  await useLayout(page, "split");
-  await expect(page.locator("#sidePane .pane-strip")).toBeVisible();
-  await expect(page.locator("#agentMain")).toBeVisible();
+  await hidePane(page);
+  await showPane(page);
+  // The tab outlived the pane being closed: it is a tab, not the pane's state.
   await expect(page.locator("#sidePane .side-chat")).toBeVisible();
 });
 
-test("clicking a localhost chat link opens the session browser in either layout", async ({ page }) => {
-  await useLayout(page, "split");
-  await page.locator("#messages").evaluate((el) => {
-    el.insertAdjacentHTML(
-      "beforeend",
-      '<a class="md-link" href="#" data-ext="http://localhost:3000">http://localhost:3000</a>',
-    );
-  });
-  await page.locator('#messages a[data-ext="http://localhost:3000"]').click();
-  await expect(page.locator("#sidePane .pane-browser")).toBeVisible();
-  await expect(page.locator("#sidePane .browser-url")).toHaveValue("http://localhost:3000");
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserOpens?.length ?? 0)).toBe(1);
-
-  await useLayout(page, "tabs");
-  await page.locator('[data-key="main"] .pane-tab-pick').click();
-  await page.locator('#messages a[data-ext="http://localhost:3000"]').click();
+test("Browser mode owns the window: no readings, no pane, its own strip", async ({ page }) => {
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#browserView")).toBeVisible();
+  await expect(page.locator("#agentView")).toBeHidden();
   await expect(page.locator("#agentMain")).toBeHidden();
-  await expect(page.locator("#sidePane .pane-browser")).toBeVisible();
-  await expect(page.locator("#paneDrawerTabs [data-browser]")).toHaveCount(1);
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserOpens?.length ?? 0)).toBe(2);
+  await expect(page.locator("#sidePane")).toBeHidden();
+  // The agent header gives way to the browser's own bar.
+  await expect(page.locator("#titleBar")).toBeHidden();
+  await expect(page.locator("#browserBar")).toBeVisible();
+
+  await page.locator("#modeAgentBtn").click();
+  await expect(page.locator("#agentView")).toBeVisible();
+  await expect(page.locator("#titleBar")).toBeVisible();
+  await expect(page.locator("#browserView")).toBeHidden();
 });
 
-test("browser tab expands to full width and the layout survives a reload", async ({ page }) => {
-  await useLayout(page, "split");
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
-  await page.evaluate(() =>
-    (window as any).__e2eHub.emit({
-      event: "browser/opened",
-      sessionId: (window as any).__e2eSubmits[0].sessionId,
-      url: "http://localhost:8080",
-    }),
-  );
-  await page.locator("#sidePane .browser-url").fill("http://127.0.0.1:3000");
-  await page.locator("#sidePane .browser-open").click();
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserBounds?.width ?? 0)).toBeGreaterThan(100);
-  const splitWidth = await page.evaluate(() => (window as any).__e2eBrowserBounds.width);
-  await useLayout(page, "tabs");
-  // Tab view fills the split, minus the tabs drawer when it is open — not
-  // "1.5x the split", which stops being true once the drawer has width.
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__e2eBrowserBounds?.width ?? 0))
-    .toBeGreaterThan(splitWidth + 100);
-  await page.locator('[data-key="main"] .pane-tab-pick').click();
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBe(null);
-  await page.locator("#paneDrawerTabs [data-browser] .pane-tab-pick").click();
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eBrowserVisible)).toBeTruthy();
-
+test("the mode survives a reload", async ({ page }) => {
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#browserView")).toBeVisible();
   await page.reload();
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  await expect(page.locator("#paneLayoutBtn")).toHaveAttribute("data-layout", "tabs");
+  await expect(page.locator("#modeBrowserBtn")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#browserView")).toBeVisible();
 });
 
-test("saved side chat menu stays usable in the unified header", async ({ page }) => {
-  await useLayout(page, "tabs");
+test("the saved-side-chat menu still works from the header +", async ({ page }) => {
   await page.locator("#paneNewChatBtn").click();
   await expect(page.locator("#paneHistoryMenu")).toBeVisible();
+  await expect(page.locator("#paneHistoryMenu")).toContainText("New side chat");
   await expect(page.locator("#paneHistoryMenu")).toContainText("No saved side chats");
 });

@@ -139,14 +139,45 @@
           <button id="ideExplorerToggle" type="button" class="rail-btn" title="Files" aria-label="Files">
             <span data-icon="folder" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
           </button>
+          <!-- App mode. Agent is the default; Browser gives the pages the whole
+               window; IDE is its own workspace. Selecting a mode replaces the
+               old split/tabs layout toggle: there is one mode at a time. -->
+          <div role="tablist" aria-label="App mode" class="flex flex-col items-center gap-1">
+            <button
+              id="modeAgentBtn"
+              type="button"
+              role="tab"
+              class="rail-btn"
+              title="Agent"
+              aria-label="Agent"
+              aria-selected="true"
+              data-mode="agent"
+            >
+              <span data-icon="rl-agent" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+            </button>
+            <button
+              id="modeBrowserBtn"
+              type="button"
+              role="tab"
+              class="rail-btn"
+              title="Browser"
+              aria-label="Browser"
+              aria-selected="false"
+              data-mode="browser"
+            >
+              <span data-icon="globe" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+              <span id="modeBrowserCount" class="rail-count"></span>
+            </button>
+          </div>
           <button
             id="paneRailToggle"
             type="button"
             class="rail-btn"
-            title="Browser and open tabs"
-            aria-label="Browser and open tabs"
+            title="Open tabs"
+            aria-label="Open tabs"
             aria-expanded="false"
             aria-pressed="false"
+            hidden
           >
             <span data-icon="layout-tabs" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
           </button>
@@ -272,27 +303,6 @@
            like Sessions and Files, so the rail button that opens it is the
            same kind of control: the panel pushes the card instead of
            floating over a native page. -->
-      <aside id="paneTabsDrawer" class="side-drawer is-closed" aria-label="Open tabs" inert>
-        <header class="tabs-drawer-head">
-          <strong>Open tabs</strong>
-          <button
-            id="paneTabsDrawerClose"
-            type="button"
-            class="tabs-drawer-close"
-            title="Hide tabs"
-            aria-label="Hide tabs"
-          >
-            <span data-icon="xmark"></span>
-          </button>
-        </header>
-        <div id="paneTabsDrawerBody" class="tabs-drawer-body">
-          <div class="pane-strip is-vertical">
-            <div id="paneDrawerTabs" class="pane-tabs" role="tablist" aria-label="Open tabs"></div>
-          </div>
-        </div>
-      </aside>
-
-      <!-- ==================== MAIN ==================== -->
       <main id="mainCard" class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
         <!-- Header -->
         <header
@@ -328,8 +338,8 @@
               id="paneNewChatBtn"
               type="button"
               class="pane-btn"
-              title="New tab and saved side chats"
-              aria-label="New tab and saved side chats"
+              title="Open the side pane"
+              aria-label="Open the side pane"
               aria-haspopup="menu"
               aria-expanded="false"
             >
@@ -342,15 +352,6 @@
               </button>
               <div id="paneHistoryItems"></div>
             </div>
-            <button
-              id="paneLayoutBtn"
-              type="button"
-              class="pane-btn"
-              title="Switch to tabs layout"
-              aria-label="Switch to tabs layout"
-            >
-              <span data-icon="layout-split"></span>
-            </button>
           </div>
           <div id="headerIdentity" class="flex items-center gap-3">
             <span class="relative flex h-2 w-2">
@@ -627,10 +628,69 @@
               </button>
               <div class="pane-strip">
                 <div id="paneTabs" class="pane-tabs" role="tablist" aria-label="Side tabs"></div>
+                <button
+                  id="paneTabsAdd"
+                  type="button"
+                  class="pane-tab-add"
+                  title="Open something else here"
+                  aria-label="Open something else here"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                >
+                  <span data-icon="plus"></span>
+                </button>
               </div>
               <div id="paneBody" class="pane-body"></div>
+              <!-- The empty state is a picker: when the pane holds nothing, it
+                     offers the three things it can hold instead of a blank
+                     column. Renderer shows and hides this. -->
+              <div id="panePicker" class="pane-picker" hidden>
+                <p class="pane-picker-title">Open something</p>
+                <button type="button" class="pane-picker-row" data-pane-pick="chat">
+                  <span class="pane-picker-ico" data-icon="comments"></span>
+                  <span class="pane-picker-text"
+                    ><strong>Side chat</strong><small>ask without adding to the conversation</small></span
+                  >
+                </button>
+                <button type="button" class="pane-picker-row" data-pane-pick="terminal">
+                  <span class="pane-picker-ico" data-icon="terminal"></span>
+                  <span class="pane-picker-text"
+                    ><strong>Terminal</strong><small>run commands beside the chat</small></span
+                  >
+                </button>
+                <button type="button" class="pane-picker-row" data-pane-pick="browser">
+                  <span class="pane-picker-ico" data-icon="globe"></span>
+                  <span class="pane-picker-text"
+                    ><strong>Browser</strong><small>a page, with its own tab strip</small></span
+                  >
+                </button>
+              </div>
             </aside>
           </div>
+        </div>
+
+        <!-- Browser mode: the pages own the window. Same TabSet as the pane's
+             browser tab, shown by the shell instead of inside the pane.
+             Its bar is the page strip — no readings, no + pane, no moon. -->
+        <div id="browserView" class="browser-view" hidden aria-label="Browser">
+          <div id="browserBar" class="browser-bar">
+            <button
+              id="browserDockBtn"
+              type="button"
+              class="browser-dock"
+              title="Show all tabs"
+              aria-label="Show all tabs"
+              aria-expanded="false"
+            >
+              <span data-icon="layout-tabs"></span>
+            </button>
+            <div id="browserTabs" class="browser-tabs" role="tablist" aria-label="Pages"></div>
+            <button id="browserNewTab" type="button" class="browser-new" title="New tab" aria-label="New tab">
+              <span data-icon="plus"></span>
+            </button>
+            <div class="browser-drag" aria-hidden="true"></div>
+          </div>
+          <div id="browserBody" class="browser-body"></div>
         </div>
       </main>
     </div>

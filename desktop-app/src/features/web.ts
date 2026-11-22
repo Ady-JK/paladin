@@ -32,12 +32,18 @@ let button: HTMLButtonElement | null = null;
 let menu: HTMLElement | null = null;
 let listEl: HTMLElement | null = null;
 
-function positionMenu(): void {
-  if (!menu || !button) return;
+// menuAnchor is whatever last opened the menu. Browser mode's + is the visible
+// one; the header anchor stays as a fallback for the keyboard shortcut, which
+// can fire in a mode whose bar is hidden.
+let menuAnchor: HTMLElement | null = null;
+
+function positionMenu(anchor: HTMLElement | null = menuAnchor ?? button): void {
+  if (!menu || !anchor) return;
   const parent = menu.offsetParent;
   if (!(parent instanceof HTMLElement)) return;
   const parentLeft = parent.getBoundingClientRect().left;
-  const desired = button.getBoundingClientRect().left - parentLeft;
+  const rect = anchor.getBoundingClientRect();
+  const desired = (rect.width > 0 ? rect.left : parentLeft + 12) - parentLeft;
   const max = document.documentElement.clientWidth - parentLeft - menu.offsetWidth - 8;
   menu.style.left = `${Math.max(-parentLeft + 8, Math.min(desired, max))}px`;
 }
@@ -122,9 +128,10 @@ function browserSession(): string {
 // openWebMenuFromKey pops the personal-browser menu open, the same menu
 // the toolbar's Browser button shows, so a shortcut can reach saved sites
 // and the address field.
-export function openWebMenuFromKey(): void {
+export function openWebMenuFromKey(anchor?: HTMLElement | null): void {
   if (!button) buildMenu();
   if (!button || !menu) return;
+  menuAnchor = anchor ?? document.querySelector<HTMLElement>("#browserNewTab") ?? button;
   if (!isMenuOpen(menu)) toggleMenu(menu);
   button.setAttribute("aria-expanded", "true");
   positionMenu();
@@ -157,10 +164,14 @@ function removeSite(url: string): void {
 function buildMenu(): void {
   const actions = document.querySelector<HTMLElement>("#paneActions");
   if (!actions || button) return;
+  // The trigger is the + in Browser mode's own bar, not a header button:
+  // an entry is created here only so the menu has an anchor to position
+  // against and a place to report its expanded state.
   button = document.createElement("button");
   button.id = "paneWebBtn";
   button.type = "button";
   button.className = "pane-btn";
+  button.hidden = true;
   button.title = "Browser: bookmarks and any address";
   button.setAttribute("aria-label", "Browser");
   button.setAttribute("aria-haspopup", "menu");
@@ -178,8 +189,13 @@ function buildMenu(): void {
     `<button type="button" role="menuitem" class="web-menu-action" data-web-address>${icon("plus", "h-3.5 w-3.5")}<span>Open an address…</span></button>` +
     `<button type="button" role="menuitem" class="web-menu-action" data-web-new>${icon("plus", "h-3.5 w-3.5")}<span>New saved site…</span></button>`;
   listEl = menu.querySelector<HTMLElement>(".web-menu-list");
-  actions.insertBefore(button, actions.querySelector("#paneLayoutBtn") ?? null);
-  actions.append(menu);
+  actions.append(button);
+  // Hidden rather than removed: positionMenu needs an anchor rectangle, and
+  // the browser bar reports its own expanded state through this element.
+  button.style.display = "none";
+  // The menu itself hangs off the card, not the header: Browser mode hides the
+  // header, and a menu inside it would be hidden with it.
+  (document.querySelector("#mainCard") ?? actions).append(menu);
 
   window.addEventListener("resize", () => {
     if (menu && isMenuOpen(menu)) positionMenu();
@@ -289,6 +305,8 @@ function addSite(): void {
 export function initWeb(): void {
   restoreSites();
   buildMenu();
+  // Browser mode's + asks for the same menu the header used to own.
+  window.addEventListener("paladin:browser-menu", () => openWebMenuFromKey());
 
   $("#siteCloseBtn").addEventListener("click", closeNewSite);
   $("#siteCancelBtn").addEventListener("click", closeNewSite);

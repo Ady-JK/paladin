@@ -38,6 +38,7 @@
 @import "./styles/thinking.css";
 @import "./styles/sidepane.css";
 @import "./styles/browser.css";
+@import "./styles/browsermode.css";
 @import "./styles/terminal.css";
 @import "./styles/settings.css";
 @import "./styles/customize.css";

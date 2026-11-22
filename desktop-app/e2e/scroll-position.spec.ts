@@ -46,16 +46,14 @@ test("a request to show the newest row survives having no layout", async ({ page
   await page.click('[data-session="sess-long"]');
   await page.waitForTimeout(600);
 
-  // Tabs layout with a side tab showing: #agentMain is display:none, so
-  // #chatView has no layout and scrollHeight reads 0.
+  // Browser mode takes the window: #agentMain is display:none, so #chatView
+  // has no layout and scrollHeight reads 0. That is the real sequence the
+  // held scroll request has to survive.
   const during = await page.evaluate(() => {
-    const view = document.querySelector("#agentView") as HTMLElement;
     const el = document.querySelector("#chatView") as HTMLElement;
-    // Scroll to the top WHILE the view still has layout, then hide it —
-    // this is the real sequence when a side tab is open.
     el.scrollTop = 0;
     const atTop = Math.round(el.scrollTop);
-    view.classList.add("is-tab-layout", "is-side-tab");
+    (document.querySelector("#modeBrowserBtn") as HTMLElement).click();
     return { clientHeight: el.clientHeight, scrollHeight: el.scrollHeight, atTop, afterTop: Math.round(el.scrollTop) };
   });
   expect(during.clientHeight, "a display:none view has no layout").toBe(0);
@@ -69,7 +67,7 @@ test("a request to show the newest row survives having no layout", async ({ page
     mod.scrollToBottom();
   });
   await page.evaluate(() => {
-    (document.querySelector("#agentView") as HTMLElement).classList.remove("is-side-tab");
+    (document.querySelector("#modeAgentBtn") as HTMLElement).click();
   });
   // Do not scroll again: only the held request may put us at the bottom.
   await page.waitForTimeout(700);
@@ -100,11 +98,11 @@ test("rewinding the conversation still lands on the newest row", async ({ page }
     (window as any).__e2eRevertResult = { restored: [], deleted: [], skipped: [] };
   });
 
-  // Hide the conversation behind a side tab, as the tabs layout does.
+  // Give the window to the browser, as switching modes does.
   await page.evaluate(() => {
     const el = document.querySelector("#chatView") as HTMLElement;
     el.scrollTop = 0;
-    document.querySelector("#agentView")!.classList.add("is-tab-layout", "is-side-tab");
+    (document.querySelector("#modeBrowserBtn") as HTMLElement).click();
   });
 
   // Rewind from the newest user row.
@@ -112,17 +110,17 @@ test("rewinding the conversation still lands on the newest row", async ({ page }
   const last = rows.last();
   await page.evaluate(() => {
     // The popover lives on document.body, so it opens even while hidden.
-    document.querySelector("#agentView")!.classList.remove("is-side-tab");
+    (document.querySelector("#modeAgentBtn") as HTMLElement).click();
   });
   await last.hover();
   await last.locator("[data-revert]").click();
   await expect(page.locator("#revertPop")).toBeVisible();
   await page.evaluate(() => {
-    document.querySelector("#agentView")!.classList.add("is-tab-layout", "is-side-tab");
+    (document.querySelector("#modeBrowserBtn") as HTMLElement).click();
   });
   await page.locator("#revertConfirmBtn").click();
   await page.evaluate(() => {
-    document.querySelector("#agentView")!.classList.remove("is-side-tab");
+    (document.querySelector("#modeAgentBtn") as HTMLElement).click();
   });
   await page.waitForTimeout(800);
 

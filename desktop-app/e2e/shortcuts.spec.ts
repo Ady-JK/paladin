@@ -1,21 +1,32 @@
 import { expect, test, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
-import { useLayout } from "./layout";
+import { showPane } from "./modes";
 
 // Every app shortcut is Cmd on macOS and Ctrl elsewhere.
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  // The app mode is remembered across reloads, and Playwright shares one
+  // browser context per worker, so a mode left behind by an earlier test would
+  // leak in here. Every test in this file starts from Agent.
+  await page.addInitScript(() => localStorage.removeItem("paladin.appMode"));
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
+  await expect(page.locator("#modeAgentBtn")).toHaveAttribute("aria-selected", "true");
 });
 
 // press sends a chord from the prompt, the place a user is most likely to
 // be typing when they want one — the shortcuts must work from there. Pass
 // focus=false when the prompt is behind a modal.
 async function press(page: Page, key: string, focus = true): Promise<void> {
-  if (focus) await page.locator("#promptInput").click();
+  // Focus the prompt only when it is on screen. Browser mode gives the window
+  // to the pages and IDE mode gives it to the editor, so there is no composer
+  // to click in either — and waiting for one would hang the call.
+  if (focus) {
+    const prompt = page.locator("#promptInput");
+    if (await prompt.isVisible()) await prompt.click({ timeout: 2000 }).catch(() => undefined);
+  }
   await page.keyboard.press(`${MOD}+Shift+${key}`);
 }
 
@@ -113,20 +124,23 @@ test("the IDE shortcut turns IDE mode on and off", async ({ page }) => {
   await expect(button).toHaveAttribute("aria-pressed", "false");
   await press(page, "i");
   await expect(button).toHaveAttribute("aria-pressed", "true");
-  await expect(ide).toBeVisible();
+  // The IDE module is loaded on demand, so the workspace appears once its
+  // chunk has run rather than on the same frame as the button's state.
+  await expect(ide).toBeVisible({ timeout: 15_000 });
   await press(page, "i");
   await expect(button).toHaveAttribute("aria-pressed", "false");
   await expect(ide).toBeHidden();
 });
 
-test("the layout shortcut switches split and tabs", async ({ page }) => {
-  const view = page.locator("#agentView");
-  const before = await page.locator("#paneLayoutBtn").getAttribute("data-layout");
+test("the layout shortcut flips Agent and Browser mode", async ({ page }) => {
+  const mode = (name: string): ReturnType<typeof page.locator> => page.locator(name);
+  await expect(mode("#modeAgentBtn")).toHaveAttribute("aria-selected", "true");
   await press(page, "l");
-  await expect(page.locator("#paneLayoutBtn")).not.toHaveAttribute("data-layout", before ?? "split");
-  await expect(view).toHaveClass(before === "split" ? /is-tab-layout/ : /^(?!.*is-tab-layout).*$/);
+  await expect(mode("#modeBrowserBtn")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#browserView")).toBeVisible();
   await press(page, "l");
-  await expect(page.locator("#paneLayoutBtn")).toHaveAttribute("data-layout", before ?? "split");
+  await expect(mode("#modeAgentBtn")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#agentView")).toBeVisible();
 });
 
 test("the terminal shortcut opens a terminal in IDE mode", async ({ page }) => {
@@ -147,8 +161,8 @@ test("the browser shortcut opens the browser menu", async ({ page }) => {
   await expect(menu).toContainText("Open an address");
 });
 
-test("the agent shortcut focuses the prompt and the split keeps its right pane", async ({ page }) => {
-  await useLayout(page, "split");
+test("the agent shortcut focuses the prompt and hides the pane", async ({ page }) => {
+  await showPane(page);
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
   await page.locator("#paneNewChatBtn").click();
@@ -161,7 +175,11 @@ test("the agent shortcut focuses the prompt and the split keeps its right pane",
   await expect(page.locator("#sidePane .side-chat .side-input")).toBeFocused();
   await press(page, "h", false);
   await expect(page.locator("#promptInput")).toBeFocused();
-  await expect(page.locator("#sidePane")).toBeVisible();
+  // The shortcut means "give me the conversation": the pane closes, and the
+  // side chat it held survives as a tab for when it opens again.
+  await expect(page.locator("#sidePane")).toBeHidden();
+  await showPane(page);
+  await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
 });
 
 test("a shortcut typed into the prompt does not leak text or send a turn", async ({ page }) => {

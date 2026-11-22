@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { showPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -527,8 +528,7 @@ test("reopening the current workspace keeps the active conversation and draft", 
   await expect(page.locator("#promptInput")).toHaveValue("unfinished message");
 });
 
-test("IDE keeps the editor and chat visible in tab layout when a terminal opens", async ({ page }) => {
-  await page.locator("#paneLayoutBtn").click();
+test("IDE keeps the editor and chat visible when a terminal opens", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideWorkspace")).toBeVisible();
   await page.locator("#paneNewChatBtn").click();
@@ -845,7 +845,9 @@ test("IDE browser tabs share the editor area and preserve file drafts", async ({
 });
 
 test("personal browser moves into and out of the IDE editor with its native view", async ({ page }) => {
-  await page.locator("#paneWebBtn").click();
+  // The globe left the header; the page is opened from the pane's own menu.
+  await showPane(page);
+  await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+J`);
   await page.locator("[data-web-address]").click();
   await page.locator(".web-url").fill("https://example.com/");
   await page.locator(".web-url").press("Enter");

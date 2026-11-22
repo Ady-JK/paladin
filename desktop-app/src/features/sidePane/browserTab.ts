@@ -110,6 +110,9 @@ async function passBrowserComments(tab: BrowserTab, onPass: () => void): Promise
     inputEl.dispatchEvent(new Event("input", { bubbles: true }));
     await bridge().browser!.clearNotes(tab.sessionId);
     onPass();
+    // The comments went into the composer, so the composer has to be on
+    // screen: leaving Browser mode is part of "pass to agent".
+    window.dispatchEvent(new Event("paladin:pass-to-agent"));
     inputEl.focus();
   } catch (error) {
     tab.body.querySelector<HTMLElement>(".browser-status")!.textContent = errorText(error);

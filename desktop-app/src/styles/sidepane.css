@@ -69,7 +69,7 @@ body.is-splitting {
 /* The pane is a column of the card, not a floating card of its own: it
    shares the card's rounded outer edge and stays square where the two
    meet, so the header and the pane read as one surface. */
-#agentView:not(.is-tab-layout) #sidePane:not([hidden]) {
+#agentView #sidePane:not([hidden]) {
   border-top-right-radius: var(--panel-radius, 14px);
   border-bottom-right-radius: var(--panel-radius, 14px);
   overflow: hidden;
@@ -77,9 +77,8 @@ body.is-splitting {
 .side-pane[hidden] {
   display: none;
 }
-/* Nothing to drag when the pane is closed or the layout is stacked. */
-#agentSplit:has(#sidePane[hidden]) .pane-split-resize,
-#agentView.is-tab-layout .pane-split-resize {
+/* Nothing to drag when the pane is closed. */
+#agentSplit:has(#sidePane[hidden]) .pane-split-resize {
   display: none;
 }
 .dark .side-pane {
@@ -104,9 +103,6 @@ body.is-splitting {
 }
 .side-pane > .pane-strip {
   padding-right: 42px;
-}
-#agentView.is-tab-layout.is-side-tab .side-pane > .pane-body {
-  padding-top: 30px;
 }
 #headerStatusActions {
   order: 3;
@@ -399,62 +395,6 @@ body.is-splitting {
    the tabs are heterogeneous — a shell, a running subagent, a site — and
    each needs a line of text, not a truncated label in a row that runs out
    of room at five tabs. */
-.pane-strip.is-vertical {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  min-height: 0;
-  flex: 1;
-  padding: 0;
-  border-bottom: 0;
-}
-.pane-strip.is-vertical > .pane-tabs {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 0 6px 8px;
-}
-.pane-strip.is-vertical .pane-tab {
-  flex: 0 0 auto;
-  max-width: none;
-  width: 100%;
-}
-.pane-strip.is-vertical .pane-tab-pick {
-  flex: 1;
-  min-width: 0;
-  justify-content: flex-start;
-  padding: 7px 8px;
-  font-size: 0.8125rem;
-}
-.pane-strip.is-vertical .pane-tab.is-active {
-  border-radius: 7px;
-  background: var(--color-slate-200);
-  box-shadow: none;
-}
-.dark .pane-strip.is-vertical .pane-tab.is-active {
-  background: var(--color-slate-800);
-}
-#agentView.is-tab-layout #sidePane {
-  order: 0;
-  width: auto;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  border-left: 0;
-  border-bottom: 0;
-}
-/* One body at a time: the conversation, or the selected tab. */
-#agentView.is-tab-layout:not(.is-side-tab) #sidePane {
-  display: none;
-}
-#agentView.is-tab-layout.is-side-tab #agentMain {
-  display: none;
-}
-
 .pane-strip {
   position: relative;
   display: flex;
@@ -1554,22 +1494,118 @@ body.is-splitting {
   }
 }
 
-/* Tabs layout navigates through the drawer, so the pane carries no strip of
-   its own; split layout keeps the horizontal strip (without Agent) there. */
-#agentView.is-tab-layout .side-pane > .pane-strip {
-  display: none;
-}
-
-/* Split layout always has its right pane, so there is nothing to close. */
-#agentView:not(.is-tab-layout) .pane-inner-close {
-  display: none;
-}
-
-/* The pane is always there in split layout, so on a narrow window it gives
-   way before the conversation does: the composer toolbar needs about this
-   much room, or its buttons are cut off. */
+/* On a narrow window the conversation gives way before it loses its toolbar:
+   the composer needs about this much room, or its buttons are cut off. */
 @media (min-width: 1100px) {
-  #agentView:not(.is-tab-layout) #agentSplit:not(.ide-mode) > #agentMain {
+  #agentSplit:not(.ide-mode) > #agentMain {
     min-width: 680px;
   }
+}
+
+/* ---- the pane's empty state: a picker, not a blank column ---- */
+.pane-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 12px;
+}
+.pane-picker[hidden] {
+  display: none;
+}
+.pane-picker-title {
+  padding: 0 2px 2px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-slate-500);
+}
+.pane-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 10px;
+  background: var(--color-slate-50);
+  text-align: left;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+.pane-picker-row:hover {
+  border-color: var(--color-accent-500);
+  background: var(--color-slate-100);
+}
+.dark .pane-picker-row {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+}
+.dark .pane-picker-row:hover {
+  border-color: var(--color-accent-500);
+  background: var(--color-slate-800);
+}
+.pane-picker-ico {
+  display: flex;
+  height: 28px;
+  width: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-slate-200);
+  color: var(--color-slate-600);
+}
+.dark .pane-picker-ico {
+  background: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+.pane-picker-ico :is(svg, span) {
+  height: 15px;
+  width: 15px;
+}
+.pane-picker-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.pane-picker-text strong {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .pane-picker-text strong {
+  color: var(--color-slate-100);
+}
+.pane-picker-text small {
+  font-size: 0.6875rem;
+  color: var(--color-slate-500);
+}
+
+/* The + at the end of the pane's strip: same three choices, once something
+   is already open. */
+.pane-tab-add {
+  display: flex;
+  height: 22px;
+  width: 22px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--color-slate-400);
+}
+.pane-tab-add:hover {
+  background: rgb(0 0 0 / 0.06);
+  color: var(--color-slate-700);
+}
+.dark .pane-tab-add:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--color-slate-100);
+}
+.pane-tab-add[hidden] {
+  display: none;
+}
+.pane-tab-add :is(svg, span) {
+  height: 12px;
+  width: 12px;
 }

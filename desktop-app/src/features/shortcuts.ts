@@ -91,7 +91,7 @@ const SHORTCUTS: Shortcut[] = [
     id: "layout",
     keys: `${MOD}+Shift+L`,
     key: "l",
-    what: "Switch between split and tabs layout",
+    what: "Switch between Agent and Browser mode",
     group: "Panes",
     run: toggleLayoutFromKey,
   },
@@ -256,7 +256,7 @@ export function initShortcuts(): void {
   // Tooltips name the chord, so the pointer and the keyboard agree.
   for (const [selector, chord] of [
     ["#ideModeBtn", "I"],
-    ["#paneLayoutBtn", "L"],
+    ["#modeBrowserBtn", "L"],
     ["#themeToggleBtn", "M"],
     ["#agentTab", "B"],
   ] as const) {

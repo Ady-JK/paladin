@@ -3,7 +3,7 @@
 // or deleted from the pane's history menu.
 import { test, expect, type Page } from "@playwright/test";
 
-import { useLayout } from "./layout";
+import { showPane } from "./modes";
 
 const sideCalls = (page: Page) => page.evaluate(() => ((window as any).__e2eSideCalls || []) as any[]);
 
@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
   // A /btw chat is a tab in the pane beside the conversation, which is split.
-  await useLayout(page, "split");
+  await showPane(page);
 });
 
 test("a bare /btw opens a new side chat ready for a question", async ({ page }) => {
@@ -178,7 +178,9 @@ test("the history menu reopens and deletes saved side chats", async ({ page }) =
   expect(await page.evaluate(() => (window as any).__e2eSideDeletes.map((d: any) => d.chatId))).toEqual(["c-gone"]);
 
   await page.keyboard.press("Escape");
-  // Split keeps its pane: there is no close button to press.
-  await expect(page.locator("#paneCloseBtn")).toBeHidden();
+  // Escape closes the menu, not the pane; the pane's own close button is the
+  // way out and it is there whenever the pane is open.
+  await expect(page.locator("#paneHistoryMenu")).toBeHidden();
+  await expect(page.locator("#paneCloseBtn")).toBeVisible();
   await expect(pane).toBeVisible();
 });

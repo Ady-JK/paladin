@@ -308,148 +308,6 @@ body {
   }
 }
 
-/* The "Open tabs" drawer in tabs layout. It is the same kind of column as
-   the sessions drawer and the files explorer, so it shares their width,
-   radius and motion — one family of panels, not three lookalikes.
-
-   Width animates only because this panel is docked: it is a column that
-   opens and closes as a column. The closed state is a separate rule below,
-   which is why the base rule leaves width/max-width in the list. */
-#paneTabsDrawer.side-drawer {
-  z-index: 30;
-  flex: 0 0 auto;
-  width: min(var(--drawer-width), calc(100vw - 4rem));
-  max-width: min(var(--drawer-width), calc(100vw - 4rem));
-  margin: 8px 0;
-  border: 1px solid rgb(0 0 0 / 0.08);
-  border-radius: var(--panel-radius, 14px);
-  background: var(--color-slate-100);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition:
-    opacity var(--panel-anim) ease,
-    transform var(--panel-anim) var(--panel-ease),
-    width var(--panel-anim) var(--panel-ease),
-    max-width var(--panel-anim) var(--panel-ease),
-    margin var(--panel-anim) var(--panel-ease),
-    border-width var(--panel-anim) var(--panel-ease),
-    border-radius var(--panel-anim) var(--panel-ease);
-}
-
-#paneTabsDrawer.side-drawer[hidden] {
-  display: none;
-}
-
-/* Straight where it meets the card, round on the outside: the seam is one
-   edge shared by two panels, so both sides square off together. */
-#paneTabsDrawer.side-drawer:not(.is-closed) {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-/* Closing animates exactly like opening: max-width and border-width are in
-   the transition list, because snapping either of them to 0 on the first
-   frame clamps the width change and the panel disappears instead of sliding
-   shut. visibility waits for the animation to finish. */
-#paneTabsDrawer.side-drawer.is-closed {
-  width: 0;
-  max-width: 0;
-  margin-left: 0;
-  margin-right: 0;
-  border-width: 0;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity var(--panel-anim) ease,
-    transform var(--panel-anim) var(--panel-ease),
-    width var(--panel-anim) var(--panel-ease),
-    max-width var(--panel-anim) var(--panel-ease),
-    margin var(--panel-anim) var(--panel-ease),
-    border-width var(--panel-anim) var(--panel-ease),
-    border-radius var(--panel-anim) var(--panel-ease),
-    visibility 0s linear var(--panel-anim);
-}
-
-.dark #paneTabsDrawer.side-drawer {
-  border-color: rgb(255 255 255 / 0.08);
-  background: #18181b;
-}
-
-.tabs-drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 10px 8px 12px;
-  font-size: 0.8125rem;
-  color: var(--color-slate-700);
-}
-.dark .tabs-drawer-head {
-  color: var(--color-slate-200);
-}
-.tabs-drawer-close {
-  display: flex;
-  height: 24px;
-  width: 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 7px;
-  color: var(--color-slate-500);
-}
-.tabs-drawer-close:hover {
-  background: rgb(0 0 0 / 0.06);
-  color: var(--color-slate-800);
-}
-.dark .tabs-drawer-close:hover {
-  background: rgb(255 255 255 / 0.08);
-  color: var(--color-slate-100);
-}
-.tabs-drawer-body {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-@media (max-width: 1099px) {
-  /* Same fallback as the other drawers: float over the card instead of
-     squeezing it to nothing, and slide out with the same motion. */
-  #paneTabsDrawer.side-drawer {
-    position: absolute;
-    top: 8px;
-    bottom: 8px;
-    left: 3.5rem;
-    width: min(var(--drawer-width), calc(100vw - 4rem));
-    max-width: min(var(--drawer-width), calc(100vw - 4rem));
-    margin: 0;
-    /* Floating, so width is not the animated property: it must re-clamp on
-       the frame the window shrinks instead of easing out past the edge. */
-    transition:
-      opacity var(--panel-anim) ease,
-      transform var(--panel-anim) var(--panel-ease),
-      border-radius var(--panel-anim) var(--panel-ease);
-    box-shadow:
-      0 2px 6px rgb(0 0 0 / 0.08),
-      0 24px 48px -16px rgb(0 0 0 / 0.28);
-  }
-  .dark #paneTabsDrawer.side-drawer {
-    box-shadow:
-      0 2px 6px rgb(0 0 0 / 0.4),
-      0 24px 48px -16px rgb(0 0 0 / 0.7);
-  }
-  #paneTabsDrawer.side-drawer.is-closed {
-    width: min(var(--drawer-width), calc(100vw - 4rem));
-    max-width: min(var(--drawer-width), calc(100vw - 4rem));
-    transform: translateX(-12px);
-    transition:
-      opacity var(--panel-anim) ease,
-      transform var(--panel-anim) var(--panel-ease),
-      visibility 0s linear var(--panel-anim);
-  }
-}
-
 #mainCard {
   margin: 8px 8px 8px 0;
   border-radius: var(--panel-radius, 14px);
@@ -470,29 +328,16 @@ body {
    seam visibly pops open mid-slide. `:has()` keys off the real open state,
    so this follows the panels however they are toggled.
 
-   A drawer also squares its own right edge whenever *any* later panel is
-   open, not just the card: with Sessions and Open tabs both open, the
-   sessions drawer's right edge meets the tab drawer, so rounding it there
-   would double the seam the user is looking at. */
+   A drawer also squares its own edge whenever a later panel is open, not just
+   the card: with Sessions and Files both open, the sessions drawer's right
+   edge meets the explorer, so rounding it there would double the seam. */
 #appShell:has(> .ide-explorer:not(.is-closed)) #mainCard,
-#appShell:has(> #sidebar.side-drawer:not(.is-closed)) #mainCard,
-#appShell:has(> #paneTabsDrawer.side-drawer:not(.is-closed)) #mainCard {
+#appShell:has(> #sidebar.side-drawer:not(.is-closed)) #mainCard {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
 
-#appShell:has(> .ide-explorer:not(.is-closed)) #sidebar.side-drawer,
-#appShell:has(> #paneTabsDrawer.side-drawer:not(.is-closed)) #sidebar.side-drawer {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-/* The tabs drawer squares whichever edge a neighbour is on. */
-#appShell:has(> .ide-explorer:not(.is-closed)) #paneTabsDrawer.side-drawer,
-#appShell:has(> #sidebar.side-drawer:not(.is-closed)) #paneTabsDrawer.side-drawer {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-#appShell:has(> .ide-explorer:not(.is-closed)) #paneTabsDrawer.side-drawer {
+#appShell:has(> .ide-explorer:not(.is-closed)) #sidebar.side-drawer {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }

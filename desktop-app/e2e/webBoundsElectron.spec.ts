@@ -25,7 +25,9 @@ test("native website follows its surface in split and full layouts at different 
   });
   try {
     const page = await app.firstWindow();
-    await page.locator("#paneWebBtn").click();
+    await page.locator("#modeBrowserBtn").click();
+    await expect(page.locator("#browserView")).toBeVisible();
+    await page.locator("#browserNewTab").click();
     await expect(page.locator("#webMenu")).toBeVisible();
     if (process.env.PALADIN_WEB_PROOF_DIR) {
       fs.mkdirSync(process.env.PALADIN_WEB_PROOF_DIR, { recursive: true });
@@ -36,13 +38,18 @@ test("native website follows its surface in split and full layouts at different 
     }
     await page.locator('[data-web-open="https://chatgpt.com/"]').click();
     await expect(page.locator(".web-surface")).toBeVisible();
+    // The menu was opened from Browser mode; the zoom loop checks the pane
+    // layout first, so come back to Agent mode.
+    await page.locator("#modeAgentBtn").click();
+    await expect(page.locator("#agentView")).toBeVisible();
     for (const zoom of [1, 1.2]) {
       await app.evaluate(
         ({ BrowserWindow }, factor) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(factor),
         zoom,
       );
-      for (const layout of ["split", "tabs"]) {
-        if (layout === "tabs") await page.locator("#paneLayoutBtn").click();
+      for (const mode of ["agent", "browser"] as const) {
+        if (mode === "browser") await page.locator("#modeBrowserBtn").click();
+        await expect(page.locator(mode === "browser" ? "#browserView" : "#agentView")).toBeVisible();
         await expect
           .poll(async () => {
             const rect = await page.locator(".web-surface").evaluate((el) => {
@@ -59,7 +66,8 @@ test("native website follows its surface in split and full layouts at different 
           })
           .toBeLessThan(3);
       }
-      await page.locator("#paneLayoutBtn").click();
+      // Back to Agent for the next zoom step.
+      await page.locator("#modeAgentBtn").click();
     }
   } finally {
     await app.close();
@@ -104,16 +112,20 @@ test("the native page keeps up with its surface while a panel slides", async () 
   });
   try {
     const page = await app.firstWindow();
-    await page.locator("#paneWebBtn").click();
+    await page.locator("#modeBrowserBtn").click();
+    await expect(page.locator("#browserView")).toBeVisible();
+    await page.locator("#browserNewTab").click();
     await expect(page.locator("#webMenu")).toBeVisible();
     await page.locator('[data-web-open="https://chatgpt.com/"]').click();
     await expect(page.locator(".web-surface")).toBeVisible();
     // This spec describes the pane beside the conversation being pushed by a
     // drawer, which is the split layout; the app opens in tabs.
-    if ((await page.locator("#paneLayoutBtn").getAttribute("data-layout")) !== "split") {
-      await page.locator("#paneLayoutBtn").click();
+    // This spec is about the pane being pushed in Agent mode, which is the
+    // default; make sure no earlier run left Browser mode stored.
+    if ((await page.locator("#modeAgentBtn").getAttribute("aria-selected")) !== "true") {
+      await page.locator("#modeAgentBtn").click();
     }
-    await expect(page.locator("#paneLayoutBtn")).toHaveAttribute("data-layout", "split");
+    await expect(page.locator("#modeAgentBtn")).toHaveAttribute("aria-selected", "true");
     // Wait for the page to be up at its final width, not mid-attach, or the
     // "it widened" assertion below compares against a half-placed view.
     await expect.poll(() => boundsOf(app).then((b) => b[2])).toBeGreaterThan(400);

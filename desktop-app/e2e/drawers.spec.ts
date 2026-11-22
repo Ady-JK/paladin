@@ -1,5 +1,5 @@
-// drawers.spec.ts pins the three rail drawers as one family: the sessions,
-// files and tabs panels must be the same width and must animate both ways.
+// drawers.spec.ts pins the rail drawers as one family: the sessions and files
+// panels must be the same width and must animate both ways.
 //
 // The close half is the regression this file exists for. Each drawer's
 // closed rule sets width, max-width and border-width at once; when a
@@ -7,7 +7,6 @@
 // first frame, clamped the width change, and the panel vanished instead of
 // sliding shut — while the open direction looked fine.
 import { expect, test, type Page } from "@playwright/test";
-import { useLayout } from "./layout";
 
 async function start(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -81,35 +80,11 @@ test("the files explorer animates both open and closed", async ({ page }) => {
   await expect(page.locator(".ide-explorer")).toHaveClass(/is-closed/);
 });
 
-test("the tabs drawer animates both open and closed", async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 900 });
-  await start(page);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
-  await useLayout(page, "tabs");
-  await expect(page.locator("#paneRailToggle")).toBeVisible();
-  const rail = page.locator("#paneRailToggle");
-  // Open first, so the close below has something to animate: the first click
-  // must not be the one that ends with the drawer already shut.
-  if ((await rail.getAttribute("aria-pressed")) === "false") await rail.click();
-  await expect(rail).toHaveAttribute("aria-pressed", "true");
-  await page.waitForTimeout(400);
-
-  const closing = await slid(page, "#paneTabsDrawer", () => rail.click());
-  expect(closing[closing.length - 1]).toBe(0);
-  expect(intermediate(closing).length, "closing must not snap to zero").toBeGreaterThan(2);
-
-  const opening = await slid(page, "#paneTabsDrawer", () => rail.click());
-  expect(opening[0]).toBeLessThan(20);
-  expect(intermediate(opening).length).toBeGreaterThan(2);
-});
-
-test("the three rail drawers are the same width", async ({ page }) => {
+test("the two rail drawers are the same width and animate both ways", async ({ page }) => {
   await page.setViewportSize({ width: 1500, height: 900 });
   await start(page);
   const drawerWidth = async (selector: string): Promise<number> =>
     page.locator(selector).evaluate((el) => Math.round(el.getBoundingClientRect().width));
-  const rail = page.locator("#paneRailToggle");
 
   // Sessions.
   await page.locator("#agentTab").click();
@@ -123,21 +98,7 @@ test("the three rail drawers are the same width", async ({ page }) => {
   await page.locator(".ide-explorer").waitFor();
   await page.waitForTimeout(300);
   const files = await drawerWidth(".ide-explorer");
-  await page.locator("#ideExplorerToggle").click();
-  await page.waitForTimeout(300);
-
-  // Tabs. The tabs drawer is closed right now — the explorer took the column
-  // slot, exactly as Sessions does — so this opens it from the rail.
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
-  await useLayout(page, "tabs");
-  await expect(rail).toBeVisible();
-  if ((await rail.getAttribute("aria-pressed")) === "false") await rail.click();
-  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
-  await page.waitForTimeout(300);
-  const tabs = await drawerWidth("#paneTabsDrawer");
 
   expect(sessions).toBeGreaterThan(200);
   expect(files, "Files matches Sessions").toBe(sessions);
-  expect(tabs, "Tabs matches Sessions").toBe(sessions);
 });

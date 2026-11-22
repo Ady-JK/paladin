@@ -1,0 +1,371 @@
+/* browsermode.css — Browser mode: the pages own the window.
+   Its bar is the page strip plus a new-tab button; the shell's readings, the
+   header's + and the theme toggle belong to Agent mode and are not shown here.
+   See appMode.ts for the mode itself and sidePane.ts for where it is painted. */
+
+#browserView {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  background: var(--color-slate-50);
+}
+.dark #browserView {
+  background: var(--color-slate-950);
+}
+#browserView[hidden] {
+  display: none;
+}
+
+/* The bar: a tab strip that grows, one +, then the draggable gap that keeps
+   the frameless window movable. */
+.browser-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--color-slate-200);
+  background: var(--color-slate-100);
+}
+.dark .browser-bar {
+  border-color: var(--color-slate-800);
+  background: var(--color-slate-900);
+}
+
+.browser-dock,
+.browser-new {
+  display: flex;
+  height: 26px;
+  width: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--color-slate-500);
+}
+.browser-dock:hover,
+.browser-new:hover {
+  background: rgb(0 0 0 / 0.06);
+  color: var(--color-slate-800);
+}
+.dark .browser-dock:hover,
+.dark .browser-new:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--color-slate-100);
+}
+.browser-dock[aria-expanded="true"] {
+  background: rgb(0 0 0 / 0.08);
+  color: var(--color-slate-900);
+}
+.dark .browser-dock[aria-expanded="true"] {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--color-slate-50);
+}
+.browser-dock :is(svg, span),
+.browser-new :is(svg, span) {
+  height: 15px;
+  width: 15px;
+}
+
+/* Pages, side by side like a browser's own bar. They scroll rather than
+   shrink: a page tab is a label, not a column. */
+.browser-tabs {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.browser-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.browser-tab {
+  display: flex;
+  min-width: 0;
+  max-width: 200px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--color-slate-600);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.dark .browser-tab {
+  color: var(--color-slate-300);
+}
+.browser-tab:hover {
+  background: rgb(0 0 0 / 0.05);
+}
+.dark .browser-tab:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.browser-tab.is-active {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-50);
+  color: var(--color-slate-900);
+}
+.dark .browser-tab.is-active {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-950);
+  color: var(--color-slate-50);
+}
+.browser-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-tab-close {
+  display: flex;
+  height: 16px;
+  width: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--color-slate-400);
+}
+.browser-tab-close:hover {
+  background: rgb(0 0 0 / 0.1);
+  color: var(--color-slate-800);
+}
+.dark .browser-tab-close:hover {
+  background: rgb(255 255 255 / 0.12);
+  color: var(--color-slate-50);
+}
+.browser-tab-close :is(svg, span) {
+  height: 11px;
+  width: 11px;
+}
+
+/* The drag region keeps a frameless window movable even when the bar is full
+   of tabs. It is empty, so it costs nothing until the tabs stop. */
+.browser-drag {
+  min-width: 24px;
+  flex: 1 1 32px;
+  align-self: stretch;
+  -webkit-app-region: drag;
+}
+
+.browser-body {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* An empty browser is an invitation, not an error. */
+.browser-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+}
+.browser-empty-ico {
+  display: flex;
+  height: 44px;
+  width: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--color-slate-100);
+  color: var(--color-slate-400);
+}
+.dark .browser-empty-ico {
+  background: var(--color-slate-800);
+}
+.browser-empty-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-slate-700);
+}
+.dark .browser-empty-title {
+  color: var(--color-slate-200);
+}
+.browser-empty-text {
+  max-width: 34ch;
+  font-size: 0.75rem;
+  color: var(--color-slate-500);
+}
+
+/* The rail's mode buttons read as a segmented pair: the active one is filled,
+   so "where am I" needs no tooltip. */
+#railPanels [data-mode] {
+  position: relative;
+}
+#railPanels [data-mode][aria-selected="true"] {
+  background: rgb(0 0 0 / 0.07);
+  color: var(--color-slate-900);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06);
+}
+.dark #railPanels [data-mode][aria-selected="true"] {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--color-slate-50);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+/* A short rule between the mode pair and the plain panel buttons, so the two
+   kinds of control do not read as one list. */
+#railPanels [data-mode] + [data-mode] {
+  margin-top: 0;
+}
+#modeBrowserBtn::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  bottom: -5px;
+  left: 6px;
+  height: 1px;
+  background: var(--color-slate-200);
+}
+.dark #modeBrowserBtn::after {
+  background: var(--color-slate-700);
+}
+
+/* ---- the floating vertical drawer ----
+   It sits over the pages so it costs them no width. A native page cannot be
+   dimmed or clipped by CSS, so the page is hidden while the list is open and
+   the drawer paints solid. */
+.browser-drawer {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 20;
+  display: flex;
+  width: 240px;
+  flex-direction: column;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 12px;
+  background: var(--color-slate-50);
+  box-shadow:
+    0 2px 8px rgb(0 0 0 / 0.1),
+    0 24px 48px -16px rgb(0 0 0 / 0.3);
+}
+.dark .browser-drawer {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-900);
+  box-shadow:
+    0 2px 8px rgb(0 0 0 / 0.5),
+    0 24px 48px -16px rgb(0 0 0 / 0.7);
+}
+.browser-drawer[hidden] {
+  display: none;
+}
+.browser-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 8px 12px;
+  font-size: 0.8125rem;
+  color: var(--color-slate-700);
+}
+.dark .browser-drawer-head {
+  color: var(--color-slate-200);
+}
+.browser-drawer-close {
+  display: flex;
+  height: 22px;
+  width: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--color-slate-500);
+}
+.browser-drawer-close:hover {
+  background: rgb(0 0 0 / 0.06);
+  color: var(--color-slate-800);
+}
+.dark .browser-drawer-close:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--color-slate-100);
+}
+.browser-drawer-list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 0 6px;
+}
+.browser-drawer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  text-align: left;
+}
+.browser-drawer-row:hover {
+  background: rgb(0 0 0 / 0.05);
+}
+.dark .browser-drawer-row:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.browser-drawer-row.is-active {
+  background: var(--color-slate-200);
+}
+.dark .browser-drawer-row.is-active {
+  background: var(--color-slate-800);
+}
+.browser-drawer-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-800);
+}
+.dark .browser-drawer-title {
+  color: var(--color-slate-100);
+}
+.browser-drawer-host {
+  font-size: 0.625rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-500);
+}
+.browser-drawer-empty {
+  padding: 10px 8px;
+  font-size: 0.75rem;
+  color: var(--color-slate-500);
+}
+.browser-drawer-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px;
+  padding: 8px;
+  border: 1px dashed var(--color-slate-300);
+  border-radius: 7px;
+  font-size: 0.75rem;
+  color: var(--color-slate-600);
+}
+.browser-drawer-new:hover {
+  border-color: var(--color-accent-500);
+  color: var(--color-slate-900);
+}
+.dark .browser-drawer-new {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-300);
+}
+/* The page is taken off screen while the list is open. */
+.browser-body.is-drawer-open > :not(#browserDrawer) {
+  visibility: hidden;
+}

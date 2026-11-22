@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { useLayout } from "./layout";
+import { hidePane, showPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -8,15 +8,19 @@ test.beforeEach(async ({ page }) => {
   await page.locator("#promptInput").press("Enter");
 });
 
-test("header menu opens side chats and preserves layout controls", async ({ page }) => {
-  await useLayout(page, "split");
+test("the header + opens the pane and offers a side chat", async ({ page }) => {
   const actions = page.locator("#titleBar #paneActions");
   await expect(actions).toBeVisible();
-  await expect(actions.locator("#paneLayoutBtn")).toBeVisible();
+  // The layout toggle that used to sit here is gone: the rail's mode buttons
+  // replaced it, so the header keeps exactly one pane control.
+  await expect(actions.locator("#paneLayoutBtn")).toHaveCount(0);
   await actions.locator("#paneNewChatBtn").click();
+  await expect(page.locator("#sidePane")).toBeVisible();
   await page.getByRole("menuitem", { name: "New side chat" }).click();
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
-  await useLayout(page, "tabs");
+  await hidePane(page);
+  // A tab is the pane's content, not its open state.
+  await showPane(page);
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
 });
 
@@ -43,9 +47,11 @@ test("the readings sit left of the icon row and never push it sideways", async (
   expect(Math.abs(after.actions - before.actions)).toBeLessThan(1);
 });
 
-test("browser has one entry and new side chats and terminals share a menu", async ({ page }) => {
+test("browser has one entry, on the rail, and the + menu offers both pane kinds", async ({ page }) => {
   await expect(page.locator("#paneBrowserBtn")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Browser", exact: true })).toHaveCount(1);
+  // Exactly one Browser control, and it is the rail's mode button.
+  await expect(page.getByRole("tab", { name: "Browser", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Browser", exact: true })).toHaveCount(0);
   await page.locator("#paneNewChatBtn").click();
   await expect(page.getByRole("menuitem", { name: "New side chat" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "New terminal" })).toBeVisible();
@@ -54,11 +60,9 @@ test("browser has one entry and new side chats and terminals share a menu", asyn
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
 });
 
-// Switching layouts must not resize the header: the tab strip moves into
-// the title bar in tabs layout, and a taller strip used to grow the bar
-// (and with it the readings row and the window buttons) by six pixels.
-test("the header keeps one height across layouts", async ({ page }) => {
-  await useLayout(page, "split");
+// Switching modes must not resize the header: the bar belongs to Agent mode
+// only, and opening or closing the pane used to be able to grow it.
+test("the header keeps one height as the pane opens and the mode changes", async ({ page }) => {
   const bar = page.locator("#titleBar");
   const measure = async (): Promise<{ bar: number; actions: number; close: number; closeY: number }> => ({
     bar: Math.round((await bar.boundingBox())!.height),
@@ -66,23 +70,22 @@ test("the header keeps one height across layouts", async ({ page }) => {
     close: Math.round((await page.locator("#windowCloseBtn").boundingBox())!.height),
     closeY: Math.round((await page.locator("#windowCloseBtn").boundingBox())!.y),
   });
-  const split = await measure();
+  const closed = await measure();
+  await showPane(page);
   await page.locator("#paneActions #paneNewChatBtn").click();
   await page.getByRole("menuitem", { name: "New side chat" }).click();
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
-  const splitWithPane = await measure();
-  await useLayout(page, "tabs");
-  // The tab list is its own shell drawer now, not part of the header and
-  // not a column inside the split, so the bar's height must not depend on
-  // the tabs at all.
-  await expect(page.locator("#titleBar .pane-strip")).toHaveCount(0);
-  await expect(page.locator("#agentSplit > .pane-strip")).toHaveCount(0);
-  await expect(page.locator("#paneTabsDrawer .pane-strip")).toBeVisible();
-  const tabs = await measure();
+  const withPane = await measure();
 
-  expect(tabs.bar, "the bar must not grow in tabs layout").toBe(split.bar);
-  expect(splitWithPane.bar).toBe(split.bar);
-  expect(tabs.actions).toBe(split.actions);
-  expect(tabs.close).toBe(split.close);
-  expect(tabs.closeY).toBe(split.closeY);
+  expect(withPane.bar).toBe(closed.bar);
+  expect(withPane.actions).toBe(closed.actions);
+  expect(withPane.close).toBe(closed.close);
+  expect(withPane.closeY).toBe(closed.closeY);
+
+  // Browser mode has no agent header at all, so nothing to measure there.
+  await page.locator("#modeBrowserBtn").click();
+  await expect(bar).toBeHidden();
+  await page.locator("#modeAgentBtn").click();
+  await expect(bar).toBeVisible();
+  expect((await measure()).bar).toBe(closed.bar);
 });

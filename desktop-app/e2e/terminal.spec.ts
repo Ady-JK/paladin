@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { useLayout } from "./layout";
+import { showPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 // The pane's terminal lives beside the conversation, which is the split
 // layout: the app opens in tabs, where a terminal has the whole window.
 async function startSplit(page: Page): Promise<void> {
-  await useLayout(page, "split");
+  await showPane(page);
 }
 
 test("IDE terminals can be renamed, split and closed independently", async ({ page }) => {
@@ -230,7 +230,8 @@ test("the shared terminal button reopens the existing terminal in Agent mode", a
   const toggle = page.locator("#rail #ideTerminalToggle");
   await toggle.click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
-  // Split keeps its pane, so the button returns to the terminal instead of hiding it.
+  // The terminal always lives in the pane, so pressing the rail button again
+  // focuses that same terminal rather than opening a second one.
   await toggle.click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
   await expect(page.locator("#sidePane .pane-terminal")).toHaveCount(1);

@@ -3,14 +3,14 @@
 // login profile, and view lifetime.
 import { expect, test, type Page } from "@playwright/test";
 
-import { useLayout } from "./layout";
+import { showPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
   // A web tab opens in the pane beside the agent; that is the split layout.
-  await useLayout(page, "split");
+  await showPane(page);
 });
 
 async function startSession(page: Page): Promise<void> {
@@ -19,8 +19,11 @@ async function startSession(page: Page): Promise<void> {
   await expect(page.locator("#messages")).toContainText("start");
 }
 
+// The globe left the header: the sites menu is opened from Browser mode's own
+// + in its bar, or by the keyboard shortcut.
 async function openMenu(page: Page): Promise<void> {
-  await page.click("#paneWebBtn");
+  if (await page.locator("#browserNewTab").isVisible()) await page.click("#browserNewTab");
+  else await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+J`);
   await expect(page.locator("#webMenu")).toBeVisible();
 }
 
@@ -40,8 +43,11 @@ test("the separate chat window is gone and the agent keeps one header", async ({
   await expect(page.locator("#pageReloadBtn")).toHaveCount(0);
   await expect(page.locator("#agentView")).toBeVisible();
   await expect(page.locator("#headerTitle")).toHaveText("Agent Chat");
-  await expect(page.locator("#paneWebBtn")).toBeVisible();
+  // The globe is a rail mode now, not a header button, so exactly one Browser
+  // entry exists and it is the mode tab.
+  await expect(page.locator("#paneWebBtn")).toBeHidden();
   await expect(page.locator("#paneBrowserBtn")).toHaveCount(0);
+  await expect(page.locator("#modeBrowserBtn")).toBeVisible();
 });
 
 test("window buttons fill the top-right corner", async ({ page }) => {
@@ -138,28 +144,23 @@ test("open web tabs stay alive when you switch away; closing one drops it", asyn
   await expect(page.locator("#paneTabs .pane-tab[data-web]")).toHaveCount(1);
 });
 
-test("a web tab is side-by-side in split and full width in tabs", async ({ page }) => {
+test("a web tab is a column in the pane and the whole window in Browser mode", async ({ page }) => {
   await startSession(page);
   await openSite(page, "https://gemini.google.com/");
-  const split = await page.evaluate(() => (window as any).__e2eViewBounds.width);
+  const inPane = await page.evaluate(() => (window as any).__e2eViewBounds.width);
+  expect(inPane).toBeGreaterThan(100);
 
-  await page.locator("#paneLayoutBtn").click();
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  // Tab view gives the page the split, less the tabs drawer when it is
-  // open. That is a fixed "+drawer" step, not a multiple, so the assertion
-  // is written against the drawer width.
-  await expect(page.locator("#paneTabsDrawer")).toBeVisible();
-  await page.waitForTimeout(500);
-  const drawer = (await page.locator("#paneTabsDrawer").boundingBox())?.width ?? 0;
-  expect(drawer).toBeGreaterThan(100);
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width)).toBeGreaterThan(split + 100);
+  // Browser mode shows the same page in the whole window: the pane's copy
+  // steps aside, so exactly one surface renders it.
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#browserView")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width)).toBeGreaterThan(inPane + 100);
+  await expect(page.locator("#browserTabs .browser-tab")).toHaveCount(1);
 
-  await page.locator('[data-key="main"] .pane-tab-pick').click();
-  await expect(page.locator("#agentMain")).toBeVisible();
-  await expect.poll(() => viewShown(page)).toBe("agent");
-  await page.locator("#paneDrawerTabs .pane-tab[data-web] .pane-tab-pick").click();
-  await expect(page.locator("#agentMain")).toBeHidden();
-  await expect.poll(() => viewShown(page)).toBe("web:t1");
+  // Back in Agent mode the page is a column of the pane again.
+  await page.locator("#modeAgentBtn").click();
+  await expect(page.locator("#agentView")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eViewBounds.width)).toBeLessThan(inPane + 100);
 });
 
 test("a modal hides the native page until it closes", async ({ page }) => {
@@ -188,9 +189,8 @@ test("a visible web page freezes the shell compositing", async ({ page }) => {
   expect(styles.animation).toBe("none");
   expect(styles.blur === "none" || styles.blur === "").toBe(true);
 
-  // Tabs layout shows the agent in place of the page.
-  await page.click("#paneLayoutBtn");
-  await page.locator('#paneDrawerTabs [data-key="main"] .pane-tab-pick').click();
+  // Closing the pane shows the agent in place of the page.
+  await page.locator("#paneCloseBtn").click();
   await expect.poll(() => page.evaluate(() => document.body.classList.contains("guest-visible"))).toBe(false);
 });
 
@@ -373,10 +373,12 @@ test("an https link in the conversation opens in the integrated browser", async 
   await expect(page.locator("#paneTabs .pane-tab[data-web]")).toContainText("example.com");
 });
 
-test("the tabs layout names the conversation tab Agent", async ({ page }) => {
+test("Browser mode lists a web tab in its own strip", async ({ page }) => {
   await startSession(page);
-  await page.locator("#paneLayoutBtn").click();
-  await expect(page.locator('[data-key="main"]')).toContainText("Agent");
+  await openSite(page, "https://chatgpt.com/");
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#browserTabs .browser-tab")).toHaveCount(1);
+  await expect(page.locator("#browserTabs .browser-tab")).toContainText("ChatGPT");
 });
 
 test("the personal browser opens without starting a chat", async ({ page }) => {
@@ -406,14 +408,13 @@ test("a menu opened over the page freezes it to a still, and the live page retur
   expect(await surfaceStill(page)).toBe("none");
 
   // The Browser menu itself drops down over the page area.
-  await page.click("#paneWebBtn");
+  await openMenu(page);
   await expect(page.locator("#webMenu")).toBeVisible();
   await expect.poll(() => viewShown(page)).toBe("agent");
   await expect.poll(() => surfaceStill(page)).toContain("data:image");
   expect(await snapshots(page)).toBeGreaterThan(0);
 
   await page.keyboard.press("Escape");
-  await page.click("#paneWebBtn");
   await expect(page.locator("#webMenu")).toBeHidden();
   await expect.poll(() => viewShown(page)).toBe("web:t1");
   await expect.poll(() => surfaceStill(page)).toBe("none");
@@ -475,19 +476,12 @@ test("ChatGPT opens in the right pane in split and is reachable from the drawer 
   await expect(page.locator('#paneTabs .pane-tab[data-key="main"]')).toHaveCount(0);
   await expect.poll(() => viewShown(page)).toBe("web:t1");
 
-  // The rail's browser button lists it under Agent, without leaving split.
-  await page.locator("#paneRailToggle").click();
-  await expect(page.locator("#paneDrawerTabs .pane-tab").first()).toHaveAttribute("data-key", "main");
-  await expect(page.locator("#paneDrawerTabs .pane-tab[data-web]")).toContainText("ChatGPT");
+  // The pane's strip lists the page beside the conversation.
+  await expect(page.locator("#paneTabs .pane-tab[data-web]")).toContainText("ChatGPT");
 
-  // Tab view: the same drawer is the only navigation.
-  await page.locator("#paneLayoutBtn").click();
-  await expect(page.locator("#agentView")).toHaveClass(/is-tab-layout/);
-  await expect(page.locator("#sidePane .pane-strip")).toBeHidden();
-  await page.locator('#paneDrawerTabs .pane-tab[data-key="main"] .pane-tab-pick').click();
-  await expect(page.locator("#agentMain")).toBeVisible();
-  await expect.poll(() => viewShown(page)).toBe("agent");
-  await page.locator("#paneDrawerTabs .pane-tab[data-web] .pane-tab-pick").click();
-  await expect(page.locator("#agentMain")).toBeHidden();
+  // Browser mode takes the same page and gives it the window.
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#browserView")).toBeVisible();
+  await expect(page.locator("#browserTabs .browser-tab")).toHaveCount(1);
   await expect.poll(() => viewShown(page)).toBe("web:t1");
 });

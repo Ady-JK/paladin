@@ -9,10 +9,11 @@ import { $, sidePaneEl } from "../core/dom";
 import { bridge, hasBridge } from "../core/bridge";
 import { escapeAttr, escapeHtml } from "../core/format";
 import { state } from "../core/state";
-import { loadText, saveText } from "../core/storage";
 import type { RunningJob, SessionChanges, SideChatMessage } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
+import { appMode, onChange as onModeChange, setAppMode, toggleAppModeFromKey } from "./appMode";
+import { browserDrawerElement, isBrowserDrawerOpen, setBrowserDrawer, setBrowserPages } from "./browserMode";
 import { registerChangesLink } from "./findings";
 import { abortAttach, hasRunningTurn, liveBadge, liveRoot, onResync, runningTurnIndex, runningUserRow } from "./live";
 import { agentStatus, openSession, refreshSessions, renderSessions } from "./sessions";
@@ -48,21 +49,20 @@ import type {
 } from "./sidePane/types";
 
 const tabsEl = $("#paneTabs");
-const drawerTabsEl = $("#paneDrawerTabs");
-const tabsDrawerEl = $("#paneTabsDrawer");
-const tabsDrawerCloseBtn = $<HTMLButtonElement>("#paneTabsDrawerClose");
 const bodyEl = $("#paneBody");
+const pickerEl = $("#panePicker");
+const tabsAddBtn = $<HTMLButtonElement>("#paneTabsAdd");
 const historyBtn = $<HTMLButtonElement>("#paneNewChatBtn");
 const menuEl = $("#paneHistoryMenu");
 const menuItemsEl = $("#paneHistoryItems");
-const layoutBtn = $<HTMLButtonElement>("#paneLayoutBtn");
-const tabsRailBtn = $<HTMLButtonElement>("#paneRailToggle");
 const changesBtn = $<HTMLButtonElement>("#sessionChangesBtn");
 const liveChangesBtn = $<HTMLButtonElement>("#liveChanges");
 const runningJobsBtn = $<HTMLButtonElement>("#runningJobsBtn");
 const runningJobsCount = $("#runningJobsCount");
 const agentView = $("#agentView");
-const layoutKey = "paladin.paneLayout";
+const browserViewEl = $<HTMLElement>("#browserView");
+const modeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-mode]"));
+const titleBarEl = $<HTMLElement>("#titleBar");
 
 export const STANDALONE_PANE_SESSION = "__standalone_pane__";
 // One tab strip for the window, not one per session. Switching session
@@ -77,36 +77,10 @@ function visibleSessionId(): string {
   return state.sessionId || STANDALONE_PANE_SESSION;
 }
 const changesCache = new Map<string, SessionChanges>();
+// paneOpen is whether the side pane is showing beside the conversation. Agent
+// mode starts with it closed: the conversation is the default view, and the
+// header's + (or a rail button) opens the pane.
 let paneOpen = false;
-// Tabs layout is the default: a session opens on the conversation alone, and
-// the browser, terminals, changes and side chats live behind the drawer. Split
-// is the opt-in, and the only layout that is remembered — a stored "split"
-// sticks, anything else (including a first run, where the key is absent) starts
-// in tabs.
-let layoutMode: "split" | "tabs" = loadText(layoutKey) === "split" ? "split" : "tabs";
-// The tab list is its own drawer column, opened from the rail button that
-// is present in both layouts, exactly like Sessions and Files. It is not a
-// strip inside the split: a column there would shrink the native page's
-// surface, and a native page cannot be clipped, so the page would stick out
-// past its panel while the column animated. A shell column keeps every
-// native surface a plain rectangle. Agent is always the first entry.
-// Each layout remembers its own choice: tabs layout navigates through the
-// drawer so it starts open; split layout has the horizontal strip, so the
-// drawer starts closed.
-const tabsDrawerKeys = { split: "paladin.tabsDrawer.split", tabs: "paladin.tabsDrawer" } as const;
-const tabsDrawerOpen = {
-  split: loadText(tabsDrawerKeys.split) === "open",
-  tabs: loadText(tabsDrawerKeys.tabs) !== "closed",
-};
-// Split layout always shows the right pane: the agent is the left half and
-// the right half is where terminals, pages, changes and side chats live. A
-// user who wants the agent at full width switches to the tabs layout. IDE
-// mode has its own arrangement and keeps its own rules.
-//
-// Tabs layout starts with no pane open. `paneOpen` is true only when a tab is
-// actually there to show, which is what the renderer already computes from
-// `tabSet.tabs.length` whenever it opens a session, so nothing else changes.
-paneOpen = layoutMode === "split";
 let nextKey = 0;
 let ideTerminalMode = false;
 let ideBrowserKey = "";
@@ -211,7 +185,7 @@ export function setIDETerminalMode(on: boolean): void {
   // IDE mode lays out its own panels, and its terminals and pages live in the
   // dock, so the pane is only there when something else is open in it.
   if (on && !tabSet.tabs.some((tab) => tab.kind !== "terminal" && !isBrowserPage(tab))) paneOpen = false;
-  if (!on && layoutMode === "split") paneOpen = true;
+  if (!on) paneOpen = true;
   hideLiveChanges(state.sessionId);
   terminalDock.setEnabled(on);
   render();
@@ -280,7 +254,9 @@ function openBrowserTab(sessionId: string, url = ""): void {
   let tab = set.tabs.find((t): t is BrowserTab => t.kind === "browser");
   if (!tab) {
     tab = newBrowserTab(sessionId, `t${++nextKey}`, syncNativeSurfaces, () => {
-      if (layoutMode === "tabs") closePane();
+      // A page that wants the whole window leaves Agent mode; appMode owns
+      // that switch now, so the pane does not have to close itself here.
+      setAppMode("browser");
     });
     set.tabs.push(tab);
     if (hasBridge() && bridge().browser?.getNotes) {
@@ -863,14 +839,20 @@ function nativeTarget(): { web: WebTab | null; browser: BrowserTab | null; surfa
   const set = currentSet();
   const idePage = ideTerminalMode && set.tabs.find((item) => item.key === ideBrowserKey && isBrowserPage(item));
   const tab = idePage || activeTab(set);
-  const pageVisible = !!idePage || (paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
+  // Browser mode shows the pages itself, so the pane's copy steps aside.
+  const shellBrowser = appMode() === "browser";
+  const pageVisible =
+    !!idePage ||
+    (shellBrowser ? !isBrowserDrawerOpen() : paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
   const web = pageVisible && tab?.kind === "web" && tab.url !== "" ? tab : null;
   const browser = pageVisible && tab?.kind === "browser" ? tab : null;
-  const surface = web
-    ? web.body.querySelector<HTMLElement>(".web-surface")
-    : browser
-      ? browser.body.querySelector<HTMLElement>(".browser-surface")
-      : null;
+  const surface = shellBrowser
+    ? bodyEl.querySelector<HTMLElement>(".web-surface, .browser-surface")
+    : web
+      ? web.body.querySelector<HTMLElement>(".web-surface")
+      : browser
+        ? browser.body.querySelector<HTMLElement>(".browser-surface")
+        : null;
   return { web, browser, surface };
 }
 
@@ -1187,51 +1169,37 @@ function tabHtml(tab: Tab, active: boolean): string {
   );
 }
 
-// mainTabHtml is the Agent entry: the conversation, pinned at the top of
-// the drawer list. It is not in the split pane's strip, because the agent is
-// the left half there and never needs a tab. Selecting it shows the chat
-// (full width in tabs layout) and keeps the list, the way a browser keeps
-// its tab bar when you pick the first tab.
-function mainTabHtml(): string {
-  const active = layoutMode === "split" || !paneOpen;
-  return `<div class="pane-tab pane-main-tab${active ? " is-active" : ""}" data-key="main"><button type="button" role="tab" aria-selected="${active}" class="pane-tab-pick" title="Agent chat">${icon("rl-agent", "h-3 w-3")}<span>Agent</span></button></div>`;
-}
-
 const emptyPaneEl = document.createElement("div");
 emptyPaneEl.className = "side-empty";
 emptyPaneEl.innerHTML = `<span class="side-empty-ico">${icon("layout-tabs", "h-5 w-5")}</span><p class="side-empty-title">Nothing open</p><p class="side-empty-text">Open a terminal, a page, the changes or a side chat from the toolbar or the rail.</p>`;
 
 let stripHtml: string | null = null;
-let drawerHtml: string | null = null;
 
-// resetTabsCache forces the next paint to rewrite both tab lists.
+// resetTabsCache forces the next paint to rewrite the strip.
 function resetTabsCache(): void {
   stripHtml = null;
-  drawerHtml = null;
 }
 
-// paintTabs writes the two views of one tab set: the horizontal strip
-// inside the split pane (no Agent entry), and the drawer's vertical list
-// (Agent first).
+// paintTabs writes the pane's horizontal strip. There is no second, vertical
+// list any more: that drawer belonged to the old full-width tabs layout, and
+// browser pages get their own floating list inside Browser mode.
 function paintTabs(): void {
   const set = currentSet();
   const tabs = set.tabs
     .filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)))
     .map((t) => tabHtml(t, paneOpen && t.key === set.active))
     .join("");
-  const drawer = mainTabHtml() + tabs;
   if (tabs !== stripHtml) {
     stripHtml = tabs;
     tabsEl.innerHTML = tabs;
-  }
-  if (drawer !== drawerHtml) {
-    drawerHtml = drawer;
-    drawerTabsEl.innerHTML = drawer;
   }
 }
 
 // render paints the open session's tabs, keeping each tab's DOM.
 function render(): void {
+  // Browser mode borrows the active page body; bring every page back under the
+  // pane before it lays out its children, or the body stays in the browser view.
+  if (appMode() !== "browser") restorePaneBodies();
   if (ideTerminalMode) terminalDock?.sync();
   else {
     const toggle = $("#ideTerminalToggle");
@@ -1242,28 +1210,25 @@ function render(): void {
     toggle.title = visible ? "Hide terminal" : "Show terminal";
   }
   renderIDEPages(currentSet());
-  // The drawer list and the split pane's strip are separate elements, so
-  // both can be on screen at once. Tabs layout has no strip in the pane: the
-  // drawer is its only navigation.
-  const drawerOpen = tabsDrawerOpen[layoutMode];
-  tabsDrawerEl.classList.toggle("is-closed", !drawerOpen);
-  tabsDrawerEl.hidden = false;
-  tabsDrawerEl.inert = !drawerOpen;
-  tabsRailBtn.setAttribute("aria-pressed", String(drawerOpen));
-  tabsRailBtn.setAttribute("aria-expanded", String(drawerOpen));
-  const tabsLabel = drawerOpen ? "Hide browser and open tabs" : "Show browser and open tabs";
-  tabsRailBtn.setAttribute("aria-label", tabsLabel);
-  tabsRailBtn.title = tabsLabel;
-  agentView.classList.toggle("is-tab-layout", layoutMode === "tabs");
-  agentView.classList.toggle("is-side-tab", layoutMode === "tabs" && paneOpen);
+  // One mode at a time: the app view is Agent (conversation + optional pane),
+  // Browser (pages own the window) or IDE (its own workspace, which paints
+  // itself). The rail's mode buttons own the switch.
+  const mode = appMode();
+  // IDE mode still lives inside #agentView (its workspace is one of that
+  // split's columns), so only Browser takes the view away from it.
+  agentView.hidden = mode === "browser";
+  browserViewEl.hidden = mode !== "browser";
+  // In Browser mode the pages own the window, so the agent header (readings,
+  // +, theme, window buttons) gives way to the browser's own bar.
+  titleBarEl.hidden = mode === "browser";
+  for (const button of modeButtons) {
+    button.setAttribute("aria-selected", String(button.dataset.mode === mode));
+  }
   sidePaneEl.hidden = !paneOpen;
-  layoutBtn.dataset.layout = layoutMode;
-  layoutBtn.setAttribute("aria-label", layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout");
-  layoutBtn.title = layoutMode === "tabs" ? "Switch to split layout" : "Switch to tabs layout";
-  if (!paneOpen && layoutMode === "split") {
-    // The strip keeps its tabs: selecting the Agent tab shows the
-    // conversation, it does not throw the other tabs away. Only the pane
-    // body gives up its space, so the native page is detached.
+  if (!paneOpen) {
+    // The strip keeps its tabs: selecting the Agent entry shows the
+    // conversation, it does not throw the other tabs away. Only the pane body
+    // gives up its space, so the native page is detached.
     closeMenu();
     paintTabs();
     bodyEl.replaceChildren();
@@ -1273,22 +1238,29 @@ function render(): void {
   const set = currentSet();
   if (!set) {
     paintTabs();
-    bodyEl.innerHTML = `<div class="side-empty"><span class="side-empty-ico">${icon("comments", "h-5 w-5")}</span><p class="side-empty-title">Side chat</p><p class="side-empty-text">Send a message first: side chats are about a conversation.</p></div>`;
+    bodyEl.replaceChildren();
+    pickerEl.hidden = false;
+    tabsAddBtn.hidden = true;
     syncNativeSurfaces();
     return;
-  }
-  if (paneOpen && layoutMode === "tabs" && set.tabs.length === 0 && hasMainMessage()) {
-    const tab = newChatTab();
-    set.tabs.push(tab);
-    set.active = tab.key;
   }
   if (set.tabs.length && !activeTab(set)) set.active = set.tabs[0].key;
   paintTabs();
   const shown = set.tabs.filter((t) => !ideTerminalMode || (t.kind !== "terminal" && !isBrowserPage(t)));
-  bodyEl.replaceChildren(...shown.map((t) => t.body), ...(shown.length || !paneOpen ? [] : [emptyPaneEl]));
+  // With nothing to show the pane offers what it can hold. The picker lives in
+  // the body, so it is hidden again the moment a tab exists.
+  const empty = shown.length === 0 && paneOpen;
+  pickerEl.hidden = !empty;
+  tabsAddBtn.hidden = empty;
+  bodyEl.replaceChildren(...shown.map((t) => t.body));
   for (const tab of set.tabs) {
     if (ideTerminalMode && (tab.kind === "terminal" || isBrowserPage(tab))) continue;
+    // Every page body was just appended above, so a page that is active in the
+    // pane must be shown even if Browser mode had been holding it.
     tab.body.hidden = !paneOpen || tab.key !== set.active;
+    if (isBrowserPage(tab) && !tab.body.hidden && tab.body.parentElement === bodyEl) {
+      tab.body.style.display = "";
+    }
     if (tab.kind === "browser" && tab.body.hidden) stopBrowserPick(tab);
     if (tab.kind === "terminal" && !tab.body.hidden) activateTerminal(tab);
   }
@@ -1298,7 +1270,40 @@ function render(): void {
     void loadAgent(tab);
   }
   if (tab?.kind === "jobs") paintJobsTab(tab);
+  // After the pane has placed its bodies: Browser mode takes the active page
+  // out of the pane while it is showing.
+  paintBrowserMode();
   syncNativeSurfaces();
+}
+
+// paintBrowserMode hands Browser mode the window's pages. They are the same
+// WebTab/BrowserTab objects the pane uses, so a page opened in either place
+// shows up in both; only the DOM that holds the native surface moves.
+// restorePaneBodies puts every page body back under the pane. Browser mode had
+// borrowed the active one; the pane lays out its own children in render().
+function restorePaneBodies(): void {
+  const browser = document.getElementById("browserBody");
+  for (const tab of tabSet.tabs) {
+    // body is the tab's own wrapper; the one Browser mode mounts is its
+    // ancestor, so check containment rather than the immediate parent.
+    if (!isBrowserPage(tab) || !browser) continue;
+    if (browser.contains(tab.body)) bodyEl.append(tab.body);
+  }
+}
+
+function paintBrowserMode(): void {
+  // Browser mode only owns the page body while it is the visible mode. In
+  // Agent mode the pane holds it, and moving it here would take the native
+  // surface out of the layout it is measured in.
+  if (appMode() !== "browser") return;
+  const pages = tabSet.tabs.filter(isBrowserPage).map((tab) => ({
+    key: tab.key,
+    title: tab.title,
+    url: tab.url,
+    active: tab.key === tabSet.active,
+  }));
+  const bodies = tabSet.tabs.filter(isBrowserPage).map((tab) => tab.body);
+  setBrowserPages(pages, bodies);
 }
 
 // After a resync the shown agent tab re-attaches to fetch the events
@@ -1314,56 +1319,19 @@ onResync(() => {
 function showPane(): void {
   paneOpen = true;
   render();
-}
-
-// setTabsDrawer opens or closes the "Open tabs" panel. It is a column of the
-// shell, so opening it narrows the card.
-//
-// `remember` separates a choice from a side effect. When another panel takes
-// the column slot this closes too, but that is not the user saying they want
-// the tab list gone: persisting it would make the panel disappear on the
-// next start because they happened to look at their sessions once.
-function setTabsDrawer(open: boolean, remember = true): void {
-  // A panel taking the slot closes the drawer in both layouts, so toggling
-  // the layout cannot bring back a second pushed column.
-  if (!open && !remember) {
-    const wasOpen = tabsDrawerOpen[layoutMode];
-    tabsDrawerOpen.split = false;
-    tabsDrawerOpen.tabs = false;
-    if (wasOpen) render();
-    return;
-  }
-  if (tabsDrawerOpen[layoutMode] === open) return;
-  tabsDrawerOpen[layoutMode] = open;
-  if (remember) saveText(tabsDrawerKeys[layoutMode], open ? "open" : "closed");
-  // The pushing panels share one column slot, so opening this one closes
-  // the sessions drawer and the file explorer.
-  if (open) {
-    window.dispatchEvent(new Event("paladin:tabs-drawer-opened"));
-    window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
-  }
-  render();
+  // The page may have been living in Browser mode's body; coming back to the
+  // pane has to hand the native surface over, not just paint the tab. The
+  // surface has no rectangle until this frame's layout has run, so the sync
+  // waits one frame — otherwise it sees a zero-sized box and hides the page.
+  syncNativeSurfaces();
+  requestAnimationFrame(syncNativeSurfaces);
 }
 
 function closePane(): void {
-  // Split keeps its right pane; only tabs layout swaps it for the agent.
-  if (layoutMode === "split" && !ideTerminalMode) {
-    closeMenu();
-    render();
-    return;
-  }
+  // Hiding the pane is always a real close now: there is no second layout
+  // where the pane is mandatory, so the conversation simply takes the space.
   paneOpen = false;
   closeMenu();
-  render();
-}
-
-function toggleLayout(): void {
-  layoutMode = layoutMode === "split" ? "tabs" : "split";
-  saveText(layoutKey, layoutMode);
-  // Tabs layout shows one body at a time, so it starts on the agent unless a
-  // tab is there to show; split always has its pane.
-  paneOpen = layoutMode === "split" || tabSet.tabs.length > 0;
-  resetTabsCache();
   render();
 }
 
@@ -1382,11 +1350,9 @@ function toggleTerminalFromRail(): void {
     return;
   }
   const set = currentSet();
-  const active = set && activeTab(set);
-  if (paneOpen && active?.kind === "terminal") {
-    closePane();
-    return;
-  }
+  // A terminal never takes the conversation's place, so pressing its button
+  // again focuses that terminal instead of closing the pane: there is nowhere
+  // else for a terminal to live.
   const existing = set?.tabs.find((tab) => tab.kind === "terminal" && tab.cwd === state.cwd);
   if (set && existing) {
     set.active = existing.key;
@@ -1404,10 +1370,10 @@ export function focusAgentFromKey(): void {
   requestAnimationFrame(() => $<HTMLTextAreaElement>("#promptInput").focus());
 }
 
-// toggleLayoutFromKey switches split <-> tabs, the same as the layout
-// button in the toolbar.
+// toggleLayoutFromKey was the old split <-> tabs shortcut. It now flips
+// Agent <-> Browser, so the shortcut keeps meaning "show me the other view".
 export function toggleLayoutFromKey(): void {
-  toggleLayout();
+  toggleAppModeFromKey();
 }
 
 function closeTab(key: string, dropBrowser = true, _sessionId = visibleSessionId()): void {
@@ -1438,8 +1404,13 @@ function closeTab(key: string, dropBrowser = true, _sessionId = visibleSessionId
     removed.term?.dispose();
   }
   if (set.tabs.length === 0) {
-    // With one strip per window, an empty strip is just a closed pane.
-    if (_sessionId === visibleSessionId()) closePane();
+    // Closing the last tab leaves the pane open on its picker: an empty pane
+    // now has something to say ("open a side chat, a terminal or a browser"),
+    // so removing the last tab is not the same gesture as closing the pane.
+    if (_sessionId === visibleSessionId()) {
+      set.active = "";
+      render();
+    }
     return;
   }
   if (set.active === key) set.active = set.tabs[Math.min(at, set.tabs.length - 1)].key;
@@ -1685,37 +1656,115 @@ export function initSidePane(): void {
     card.classList.toggle("turn-change-collapsed");
     card.setAttribute("aria-expanded", String(!card.classList.contains("turn-change-collapsed")));
   });
-  layoutBtn.addEventListener("click", () => {
-    toggleLayout();
+  // The rail's mode buttons: Agent, Browser and (through its own toggle) IDE.
+  for (const button of modeButtons) {
+    button.addEventListener("click", () => {
+      const next = button.dataset.mode;
+      if (next === "agent" || next === "browser") setAppMode(next);
+    });
+  }
+  onModeChange(() => {
+    resetTabsCache();
+    render();
+    paintBrowserMode();
   });
-  // The tab list is a drawer: the rail button opens and closes it, the way
-  // the Sessions and Files buttons work. Closing it gives a page the window.
-  tabsRailBtn.addEventListener("click", () => {
-    setTabsDrawer(!tabsDrawerOpen[layoutMode]);
+  // Browser mode's own bar: the dock button floats the vertical list, + opens
+  // the address/sites menu, and the strip selects and closes pages.
+  $("#browserDockBtn").addEventListener("click", () => setBrowserDrawer(!isBrowserDrawerOpen()));
+  const drawer = browserDrawerElement();
+  drawer.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-drawer-close]")) {
+      setBrowserDrawer(false);
+      $("#browserDockBtn").focus();
+      return;
+    }
+    if (target.closest("[data-drawer-new]")) {
+      setBrowserDrawer(false);
+      window.dispatchEvent(new Event("paladin:browser-menu"));
+      return;
+    }
+    const key = target.closest<HTMLElement>("[data-page]")?.dataset.page;
+    if (!key) return;
+    tabSet.active = key;
+    setBrowserDrawer(false);
+    render();
   });
-  tabsDrawerCloseBtn.addEventListener("click", () => {
-    setTabsDrawer(false);
-    tabsRailBtn.focus();
+  // Escape closes the list. It is handled on the document in the capture phase
+  // so it wins over the shell's other Escape handlers (which close menus and
+  // settings) whatever has focus — the drawer is never focusable as a whole.
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Escape" || !isBrowserDrawerOpen()) return;
+      event.stopPropagation();
+      event.preventDefault();
+      setBrowserDrawer(false);
+      $("#browserDockBtn").focus();
+    },
+    true,
+  );
+  // Passing comments to the agent lands in the composer, so come back to the
+  // mode that owns it.
+  window.addEventListener("paladin:pass-to-agent", () => setAppMode("agent"));
+  // Leaving Browser mode closes the list: it belongs to that mode's window.
+  window.addEventListener("paladin:app-mode-changed", (event) => {
+    if ((event as CustomEvent<string>).detail !== "browser") setBrowserDrawer(false);
   });
-  // First Escape closes the tabs drawer, the way it closes the sessions
-  // drawer: a panel that pushed the card should be dismissable from the
-  // keyboard, and a second press then reaches whatever is behind it.
-  tabsDrawerEl.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    event.stopPropagation();
-    setTabsDrawer(false);
-    tabsRailBtn.focus();
+  $("#browserNewTab").addEventListener("click", () => window.dispatchEvent(new Event("paladin:browser-menu")));
+  $("#browserTabs").addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const closeKey = target.closest<HTMLElement>("[data-page-close]")?.dataset.pageClose;
+    if (closeKey) {
+      closeTab(closeKey);
+      return;
+    }
+    const key = target.closest<HTMLElement>("[data-page]")?.dataset.page;
+    if (!key) return;
+    tabSet.active = key;
+    showPane();
+    render();
+    paintBrowserMode();
   });
-  // One panel per column slot. The explorer announces that it is opening;
-  // the sessions drawer announces itself the same way, and opening this one
-  // closes both. Listening to each panel's *own* open event (rather than to
-  // every show/hide request) is what keeps a late close animation from
-  // shutting a panel the user just opened.
-  window.addEventListener("paladin:sessions-drawer-opened", () => setTabsDrawer(false, false));
-  window.addEventListener("paladin:explorer-opened", () => setTabsDrawer(false, false));
+  // The IDE button reports through appMode directly, so the rail only has to
+  // follow onChange; there is nothing to mirror here.
+  window.addEventListener("paladin:enter-ide-done", () => render());
   $("#paneCloseBtn").addEventListener("click", closePane);
+  // The picker and the strip's + are the same three choices. Both live in the
+  // pane, so the pane is where they are wired.
+  const pick = (kind: string): void => {
+    if (kind === "chat") {
+      if (!canOpenSideChat()) return;
+      const set = currentSet();
+      if (!set) return;
+      const tab = newChatTab();
+      set.tabs.push(tab);
+      set.active = tab.key;
+      render();
+      tab.body.querySelector<HTMLTextAreaElement>(".side-input")?.focus();
+      return;
+    }
+    if (kind === "terminal") {
+      openTerminalTab(visibleSessionId());
+      return;
+    }
+    if (kind === "browser") openBrowserTab(visibleSessionId(), "");
+  };
+  pickerEl.addEventListener("click", (event) => {
+    const kind = (event.target as HTMLElement).closest<HTMLElement>("[data-pane-pick]")?.dataset.panePick;
+    if (kind) pick(kind);
+  });
+  tabsAddBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    // With something already open, + offers the same three choices in the
+    // header menu rather than replacing what is there.
+    void openMenu();
+  });
   historyBtn.addEventListener("click", (event) => {
     event.stopPropagation();
+    // + means "open the pane": it reveals the pane and offers the ways to
+    // fill it in the same gesture.
+    if (!paneOpen) showPane();
     if (menuEl.hidden) void openMenu();
     else closeMenu();
   });
@@ -1748,11 +1797,10 @@ export function initSidePane(): void {
     const target = event.target as HTMLElement;
     const key = target.closest<HTMLElement>(".pane-tab")?.dataset.key;
     if (key === "main") {
-      // Agent is the left half of a split, so picking it only returns focus
-      // to the prompt. In tabs layout it shows the conversation in place of
-      // the page, without destroying the list.
-      if (layoutMode === "tabs") closePane();
-      else $<HTMLTextAreaElement>("#promptInput").focus();
+      // The Agent entry shows the conversation: hide the pane and put the
+      // caret where the user is about to type. The pane's tabs are kept.
+      closePane();
+      $<HTMLTextAreaElement>("#promptInput").focus();
       return;
     }
     const set = currentSet();
@@ -1765,7 +1813,6 @@ export function initSidePane(): void {
     }
   };
   tabsEl.addEventListener("click", onTabListClick);
-  drawerTabsEl.addEventListener("click", onTabListClick);
   document.addEventListener("mousedown", (event) => {
     const target = event.target as Node;
     if (!menuEl.hidden && !menuEl.contains(target) && !historyBtn.contains(target)) closeMenu();

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-import { useLayout } from "./layout";
+import { showPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -57,7 +57,7 @@ test("the conversation and composer share a centered reading width", async ({ pa
   await page.setViewportSize({ width: 1440, height: 900 });
   // Split layout narrows the conversation, which is what gives it a reading
   // width instead of the whole window.
-  await useLayout(page, "split");
+  await showPane(page);
   await page.fill("#promptInput", "hello");
   await page.click("#sendBtn");
   await expect(page.locator("#messages .turn-row").first()).toBeVisible();

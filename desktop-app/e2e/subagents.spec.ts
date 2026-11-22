@@ -3,7 +3,7 @@
 // and stream live into a side-pane tab opened from the spawn_agent row.
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
-import { useLayout } from "./layout";
+import { showPane } from "./modes";
 
 const now = Date.now();
 const link = (name: string, type: string, status: string) => ({
@@ -225,7 +225,7 @@ test("a child opens in its own pane window, with a way into the main view", asyn
 });
 
 test("every working child gets a pane window without a click", async ({ page }) => {
-  await useLayout(page, "split");
+  await showPane(page);
   await showSidebar(page);
   await page.locator('[data-session="sess-parent"]').click();
 
