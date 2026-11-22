@@ -472,6 +472,12 @@ func codexRuntime(t *testing.T, scenario string) (*AgentRuntime, *eventLog, stri
 	t.Setenv(fakeCodexEnv, "1")
 	t.Setenv(fakeCodexScenario, scenario)
 	t.Setenv(fakeCodexLogEnv, logPath)
+	// Discovery paces itself so scans yield to foreground turns; a test
+	// that reads many pages would otherwise sleep the sum of every
+	// pause (13s for the 53-thread discovery test).
+	oldPace := discoveryPace
+	discoveryPace = 0
+	t.Cleanup(func() { discoveryPace = oldPace })
 	rt, _ := testRuntime(t)
 	log := newEventLog()
 	rt.SetTurnSink(log.sink)

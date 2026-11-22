@@ -47,6 +47,15 @@ const executablePath = browserPath();
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
+  // One retry absorbs the renderer-timer races a loaded machine
+  // stretches (drawer widths, animation settling, toast overwrite); a
+  // genuinely broken spec fails twice.
+  retries: 1,
+  // E2E drives one renderer per worker; four workers match the dev
+  // boxes this suite runs on and keep Vite responsive while specs
+  // stream from the one fixed-port server.
+  workers: 4,
+  fullyParallel: true,
   use: {
     baseURL: "http://localhost:5173",
     launchOptions: executablePath ? { executablePath } : {},

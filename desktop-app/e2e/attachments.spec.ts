@@ -26,9 +26,18 @@ test("dropped image appears as a removable card and is copied into the session o
   // The thumbnail shows as soon as the message does, before the turn ends.
   const thumb = page.locator("#messages .session-image-thumb");
   await expect(thumb).toHaveCount(1);
-  const bubble = await page.locator("#messages .bubble-user").last().boundingBox();
-  const box = await thumb.boundingBox();
-  expect(box && bubble && box.y + box.height <= bubble.y + 1).toBe(true);
+  // One synchronous read: two boundingBox() calls are separate protocol
+  // round trips that can straddle the row's slide-in animation under
+  // load, and the 1px comparison then sees a mid-animation position.
+  const fits = await page.evaluate(() => {
+    const thumb = document.querySelector<HTMLElement>("#messages .session-image-thumb");
+    const bubble = document.querySelector<HTMLElement>("#messages .bubble-user:last-of-type");
+    if (!thumb || !bubble) return false;
+    const t = thumb.getBoundingClientRect();
+    const b = bubble.getBoundingClientRect();
+    return t.y + t.height <= b.y + 1;
+  });
+  expect(fits).toBe(true);
 });
 
 test("a finished turn mounts the user's image from sessionImages", async ({ page }) => {

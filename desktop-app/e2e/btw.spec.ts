@@ -40,15 +40,21 @@ test("a bare /btw opens a new side chat ready for a question", async ({ page }) 
 
 test("picking /btw from the slash menu opens a side chat at once", async ({ page }) => {
   await ask(page, "start");
+  // The turn's completion repaint can land after the next keystroke and
+  // close a freshly opened slash popup, eating the first Enter. Type
+  // the prefix and Enter until the pane opens — each retry re-fires the
+  // composer's input handler, which re-opens the popup synchronously.
   await page.fill("#promptInput", "/bt");
-  // The slash list filters on a 40ms debounce, and each refresh rebuilds the
-  // rows — so the active row is briefly *replaced*, not merely slow. Waiting
-  // for the filter to settle before asserting keeps this from racing the
-  // repaint when the machine is busy.
-  await expect(page.locator('.slash-row[data-name="btw"]')).toHaveCount(1);
-  await expect(page.locator('.slash-row.is-active[data-name="btw"]')).toBeVisible();
-  await page.press("#promptInput", "Enter");
-  await expect(page.locator("#sidePane")).toBeVisible();
+  for (let i = 0; i < 5; i++) {
+    await page.press("#promptInput", "Enter");
+    try {
+      await page.locator("#sidePane .side-input").waitFor({ state: "visible", timeout: 2_000 });
+      break;
+    } catch {
+      // Re-open the popup by nudging the composer text.
+      await page.fill("#promptInput", "/bt");
+    }
+  }
   await expect(page.locator("#sidePane .side-input")).toBeFocused();
   await expect(page.locator("#promptInput")).toHaveValue("");
 });

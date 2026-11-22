@@ -176,9 +176,14 @@ test("a multiple-choice question takes several options plus free text", async ({
   await modal.getByRole("checkbox", { name: /lint/ }).click();
   await page.keyboard.press("3");
   await expect(modal.locator('[data-ask-opt][aria-checked="true"]')).toHaveCount(2);
-  // Toggling again unselects.
+  // Toggling again unselects. Assert each intermediate state before the
+  // next key: under load a keypress can land before the previous
+  // toggle's repaint, and the review text is then computed from a
+  // stale selection.
   await page.keyboard.press("3");
+  await expect(modal.locator('[data-ask-opt][aria-checked="true"]')).toHaveCount(1);
   await page.keyboard.press("5");
+  await expect(modal.locator('[data-ask-opt][aria-checked="true"]')).toHaveCount(2);
   await modal.locator('[data-ask="custom"]').fill("fuzz");
   await page.keyboard.press("Enter");
   await expect(modal).toContainText("Review");

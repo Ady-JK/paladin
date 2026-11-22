@@ -230,7 +230,12 @@ test("failed write row shows the exists error", async ({ page }) => {
 // Verifies an overwritten write shows the overwrite chip.
 // It checks the chip and the replaced content.
 test("overwritten write row reports the overwrite", async ({ page }) => {
-  const row = page.locator('[data-tool="write"]').nth(2);
+  // Wait for the full paint before taking an index: heads materialize
+  // while history renders, and an index picked mid-paint can shift.
+  const rows = page.locator('[data-tool="write"]');
+  await expect(rows).toHaveCount(3);
+  const row = rows.nth(2);
+  await expect(row).toBeVisible();
   await row.locator("button").first().click();
   const view = row.locator('[data-fileview="write"]');
   await expect(view).toBeVisible();
@@ -241,7 +246,13 @@ test("overwritten write row reports the overwrite", async ({ page }) => {
 // Verifies a multiline diff shows context, del, and add rows.
 // It checks the replace-all chip and each row kind.
 test("multiline edit diff keeps context lines", async ({ page }) => {
-  const row = page.locator('[data-tool="edit"]').nth(2);
+  // Wait for history to paint completely before picking a row: heads
+  // materialize while history renders, and an index picked mid-paint
+  // can shift (a group gained its head) and expand the wrong row.
+  const rows = page.locator('[data-tool="edit"]');
+  await expect(rows).toHaveCount(3);
+  const row = rows.nth(2);
+  await expect(row).toBeVisible();
   await row.locator("button").first().click();
   const diff = row.locator('[data-filediff="edit"]');
   await expect(diff).toBeVisible();
@@ -258,13 +269,26 @@ test("expanding a file row never scrolls the chat", async ({ page }) => {
   await expect(page.locator("#messages")).toContainText("Config rewritten");
   const box = page.locator('[data-tool="write"]').first();
   await box.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await page.waitForTimeout(150);
+  // Wait for scrolling to settle by observing the value, not a constant:
+  // under load a 150ms sleep can end mid-smooth-scroll.
   const chat = page.locator("#chatView");
-  const before = await chat.evaluate((el) => el.scrollTop);
+  // scrollTop 0 is a valid settled position, so wait for two equal
+  // successive reads rather than a truthy value.
+  let before = -1;
+  for (let i = 0; i < 8; i++) {
+    const now = await chat.evaluate((el) => el.scrollTop);
+    if (now === before) break;
+    before = now;
+    await page.waitForTimeout(150);
+  }
   await box.locator("button").first().click({ force: true });
   await page.locator('[data-tool="edit"]').first().locator("button").first().click({ force: true });
-  await page.waitForTimeout(200);
-  const after = await chat.evaluate((el) => el.scrollTop);
+  let after = before;
+  for (let i = 0; i < 10; i++) {
+    after = await chat.evaluate((el) => el.scrollTop);
+    if (Math.abs(after - before) >= 5) break;
+    await page.waitForTimeout(100);
+  }
   expect(Math.abs(after - before)).toBeLessThan(5);
 });
 

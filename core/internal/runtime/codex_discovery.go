@@ -50,8 +50,13 @@ func (r *AgentRuntime) StartCodexDiscovery() {
 	})
 }
 
+// discoveryPace scales discovery's pauses. Production paces so a scan
+// yields to foreground turns; tests with many pages shorten it so the
+// suite does not sleep the sum of every session's pause.
+var discoveryPace = time.Duration(1)
+
 func discoveryWait(ctx context.Context, delay time.Duration) bool {
-	t := time.NewTimer(delay)
+	t := time.NewTimer(delay * discoveryPace)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():

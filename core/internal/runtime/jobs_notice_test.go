@@ -205,6 +205,11 @@ func watchJob(t *testing.T, args map[string]any, want ...string) string {
 		for _, id := range rt.jobs.running(sid) {
 			_, _ = rt.shell.Call([]byte(`{"action":"cancel","job_id":"`+id+`"}`), &tools.ToolCtx{SessionID: sid})
 		}
+		// The cancellation just kicked off an asynchronous finalize
+		// write; drain it here, before TempDir's cleanup removes the
+		// directory it writes into (quiesceMonitors stops monitors AND
+		// waits out in-flight finalizes).
+		rt.jobs.quiesceMonitors()
 	})
 
 	runParent(t, rt, sid, ws, "start it")
@@ -286,8 +291,30 @@ func TestBackgroundJobWithNotifyFalseIsNotWatched(t *testing.T) {
 		for _, id := range rt.jobs.running(sid) {
 			_, _ = rt.shell.Call([]byte(`{"action":"cancel","job_id":"`+id+`"}`), &tools.ToolCtx{SessionID: sid})
 		}
+		// The cancellation just kicked off an asynchronous finalize
+		// write; drain it here, before TempDir's cleanup removes the
+		// directory it writes into (quiesceMonitors stops monitors AND
+		// waits out in-flight finalizes).
+		rt.jobs.quiesceMonitors()
 	})
 	runParent(t, rt, sid, ws, "start it")
+
+	// The absence assertions are only meaningful once the job exists:
+	// wait for it to be live rather than sleeping a fixed 400ms, which
+	// under load can expire before the spawn even happened (and made
+	// this test pass or fail on scheduler luck).
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if ids := rt.jobs.running(sid); len(ids) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ids := rt.jobs.running(sid); len(ids) == 0 {
+		t.Fatal("the background job never started; the turn finished without spawning it")
+	}
+	// A generous quiet window, scaled from the 40ms stall the test pins:
+	// several stall intervals must pass with no monitor, no notice.
 	time.Sleep(400 * time.Millisecond)
 
 	mu.Lock()

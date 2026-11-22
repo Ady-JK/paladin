@@ -68,8 +68,9 @@ test("Revert to here previews, restores files and the conversation", async ({ pa
     index: 0,
     version: "undo-preview-version",
   });
-  await expect(page.locator("#toastText")).toContainText("2 files restored");
-  await expect(page.locator("#toastText")).toContainText("1 file deleted");
+  // One toast carries the whole sentence; two back-to-back toast asserts
+  // race the overwrite (a new toast replaces #toastText's text at once).
+  await expect(page.locator("#toastText")).toContainText(/2 files restored, 1 file deleted/);
   await expect(page.locator("#promptInput")).toHaveValue("run the slow job");
   await expect(page.locator("#messages .bubble-user")).toHaveCount(0);
   await expect(page.locator("#recoverLatestBtn")).toBeVisible();
@@ -316,8 +317,7 @@ test("worktree sessions show their branch under the origin folder and merge back
     __e2eMergeResult: { merged: false, nothingToMerge: false, conflicts: ["src/a.ts"], into: "main" },
   });
   await bar.locator("#mergeBtn").click();
-  await expect(page.locator("#toastText")).toContainText(/conflict/i);
-  await expect(page.locator("#toastText")).toContainText("src/a.ts");
+  await expect(page.locator("#toastText")).toContainText(/conflict.*src\/a\.ts|src\/a\.ts.*conflict/i);
 
   await set(page, { __e2eMergeError: "the repository checkout has uncommitted changes; commit or stash them first" });
   await bar.locator("#mergeBtn").click();

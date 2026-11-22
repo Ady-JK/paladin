@@ -23,7 +23,15 @@ import (
 func testRuntime(t *testing.T) (*AgentRuntime, string) {
 	t.Helper()
 	dir := t.TempDir()
-	return WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore()), dir
+	rt := WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore())
+	// Cleanup runs last-in-first-out, so this quiesce (registered first)
+	// runs LAST: every test's own cleanup has already stopped its jobs,
+	// and the monitors are gone before TempDir's RemoveAll deletes the
+	// job records they would still be writing. Without it a monitor's
+	// late finalize races the directory removal and flunks whichever
+	// neighboring test loses the race under load.
+	t.Cleanup(rt.jobs.quiesceMonitors)
+	return rt, dir
 }
 
 func pointMockAt(rt *AgentRuntime, url string) {

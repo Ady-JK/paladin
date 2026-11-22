@@ -56,7 +56,10 @@ test("legacy Auto selections become Read-only and only two session modes remain"
   await page.keyboard.press("Escape");
   await showSidebar(page);
   await page.locator('button.session-pick[data-session="sess-notify-1"]').click();
-  await expect(page.locator("#permChip")).toHaveAttribute("data-preset", "read-only");
+  // The chip's preset attribute lands after the session-open RPC chain
+  // (openSession, attach, permissionsGet) resolves; poll rather than
+  // assert-once so a busy main thread cannot race it.
+  await expect.poll(async () => page.locator("#permChip").getAttribute("data-preset")).toBe("read-only");
   await send(page, "inspect only");
   await expect(page.locator("#messages")).toContainText("Stub reply to: inspect only");
   const submits = await page.evaluate(() => (window as any).__e2eSubmits);

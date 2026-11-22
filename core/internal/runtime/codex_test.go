@@ -34,6 +34,21 @@ func submitCodex(t *testing.T, rt *AgentRuntime, id, cwd, message string) <-chan
 	return done
 }
 
+// awaitTurn waits for a Codex turn with a deadline. A raw <-done has
+// none: under suite load the fake's stream teardown can race the
+// approval answer, and the receive then hangs to the package's 10m
+// cap, turning a slow test into a 10-minute stall.
+func awaitTurn(t *testing.T, done <-chan TurnInfo) TurnInfo {
+	t.Helper()
+	select {
+	case info := <-done:
+		return info
+	case <-time.After(30 * time.Second):
+		t.Fatal("the codex turn did not finish")
+		return TurnInfo{}
+	}
+}
+
 func TestCodexStatusListsVisibleModels(t *testing.T) {
 	rt, _, _ := codexRuntime(t, "chat")
 	if st := rt.CodexStatus(false); !st.Installed || st.LoggedIn {
@@ -53,7 +68,7 @@ func TestCodexTurnStreamsPersistsAndKeepsItsThread(t *testing.T) {
 	id, cwd := openCodex(t, rt)
 
 	done := submitCodex(t, rt, id, cwd, "list files")
-	final := <-done
+	final := awaitTurn(t, done)
 	if final.Error != "" || final.Reply != "Looking now.Done." || !final.Persisted {
 		t.Fatalf("final %+v", final)
 	}
@@ -134,7 +149,7 @@ func TestCodexApprovalCardAnswersTheRequest(t *testing.T) {
 			if ok, err := rt.AnswerApproval(id, ap.ID, tc.decision); err != nil || !ok {
 				t.Fatalf("answer: %v %v", ok, err)
 			}
-			final := <-done
+			final := awaitTurn(t, done)
 			if final.Error != "" || final.Reply != "after "+tc.want {
 				t.Fatalf("final %+v", final)
 			}
@@ -153,7 +168,7 @@ func TestCodexStopInterruptsTheTurn(t *testing.T) {
 	if !rt.StopIn(id, cwd) {
 		t.Fatal("stop found nothing to stop")
 	}
-	final := <-done
+	final := awaitTurn(t, done)
 	if !final.Stopped || final.Error != "" || !final.Persisted {
 		t.Fatalf("final %+v", final)
 	}
@@ -197,7 +212,7 @@ func TestCodexPermissionPresetsPickTheSandbox(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		<-done
+		awaitTurn(t, done)
 		if want := "sandbox=" + tc.sandbox + " approval=" + tc.approval; !strings.Contains(fakeLog(t, fake), want) {
 			t.Fatalf("%s/%s: want %q in\n%s", tc.perm, tc.mode, want, fakeLog(t, fake))
 		}
@@ -234,7 +249,7 @@ func TestCodexProviderIsRefusedOnAPaladinSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final := <-done; !strings.Contains(final.Error, "start a Codex session") {
+	if final := awaitTurn(t, done); !strings.Contains(final.Error, "start a Codex session") {
 		t.Fatalf("error = %q", final.Error)
 	}
 }
@@ -283,7 +298,7 @@ func TestCodexManagedRequirementsClampFullAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final := <-done; final.Error != "" {
+	if final := awaitTurn(t, done); final.Error != "" {
 		t.Fatalf("final %+v", final)
 	}
 	if want := "sandbox=workspace-write approval=on-request"; !strings.Contains(fakeLog(t, fake), want) {
@@ -299,7 +314,7 @@ func TestCodexSessionsRefuseSkillsAndPromptCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final := <-done; !strings.Contains(final.Error, "not available in a codex session") {
+	if final := awaitTurn(t, done); !strings.Contains(final.Error, "not available in a codex session") {
 		t.Fatalf("error = %q", final.Error)
 	}
 }
@@ -391,7 +406,7 @@ func TestCodexCompactRunsCodexsOwnCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f := <-done; f.Error != "" || f.Reply != "" {
+	if f := awaitTurn(t, done); f.Error != "" || f.Reply != "" {
 		t.Fatalf("compact request: %+v", f)
 	}
 	if strings.Count(fakeLog(t, fake), "thread/compact/start") != 2 {
@@ -499,7 +514,7 @@ func TestCodexPlanModeAndPlanUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	final := <-done
+	final := awaitTurn(t, done)
 	if final.Error != "" || final.Reply != "1. Read\n2. Write\n" {
 		t.Fatalf("final %+v", final)
 	}
@@ -539,7 +554,7 @@ func TestCodexPlanModeAndPlanUpdates(t *testing.T) {
 	// Leaving plan mode is told to Codex too.
 	provider2 := HarnessCodex
 	_, done, _ = rt.SubmitTurn(agent.Request{SessionID: id, Message: "go", Cwd: cwd, Provider: &provider2, Model: &model}, SubmitOpts{})
-	<-done
+	awaitTurn(t, done)
 	if !strings.Contains(fakeLog(t, fake), "collaboration mode=default") {
 		t.Fatalf("default mode not sent:\n%s", fakeLog(t, fake))
 	}
@@ -569,7 +584,7 @@ func TestCodexQuestionsGoThroughTheAskWizard(t *testing.T) {
 	if ok, err := rt.AnswerAsk(id, "q-1", []tools.AskAnswer{{Question: "a", Answer: "hello_world", Selected: nil}, {Question: "b", Answer: "main.py"}}); err != nil || !ok {
 		t.Fatalf("answer %v %v", ok, err)
 	}
-	final := <-done
+	final := awaitTurn(t, done)
 	if final.Error != "" || final.Reply != "thanks" {
 		t.Fatalf("final %+v", final)
 	}
@@ -613,7 +628,7 @@ func TestDismissingCodexQuestionsStopsTheTurn(t *testing.T) {
 	if !rt.CancelAsk(id, "q-1") {
 		t.Fatal("nothing was waiting")
 	}
-	if final := <-done; !final.Stopped {
+	if final := awaitTurn(t, done); !final.Stopped {
 		t.Fatalf("final %+v", final)
 	}
 }
@@ -689,7 +704,7 @@ func TestCodexNamesTheDefaultModelItRan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final := <-done; final.Error != "" {
+	if final := awaitTurn(t, done); final.Error != "" {
 		t.Fatalf("turn: %+v", final)
 	}
 	view, _ := rt.SessionUsage(opened.SessionID, cwd)
@@ -1027,7 +1042,7 @@ func TestCodexMCPPromptGoesThroughTheAskWizard(t *testing.T) {
 	if ok, err := rt.AnswerAsk(id, card.Tool.ID, answers); err != nil || !ok {
 		t.Fatalf("answer %v %v", ok, err)
 	}
-	if final := <-done; final.Error != "" || final.Reply != "done" {
+	if final := awaitTurn(t, done); final.Error != "" || final.Reply != "done" {
 		t.Fatalf("final %+v", final)
 	}
 	want := `elicitation={"_meta":{"persist":"session"},"action":"accept","content":{"approval":"accept","count":3,"note":"hi","tags":["a","b"]}}`
@@ -1044,7 +1059,7 @@ func TestDismissingAnMCPPromptCancelsIt(t *testing.T) {
 	if !rt.CancelAsk(id, card.Tool.ID) {
 		t.Fatal("nothing was waiting")
 	}
-	<-done
+	awaitTurn(t, done)
 	if got := fakeLog(t, fake); !strings.Contains(got, `elicitation={"action":"cancel"}`) {
 		t.Fatalf("a dismissed prompt is a cancel:\n%s", got)
 	}
@@ -1073,7 +1088,7 @@ func TestCodexSessionApprovalCoversLaterRequestsOfThatKind(t *testing.T) {
 	if ok, err := rt.AnswerApproval(id, "cmd-1", "session"); err != nil || !ok {
 		t.Fatalf("answer: %v %v", ok, err)
 	}
-	if final := <-done; final.Error != "" {
+	if final := awaitTurn(t, done); final.Error != "" {
 		t.Fatalf("first turn: %+v", final)
 	}
 	before := countEvents(log.all(), "chat/approval")
@@ -1109,7 +1124,7 @@ func TestCodexSessionApprovalDoesNotSurviveAChangeOfPermissions(t *testing.T) {
 	if _, err := rt.AnswerApproval(id, "cmd-1", "session"); err != nil {
 		t.Fatal(err)
 	}
-	<-done
+	awaitTurn(t, done)
 	before := countEvents(log.all(), "chat/approval")
 
 	provider, model := HarnessCodex, "fake-luna"
@@ -1121,7 +1136,7 @@ func TestCodexSessionApprovalDoesNotSurviveAChangeOfPermissions(t *testing.T) {
 	if _, err := rt.AnswerApproval(id, "cmd-1", "deny"); err != nil {
 		t.Fatal(err)
 	}
-	<-done
+	awaitTurn(t, done)
 }
 
 func TestMcpCommandListsCodexsServers(t *testing.T) {

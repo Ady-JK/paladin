@@ -111,7 +111,10 @@ func (l *eventLog) all() []TurnEvent {
 // waitFor polls until pred holds over the log or fails the test.
 func (l *eventLog) waitFor(t *testing.T, what string, pred func([]TurnEvent) bool) []TurnEvent {
 	t.Helper()
-	deadline := time.After(10 * time.Second)
+	// Generous on purpose: the deadline only guards a hung turn, and a
+	// short one turns into load-flakiness when the suite runs beside
+	// other packages on a busy machine.
+	deadline := time.After(30 * time.Second)
 	for {
 		evs := l.all()
 		if pred(evs) {

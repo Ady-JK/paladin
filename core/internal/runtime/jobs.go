@@ -77,8 +77,16 @@ type jobBook struct {
 	// notices are running-job reminders waiting for the session's next
 	// round, or for the wake turn that delivers them.
 	notices map[string][]agent.Notice
-	// stops ends each live job's log monitor.
+	// stops ends each live job's log monitor; monitors track themselves
+	// in monitors so a test can wait for every watcher to be gone before
+	// its TempDir disappears.
 	stops map[string]chan struct{}
+	// monitors counts monitor goroutines still executing their loop.
+	monitors sync.WaitGroup
+	// finalizes counts JobFinished calls between their start and the
+	// record write, so a test can wait out the asynchronous finalize a
+	// cancellation kicks off before its TempDir is removed.
+	finalizes sync.WaitGroup
 	// waited is closed at a session's next job completion, so a blocked
 	// wait call can re-read job state. A closed session's entry is stale
 	// and dropped.
@@ -198,6 +206,11 @@ func (b *jobBook) JobBackgrounded(e tools.JobEvent) {
 }
 
 func (b *jobBook) JobFinished(e tools.JobEvent) {
+	// The finalize write races a test's TempDir removal when the
+	// cancellation that triggered it happens in cleanup; the WaitGroup
+	// lets quiesceMonitors drain in-flight finalizes too.
+	b.finalizes.Add(1)
+	defer b.finalizes.Done()
 	b.mu.Lock()
 	rec := b.live[e.ID]
 	if rec == nil {
@@ -310,8 +323,13 @@ func (b *jobBook) startMonitor(rec *JobRecord) {
 	}
 	stop := make(chan struct{})
 	b.stops[id] = stop
+	// Add before releasing the lock: a WaitGroup Add that starts when the
+	// counter is zero must happen before any Wait, or a quiesce racing
+	// this registration could return before the goroutine is counted.
+	b.monitors.Add(1)
 	b.mu.Unlock()
 	go func() {
+		defer b.monitors.Done()
 		ticker := time.NewTicker(jobCheckEvery)
 		defer ticker.Stop()
 		watch := newLogWatch(time.Now(), tools.LogSize(logPath))
@@ -575,6 +593,42 @@ func joinJobIDs(recs []JobRecord) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// quiesceMonitors stops every live job's monitor and waits until all
+// watcher goroutines and in-flight finalize writes have exited. Tests
+// call it from cleanup so nothing job-related outlives the test's
+// TempDir: a late monitor tick or finalize write racing RemoveAll is
+// what made neighboring tests flake under load. Production never needs
+// it — monitors end with their jobs and finalizes with their records.
+func (b *jobBook) quiesceMonitors() {
+	b.mu.Lock()
+	stops := make([]chan struct{}, 0, len(b.stops))
+	for id, stop := range b.stops {
+		stops = append(stops, stop)
+		delete(b.stops, id)
+	}
+	b.mu.Unlock()
+	for _, stop := range stops {
+		close(stop)
+	}
+	b.monitors.Wait()
+	// A cancellation kills the process, but the watcher goroutine that
+	// reports it runs separately: wait until every job has actually been
+	// finalized before draining the writes. JobFinished removes the job
+	// from live and counts itself in finalizes, so live empty plus the
+	// WaitGroup below covers the whole path.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		live := len(b.live) + len(b.candidates)
+		b.mu.Unlock()
+		if live == 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	b.finalizes.Wait()
 }
 
 // errJobsRunning refuses a revert while the session's jobs could still
