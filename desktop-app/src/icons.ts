@@ -152,6 +152,11 @@ const ICONS: Record<string, Icon> = {
     line: true,
     thin: true,
   },
+  "tl-folder-open": {
+    d: "M3 18V7a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v2M3 18l2.6-7h15.2L18 18H3Z",
+    line: true,
+    thin: true,
+  },
   "tl-pencil": { d: "M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Zm9.5-13.5 4 4", line: true, thin: true },
   "tl-list": { d: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01", line: true, thin: true },
   "tl-ask": {
