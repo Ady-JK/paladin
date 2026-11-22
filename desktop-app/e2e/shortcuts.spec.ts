@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
-import { showPane } from "./modes";
+import { addToPane, showPane } from "./modes";
 
 // Every app shortcut is Cmd on macOS and Ctrl elsewhere.
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
@@ -165,8 +165,7 @@ test("the agent shortcut focuses the prompt and hides the pane", async ({ page }
   await showPane(page);
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
-  await page.locator("#paneNewChatBtn").click();
-  await page.getByRole("menuitem", { name: "New side chat" }).click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
   // Park focus inside the side chat, so moving to the prompt is proof the
   // shortcut ran and not just where focus already was — and so the chord
