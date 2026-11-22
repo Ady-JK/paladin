@@ -48,6 +48,11 @@ let confirmReload = "";
 let openRequest = 0;
 let browserActive = false;
 let explorerVisible = true;
+
+// The shell's panel animation (--panel-anim in shell.css) and one frame:
+// the pause a drawer handoff waits so the closing panel settles first.
+const PANEL_ANIM_MS = 200;
+const FRAME_MS = 16;
 let agentVisible = true;
 let restoring = false;
 let restoreInteracted = false;
@@ -495,7 +500,7 @@ function setEnabled(on: boolean): void {
   if (on) window.dispatchEvent(new Event("paladin:enter-ide-done"));
 }
 
-export function initIDE(): void {
+export async function initIDE(): Promise<void> {
   const root = document.createElement("section");
   root.id = "ideWorkspace";
   root.className = "ide-workspace";
@@ -527,7 +532,11 @@ export function initIDE(): void {
   explorer.append($("#ideExplorerResize"));
   explorer.classList.add("is-closed");
   explorer.inert = true;
-  // Establish the closed state before the first request opens the drawer.
+  // The lazy load's first click mounts the explorer and shows it in the same
+  // task: the browser never paints the closed state, so the width transition
+  // has no start point and the panel snaps open. Mount closed, then let one
+  // frame paint before the caller's show event lands.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   explorer.getBoundingClientRect();
   explorer.addEventListener("transitionend", (event) => {
     if (event.target === explorer) window.dispatchEvent(new Event("resize"));
@@ -602,9 +611,22 @@ export function initIDE(): void {
     syncPaneVisibility();
     scheduleLayout();
   });
-  window.addEventListener("paladin:ide-show-explorer", () => {
+  window.addEventListener("paladin:ide-show-explorer", (event) => {
     explorerVisible = true;
     syncWorkspace();
+    // A drawer switch is a handoff, not a scramble: the sessions drawer is
+    // already collapsing (window.ts closed it synchronously on this same
+    // event), so let it finish before this one grows — the incoming panel
+    // then animates from a settled left edge, left-to-right, instead of
+    // riding the outgoing column leftward.
+    const switching = (event as CustomEvent<{ switching?: boolean }>).detail?.switching === true;
+    if (switching) {
+      setTimeout(() => {
+        syncPaneVisibility();
+        scheduleLayout();
+      }, PANEL_ANIM_MS + FRAME_MS);
+      return;
+    }
     syncPaneVisibility();
     scheduleLayout();
   });

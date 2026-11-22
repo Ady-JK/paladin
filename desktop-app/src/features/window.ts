@@ -48,8 +48,12 @@ export function toggleThemeFromKey(): void {
 // toggleSidebarFromKey is the Sessions-button toggle without the
 // pointer, so a shortcut can hide or show the sessions drawer.
 export function toggleSidebarFromKey(): void {
-  setDrawer(state.collapsed);
+  if (state.collapsed) handoffOpenSessions();
+  else setDrawer(false);
 }
+
+const PANEL_ANIM_MS = 200;
+const FRAME_MS = 16;
 
 // paintSideVisibility shows the sessions column. It is a real column in
 // the shell's flex row, so opening it narrows the main card instead of
@@ -74,16 +78,41 @@ function paintSideVisibility(): void {
 // surprise when it also resized it, and it makes selecting text or
 // dragging a file out of it impossible. The rail button, the close button
 // and Escape are the only ways out.
+// setDrawer closes the sessions drawer; opens go through
+// handoffOpenSessions, which sequences a switch when the file explorer is
+// still occupying the column.
 function setDrawer(open: boolean): void {
-  if (state.collapsed === !open) {
+  if (open) {
+    handoffOpenSessions();
     return;
   }
-  state.collapsed = !open;
-  if (open) {
-    window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
+  if (state.collapsed === true) {
+    return;
+  }
+  state.collapsed = true;
+  paintSideVisibility();
+}
+
+// A drawer switch is a handoff, not a scramble: the explorer that is closing
+// should settle before this drawer grows, so the incoming panel animates from
+// a still edge instead of riding the collapsing column.
+let handoffTimer = 0;
+function handoffOpenSessions(): void {
+  window.clearTimeout(handoffTimer);
+  const explorer = document.querySelector<HTMLElement>(".ide-explorer");
+  const switching = explorer !== null && !explorer.classList.contains("is-closed");
+  if (state.collapsed) {
+    state.collapsed = false;
+    if (switching) {
+      window.dispatchEvent(new Event("paladin:ide-hide-explorer"));
+      handoffTimer = window.setTimeout(() => {
+        if (!state.collapsed) paintSideVisibility();
+      }, PANEL_ANIM_MS + FRAME_MS);
+      return;
+    }
+    paintSideVisibility();
     window.dispatchEvent(new Event("paladin:sessions-drawer-opened"));
   }
-  paintSideVisibility();
 }
 
 function drawerOpen(): boolean {
@@ -125,6 +154,10 @@ function wireDrawer(): void {
   agentTabEl.addEventListener("click", toggleSidebarFromKey);
   // The pushing panels share the shell's column slot, so opening one closes
   // the others: two drawers side by side would squeeze the card to nothing.
+  // This runs before ide.ts's own ide-show-explorer handler (that module is
+  // lazy), so the sessions drawer is closed and collapsing by the time the
+  // explorer reads the event — its handler waits out the collapse, which is
+  // what makes a switch a handoff instead of a scramble.
   window.addEventListener("paladin:ide-show-explorer", () => setDrawer(false));
   window.addEventListener("paladin:tabs-drawer-opened", () => setDrawer(false));
   document.querySelector<HTMLElement>("#ideModeBtn")?.addEventListener("click", (event) => {

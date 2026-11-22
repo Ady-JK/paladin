@@ -139,8 +139,8 @@ window.addEventListener("DOMContentLoaded", () => {
   let ideLoad: Promise<void> | undefined;
   const ensureIDE = (): Promise<void> => {
     ideLoad ??= import("./features/ide")
-      .then(({ initIDE }) => {
-        initIDE();
+      .then(async ({ initIDE }) => {
+        await initIDE();
         ideButton.removeEventListener("click", loadIDE);
       })
       .catch((error: unknown) => {
@@ -152,10 +152,21 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#ideExplorerToggle").addEventListener("click", () => {
     void ensureIDE()
       .then(() => {
-        const event = $(".ide-explorer").classList.contains("is-closed")
-          ? "paladin:ide-show-explorer"
-          : "paladin:ide-toggle-explorer";
-        window.dispatchEvent(new Event(event));
+        // Snapshot before dispatching: window.ts's ide-show-explorer
+        // listener closes the sessions drawer synchronously, so the
+        // explorer's handler cannot tell a switch from a plain open by
+        // reading the DOM after the fact. The detail carries the answer.
+        const switching =
+          document.querySelector("#sidebar") !== null &&
+          !document.querySelector("#sidebar")!.classList.contains("is-closed");
+        window.dispatchEvent(
+          new CustomEvent(
+            $(".ide-explorer").classList.contains("is-closed")
+              ? "paladin:ide-show-explorer"
+              : "paladin:ide-toggle-explorer",
+            { detail: { switching } },
+          ),
+        );
       })
       .catch((error: unknown) => setStatus(`Could not open Explorer: ${String(error)}`, "error"));
   });
