@@ -23,6 +23,9 @@
     "executableName": "paladin",
     "maintainer": "paladin"
   },
+  "deb": {
+    "afterInstall": "scripts/deb-postinstall.sh"
+  },
   "mac": {
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Paladin uses the microphone only for on-device dictation."
