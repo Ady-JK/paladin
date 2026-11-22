@@ -423,6 +423,15 @@
   flex: 0 0 32%;
   border-left: 1px solid var(--color-slate-800);
 }
+/* The animated closed state must win over the mode rule above (an ID beats
+   a class pair), or a closed pane in IDE mode keeps holding an invisible
+   32% column. Same-number selector, one ID more: the closed state wins. */
+#agentSplit.ide-mode > #sidePane.is-closed {
+  flex-basis: 0;
+  min-width: 0;
+  width: 0;
+  border-left-width: 0;
+}
 .ide-mode .greet-title {
   font-size: clamp(20px, 2vw, 28px);
 }

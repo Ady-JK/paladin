@@ -16,6 +16,19 @@ async function openPane(page: Page): Promise<void> {
   await showPane(page);
   await addToPane(page, "chat");
   await expect(page.locator("#sidePane")).toBeVisible();
+  // The pane animates open now; drag geometry must be read settled, or the
+  // handle moves under the cursor mid-drag. Settled = two equal reads.
+  await expect
+    .poll(
+      async () => {
+        const first = await paneWidth(page);
+        await page.waitForTimeout(120);
+        const second = await paneWidth(page);
+        return Math.abs(first - second) < 1;
+      },
+      { timeout: 4000 },
+    )
+    .toBe(true);
 }
 
 const paneWidth = (page: Page): Promise<number> =>
@@ -111,12 +124,25 @@ test("double-clicking the border returns the split to half", async ({ page }) =>
   await openPane(page);
   const handle = page.locator("#paneSplitResize");
   const box = (await handle.boundingBox())!;
+  const available = await page.locator("#agentSplit").evaluate((el) => el.getBoundingClientRect().width);
   await page.mouse.move(box.x + box.width / 2, box.y + 60);
   await page.mouse.down();
   await page.mouse.move(box.x - 200, box.y + 60, { steps: 6 });
   await page.mouse.up();
+  // The pane's width animates to the committed split; wait for it to
+  // settle before measuring, or the read lands at the animation's start.
+  await expect
+    .poll(
+      async () => {
+        const first = await paneWidth(page);
+        await page.waitForTimeout(120);
+        const second = await paneWidth(page);
+        return Math.abs(first - second) < 1 ? second : -1;
+      },
+      { timeout: 4000 },
+    )
+    .toBeGreaterThan(available * 0.5 + 50);
   const widened = await paneWidth(page);
-  const available = await page.locator("#agentSplit").evaluate((el) => el.getBoundingClientRect().width);
   expect(widened).toBeGreaterThan(available * 0.5 + 50);
 
   await handle.dblclick();

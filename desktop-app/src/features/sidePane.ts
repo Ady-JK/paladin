@@ -84,6 +84,12 @@ export const STANDALONE_PANE_SESSION = "__standalone_pane__";
 const tabSet: TabSet = { tabs: [], active: "" };
 const pendingBrowserSessions = new Set<string>();
 
+// The shell's panel animation (--panel-anim in shell.css) and one frame:
+// the pause the pane's close waits before tearing its body down, so the
+// slide-shut is seen rather than a vanish.
+const PANEL_ANIM_MS = 200;
+const FRAME_MS = 16;
+
 function visibleSessionId(): string {
   return state.sessionId || STANDALONE_PANE_SESSION;
 }
@@ -1238,14 +1244,23 @@ function render(): void {
   for (const button of modeButtons) {
     button.setAttribute("aria-selected", String(button.dataset.mode === mode));
   }
-  sidePaneEl.hidden = !paneOpen;
+  // In Browser mode the pages own the window; the agent view (pane included)
+  // is hidden as one unit, so the pane needs no separate handling here.
+  sidePaneEl.hidden = false;
+  sidePaneEl.classList.toggle("is-closed", !paneOpen);
   if (!paneOpen) {
     // The strip keeps its tabs: selecting the Agent entry shows the
-    // conversation, it does not throw the other tabs away. Only the pane body
-    // gives up its space, so the native page is detached.
+    // conversation, it does not throw the other tabs away. The body is
+    // emptied only after the close animation has shown the pane sliding
+    // shut — tearing it down at once made the column vanish instead of
+    // animating.
     closeMenu();
     paintTabs();
-    bodyEl.replaceChildren();
+    window.setTimeout(() => {
+      if (paneOpen) return;
+      bodyEl.replaceChildren();
+      syncNativeSurfaces();
+    }, PANEL_ANIM_MS + FRAME_MS);
     syncNativeSurfaces();
     return;
   }

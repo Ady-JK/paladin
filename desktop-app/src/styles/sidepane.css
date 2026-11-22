@@ -64,6 +64,17 @@ body.is-splitting {
   flex-direction: column;
   border-left: 1px solid var(--color-slate-200);
   background: #fff;
+  /* Opening and closing animate like the rail drawers: the pane is a flex
+     column, so its basis slides from zero and the conversation reclaims the
+     space smoothly instead of the whole layout snapping one column wider.
+     `min-width` snaps at once on the way OPEN (a delayed snap would clamp
+     the basis to zero for the whole animation); on the way CLOSED it is
+     held back by the is-closed rule so the slide is not cut short. */
+  transition:
+    flex-basis var(--panel-anim) var(--panel-ease),
+    opacity var(--panel-anim) ease,
+    border-left-width var(--panel-anim) var(--panel-ease),
+    visibility 0s linear var(--panel-anim);
 }
 
 /* The pane is a column of the card, not a floating card of its own: it
@@ -77,8 +88,33 @@ body.is-splitting {
 .side-pane[hidden] {
   display: none;
 }
+/* Closed: the pane keeps its place in the flow so it can animate shut —
+   `hidden` stays reserved for layouts that truly remove it (Browser mode
+   owns the window). Every property that decides the width transitions to
+   zero together, or the first frame clamps the rest and the panel cuts
+   instead of sliding. min-width is delayed: while it still reads 240px the
+   basis is free to slide under it. */
+.side-pane.is-closed {
+  flex-basis: 0;
+  min-width: 0;
+  width: 0;
+  border-left-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    flex-basis var(--panel-anim) var(--panel-ease),
+    opacity var(--panel-anim) ease,
+    border-left-width var(--panel-anim) var(--panel-ease),
+    min-width 0s,
+    visibility 0s linear var(--panel-anim);
+}
+.side-pane.is-closed > * {
+  visibility: hidden;
+}
 /* Nothing to drag when the pane is closed. */
-#agentSplit:has(#sidePane[hidden]) .pane-split-resize {
+#agentSplit:has(#sidePane[hidden]) .pane-split-resize,
+#agentSplit:has(#sidePane.is-closed) .pane-split-resize {
   display: none;
 }
 .dark .side-pane {

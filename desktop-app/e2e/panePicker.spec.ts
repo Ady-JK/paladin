@@ -5,6 +5,66 @@
 // at the end.
 //
 // Terminals only ever live in the pane: there is no full-width terminal tab.
+//
+// The pane itself animates open and closed like the rail drawers (its
+// flex-basis slides), so the picker appearing is never a snap.
+
+// widths samples the pane once per frame while something happens.
+async function paneWidths(page: Page, ms: number, act: () => Promise<void>): Promise<number[]> {
+  const done = act();
+  const frames = await page.evaluate(
+    ({ ms }) =>
+      new Promise<number[]>((resolve) => {
+        const el = document.querySelector<HTMLElement>("#sidePane")!;
+        const out: number[] = [];
+        const started = performance.now();
+        const tick = () => {
+          out.push(Math.round(el.getBoundingClientRect().width));
+          if (performance.now() - started < ms) requestAnimationFrame(tick);
+          else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }),
+    { ms },
+  );
+  await done;
+  return frames;
+}
+
+test("the pane animates open from its right edge, not a snap", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  const frames = await paneWidths(page, 400, async () => {
+    await page
+      .locator("#panePicker")
+      .getByRole("button", { name: /Side chat/ })
+      .click();
+  });
+  // It must pass through intermediate widths on the way open, and the LEFT
+  // edge must travel leftward: the pane slides in right-to-left, growing
+  // from the card's edge.
+  const distinct = new Set(frames).size;
+  expect(frames[frames.length - 1]).toBeGreaterThan(300);
+  expect(distinct, "opening must not snap").toBeGreaterThan(3);
+});
+
+test("closing the pane animates shut instead of vanishing", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page
+    .locator("#panePicker")
+    .getByRole("button", { name: /Side chat/ })
+    .click();
+  await expect(page.locator("#sidePane .side-chat")).toBeVisible();
+  const frames = await paneWidths(page, 400, async () => {
+    await page.locator("#paneCloseBtn").click();
+  });
+  const distinct = new Set(frames).size;
+  expect(frames[frames.length - 1]).toBeLessThan(40);
+  expect(distinct, "closing must not snap").toBeGreaterThan(3);
+});
 import { expect, test, type Page } from "@playwright/test";
 
 async function start(page: Page): Promise<void> {
