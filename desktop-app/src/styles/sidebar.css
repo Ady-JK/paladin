@@ -1,15 +1,9 @@
 /* ---- Sidebar: flat, Codex-style ---- */
-#sidebar,
+/* The drawer's own edge lives in shell.css (`.side-drawer`), which the file
+   explorer shares — one rule, so the two panels cannot drift apart. Only the
+   rows inside the sidebar are flattened here. */
 #sidebar > div {
   border-color: transparent;
-}
-
-.dark #sidebar {
-  border-right-color: rgb(255 255 255 / 0.05);
-}
-
-#sidebar {
-  border-right-color: var(--color-slate-200);
 }
 
 #titleBar {

@@ -438,10 +438,15 @@ function placeExplorer(): void {
   if (enabled) {
     const workspace = $(".ide-workspace");
     if (explorer.parentElement !== workspace) workspace.prepend(explorer, resize);
+    // Inside the editor it is a column, not a drawer: no card surface.
+    explorer.classList.remove("side-drawer");
     return;
   }
   const shell = $("#appShell");
   if (explorer.parentElement !== shell) shell.insertBefore(explorer, $("#mainCard"));
+  // Beside the chat it is the sessions drawer's twin, and says so: one rule
+  // set describes both surfaces, so they cannot drift apart again.
+  explorer.classList.add("side-drawer");
 }
 
 function syncPaneVisibility(): void {

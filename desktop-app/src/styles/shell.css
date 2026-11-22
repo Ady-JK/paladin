@@ -114,7 +114,13 @@ body {
 
    The file explorer moves between two columns depending on mode (see
    placeExplorer): inside the IDE workspace it narrows the editor, and in
-   Agent mode it is a column of the shell beside the chat. */
+   Agent mode it is a column of the shell beside the chat.
+
+   Agent mode gives it the same `side-drawer` class as #sidebar, so one rule
+   set — surface, radius, seam and the floating-branch shadow — describes
+   both drawers. Duplicating those declarations here is what let the explorer
+   drift (its own border and shadow, plus a margin that the floating branch
+   never reset, so it sat 8px low and showed the title bar above it). */
 .ide-explorer {
   flex: 0 0 auto;
   transition:
@@ -123,25 +129,20 @@ body {
     border-color var(--panel-anim) ease;
 }
 
-/* Agent mode: a panel column of the shell. */
+/* In the IDE workspace the explorer is not a drawer: it is a column of the
+   editor, so it keeps no card surface of its own. */
+.ide-workspace .ide-explorer {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  margin: 0;
+}
+
+/* Agent mode: a panel column of the shell, wearing the sessions drawer's
+   own card class so the two cannot drift apart. */
 #appShell > .ide-explorer {
-  margin: 8px 0;
-  border: 1px solid rgb(0 0 0 / 0.08);
-  border-radius: var(--panel-radius, 14px);
-  background: var(--color-slate-100);
   overflow: hidden;
-}
-
-/* Straight where it meets the card, round on the outside: the seam is one
-   edge shared by two panels, so both sides square off together. */
-#appShell:has(> #mainCard) > .ide-explorer:not(.is-closed) {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.dark #appShell > .ide-explorer {
-  border-color: rgb(255 255 255 / 0.08);
-  background: #18181b;
 }
 
 @media (max-width: 1099px) {
@@ -155,9 +156,9 @@ body {
     z-index: 40;
     width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
-    border: 1px solid rgb(0 0 0 / 0.08);
-    border-radius: 14px;
-    background: var(--color-slate-100);
+    /* The absolute box owns the offsets, so the column margin would shift
+       the panel down and expose the lighter title bar above it. */
+    margin: 0;
     /* Floating: the panel slides and fades over the card instead of pushing
        it, so `width` is not something the user watches change. Keeping it
        out of the transition list also lets the viewport clamps above apply
@@ -167,16 +168,6 @@ body {
       opacity var(--panel-anim) ease,
       transform var(--panel-anim) var(--panel-ease),
       border-radius var(--panel-anim) var(--panel-ease);
-    box-shadow:
-      0 2px 6px rgb(0 0 0 / 0.08),
-      0 24px 48px -16px rgb(0 0 0 / 0.28);
-  }
-  .dark .ide-explorer {
-    border-color: rgb(255 255 255 / 0.08);
-    background: #18181b;
-    box-shadow:
-      0 2px 6px rgb(0 0 0 / 0.4),
-      0 24px 48px -16px rgb(0 0 0 / 0.7);
   }
   .ide-explorer.is-closed {
     width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
@@ -188,8 +179,9 @@ body {
   }
 }
 
-.dark #sidebar.side-drawer {
-  border-color: rgb(255 255 255 / 0.08);
+.dark .side-drawer {
+  border-color: transparent;
+  border-right-color: rgb(255 255 255 / 0.05);
   background: #18181b;
 }
 
@@ -214,7 +206,7 @@ body {
   display: none;
 }
 
-#sidebar.side-drawer {
+.side-drawer {
   z-index: 40;
   flex: 0 0 auto;
   width: var(--drawer-width, 22rem);
@@ -236,11 +228,23 @@ body {
     border-radius var(--panel-anim) var(--panel-ease);
 }
 
-#sidebar.side-drawer:not(.is-closed) {
+.side-drawer:not(.is-closed) {
   /* Straight where it meets the card, round on the outside: the seam is one
      edge shared by two panels, so both sides square off together. */
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
+}
+
+/* One hairline, on the edge that faces the conversation: a full ring reads
+   as a floating card with a gradient halo instead of a panel that shares the
+   shell's surface. */
+.side-drawer {
+  border-color: transparent;
+  border-right-color: var(--color-slate-200);
+}
+
+.dark .side-drawer {
+  border-right-color: rgb(255 255 255 / 0.05);
 }
 
 /* Collapsed takes no width, so the card reclaims it.
@@ -251,7 +255,7 @@ body {
    closing the drawer look like a cut even though the transition list said
    otherwise. `visibility` is held back until the end so the panel stays
    painted while it slides shut. */
-#sidebar.side-drawer.is-closed {
+.side-drawer.is-closed {
   width: 0;
   max-width: 0;
   margin-left: 0;
@@ -273,7 +277,7 @@ body {
 
 @media (max-width: 1099px) {
   /* No room for a third column: float the drawer over the card again. */
-  #sidebar.side-drawer {
+  .side-drawer {
     position: absolute;
     top: 8px;
     bottom: 8px;
@@ -292,12 +296,12 @@ body {
       0 2px 6px rgb(0 0 0 / 0.08),
       0 24px 48px -16px rgb(0 0 0 / 0.28);
   }
-  .dark #sidebar.side-drawer {
+  .dark .side-drawer {
     box-shadow:
       0 2px 6px rgb(0 0 0 / 0.4),
       0 24px 48px -16px rgb(0 0 0 / 0.7);
   }
-  #sidebar.side-drawer.is-closed {
+  .side-drawer.is-closed {
     width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     max-width: min(var(--drawer-width, 22rem), calc(100vw - 4rem));
     transform: translateX(-12px);
