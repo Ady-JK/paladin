@@ -51,6 +51,17 @@ import type {
 const tabsEl = $("#paneTabs");
 const bodyEl = $("#paneBody");
 const pickerEl = $("#panePicker");
+
+// syncPickerInset keeps the empty-state picker on the WINDOW's centre line.
+// The pane starts below the header strip, so centring inside its own box
+// dropped the rows ~40px below the conversation's middle and read as sagging.
+// Writing the inset as a variable lets the CSS cancel it exactly, at any
+// header height, without a second layout pass of its own.
+function syncPickerInset(): void {
+  if (!sidePaneEl || pickerEl.hidden) return;
+  const top = sidePaneEl.getBoundingClientRect().top;
+  pickerEl.style.setProperty("--picker-inset", `${Math.round(top)}px`);
+}
 const tabsAddBtn = $<HTMLButtonElement>("#paneTabsAdd");
 const historyBtn = $<HTMLButtonElement>("#paneNewChatBtn");
 const menuEl = $("#paneHistoryMenu");
@@ -1254,6 +1265,7 @@ function render(): void {
   // the body, so it is hidden again the moment a tab exists.
   const empty = shown.length === 0 && paneOpen;
   pickerEl.hidden = !empty;
+  if (empty) syncPickerInset();
   tabsAddBtn.hidden = empty;
   // The body and the picker are both flex:1, so leaving both visible split the
   // column in half and the picker landed mid-pane instead of centred in it.
@@ -1740,6 +1752,15 @@ export function initSidePane(): void {
       return;
     }
     if (kind === "browser") openBrowserTab(visibleSessionId(), "");
+    if (kind === "changes") {
+      if (!state.sessionId) {
+        toast("Open a session to see its changes.", "error");
+        return;
+      }
+      openChangesTab(null);
+      return;
+    }
+    if (kind === "jobs") openJobsTab();
   };
   pickerEl.addEventListener("click", (event) => {
     const kind = (event.target as HTMLElement).closest<HTMLElement>("[data-pane-pick]")?.dataset.panePick;

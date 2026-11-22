@@ -1508,7 +1508,13 @@ body.is-splitting {
 /* ---- the pane's empty state: a picker, not a blank column ---- */
 /* The picker IS the pane's empty state, so it takes the pane's whole body and
    centres its rows. As a bare sibling below a `flex: 1` body it was pushed to
-   the bottom of the column, which read as stray content rather than a choice. */
+   the bottom of the column, which read as stray content rather than a choice.
+
+   It centres on the WINDOW, not on this column: the pane starts below the
+   header strip, so `justify-content: center` inside it landed the rows ~43px
+   below the app's optical middle and read as sagging. The rows are therefore
+   pinned to the viewport's centre line, with the pane's own top inset
+   subtracted so the offset cancels at any header height. */
 .pane-picker {
   display: flex;
   flex: 1;
@@ -1517,6 +1523,27 @@ body.is-splitting {
   justify-content: center;
   gap: 8px;
   padding: 14px 12px;
+  /* The rows centre on the WINDOW, not on this column. As a flex child the
+     box starts below the pane's tab strip, so centring inside it landed the
+     rows ~40px below the conversation's middle and read as sagging. Absolute
+     placement against the pane lets the box span the window's height: the
+     renderer writes --picker-inset (the pane's top, i.e. how far the header
+     pushes it down) and the box is pulled up by exactly that much and given
+     the same extra height. A negative margin cannot do this — a flex
+     container clamps it — and a translate moves the box without moving the
+     point it centres on. */
+  position: absolute;
+  /* It starts at the pane's own top so the rows centre on the window, but it
+     must not swallow the tab strip above: the strip is 40px and sits over
+     this box, so the pointer-events rule below hands the top band back. */
+  top: calc(-1 * var(--picker-inset, 0px));
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: auto;
+  /* The strip and the close button stay clickable: only the picker's own
+     rows take the pointer. */
+  pointer-events: none;
 }
 .pane-picker[hidden] {
   display: none;
@@ -1528,6 +1555,7 @@ body.is-splitting {
   color: var(--color-slate-500);
 }
 .pane-picker-row {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 10px;

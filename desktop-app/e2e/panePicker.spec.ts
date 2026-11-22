@@ -1,7 +1,8 @@
 // panePicker.spec.ts pins how the side pane is filled. The header + opens the
-// pane; an empty pane offers three large choices (Side chat / Terminal /
-// Browser) instead of an empty box, and once anything is open that same list
-// becomes the pane's strip with a + at the end.
+// pane; an empty pane offers the five things it can hold (Side chat /
+// Terminal / Browser / Changes / Running commands) instead of an empty box,
+// and once anything is open that same list becomes the pane's strip with a +
+// at the end.
 //
 // Terminals only ever live in the pane: there is no full-width terminal tab.
 import { expect, test, type Page } from "@playwright/test";
@@ -14,7 +15,7 @@ async function start(page: Page): Promise<void> {
   await expect(page.locator("#messages")).toContainText("hello");
 }
 
-test("an empty pane offers the three things it can hold", async ({ page }) => {
+test("an empty pane offers the five things it can hold", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await expect(page.locator("#sidePane")).toBeHidden();
@@ -27,6 +28,66 @@ test("an empty pane offers the three things it can hold", async ({ page }) => {
   await expect(picker.getByRole("button", { name: /Side chat/ })).toBeVisible();
   await expect(picker.getByRole("button", { name: /Terminal/ })).toBeVisible();
   await expect(picker.getByRole("button", { name: /Browser/ })).toBeVisible();
+  await expect(picker.getByRole("button", { name: /Changes/ })).toBeVisible();
+  await expect(picker.getByRole("button", { name: /Running commands/ })).toBeVisible();
+});
+
+// The rows centre on the window, not on the pane's own box: the pane starts
+// below the header, and centring inside it left the list sagging ~40px low.
+test("the picker centres on the window, not on the pane", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await expect(page.locator("#panePicker")).toBeVisible();
+  const centred = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(".pane-picker-row"));
+    const title = document.querySelector<HTMLElement>(".pane-picker-title")!.getBoundingClientRect();
+    const block = (title.top + rows[rows.length - 1].getBoundingClientRect().bottom) / 2;
+    return Math.abs(block - window.innerHeight / 2);
+  });
+  expect(centred).toBeLessThan(16);
+});
+
+// The box spans the header gap so it can centre on the window, but it must
+// not swallow the strip above it: the + and the close button stay clickable.
+test("the picker does not block the pane strip", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await expect(page.locator("#panePicker")).toBeVisible();
+  const top = await page.evaluate(() => {
+    const strip = document.querySelector<HTMLElement>(".pane-strip")!.getBoundingClientRect();
+    const hit = document.elementFromPoint(strip.x + 20, strip.y + strip.height / 2);
+    return (hit as HTMLElement | null)?.closest(".pane-strip") !== null;
+  });
+  expect(top).toBe(true);
+});
+
+test("picking Changes opens the session's changes tab", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page
+    .locator("#panePicker")
+    .getByRole("button", { name: /Changes/ })
+    .click();
+  // It opens a tab in the pane's strip, beside the conversation.
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+  await expect(page.locator("#panePicker")).toBeHidden();
+  await expect(page.locator("#agentMain")).toBeVisible();
+});
+
+test("picking Running commands opens the jobs tab", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page
+    .locator("#panePicker")
+    .getByRole("button", { name: /Running commands/ })
+    .click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+  await expect(page.locator("#panePicker")).toBeHidden();
+  await expect(page.locator("#agentMain")).toBeVisible();
 });
 
 test("picking Terminal from the picker puts a terminal in the pane", async ({ page }) => {
