@@ -306,6 +306,12 @@ async function __paladinBaseInvoke(cmd, args) {
         version: "undo-preview-version",
         ...(window.__e2ePreview || {}),
       };
+    case "revertKillJobs": {
+      window.__e2eKillJobs = (window.__e2eKillJobs || []).concat([args]);
+      const ids = (window.__e2ePreview?.blockingJobs || []).map((j) => j.id);
+      window.__e2ePreview = { ...(window.__e2ePreview || {}), blockingJobs: [] };
+      return ids;
+    }
     case "sessionChanges":
       return window.__e2eChanges || { available: true, turns: [], files: [] };
     case "ideSearch":

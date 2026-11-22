@@ -72,48 +72,76 @@ function guard(sessionId: string): boolean {
 function previewHtml(pv: RevertPreview): string {
   const list = (cls: string, files: string[]) =>
     `<ul class="${cls}">${files.map((f) => `<li title="${escapeHtml(f)}">${escapeHtml(f)}</li>`).join("")}</ul>`;
-  let body = `<p class="revert-sub">Rewinds ${plural(pv.turns || 1, "turn")}: this message and everything after it.</p>`;
+  const chip = (label: string, n: number, warn = false) =>
+    `<span class="revert-chip${warn ? " is-warn" : ""}">${label}</span><span class="revert-count">${n}</span>`;
+
+  let body = `<p class="revert-sub">Rewinds ${plural(pv.turns || 1, "turn")} — this message and everything after it.</p>`;
+
+  // Running jobs block the revert; offer to stop them in one click.
+  const jobs = pv.blockingJobs ?? [];
+  if (jobs.length) {
+    body +=
+      `<div class="revert-jobs">` +
+      `<div class="revert-label is-warn">${chip("Running jobs", jobs.length, true)}</div>` +
+      `<ul class="revert-joblist">${jobs
+        .map(
+          (j) =>
+            `<li title="${escapeHtml(j.command || j.id)}"><span class="revert-job-cmd">${escapeHtml(
+              firstLine(j.command || j.id),
+            )}</span>${j.live ? "" : `<span class="revert-job-orphan">from an earlier run</span>`}</li>`,
+        )
+        .join("")}</ul>` +
+      `<p class="revert-note">These must stop before reverting. “Stop jobs &amp; revert” ends them now.</p>` +
+      `</div>`;
+  }
+
   if (!pv.snapshots) {
     const reason = pv.protection?.reason ? ` ${escapeHtml(pv.protection.reason)}` : "";
-    body += `<p class="revert-note">Only the conversation is rewound; no usable undo snapshot is available.${reason}</p>`;
+    body += `<p class="revert-note">Conversation only — no usable undo snapshot.${reason}</p>`;
   } else if (pv.files.length === 0 && pv.deleted.length === 0 && pv.skipped.length === 0) {
     body += `<p class="revert-note">No file changes to undo.</p>`;
   }
   if (pv.files.length) {
-    body +=
-      `<div class="revert-label">Restores ${plural(pv.files.length, "file")}</div>` + list("revert-files", pv.files);
+    body += `<div class="revert-label">${chip("Restores", pv.files.length)}</div>` + list("revert-files", pv.files);
   }
   if (pv.deleted.length) {
     body +=
-      `<div class="revert-label is-warn">Deletes ${plural(pv.deleted.length, "file")} created since</div>` +
+      `<div class="revert-label is-warn">${chip("Deletes", pv.deleted.length, true)}</div>` +
       list("revert-conflicts", pv.deleted);
   }
   if (pv.skipped.length) {
     body +=
-      `<div class="revert-label is-warn">Leaves ${plural(pv.skipped.length, "file")} alone (too large or binary)</div>` +
+      `<div class="revert-label is-warn">${chip("Leaves alone", pv.skipped.length, true)}</div>` +
       list("revert-conflicts", pv.skipped);
   }
   if (pv.protection?.excluded?.length) {
     body +=
-      `<div class="revert-label is-warn">Excluded from snapshots; not restored</div>` +
+      `<div class="revert-label is-warn">${chip("Not captured", pv.protection.excluded.length, true)}</div>` +
       list("revert-excluded", pv.protection.excluded);
   }
   if (pv.protection?.truncated) {
-    body += `<p class="revert-note">The exclusion list is incomplete; more paths may not be restored.</p>`;
+    body += `<p class="revert-note">More files may be excluded than listed.</p>`;
   }
-  if (pv.snapshots) {
-    body += `<p class="revert-note">These files may include later changes by you or another chat. A recovery snapshot will be saved before undo. Ignored, large and binary files may not be captured.</p>`;
-  } else {
-    body += `<p class="revert-note">The conversation can be recovered after undo.</p>`;
-  }
+  body += `<p class="revert-note">Later edits by you or another chat may be overwritten. A recovery snapshot is saved first.</p>`;
+
+  const confirm =
+    jobs.length > 0
+      ? `<button type="button" id="revertConfirmBtn" class="revert-confirm">Stop jobs &amp; revert</button>`
+      : `<button type="button" id="revertConfirmBtn" class="revert-confirm">Revert</button>`;
   return (
     `<div class="revert-head">${icon("tl-undo", "h-3.5 w-3.5")}<span>Revert to here?</span></div>` +
     body +
     `<div class="revert-actions">` +
     `<button type="button" id="revertCancelBtn" class="revert-cancel">Cancel</button>` +
-    `<button type="button" id="revertConfirmBtn" class="revert-confirm">Revert</button>` +
+    confirm +
     `</div>`
   );
+}
+
+// firstLine clips a command to its first line for the job list.
+function firstLine(cmd: string): string {
+  const line = cmd.split("\n")[0] ?? cmd;
+  return line.length > 72 ? `${line.slice(0, 72)}…` : line;
 }
 
 async function openPreview(btn: HTMLElement): Promise<void> {
@@ -148,16 +176,24 @@ async function openPreview(btn: HTMLElement): Promise<void> {
     if (t.closest("#revertCancelBtn")) closePop();
     else if (t.closest("#revertConfirmBtn")) {
       closePop();
-      void revert(sessionId, index, pv.version);
+      void revert(sessionId, index, pv.version, (pv.blockingJobs ?? []).length > 0);
     }
   });
   pop = el;
   el.querySelector<HTMLElement>("#revertConfirmBtn")?.focus();
 }
 
-async function revert(sessionId: string, index: number, version?: string): Promise<void> {
+async function revert(sessionId: string, index: number, version?: string, killJobs = false): Promise<void> {
   if (!guard(sessionId)) return;
   try {
+    if (killJobs) {
+      const stopped = await api.revertKillJobs(sessionId, null);
+      if (stopped.length) {
+        toast(`Stopping ${plural(stopped.length, "job")}…`);
+        // Give the kill a beat to land before the revert races it.
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    }
     const res = await api.revertSession(sessionId, null, index, version);
     await reload(sessionId);
     await refreshRecovery(sessionId);

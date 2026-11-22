@@ -364,6 +364,9 @@ var methods = map[string]handler{
 	"revertSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RevertSessionChecked(a.str("sessionId"), a.str("cwd"), a.num("index", -1), a.str("version"))
 	},
+	"revertKillJobs": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.RevertKillJobs(a.str("sessionId"), a.str("cwd"))
+	},
 	"recoveryAvailable": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.RecoveryAvailable(a.str("sessionId"), a.str("cwd"))
 	},

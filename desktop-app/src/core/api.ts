@@ -283,6 +283,12 @@ export function revertSession(
   return invoke<RevertResult>("revertSession", { sessionId, cwd, index, version });
 }
 
+// revertKillJobs stops the running jobs that block a revert, so the
+// caller can retry it right after.
+export function revertKillJobs(sessionId: string, cwd: string | null): Promise<string[]> {
+  return invoke<string[]>("revertKillJobs", { sessionId, cwd });
+}
+
 export function recoveryAvailable(sessionId: string): Promise<boolean> {
   return invoke<boolean>("recoveryAvailable", { sessionId });
 }

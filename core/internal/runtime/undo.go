@@ -20,14 +20,17 @@ import (
 
 // RevertPreview describes what reverting to a user message would do.
 type RevertPreview struct {
-	Index      int                         `json:"index"`
-	Turns      int                         `json:"turns"`
-	Files      []string                    `json:"files"`
-	Deleted    []string                    `json:"deleted"`
-	Skipped    []string                    `json:"skipped"`
-	Snapshots  bool                        `json:"snapshots"`
-	Version    string                      `json:"version,omitempty"`
-	Protection *session.SnapshotProtection `json:"protection,omitempty"`
+	Index     int      `json:"index"`
+	Turns     int      `json:"turns"`
+	Files     []string `json:"files"`
+	Deleted   []string `json:"deleted"`
+	Skipped   []string `json:"skipped"`
+	Snapshots bool     `json:"snapshots"`
+	Version   string   `json:"version,omitempty"`
+	// BlockingJobs are the running commands that stop the revert until
+	// they finish or are stopped; the UI offers to stop them.
+	BlockingJobs []BlockingJob               `json:"blockingJobs,omitempty"`
+	Protection   *session.SnapshotProtection `json:"protection,omitempty"`
 }
 
 // RevertResult reports a revert.
@@ -163,7 +166,7 @@ func (r *AgentRuntime) RevertPreview(sessionID, cwd string, index int) (RevertPr
 	if err != nil {
 		return RevertPreview{}, err
 	}
-	out := RevertPreview{Index: index, Turns: count, Files: []string{}, Deleted: []string{}, Skipped: []string{}}
+	out := RevertPreview{Index: index, Turns: count, Files: []string{}, Deleted: []string{}, Skipped: []string{}, BlockingJobs: r.jobs.blocking(sessionID, sess.Dir)}
 	entries, statusErr := readProtection(sess.Dir)
 	if statusErr == nil {
 		for _, p := range entries {
@@ -217,6 +220,21 @@ func (r *AgentRuntime) RevertPreview(sessionID, cwd string, index int) (RevertPr
 // snapshot taken before the message, then truncates the conversation.
 func (r *AgentRuntime) RevertSession(sessionID, cwd string, index int) (RevertResult, error) {
 	return r.RevertSessionChecked(sessionID, cwd, index, "")
+}
+
+// RevertKillJobs stops every job blocking a revert: live ones through
+// the shell tool (their completion is reported), orphaned process
+// groups directly, and their records are finalized so they stop
+// blocking. The UI calls this before retrying the revert.
+func (r *AgentRuntime) RevertKillJobs(sessionID, cwd string) ([]string, error) {
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	r.undoMu.Lock()
+	defer r.undoMu.Unlock()
+	stopped := r.jobs.killBlocking(sessionID, sess.Dir)
+	return nonNil(stopped), nil
 }
 
 // RevertSessionChecked rejects an out-of-date preview before changing files.

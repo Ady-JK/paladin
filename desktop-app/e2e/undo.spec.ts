@@ -82,6 +82,42 @@ test("Revert to here previews, restores files and the conversation", async ({ pa
   await expect(page.locator("#messages .bubble-user")).toHaveCount(1);
 });
 
+test("running jobs block the revert until stopped, then it proceeds", async ({ page }) => {
+  await boot(page, {
+    __e2ePreview: {
+      turns: 1,
+      files: ["src/a.ts"],
+      deleted: [],
+      skipped: [],
+      blockingJobs: [
+        { id: "job-697", command: "npm run dev\nsecond line", live: true },
+        { id: "job-old-1", command: "go test ./...", pid: 225450 },
+      ],
+    },
+  });
+  await openDemo(page);
+  const row = page.locator("#messages .turn-row:has(.bubble-user)").first();
+  await row.hover();
+  await row.locator('[data-revert="0"]').click();
+
+  const pop = page.locator("#revertPop");
+  await expect(pop).toBeVisible();
+  // The jobs panel shows each command clipped to one line, and orphans
+  // are labelled so the user knows why the running-jobs panel is empty.
+  await expect(pop.locator(".revert-jobs")).toBeVisible();
+  await expect(pop.locator(".revert-joblist li")).toHaveCount(2);
+  await expect(pop.locator(".revert-joblist li").first()).toContainText("npm run dev");
+  await expect(pop.locator(".revert-joblist li").last()).toContainText("from an earlier run");
+  await expect(pop.locator("#revertConfirmBtn")).toHaveText("Stop jobs & revert");
+
+  await pop.locator("#revertConfirmBtn").click();
+  await expect(pop).toBeHidden();
+  // The stop call ran first, then the revert.
+  expect((await get(page, "__e2eKillJobs"))[0]).toMatchObject({ sessionId: "sess-notify-1" });
+  await expect.poll(() => get(page, "__e2eReverts")).toHaveLength(1);
+  expect((await get(page, "__e2eReverts"))[0]).toMatchObject({ index: 0 });
+});
+
 test("the recovery option disappears once the next message is sent", async ({ page }) => {
   await boot(page);
   await openDemo(page);
@@ -104,7 +140,7 @@ test("Cancel leaves everything alone; untracked folders note conversation-only",
   await row.hover();
   await row.locator("[data-revert]").click();
   const pop = page.locator("#revertPop");
-  await expect(pop.locator(".revert-note").first()).toContainText(/only the conversation/i);
+  await expect(pop.locator(".revert-note").first()).toContainText(/conversation only/i);
   await page.keyboard.press("Escape");
   await expect(pop).toBeHidden();
   expect(await get(page, "__e2eReverts")).toBeUndefined();

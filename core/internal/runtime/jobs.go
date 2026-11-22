@@ -26,6 +26,16 @@ const jobsDir = "jobs"
 // JobInterrupted marks a job whose sidecar exited before the job did.
 const JobInterrupted = "interrupted"
 
+// BlockingJob is one running command that would stop a revert: a live
+// job in this process, or an orphan an earlier sidecar left behind.
+type BlockingJob struct {
+	ID      string `json:"id"`
+	Command string `json:"command,omitempty"`
+	PID     int    `json:"pid,omitempty"`
+	// Live marks a job running in this process; an orphan is not.
+	Live bool `json:"live,omitempty"`
+}
+
 // JobRecord is a background job's persisted lifecycle record.
 type JobRecord struct {
 	ID        string    `json:"id"`
@@ -495,16 +505,76 @@ func (b *jobBook) checkIdle(sessionID, sessionDir string) error {
 	if ids := b.running(sessionID); len(ids) > 0 {
 		return errJobsRunning(ids)
 	}
-	var alive []string
-	for _, rec := range b.orphans(sessionDir) {
-		if groupAlive(rec.PID) {
-			alive = append(alive, fmt.Sprintf("%s (pid %d)", rec.ID, rec.PID))
-		}
-	}
-	if len(alive) > 0 {
-		return fmt.Errorf("background job %s from an earlier run of Paladin is still running; stop it or wait for it to exit, then retry", strings.Join(alive, ", "))
+	if alive := b.liveOrphans(sessionDir); len(alive) > 0 {
+		return fmt.Errorf("background job %s from an earlier run of Paladin is still running; stop it or wait for it to exit, then retry", joinJobIDs(alive))
 	}
 	return nil
+}
+
+// liveOrphans are the session's orphaned records whose process group is
+// still alive — jobs an earlier sidecar left behind that the running-jobs
+// panel cannot show or stop.
+func (b *jobBook) liveOrphans(sessionDir string) []JobRecord {
+	var alive []JobRecord
+	for _, rec := range b.orphans(sessionDir) {
+		if groupAlive(rec.PID) {
+			alive = append(alive, rec)
+		}
+	}
+	return alive
+}
+
+// blocking reports every job that would stop a revert right now: the
+// live ones in this process and any orphan still writing. Each entry
+// carries the command line so the user can tell what they are stopping.
+func (b *jobBook) blocking(sessionID, sessionDir string) []BlockingJob {
+	var out []BlockingJob
+	for _, id := range b.running(sessionID) {
+		if rec, ok := b.live[id]; ok {
+			out = append(out, BlockingJob{ID: id, Command: rec.Command, Live: true})
+		}
+	}
+	for _, rec := range b.liveOrphans(sessionDir) {
+		out = append(out, BlockingJob{ID: rec.ID, Command: rec.Command, PID: rec.PID})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// killBlocking stops every job blocking a revert: live ones through the
+// shell tool (their completion is reported to the agent), orphaned
+// process groups directly, finalizing their records so they stop
+// blocking. It returns the ids actually stopped.
+func (b *jobBook) killBlocking(sessionID, sessionDir string) []string {
+	var stopped []string
+	for _, id := range b.running(sessionID) {
+		if _, err := b.rt.KillJob(id); err == nil {
+			stopped = append(stopped, id)
+		}
+	}
+	for _, rec := range b.liveOrphans(sessionDir) {
+		killGroup(rec.PID)
+		rec.Status, rec.Finalized, rec.EndedAt = tools.JobCancelled, true, time.Now().UTC()
+		if err := writeJobRecord(&rec); err != nil {
+			log.Printf("jobs: finalize orphan %s: %v", rec.ID, err)
+		} else {
+			stopped = append(stopped, rec.ID)
+		}
+	}
+	return stopped
+}
+
+// joinJobIDs renders orphan records as "job-1 (pid 42)".
+func joinJobIDs(recs []JobRecord) string {
+	parts := make([]string, 0, len(recs))
+	for _, rec := range recs {
+		if rec.PID > 0 {
+			parts = append(parts, fmt.Sprintf("%s (pid %d)", rec.ID, rec.PID))
+		} else {
+			parts = append(parts, rec.ID)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // errJobsRunning refuses a revert while the session's jobs could still

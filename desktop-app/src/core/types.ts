@@ -169,6 +169,8 @@ export type WorktreeInfo = {
   origin: string;
 };
 
+export type BlockingJob = { id: string; command?: string; pid?: number; live?: boolean };
+
 export type RevertPreview = {
   index: number;
   turns: number;
@@ -177,6 +179,7 @@ export type RevertPreview = {
   skipped: string[];
   snapshots: boolean;
   version?: string;
+  blockingJobs?: BlockingJob[];
   protection?: SnapshotProtection;
 };
 

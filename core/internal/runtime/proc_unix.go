@@ -16,3 +16,14 @@ func groupAlive(pid int) bool {
 	err := syscall.Kill(-pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
+
+// killGroup stops a whole orphaned process group: freeze first so a
+// parent woken by a child's death cannot fork past the kill (the same
+// discipline the shell tool uses for its own jobs).
+func killGroup(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, syscall.SIGSTOP)
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+}

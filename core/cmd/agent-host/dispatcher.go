@@ -54,7 +54,7 @@ var methodClass = map[string]runClass{
 	"saveTaggedImage": runSession,
 	"terminalStart":   runSession,
 	"renameSession":   runSession, "forkSession": runSession, "deleteSession": runSession,
-	"revertSession": runSession, "recoveryAvailable": runSession, "recoveryPreview": runSession, "recoverLatest": runSession, "worktreeMerge": runSession,
+	"revertSession": runSession, "revertKillJobs": runSession, "recoveryAvailable": runSession, "recoveryPreview": runSession, "recoverLatest": runSession, "worktreeMerge": runSession,
 	"budgetSet": runSession, "thinkingSet": runSession, "compactionSet": runSession, "memoryRefreshSnapshot": runSession,
 	"memorySnapshotStatus": runSession,
 	"deleteSideChat":       runSession,
