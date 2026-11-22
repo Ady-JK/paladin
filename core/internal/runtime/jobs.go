@@ -69,11 +69,37 @@ type jobBook struct {
 	notices map[string][]agent.Notice
 	// stops ends each live job's log monitor.
 	stops map[string]chan struct{}
+	// waited is closed at a session's next job completion, so a blocked
+	// wait call can re-read job state. A closed session's entry is stale
+	// and dropped.
+	waited map[string]chan struct{}
 }
 
 func newJobBook(rt *AgentRuntime) *jobBook {
 	return &jobBook{rt: rt, live: map[string]*JobRecord{}, candidates: map[string]*JobRecord{},
-		notices: map[string][]agent.Notice{}, stops: map[string]chan struct{}{}}
+		notices: map[string][]agent.Notice{}, stops: map[string]chan struct{}{}, waited: map[string]chan struct{}{}}
+}
+
+// waitChan is closed at the session's next job completion.
+func (b *jobBook) waitChan(sessionID string) <-chan struct{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch, ok := b.waited[sessionID]
+	if !ok {
+		ch = make(chan struct{})
+		b.waited[sessionID] = ch
+	}
+	return ch
+}
+
+// jobDone closes a session's wait channel, if anyone is waiting.
+func (b *jobBook) jobDone(sessionID string) {
+	b.mu.Lock()
+	if ch, ok := b.waited[sessionID]; ok {
+		close(ch)
+		delete(b.waited, sessionID)
+	}
+	b.mu.Unlock()
 }
 
 // running lists a session's jobs that are still running.
@@ -88,6 +114,14 @@ func (b *jobBook) running(sessionID string) []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// runningJob reports whether jobID is one of the session's live jobs.
+func (b *jobBook) runningJob(sessionID, jobID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	rec, ok := b.live[strings.TrimSpace(jobID)]
+	return ok && rec.SessionID == sessionID
 }
 
 func (b *jobBook) JobStarted(e tools.JobEvent) {
@@ -186,6 +220,8 @@ func (b *jobBook) JobFinished(e tools.JobEvent) {
 	// so it would read "running" forever: tell the app the job is gone and
 	// let it read the session again.
 	b.rt.hub.PublishSession(sessionID, "session/refresh")
+	// A blocked wait call re-reads job state at the next completion.
+	b.jobDone(sessionID)
 	// A finished job's notice still has to reach an idle session.
 	if wake {
 		b.rt.wakeSession(sessionID, workspace)

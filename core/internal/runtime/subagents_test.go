@@ -37,7 +37,7 @@ func TestAgentWaitsUsingReturnedShortID(t *testing.T) {
 		if c.Child {
 			return modelReply{Text: "child finished"}
 		}
-		if result, ok := c.Results["wait_agent"]; ok {
+		if result, ok := c.Results["wait"]; ok {
 			return modelReply{Text: result}
 		}
 		if result, ok := c.Results["spawn_agent"]; ok {
@@ -47,7 +47,7 @@ func TestAgentWaitsUsingReturnedShortID(t *testing.T) {
 			if json.Unmarshal([]byte(result), &spawned) != nil || len(spawned.ID) != 8 {
 				return modelReply{Text: "bad spawn result: " + result}
 			}
-			return modelReply{Calls: []mockToolCall{call("wait_agent", map[string]any{"targets": []string{spawned.ID}, "timeout_ms": 10000})}}
+			return modelReply{Calls: []mockToolCall{call("wait", map[string]any{"target": spawned.ID, "timeout_ms": 10000})}}
 		}
 		return modelReply{Calls: []mockToolCall{call("spawn_agent", map[string]any{"agent_type": "explore", "task": "look"})}}
 	})
@@ -258,11 +258,11 @@ func spawnThenWait(spawn map[string]any, childReply func(modelCall) modelReply) 
 		if c.Child {
 			return childReply(c)
 		}
-		if res, ok := c.Results["wait_agent"]; ok {
+		if res, ok := c.Results["wait"]; ok {
 			return modelReply{Text: "parent saw: " + res}
 		}
 		if _, ok := c.Results["spawn_agent"]; ok {
-			return modelReply{Calls: []mockToolCall{call("wait_agent", map[string]any{"timeout_ms": 10000})}}
+			return modelReply{Calls: []mockToolCall{call("wait", map[string]any{"timeout_ms": 10000})}}
 		}
 		if !strings.Contains(c.Users[len(c.Users)-1], "delegate") {
 			return modelReply{Text: "noted"}
@@ -327,7 +327,7 @@ func TestSpawnFreshChildRunsWithOneSlotAndReportsOnce(t *testing.T) {
 		}
 	}
 
-	// Delivered by wait_agent, so no wake turn or later notice repeats it.
+	// Delivered by wait, so no wake turn or later notice repeats it.
 	time.Sleep(200 * time.Millisecond)
 	if n := len(rt.Turns()); n != 0 {
 		t.Fatalf("unexpected turns after delivery: %+v", rt.Turns())
@@ -406,7 +406,7 @@ func TestOnlyTheParentControlsItsChildren(t *testing.T) {
 	if _, _, err := rt.subagents.interrupt(other.SessionID, info.ID); err == nil {
 		t.Fatal("stranger interrupted a child")
 	}
-	if _, err := rt.subagents.wait(context.Background(), other.SessionID, []string{info.Name}, time.Second); err == nil {
+	if _, err := rt.subagents.wait(context.Background(), other.SessionID, info.Name, time.Second); err == nil {
 		t.Fatal("stranger waited on a child by name")
 	}
 	if _, err := rt.subagents.spawn(info.ID, spawnArgs{Kind: subagentKinds[0], Task: "nested", ForkTurns: ForkNone}); err == nil ||
@@ -757,7 +757,7 @@ func TestParentStopCascadesToChildren(t *testing.T) {
 			return blockingChild(release, started)(c)
 		}
 		if _, ok := c.Results["spawn_agent"]; ok {
-			return modelReply{Calls: []mockToolCall{call("wait_agent", map[string]any{"timeout_ms": 600000})}}
+			return modelReply{Calls: []mockToolCall{call("wait", map[string]any{"timeout_ms": 600000})}}
 		}
 		return modelReply{Calls: []mockToolCall{call("spawn_agent", map[string]any{"agent_type": "explore", "task": "forever"})}}
 	})
@@ -1098,23 +1098,26 @@ func TestFollowupRespectsTheChildLimit(t *testing.T) {
 	}
 }
 
-// TestWaitAgentDescriptionForbidsIdling pins the tool description that the
-// model reads at call time. wait_agent used to say "only wait when you have
+// TestWaitDescriptionForbidsIdling pins the tool description that the
+// model reads at call time. wait used to say "only wait when you have
 // nothing else useful to do", which invited using it as a sleep: a session
 // then spent 95 rounds calling it with no subagents, each one re-sending the
 // whole prompt to be told "You have no subagents". The description must now
-// say that an empty call is a no-op, and that ending the turn is the way to
-// wait because the work reports itself.
-func TestWaitAgentDescriptionForbidsIdling(t *testing.T) {
+// say that an empty call with nothing running is a no-op, and that work
+// that finishes while you are not waiting wakes you on its own.
+func TestWaitDescriptionForbidsIdling(t *testing.T) {
 	def := waitDef()
+	if def.Name != "wait" {
+		t.Fatalf("name = %q", def.Name)
+	}
 	for _, want := range []string{
-		"With no subagents running this returns immediately with nothing to wait for",
+		"With nothing running this returns immediately with nothing to wait for",
 		"never call it to pause",
-		"end your turn",
 		"wakes you on its own",
+		"delivered once",
 	} {
 		if !strings.Contains(def.Description, want) {
-			t.Fatalf("wait_agent description lost %q:\n%s", want, def.Description)
+			t.Fatalf("wait description lost %q:\n%s", want, def.Description)
 		}
 	}
 	for _, stale := range []string{
@@ -1122,7 +1125,14 @@ func TestWaitAgentDescriptionForbidsIdling(t *testing.T) {
 		"omit for all of your agents",
 	} {
 		if strings.Contains(def.Description, stale) {
-			t.Fatalf("wait_agent description still says %q", stale)
+			t.Fatalf("wait description still says %q", stale)
+		}
+	}
+	params, _ := def.Parameters.(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+	for _, want := range []string{"target", "timeout_ms", "settle"} {
+		if _, ok := props[want]; !ok {
+			t.Fatalf("definition is missing %q", want)
 		}
 	}
 }

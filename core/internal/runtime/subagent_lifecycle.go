@@ -90,7 +90,7 @@ func (m *subagentManager) activeChildren(parent transcript.Session, except strin
 
 func (m *subagentManager) checkLimit(active int) error {
 	if limit := m.r.maxSubagents(); active >= limit {
-		return fmt.Errorf("subagent limit reached: %d already queued or running (max %d); wait_agent for one to finish or interrupt_agent one", active, limit)
+		return fmt.Errorf("subagent limit reached: %d already queued or running (max %d); wait for one to finish or interrupt_agent one", active, limit)
 	}
 	return nil
 }

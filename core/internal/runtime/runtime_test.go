@@ -885,7 +885,7 @@ func TestToolDefinitionsMirrorRegistry(t *testing.T) {
 		names[d.Name] = true
 	}
 	for _, want := range []string{"read", "write", "edit", "shell", "ask", "todo", "browser", "memory", "skill", "session_search",
-		"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"} {
+		"spawn_agent", "send_message", "followup_task", "wait", "interrupt_agent", "list_agents"} {
 		if !names[want] {
 			t.Fatalf("missing %q", want)
 		}

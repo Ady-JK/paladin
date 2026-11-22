@@ -27,11 +27,11 @@ func TestReadWriteChildInheritsParentPlanMode(t *testing.T) {
 		if c.Child {
 			return modelReply{Text: "child finished"}
 		}
-		if _, ok := c.Results["wait_agent"]; ok {
+		if _, ok := c.Results["wait"]; ok {
 			return modelReply{Text: "done"}
 		}
 		if _, ok := c.Results["spawn_agent"]; ok {
-			return modelReply{Calls: []mockToolCall{call("wait_agent", map[string]any{"timeout_ms": 10000})}}
+			return modelReply{Calls: []mockToolCall{call("wait", map[string]any{"timeout_ms": 10000})}}
 		}
 		return modelReply{Calls: []mockToolCall{call("spawn_agent", map[string]any{"agent_type": "writer", "task": "inspect"})}}
 	})

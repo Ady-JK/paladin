@@ -3,7 +3,7 @@
 // whose turns go through the same hub, permission gate and hooks
 // and budget as any other turn. The manager tracks which children are
 // in flight, delivers each finished child's result to its parent
-// exactly once (wait_agent, a mid-turn notice, or an idle wake), and
+// exactly once (wait, a mid-turn notice, or an idle wake), and
 // lends the parent's hub slot while it waits so a child can run even
 // with maxConcurrentTurns = 1.
 
@@ -154,7 +154,7 @@ func (r *AgentRuntime) maxSubagents() int {
 
 // turnStarted records the settings children inherit and reports
 // whether this turn is a wake turn with nothing left to deliver (a
-// wait_agent or an earlier turn already took it), which then skips.
+// wait or an earlier turn already took it), which then skips.
 func (m *subagentManager) turnStarted(req agent.Request) (skip bool) {
 	m.mu.Lock()
 	m.last[req.SessionID] = turnSettings{Cwd: req.Cwd, Permissions: req.Permissions, Mode: req.Mode, Provider: req.Provider, Model: req.Model}

@@ -73,7 +73,12 @@ const isAgentTool = (name: string): boolean => Object.prototype.hasOwnProperty.c
 
 const AGENT_KINDS: Record<string, ToolKind> = {
   spawn_agent: { icon: "rl-agent", past: "Spawned", now: "Spawning", noun: plural("subagent", "subagents") },
-  wait_agent: { icon: "rl-agent", past: "Waited for", now: "Waiting for", noun: plural("subagent", "subagents") },
+  wait: {
+    icon: "rl-agent",
+    past: "Waited for",
+    now: "Waiting for",
+    noun: plural("subagent or job", "subagents and jobs"),
+  },
   send_message: { icon: "rl-agent", past: "Messaged", now: "Messaging", noun: plural("subagent", "subagents") },
   followup_task: { icon: "rl-agent", past: "Followed up", now: "Following up", noun: plural("subagent", "subagents") },
   interrupt_agent: { icon: "rl-agent", past: "Stopped", now: "Stopping", noun: plural("subagent", "subagents") },
@@ -111,9 +116,9 @@ function agentDetail(tool: ToolInfo, args: Record<string, unknown>): ToolLabel |
   switch (tool.name) {
     case "spawn_agent":
       return { verb, detail: name || str(args.agent_type) || "a subagent", chip: str(args.agent_type) };
-    case "wait_agent": {
-      const targets = Array.isArray(args.targets) ? args.targets.map(String) : [];
-      return { verb, detail: targets.length ? targets.join(", ") : "subagents", chip: "" };
+    case "wait": {
+      const target = str(args.target);
+      return { verb, detail: target || "subagents and jobs", chip: "" };
     }
     case "list_agents":
       return { verb, detail: "subagents", chip: "" };
@@ -126,7 +131,7 @@ function agentDetail(tool: ToolInfo, args: Record<string, unknown>): ToolLabel |
 
 // agentIdOf is the child session an agent tool row can open.
 function agentIdOf(tool: ToolInfo): string {
-  if (!isAgentTool(tool.name) || tool.name === "list_agents" || tool.name === "wait_agent") return "";
+  if (!isAgentTool(tool.name) || tool.name === "list_agents" || tool.name === "wait") return "";
   const id = parseArgs(tool.result).agent_id ?? parseArgs(tool.arguments).agent_id;
   return typeof id === "string" ? id : "";
 }

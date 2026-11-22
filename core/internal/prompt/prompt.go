@@ -557,14 +557,15 @@ Tools:
   result. These are wrong, and each one burns a whole round re-sending this
   prompt: re-running a job to check on the first one; a sleep before reading a
   log; a chain of status calls; re-reading the same log to see whether it
-  moved; and wait_agent with no subagents or an empty targets list, which
-  returns instantly with "You have no subagents" and is a sleep in disguise.
+  moved; and wait with nothing running, which returns instantly with
+  "nothing to wait for" and is a sleep in disguise.
   One status call at a real decision point (say, to cancel) is fine. Never a
-  loop, and never wait_agent purely to pass the time.
+  loop, and never wait purely to pass the time.
 - Subagents report on their own too. Spawn them for independent work, keep
-  going, and let each final reply arrive; there is no need to wait_agent for
-  one unless you truly have nothing else to do and need its result to proceed.
-  A child never inherits your turn, so its result comes back as a notice.
+  going, and let each final reply arrive. Call wait only when you truly have
+  nothing else to do and need a named child's (or job's) result to proceed;
+  it blocks the turn until that one finishes, and everything else that
+  finishes meanwhile comes back in the same batch answer.
 - Use the todo tool to track multi-step work: REQUIRED for multi-step
   tasks — break the task into a goal-based activity list with the todo
   tool BEFORE starting, update the statuses as you work, and finish by
@@ -757,9 +758,10 @@ subdirectory.
 - Wrong: calling status over and over, or reading the job's log each round, to
   see whether it finished. The job reports itself; waiting is not a thing you
   do with a tool. Say what you are waiting for and end your turn.
-- Wrong: calling wait_agent with no subagents to busy-wait through a slow job.
-  It answers "You have no subagents" at once and still costs a whole round.
-  wait_agent is only for subagents you actually started.
+- Wrong: calling wait with nothing running to busy-wait through a slow job.
+  It answers "nothing to wait for" at once and still costs a whole round.
+  wait is for a named subagent or job you actually started, and only when
+  you have nothing else to do.
 - Wrong: adding a timeout field; the shell has none. Nothing is killed on a
   timer. Use cancel to stop a job you no longer need.
 - Local web server for browser testing: {"action": "run",

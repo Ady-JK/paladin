@@ -614,7 +614,7 @@ never have pending tools.
 ### Subagents
 
 A turn can delegate focused work to **subagents** with six tools:
-`spawn_agent`, `send_message`, `followup_task`, `wait_agent`,
+`spawn_agent`, `send_message`, `followup_task`, `wait`,
 `interrupt_agent` and `list_agents`. Each subagent is a persistent child
 session stored beside its parent (`sessions/<encoded-cwd>/<child-uuid>/`);
 its `meta.json` has `subagent: {parentId, parentTurnId, spawnCallId, type,
@@ -663,12 +663,12 @@ and a `followup_task` that reactivates a finished child needs a free
 slot too.
 
 Each finished child result is delivered to the parent: as the
-`wait_agent` result, as a notify row (`agent` tool name, content
+`wait` result, as a notify row (`agent` tool name, content
 `{"event":"subagent_finished",…}`) drained before the parent's next
 model call, or — when the parent is idle — by starting a parent turn
 with `resume:true` to read it. Each result has a
 `completionId` (`<child id>#<child turn id>`), used as the notify row's
-tool-call id and returned as `completion_id` by `wait_agent`, so the
+tool-call id and returned as `completion_id` by `wait`, so the
 parent transcript records which results it holds. A delivered result is
 marked `reported` only once the parent turn that took it is saved; if
 that turn's save fails it goes back to the parent's mailbox, and after
@@ -678,8 +678,16 @@ transcript (a crash between the save and the `reported` write) is
 marked reported instead of delivered again. Delivery is therefore
 exactly once, including across crashes; a failed `reported` write is
 logged and settled by the same check at the next restart. A child stopped by its parent (or by
-stopping the parent) is not reported back. `wait_agent` lends the
+stopping the parent) is not reported back. `wait` blocks the turn until
+a named subagent or shell job (`target`: an agent_id, name or job_id)
+finishes — or, with no target, until any child or running job of the
+session does — and everything else that finishes meanwhile is returned
+in the same batch; a `notify:false` job's completion rides along only
+when it is the named target. It lends the
 parent's hub slot, so a child runs even with `maxConcurrentTurns: 1`.
+Its `settle` array marks activity-list steps finished, keeping the
+unfinished-plan guard quiet while the turn holds. On `timeout_ms`
+(default 60 s, clamped 1 s–10 min) or a stop, nothing is consumed.
 After a restart, a child whose turn was cut off reads `interrupted` and
 unreported results are delivered on the parent's next turn.
 

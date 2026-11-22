@@ -1,5 +1,5 @@
 // subagent_tools.go is the model-facing control surface for child
-// agents: spawn_agent, send_message, followup_task, wait_agent,
+// agents: spawn_agent, send_message, followup_task, wait,
 // interrupt_agent and list_agents. Every call is scoped to the calling
 // session's own children; children never get these tools.
 
@@ -19,7 +19,7 @@ import (
 )
 
 // agentToolNames are the delegation tools; children never get them.
-var agentToolNames = []string{"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents"}
+var agentToolNames = []string{"spawn_agent", "send_message", "followup_task", "wait", "interrupt_agent", "list_agents"}
 
 const (
 	waitDefault = 60 * time.Second
@@ -36,7 +36,7 @@ func (r *AgentRuntime) registerAgentTools() {
 	r.tools.Register(&agentTool{name: "spawn_agent", parallel: true, dynamicDef: func() tools.ToolDefinition { return spawnDefFor(r.configuredSubagents()) }, call: m.spawnCall})
 	r.tools.Register(&agentTool{name: "send_message", parallel: true, def: sendDef(), call: m.sendCall})
 	r.tools.Register(&agentTool{name: "followup_task", parallel: true, def: followupDef(), call: m.followupCall})
-	r.tools.Register(&agentTool{name: "wait_agent", def: waitDef(), call: m.waitCall})
+	r.tools.Register(&agentTool{name: "wait", def: waitDef(), call: m.waitCall})
 	r.tools.Register(&agentTool{name: "interrupt_agent", parallel: true, def: interruptDef(), call: m.interruptCall})
 	r.tools.Register(&agentTool{name: "list_agents", parallel: true, def: listDef(), call: m.listCall})
 }
@@ -121,7 +121,7 @@ func spawnDefFor(available []subagentKind) tools.ToolDefinition {
 		Description: "Start a subagent on a focused task in the background and return its agent_id at once. " +
 			"Each type has its configured tools and read-only or read-write access, subject to your permissions. " +
 			"Children cannot spawn agents. Use them for parallel, independent work; do quick lookups yourself. " +
-			"Their final reply comes back to you automatically when they finish (or call wait_agent). Types:\n" +
+			"Their final reply comes back to you automatically when they finish (or call wait). Types:\n" +
 			strings.Join(lines, "\n"),
 		Parameters: objectSchema(map[string]any{
 			"agent_type": agentType,
@@ -178,7 +178,7 @@ func (m *subagentManager) spawnCall(raw json.RawMessage, ctx *tools.ToolCtx) (an
 	return map[string]any{
 		"agent_id": m.modelID(ctx.SessionID, info.ID), "name": info.Name, "agent_type": info.Type, "status": info.Status,
 		"fork_turns": info.ForkTurns, "workspace": map[bool]string{true: "shared, read-write subject to parent permissions", false: workspaceNote}[kind.ReadWrite],
-		"note": "Running in the background. Its result is delivered to you when it finishes; keep working or call wait_agent.",
+		"note": "Running in the background. Its result is delivered to you when it finishes; keep working or call wait.",
 	}, nil
 }
 
@@ -270,27 +270,35 @@ func (m *subagentManager) followupCall(raw json.RawMessage, ctx *tools.ToolCtx) 
 
 func waitDef() tools.ToolDefinition {
 	return tools.ToolDefinition{
-		Name: "wait_agent",
-		Description: "Wait until one of your subagents finishes (or the timeout passes) and return statuses plus any new results. " +
-			"Results are delivered once: a result returned here will not be sent again. " +
-			"With no subagents running this returns immediately with nothing to wait for — never call it to pause, pass the time, " +
-			"or wait for a shell job. A finishing job or subagent wakes you on its own, so while you are waiting for one the right " +
-			"move is to end your turn: that costs nothing, and the completion notice resumes you with the result.",
+		Name: "wait",
+		Description: "Block until work you started finishes: one named subagent or shell job (target: an agent_id, name or job_id), " +
+			"or, with no target, whichever of your children or running jobs finishes first. " +
+			"Others that finish while you wait are returned together as one batch, so a second call is unnecessary. " +
+			"Subagent results are delivered once: a result returned here will not be sent again. " +
+			"Pass settle for the activity-list steps this wait covers, so a plan in progress does not read as abandoned. " +
+			"With nothing running this returns immediately with nothing to wait for — never call it to pause or pass the time. " +
+			"A job or subagent that finishes while you are not waiting wakes you on its own, so when you have other work to do, " +
+			"do that first or end your turn instead.",
 		Parameters: objectSchema(map[string]any{
-			"targets": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
-				"description": "agent_ids or names to wait for. Omit only when you have subagents of your own that are still running; with none, the call is a no-op that still costs a round."},
+			"target": map[string]any{"type": "string",
+				"description": "The subagent (agent_id or name) or shell job_id to wait for. Omit to wait for whichever of your " +
+					"children or running jobs finishes first."},
 			"timeout_ms": map[string]any{"type": "integer", "minimum": waitMin.Milliseconds(), "maximum": waitMax.Milliseconds(),
-				"description": fmt.Sprintf("How long to wait (default %d).", waitDefault.Milliseconds())},
+				"description": fmt.Sprintf("How long to wait (default %d). On timeout the statuses come back and nothing is killed or consumed.", waitDefault.Milliseconds())},
+			"settle": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "Activity-list steps this wait covers, matched by text; each is marked finished so the plan guard " +
+					"does not treat waiting as abandoning the plan."},
 		}),
 	}
 }
 
 func (m *subagentManager) waitCall(raw json.RawMessage, ctx *tools.ToolCtx) (any, error) {
 	var a struct {
-		Targets   []string `json:"targets"`
+		Target    string   `json:"target"`
 		TimeoutMs *int64   `json:"timeout_ms"`
+		Settle    []string `json:"settle"`
 	}
-	if err := decodeArgs("wait_agent", raw, &a); err != nil {
+	if err := decodeArgs("wait", raw, &a); err != nil {
 		return nil, err
 	}
 	timeout := waitDefault
@@ -301,18 +309,32 @@ func (m *subagentManager) waitCall(raw json.RawMessage, ctx *tools.ToolCtx) (any
 	if parent == nil {
 		parent = context.Background()
 	}
-	res, err := m.wait(parent, ctx.SessionID, a.Targets, timeout)
+	res, err := m.wait(parent, ctx.SessionID, a.Target, timeout)
 	if err != nil {
 		return nil, err
+	}
+	// Settle the plan steps this wait covers. A failure must not lose the
+	// results the wait already gathered: an unsettled plan is a nudge.
+	var settled []string
+	if len(a.Settle) > 0 && strings.TrimSpace(ctx.SessionDir) != "" {
+		if err := tools.SettleTodos(ctx.SessionDir, a.Settle); err == nil {
+			settled = a.Settle
+		}
 	}
 	agents := make([]map[string]any, 0, len(res.Agents))
 	for _, info := range res.Agents {
 		info.ID = m.modelID(ctx.SessionID, info.ID)
 		agents = append(agents, agentView(info, true))
 	}
-	out := map[string]any{"agents": agents, "timed_out": res.TimedOut}
-	if len(agents) == 0 {
-		out["note"] = "You have no subagents."
+	out := map[string]any{"agents": agents, "jobs": res.Jobs, "timed_out": res.TimedOut}
+	if len(settled) > 0 {
+		out["settled"] = settled
+	}
+	if len(agents) == 0 && len(res.Jobs) == 0 && !res.TimedOut {
+		out["note"] = "Nothing is running for this session, so there was nothing to wait for."
+	}
+	if res.TimedOut && len(agents) == 0 && len(res.Jobs) == 0 {
+		out["note"] = "The timeout passed with nothing to show for it; the work is still running."
 	}
 	return out, nil
 }

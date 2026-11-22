@@ -164,10 +164,10 @@ func TestShellGuidanceHasNoWaitAction(t *testing.T) {
 			"end your turn",
 			"There is no wait action; the call is refused",
 			// Waiting must not become a tool call of its own: the session
-			// that burned 95 wait_agent rounds started exactly here.
+			// that burned 95 idle wait rounds started exactly here.
 			"Waiting is never a reason to make a model call",
-			"You have no subagents",
-			"never wait_agent purely to pass the time",
+			"nothing to wait for",
+			"never wait purely to pass the time",
 			"calling status over and over",
 			"busy-wait through a slow job",
 			"Subagents report on their own too",
