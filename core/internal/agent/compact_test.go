@@ -62,7 +62,7 @@ func TestLlmMessagesStartFromLastCompaction(t *testing.T) {
 		{Role: transcript.RoleTool, Content: "r", CreatedAt: now, ToolCallID: &id, Name: &name, Replay: true},
 		{Role: transcript.RoleAssistant, Content: "after", CreatedAt: now},
 	}
-	got := LlmMessages(history, true)
+	got := LlmMessages(history, true, true)
 	if len(got) != 5 {
 		t.Fatalf("got %d: %+v", len(got), got)
 	}
@@ -153,7 +153,7 @@ func TestReactiveCompactionRecoversOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := LlmMessages(h, true)
+	view := LlmMessages(h, true, true)
 	if len(view) != len(after)+1 || view[0].Content != after[0].Content || view[len(view)-1].Content != "ok" {
 		t.Fatalf("persisted view %+v vs %+v", view, after)
 	}

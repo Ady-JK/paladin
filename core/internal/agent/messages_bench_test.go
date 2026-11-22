@@ -23,7 +23,7 @@ func BenchmarkLlmMessagesLargeToolBatch(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if got := LlmMessages(history, true); len(got) != count+1 {
+		if got := LlmMessages(history, true, true); len(got) != count+1 {
 			b.Fatalf("got %d messages", len(got))
 		}
 	}

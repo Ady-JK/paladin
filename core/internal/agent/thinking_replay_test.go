@@ -71,7 +71,7 @@ func TestReasoningSurvivesIntoALaterTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next := LlmMessages(history, true)
+	next := LlmMessages(history, true, true)
 	got := assistantThinking(next)
 	if len(got) != 1 || got[0] == nil || got[0].Opaque != "OP" || got[0].Text != "plan" {
 		t.Fatalf("next turn messages %+v", got)

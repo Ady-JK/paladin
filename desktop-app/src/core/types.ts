@@ -528,6 +528,9 @@ type ModelMeta = {
   /** Weakest first; empty with thinkingKnown means "none to pick". */
   thinkingLevels?: string[];
   thinkingKnown?: boolean;
+  /** Whether the model accepts image inputs; imagesKnown makes it authoritative. */
+  supportsImages?: boolean;
+  imagesKnown?: boolean;
   priceInput?: number;
   priceOutput?: number;
   priceCacheRead?: number;

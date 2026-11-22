@@ -81,7 +81,7 @@ func (r *AgentRuntime) SideQuestion(ctx context.Context, req SideQuestionRequest
 		if err != nil {
 			return SideAnswer{}, err
 		}
-		messages = agent.LlmMessages(history, true)
+		messages = agent.LlmMessages(history, true, inference.ModelAcceptsImages(provider))
 	}
 	for _, m := range chat.Messages {
 		content := m.Content

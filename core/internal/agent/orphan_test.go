@@ -63,7 +63,7 @@ func TestLlmMessagesSynthesizesMissingToolResults(t *testing.T) {
 		toolResult("c1", "ok"),
 		transcript.UserMessage("next"),
 	}
-	msgs := LlmMessages(history, true)
+	msgs := LlmMessages(history, true, true)
 	assertPaired(t, msgs)
 	var synthetic []string
 	for _, m := range msgs {
@@ -81,7 +81,7 @@ func TestLlmMessagesSynthesizesMissingToolResults(t *testing.T) {
 
 func TestLlmMessagesTrailingOrphanCallsAreSettled(t *testing.T) {
 	history := []transcript.Message{transcript.UserMessage("go"), assistantCalls("c1")}
-	assertPaired(t, LlmMessages(history, true))
+	assertPaired(t, LlmMessages(history, true, true))
 }
 
 func TestLlmMessagesDropsDuplicateAndLateResults(t *testing.T) {
@@ -93,7 +93,7 @@ func TestLlmMessagesDropsDuplicateAndLateResults(t *testing.T) {
 		transcript.UserMessage("between"),
 		toolResult("c1", "late"),
 	}
-	msgs := LlmMessages(history, true)
+	msgs := LlmMessages(history, true, true)
 	assertPaired(t, msgs)
 	for _, m := range msgs {
 		if m.Role == "tool" && m.Content != "first" {
@@ -112,7 +112,7 @@ func TestLlmMessagesReusedIDsAcrossRounds(t *testing.T) {
 		assistantCalls("pending-0"),
 		toolResult("pending-0", "r2"),
 	}
-	msgs := LlmMessages(history, true)
+	msgs := LlmMessages(history, true, true)
 	assertPaired(t, msgs)
 	var got []string
 	for _, m := range msgs {
@@ -180,5 +180,5 @@ func TestStopMidToolsPersistsAbortedResults(t *testing.T) {
 	if aborted != 2 {
 		t.Fatalf("the UI must see both aborted rows settle, saw %d", aborted)
 	}
-	assertPaired(t, LlmMessages(history, true))
+	assertPaired(t, LlmMessages(history, true, true))
 }

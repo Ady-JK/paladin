@@ -34,6 +34,12 @@ type catalogEntry struct {
 			Toggle    *bool    `json:"toggle"`
 		} `json:"reasoning"`
 	} `json:"capabilities"`
+	// Modalities are the input/output kinds the model accepts. OpenCode
+	// lists MIME types ("text", "image/png", …); only the input side
+	// decides whether images can be sent.
+	Modalities struct {
+		Input []string `json:"input"`
+	} `json:"modalities"`
 	Limit struct {
 		Context int64 `json:"context"`
 		Output  int64 `json:"output"`
@@ -219,17 +225,37 @@ func normalizeEfforts(entry catalogEntry) ([]string, bool) {
 	return []string{}, true
 }
 
+// imagesKnown reads the listing's input modalities: whether the model
+// accepts images, and whether that answer is authoritative. A listing
+// that says nothing keeps the permissive default (images flow) rather
+// than silently blinding a vision model the metadata never described.
+func imagesKnown(entry catalogEntry) (supported, known bool) {
+	inputs := entry.Modalities.Input
+	if len(inputs) == 0 {
+		return false, false
+	}
+	for _, in := range inputs {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(in)), "image") {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 // meta builds the metadata stored with the catalog. apiKeys are the
 // endpoints the entry documents; the caller collects them because a
 // map's keys range in no defined order.
 func (e catalogEntry) meta(apiKeys []string) CatalogMeta {
 	levels, known := normalizeEfforts(e)
+	images, imagesKnownOK := imagesKnown(e)
 	return CatalogMeta{
 		ContextWindow:   e.Limit.Context,
 		MaxOutput:       e.Limit.Output,
 		Protocol:        catalogProtocol(apiKeys),
 		ThinkingLevels:  levels,
 		ThinkingKnown:   known,
+		SupportsImages:  images,
+		ImagesKnown:     imagesKnownOK,
 		PriceInput:      e.Cost.input(),
 		PriceOutput:     e.Cost.output(),
 		PriceCacheRead:  e.Cost.cacheRead(),

@@ -66,5 +66,20 @@ func TestParseLiveCatalogShape(t *testing.T) {
 		if len(m.ThinkingLevels) > 0 && len(levels) == 0 && (m.Protocol == protocolChat || m.Protocol == protocolResponses) {
 			t.Errorf("%s: catalog levels dropped for %s", id, m.Protocol)
 		}
+		// A listing that documents input modalities must classify every
+		// described model as image-capable or text-only, never neither.
+		if m.ImagesKnown && !m.SupportsImages && id == "deepseek-v4.1-flash" {
+			t.Errorf("deepseek-v4.1-flash must accept images, got %+v", m)
+		}
+	}
+
+	// The transition the whole capability exists for: a vision model and
+	// a text-only model in the same session. The listing must say which
+	// is which.
+	if m := meta["deepseek-v4.1-flash"]; !m.ImagesKnown || !m.SupportsImages {
+		t.Errorf("deepseek-v4.1-flash images: known=%v supported=%v", m.ImagesKnown, m.SupportsImages)
+	}
+	if m := meta["glm-5.3"]; !m.ImagesKnown || m.SupportsImages {
+		t.Errorf("glm-5.3 images: known=%v supported=%v", m.ImagesKnown, m.SupportsImages)
 	}
 }

@@ -44,6 +44,9 @@ type copilotModel struct {
 			AdaptiveThinking  bool      `json:"adaptive_thinking"`
 			MinThinkingBudget int64     `json:"min_thinking_budget"`
 			MaxThinkingBudget int64     `json:"max_thinking_budget"`
+			// Vision is null when the listing said nothing about image
+			// inputs; the pointer distinguishes that from a plain no.
+			Vision *bool `json:"vision"`
 		} `json:"supports"`
 	} `json:"capabilities"`
 }
@@ -116,6 +119,9 @@ func parseCopilotModel(id, raw string) (config.ModelMeta, bool, error) {
 	}
 	meta := config.ModelMeta{Protocol: protocol, ContextWindow: model.Capabilities.Limits.Context, MaxInput: model.Capabilities.Limits.Input, MaxOutput: model.Capabilities.Limits.Output,
 		AdaptiveThinking: model.Capabilities.Supports.AdaptiveThinking, MinThinkingBudget: model.Capabilities.Supports.MinThinkingBudget, MaxThinkingBudget: model.Capabilities.Supports.MaxThinkingBudget}
+	if model.Capabilities.Supports.Vision != nil {
+		meta.SupportsImages, meta.ImagesKnown = *model.Capabilities.Supports.Vision, true
+	}
 
 	prices := model.Billing.TokenPrices
 	if prices.Default != nil && prices.Default.MaxInput > 0 && prices.Default.MaxInput < meta.MaxInput {

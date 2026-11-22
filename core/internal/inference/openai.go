@@ -146,6 +146,16 @@ func (p *OpenAIProvider) Name() string            { return p.name }
 func (p *OpenAIProvider) ApiType() config.ApiType { return config.ApiTypeOpenai }
 func (p *OpenAIProvider) Model() string           { return p.model }
 
+// AcceptsImages reports whether this model takes image inputs. Only a
+// listing that documented the model's input modalities can say no; an
+// unknown listing stays permissive so a vision model is never blinded.
+func (p *OpenAIProvider) AcceptsImages() bool {
+	if !p.meta.ImagesKnown {
+		return true
+	}
+	return p.meta.SupportsImages
+}
+
 func (p *OpenAIProvider) headers(sessionID string) []option.RequestOption {
 	if p.isCopilot {
 		return nil

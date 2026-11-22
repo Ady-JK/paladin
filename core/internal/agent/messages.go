@@ -5,9 +5,11 @@ package agent
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/inference"
+	"github.com/Ady-JK/paladin/core/internal/media"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/tools"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -31,16 +33,44 @@ func fromTranscriptThinking(t *transcript.Thinking) *inference.Thinking {
 
 func (a *Agent) modelMessages(message string, resume bool) []inference.LlmMessage {
 	withTools := len(a.toolDefs) > 0
-	messages := LlmMessages(a.history, withTools)
+	messages := LlmMessages(a.history, withTools, a.imagesAccepted())
 	if withTools && !resume {
 		messages = append(messages, inference.LlmMessage{Role: "user", Content: message})
 		for _, attachment := range a.currentAttachments {
 			if attachment.Image != nil {
-				messages = append(messages, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
+				messages = append(messages, a.imageMessage("Attached image: "+attachment.Name, attachment.Image))
 			}
 		}
 	}
 	return messages
+}
+
+// imagesAccepted caches the active model's image capability for the
+// turn; an image-blind model keeps working after a switch mid-session
+// because its calls carry no image parts at all.
+func (a *Agent) imagesAccepted() bool {
+	if a.provider == nil {
+		return true
+	}
+	if a.imageOK == nil {
+		ok := inference.ModelAcceptsImages(a.provider)
+		a.imageOK = &ok
+	}
+	return *a.imageOK
+}
+
+// imageMessage renders one image for the active model: the image itself
+// for a model that accepts them, a short note for one that does not, so
+// the tool result or attachment still reads as part of the exchange.
+func (a *Agent) imageMessage(label string, img *media.Image) inference.LlmMessage {
+	if a.imagesAccepted() {
+		return inference.LlmMessage{Role: "user", Content: label, Image: img}
+	}
+	name := ""
+	if img != nil {
+		name = filepath.Base(img.Path)
+	}
+	return inference.LlmMessage{Role: "user", Content: label + " (" + imageBlindNote(name) + ")"}
 }
 
 // AbortedToolContent is the model-facing result for a tool call that
@@ -56,8 +86,8 @@ const AbortedToolContent = `{"error":"aborted: this tool call did not complete (
 // (reminders, orphans, empty or unknown ids) become plain user context
 // after the block instead of breaking the provider contract. Only the
 // part after the last compaction marker is replayed, behind its summary.
-func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMessage {
-	builder := messageBuilder{out: []inference.LlmMessage{}, withTools: withTools}
+func LlmMessages(history []transcript.Message, withTools, imagesAccepted bool) []inference.LlmMessage {
+	builder := messageBuilder{out: []inference.LlmMessage{}, withTools: withTools, imagesAccepted: imagesAccepted}
 	// The latest compaction summary replaces all earlier messages.
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].IsCompaction() {
@@ -84,10 +114,14 @@ func LlmMessages(history []transcript.Message, withTools bool) []inference.LlmMe
 type messageBuilder struct {
 	out       []inference.LlmMessage
 	withTools bool
-	open      bool
-	order     []inference.ToolCall
-	answered  map[string]bool
-	deferred  []inference.LlmMessage
+	// imagesAccepted is the active model's image capability; a blind
+	// model gets a text note instead of the image part a text-only
+	// endpoint would reject outright.
+	imagesAccepted bool
+	open           bool
+	order          []inference.ToolCall
+	answered       map[string]bool
+	deferred       []inference.LlmMessage
 }
 
 func (b *messageBuilder) closeBlock() {
@@ -110,7 +144,11 @@ func (b *messageBuilder) addUser(msg transcript.Message) {
 	b.out = append(b.out, inference.LlmMessage{Role: "user", Content: msg.Content})
 	for _, attachment := range msg.Attachments {
 		if attachment.Image != nil {
-			b.out = append(b.out, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
+			if b.imagesAccepted {
+				b.out = append(b.out, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name, Image: attachment.Image})
+			} else {
+				b.out = append(b.out, inference.LlmMessage{Role: "user", Content: "Attached image: " + attachment.Name + " (" + imageBlindNote(attachment.Name) + ")"})
+			}
 		}
 	}
 }
@@ -152,10 +190,34 @@ func (b *messageBuilder) addTool(msg transcript.Message) {
 	}
 	b.answered[id] = true
 	callID := id
+	image := msg.Image
+	if image != nil && !b.imagesAccepted {
+		// A text-only model must not receive the image part its endpoint
+		// would reject; the note keeps the tool result honest.
+		name := "an image"
+		if msg.Name != nil && *msg.Name != "" {
+			name = *msg.Name
+		}
+		b.out = append(b.out, inference.LlmMessage{
+			Role: "tool", Content: msg.Content + "\n[" + imageBlindNote(name) + "]",
+			Image: nil, ToolCallID: &callID, Name: msg.Name,
+		})
+		return
+	}
 	b.out = append(b.out, inference.LlmMessage{
 		Role: "tool", Content: msg.Content,
-		Image: msg.Image, ToolCallID: &callID, Name: msg.Name,
+		Image: image, ToolCallID: &callID, Name: msg.Name,
 	})
+}
+
+// imageBlindNote is what replaces an image for a model with no image
+// inputs: honest about the missing picture, short enough not to crowd
+// the exchange.
+func imageBlindNote(name string) string {
+	if name == "" {
+		return "this model does not accept images, so an image is not shown"
+	}
+	return "this model does not accept images, so the image from " + name + " is not shown"
 }
 
 func (b *messageBuilder) demote(content string) {

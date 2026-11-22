@@ -165,6 +165,13 @@ type ModelMeta struct {
 	// Pricing distinguishes missing prices from a published zero and may
 	// contain higher rates for long-context requests.
 	Pricing *ModelPricing `json:"pricing,omitempty"`
+	// SupportsImages is whether the model accepts image inputs.
+	// ImagesKnown marks it authoritative: the listing described this
+	// model's input modalities, so false really means text-only. An
+	// unknown listing keeps images flowing (the permissive default that
+	// never broke a vision model).
+	SupportsImages bool `json:"supportsImages,omitempty"`
+	ImagesKnown    bool `json:"imagesKnown,omitempty"`
 }
 
 type ModelPricing struct {
@@ -185,7 +192,7 @@ type PriceTier struct {
 func (m ModelMeta) Empty() bool {
 	return m.ContextWindow == 0 && m.MaxInput == 0 && m.DefaultInput == 0 && !m.LongContextSurcharge && m.MaxOutput == 0 && m.Protocol == "" &&
 		len(m.ThinkingLevels) == 0 && !m.ThinkingKnown && !m.AdaptiveThinking && m.MinThinkingBudget == 0 && m.MaxThinkingBudget == 0 && m.PriceInput == 0 && m.PriceOutput == 0 &&
-		m.PriceCacheRead == 0 && m.PriceCacheWrite == 0 && m.Pricing == nil
+		m.PriceCacheRead == 0 && m.PriceCacheWrite == 0 && m.Pricing == nil && !m.ImagesKnown
 }
 
 type ModelsFile struct {

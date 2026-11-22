@@ -15,13 +15,13 @@ func TestToolResultsDemoteToUserWithoutTools(t *testing.T) {
 		transcript.UserMessage("hi"),
 		{Role: transcript.RoleTool, Content: "out", CreatedAt: time.Now().UTC(), ToolCallID: &callID, Name: &name},
 	}
-	plain := LlmMessages(history, false)
+	plain := LlmMessages(history, false, true)
 	for _, m := range plain {
 		if m.Role == "tool" {
 			t.Fatal("tool role leaked without tools")
 		}
 	}
-	with := LlmMessages(history, true)
+	with := LlmMessages(history, true, true)
 	for _, m := range with {
 		if m.Role == "tool" {
 			t.Fatal("orphan tool result kept tool role")
@@ -36,7 +36,7 @@ func TestLinkedToolResultsKeepToolRole(t *testing.T) {
 		{Role: transcript.RoleAssistant, CreatedAt: time.Now().UTC(), ToolCalls: &stored},
 		{Role: transcript.RoleTool, Content: "out", CreatedAt: time.Now().UTC(), ToolCallID: &callID, Name: &name},
 	}
-	with := LlmMessages(history, true)
+	with := LlmMessages(history, true, true)
 	found := false
 	for _, m := range with {
 		if m.Role == "tool" {
@@ -50,7 +50,7 @@ func TestLinkedToolResultsKeepToolRole(t *testing.T) {
 
 func TestModelMessagesIncludesCurrent(t *testing.T) {
 	h := []transcript.Message{transcript.UserMessage("old")}
-	with := LlmMessages(h, true)
+	with := LlmMessages(h, true, true)
 	if len(with) != 1 || with[0].Content != "old" {
 		t.Fatalf("got %+v", with)
 	}
@@ -78,7 +78,7 @@ func TestAttachedImagesReachCurrentAndReplayedModelMessages(t *testing.T) {
 	}
 	stored := transcript.UserMessage("inspect it")
 	stored.Attachments = []media.Attachment{attachment}
-	replayed := LlmMessages([]transcript.Message{stored}, true)
+	replayed := LlmMessages([]transcript.Message{stored}, true, true)
 	if len(replayed) != 2 || replayed[1].Image == nil || replayed[1].Image.Path != image.Path {
 		t.Fatalf("replayed image missing: %+v", replayed)
 	}
@@ -89,7 +89,7 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 	// Assistant blank without calls is dropped.
 	msgs := LlmMessages([]transcript.Message{
 		{Role: transcript.RoleAssistant, Content: "  ", CreatedAt: now},
-	}, true)
+	}, true, true)
 	if len(msgs) != 0 {
 		t.Fatalf("got %+v", msgs)
 	}
@@ -97,7 +97,7 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 	stored := []transcript.ToolCall{{ID: "c1", Name: "read", Arguments: "{}", Signature: "sig-1"}}
 	msgs = LlmMessages([]transcript.Message{
 		{Role: transcript.RoleAssistant, Content: "", CreatedAt: now, ToolCalls: &stored},
-	}, true)
+	}, true, true)
 	// The unanswered call is settled with a synthetic aborted result.
 	if len(msgs) != 2 || len(msgs[0].ToolCalls) != 1 || msgs[1].Role != "tool" || msgs[1].Content != AbortedToolContent {
 		t.Fatalf("got %+v", msgs)
@@ -109,7 +109,7 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 	stored2 := []transcript.ToolCall{{ID: "", Name: "read", Arguments: "{}"}}
 	msgs = LlmMessages([]transcript.Message{
 		{Role: transcript.RoleAssistant, Content: "x", CreatedAt: now, ToolCalls: &stored2},
-	}, true)
+	}, true, true)
 	if len(msgs) != 1 || len(msgs[0].ToolCalls) != 0 {
 		t.Fatalf("got %+v", msgs)
 	}
@@ -118,19 +118,19 @@ func TestLlmMessagesEdgeCases(t *testing.T) {
 	msgs = LlmMessages([]transcript.Message{
 		{Role: transcript.RoleAssistant, CreatedAt: now, ToolCalls: &[]transcript.ToolCall{{ID: "c1", Name: "shell", Arguments: "{}"}}},
 		{Role: transcript.RoleTool, Content: "bg done", CreatedAt: now, ToolCallID: &nid, Name: &nname},
-	}, true)
+	}, true, true)
 	if len(msgs) != 3 || msgs[1].Role != "tool" || msgs[2].Role != "user" {
 		t.Fatalf("got %+v", msgs)
 	}
 	// System rows are not forwarded to the model.
 	msgs = LlmMessages([]transcript.Message{
 		{Role: transcript.RoleSystem, Content: "sys", CreatedAt: now},
-	}, true)
+	}, true, true)
 	if len(msgs) != 0 {
 		t.Fatalf("got %+v", msgs)
 	}
 	// Nil history -> empty non-nil slice.
-	if out := LlmMessages(nil, true); out == nil || len(out) != 0 {
+	if out := LlmMessages(nil, true, true); out == nil || len(out) != 0 {
 		t.Fatalf("got %+v", out)
 	}
 }

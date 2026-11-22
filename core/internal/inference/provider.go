@@ -232,6 +232,23 @@ func BuildProvider(apiType config.ApiType, name, model, baseURL, apiKey string) 
 	return BuildProviderWithMeta(apiType, name, model, baseURL, apiKey, config.ModelMeta{})
 }
 
+// ImageCapable reports whether the active model accepts image inputs.
+// Providers whose model metadata describes input modalities implement
+// it; every other provider keeps the permissive default.
+type ImageCapable interface {
+	AcceptsImages() bool
+}
+
+// ModelAcceptsImages resolves the image capability for any provider:
+// a provider that knows says so, one that does not accepts images
+// (the historic behavior, which never broke a vision model).
+func ModelAcceptsImages(p Provider) bool {
+	if c, ok := p.(ImageCapable); ok {
+		return c.AcceptsImages()
+	}
+	return true
+}
+
 // BuildProviderWithMeta is BuildProvider for a model whose catalog
 // metadata is known, so the provider routes the way its gateway
 // documents rather than by the model's name.

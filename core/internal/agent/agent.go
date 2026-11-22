@@ -367,6 +367,8 @@ type Agent struct {
 	currentDisplay     string
 	currentAttachments []media.Attachment
 	currentResume      bool
+	// imageOK caches the active model's image capability for the turn.
+	imageOK *bool
 	// compactOnly runs a manual /compact instead of a model turn.
 	compactOnly bool
 

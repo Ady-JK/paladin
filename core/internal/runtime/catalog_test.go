@@ -347,6 +347,7 @@ func TestNetworkFetchParsesMetadata(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"object":"list","data":[
 		 {"id":"glm-5.3","capabilities":{"reasoning":{"supported":true,"effort":["low","high","max"]}},
+		  "modalities":{"input":["text"]},
 		  "limit":{"context":1000000,"output":131072},
 		  "cost":{"text":{"input":{"price":1.4,"cache":{"read":0.26}},"output":{"price":4.4}}},
 		  "api":{"chat-completions":{"base_url":"http://x"}}}]}`)
@@ -386,6 +387,7 @@ func TestNetworkFetchParsesMetadata(t *testing.T) {
 	want := config.ModelMeta{
 		ContextWindow: 1000000, MaxOutput: 131072, Protocol: "chat",
 		ThinkingLevels: []string{"low", "high", "max"}, ThinkingKnown: true,
+		SupportsImages: false, ImagesKnown: true,
 		PriceInput: 1.4, PriceOutput: 4.4, PriceCacheRead: 0.26,
 	}
 	gotJSON, _ := json.Marshal(got)
@@ -404,5 +406,50 @@ func TestNetworkFetchParsesMetadata(t *testing.T) {
 		if len(p.Models) != 1 || p.Models[0] != "glm-5.3" {
 			t.Fatalf("models %v", p.Models)
 		}
+	}
+}
+
+// The switch the capability exists for: a session that used a vision
+// model (deepseek-v4.1-flash) moves to a text-only one (glm-5.3), and
+// the resolved provider reports it. The agent's message builder uses
+// that answer to send notes instead of image parts, so the text-only
+// endpoint never sees a request it would reject.
+func TestResolvedProviderReportsImageCapability(t *testing.T) {
+	rt, _ := testRuntime(t)
+	if err := rt.store.Keys.Set("Opencode Go", "sk-live"); err != nil {
+		t.Fatal(err)
+	}
+	rt.SetCatalogFetcher(catalogFetcher(CatalogFetch{
+		Models: []string{"deepseek-v4.1-flash", "glm-5.3"},
+		Meta: map[string]config.ModelMeta{
+			"deepseek-v4.1-flash": {SupportsImages: true, ImagesKnown: true},
+			"glm-5.3":             {SupportsImages: false, ImagesKnown: true},
+		},
+	}))
+	if _, err := rt.RefreshProvider(config.DefaultProviderName); err != nil {
+		t.Fatal(err)
+	}
+	vision, err := runtimeProviders{rt}.ResolveProvider(config.DefaultProviderName, "deepseek-v4.1-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inference.ModelAcceptsImages(vision) {
+		t.Fatal("deepseek-v4.1-flash must accept images")
+	}
+	blind, err := runtimeProviders{rt}.ResolveProvider(config.DefaultProviderName, "glm-5.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inference.ModelAcceptsImages(blind) {
+		t.Fatal("glm-5.3 must report text-only")
+	}
+	// A model whose listing said nothing keeps images, the permissive
+	// default that never blinded a vision model.
+	unknown, err := runtimeProviders{rt}.ResolveProvider(config.DefaultProviderName, "never-listed-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inference.ModelAcceptsImages(unknown) {
+		t.Fatal("an undescribed model must stay permissive")
 	}
 }
