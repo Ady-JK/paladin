@@ -48,6 +48,14 @@
       .startup.is-leaving {
         opacity: 0;
       }
+      .startup-detail {
+        max-width: 42ch;
+        margin: -8px 0 0;
+        text-align: center;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #f0a0a0;
+      }
       .startup-content {
         display: grid;
         justify-items: center;
@@ -120,6 +128,9 @@
         <div class="startup-mark" aria-hidden="true">P</div>
         <div>Opening Paladin</div>
         <div class="startup-line" aria-hidden="true"></div>
+        <!-- Filled only when boot throws, so a failure says so instead of
+             leaving "Opening Paladin" on screen forever. -->
+        <p id="startupDetail" class="startup-detail" hidden></p>
       </div>
     </div>
     <div id="appShell" class="relative flex h-screen overflow-hidden" inert>

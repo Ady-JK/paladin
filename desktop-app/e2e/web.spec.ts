@@ -412,15 +412,18 @@ test("a menu opened over the page freezes it to a still, and the live page retur
   await expect.poll(() => viewShown(page)).toBe("web:t1");
   expect(await surfaceStill(page)).toBe("none");
 
-  // The Browser menu itself drops down over the page area.
-  await openMenu(page);
-  await expect(page.locator("#webMenu")).toBeVisible();
+  // Browser mode's sites menu hangs off its + in the top bar, which is over the
+  // left rail, not over the page — it is deliberately placed not to cover the
+  // native surface. The freeze is what matters here, so trigger it with an
+  // overlay that really does sit on the page: the settings modal.
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#settingsModal")).toBeVisible();
   await expect.poll(() => viewShown(page)).toBe("agent");
   await expect.poll(() => surfaceStill(page)).toContain("data:image");
   expect(await snapshots(page)).toBeGreaterThan(0);
 
   await page.keyboard.press("Escape");
-  await expect(page.locator("#webMenu")).toBeHidden();
+  await expect(page.locator("#settingsModal")).toBeHidden();
   await expect.poll(() => viewShown(page)).toBe("web:t1");
   await expect.poll(() => surfaceStill(page)).toBe("none");
 });

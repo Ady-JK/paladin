@@ -61,10 +61,21 @@ import type {
   SkillEntry,
   TodoEntry,
 } from "./types";
-import { bridge } from "./bridge";
+import { bridge, hasBridge } from "./bridge";
 
 function invoke<T>(method: string, args: unknown = {}): Promise<T> {
-  return bridge().invoke(method, args) as Promise<T>;
+  // A rejected promise, never a synchronous throw. Every caller awaits this or
+  // attaches .catch, so throwing here bypassed all of that error handling and
+  // unwound whichever feature was booting — a missing bridge took the whole
+  // renderer down through the first call that ran (see onAgentEvent).
+  if (!hasBridge()) {
+    return Promise.reject(new Error("native bridge is missing (run under Electron)"));
+  }
+  try {
+    return bridge().invoke(method, args) as Promise<T>;
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
 }
 
 export type TerminalResult = { output: string; exitCode: number; truncated: boolean };
@@ -514,6 +525,14 @@ export function cancelTurn(turnId: string): Promise<boolean> {
 
 // onAgentEvent subscribes to every turn event of every session.
 export function onAgentEvent(cb: (event: TurnEvent) => void): () => void {
+  // Subscribing is something every feature does during boot, and boot must not
+  // depend on Electron: outside the desktop app (the dev server in a plain
+  // browser, where this renderer is otherwise fully usable for layout work)
+  // there is simply nothing to subscribe to. Throwing here aborted the rest of
+  // DOMContentLoaded and left the window on its startup screen forever.
+  if (!hasBridge()) {
+    return () => {};
+  }
   const b = bridge();
   if (!b.onEvent) {
     return () => {};

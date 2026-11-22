@@ -317,3 +317,13 @@
 .dark .web-menu-action:hover {
   background: rgb(255 255 255 / 0.07);
 }
+
+/* The sites menu hangs off the card, not the header: Browser mode hides the
+   header it was born in, and Web mode wants the menu under its own bar. So it
+   is fixed and placed by positionMenu from its anchor's rectangle — the
+   inherited `top: calc(100% + 8px)` put it a whole card-height down. */
+#webMenu {
+  position: fixed;
+  z-index: 60;
+  top: auto;
+}

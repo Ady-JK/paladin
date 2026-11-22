@@ -7,7 +7,7 @@
 // visible, and rows are patched in place rather than re-rendered.
 
 import * as api from "../core/api";
-import { bridge } from "../core/bridge";
+import { bridge, hasBridge } from "../core/bridge";
 import { escapeAttr } from "../core/format";
 import { state } from "../core/state";
 import type { ResourceSnapshot, ResourceUsage } from "../core/types";
@@ -274,6 +274,13 @@ async function sample(): Promise<void> {
   if (inFlight) {
     return;
   }
+  // No desktop process to measure outside Electron. `.finally(schedule)` alone
+  // left the rejection unhandled, which surfaced as a page error on every
+  // sample.
+  if (!hasBridge()) {
+    window.clearTimeout(timer);
+    return;
+  }
   inFlight = true;
   try {
     const metrics = bridge().metrics;
@@ -295,7 +302,9 @@ function schedule(): void {
     return;
   }
   timer = window.setTimeout(() => {
-    void sample().finally(schedule);
+    void sample()
+      .catch(() => undefined)
+      .finally(schedule);
   }, interval());
 }
 

@@ -134,7 +134,16 @@ function wireDrawer(): void {
 }
 
 async function setupWindow(): Promise<void> {
+  // Outside Electron (the dev server opened in a plain browser) there are no
+  // window operations to wire, but the controls must still be inert-looking
+  // rather than dead: mark them so a click says why instead of doing nothing.
   if (!hasBridge()) {
+    for (const id of ["#windowMinimizeBtn", "#windowMaximizeBtn", "#windowCloseBtn"]) {
+      const button = document.querySelector<HTMLButtonElement>(id);
+      if (!button) continue;
+      button.disabled = true;
+      button.title = `${button.title} (desktop only)`;
+    }
     return;
   }
 

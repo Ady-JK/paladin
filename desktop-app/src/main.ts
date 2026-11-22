@@ -228,3 +228,20 @@ window.addEventListener("DOMContentLoaded", () => {
 
   void revealApp(connect());
 });
+
+// Boot must fail open. A throw anywhere above aborted the rest of
+// DOMContentLoaded, and #startup is only removed by revealApp — so one
+// synchronous error left the window on "Opening Paladin" forever, with the
+// shell inert and no way to read the reason. Opening the dev server in a plain
+// browser is enough to trigger it, which made the renderer un-inspectable
+// exactly where it is easiest to inspect.
+window.addEventListener("error", (event) => {
+  const startup = document.querySelector<HTMLElement>("#startup");
+  if (!startup) return;
+  const detail = document.querySelector<HTMLElement>("#startupDetail");
+  if (detail) {
+    detail.textContent = event.message || "Something failed while opening.";
+    detail.hidden = false;
+  }
+  startup.classList.add("is-failed");
+});

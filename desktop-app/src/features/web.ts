@@ -37,15 +37,23 @@ let listEl: HTMLElement | null = null;
 // can fire in a mode whose bar is hidden.
 let menuAnchor: HTMLElement | null = null;
 
+// The menu is positioned against the viewport, from the rectangle of whatever
+// opened it. It cannot be positioned against its container: it hangs off the
+// card now (Browser mode hides the header it used to live in), and a
+// percentage offset inside the card means "below the whole card".
 function positionMenu(anchor: HTMLElement | null = menuAnchor ?? button): void {
   if (!menu || !anchor) return;
-  const parent = menu.offsetParent;
-  if (!(parent instanceof HTMLElement)) return;
-  const parentLeft = parent.getBoundingClientRect().left;
   const rect = anchor.getBoundingClientRect();
-  const desired = (rect.width > 0 ? rect.left : parentLeft + 12) - parentLeft;
-  const max = document.documentElement.clientWidth - parentLeft - menu.offsetWidth - 8;
-  menu.style.left = `${Math.max(-parentLeft + 8, Math.min(desired, max))}px`;
+  const width = menu.offsetWidth || 320;
+  // A hidden anchor has no rectangle (the keyboard shortcut opens the menu in
+  // Agent mode, where the globe is not shown). Fall back to the header, so the
+  // menu appears under the composer bar rather than in the window's corner.
+  const header = document.querySelector<HTMLElement>("#titleBar");
+  const fallback = header && header.getBoundingClientRect().width > 0 ? header.getBoundingClientRect() : null;
+  const left = rect.width > 0 ? rect.left : (fallback?.left ?? 12) + 8;
+  const maxLeft = document.documentElement.clientWidth - width - 8;
+  menu.style.left = `${Math.max(8, Math.min(left, maxLeft))}px`;
+  menu.style.top = `${Math.round((rect.width > 0 ? rect.bottom : (fallback?.bottom ?? 0)) + 6)}px`;
 }
 
 function normalizeSiteUrl(raw: string): string {
