@@ -2,7 +2,7 @@
 // arrow navigation, Enter to advance, review screen, submit answers.
 import { test, expect, type Page } from "@playwright/test";
 
-import { showPane } from "./modes";
+import { showPane, addToPane } from "./modes";
 
 const QUESTIONS = [
   { question: "Deploy where?", options: ["staging", "production"] },
@@ -134,8 +134,7 @@ test("question wizard hides the native browser and restores it when dismissed", 
   await page.fill("#promptInput", "start");
   await page.click("#sendBtn");
   await expect(page.locator("#messages")).toContainText("start");
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await page.evaluate(() =>
     (window as any).__e2eHub.emit({
       event: "browser/opened",

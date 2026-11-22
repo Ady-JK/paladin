@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
   await page.locator("#promptInput").press("Enter");
 });
 
-test("the header + opens the pane and offers a side chat", async ({ page }) => {
+test("the header + opens the pane, whose picker offers a side chat", async ({ page }) => {
   const actions = page.locator("#titleBar #paneActions");
   await expect(actions).toBeVisible();
   // The layout toggle that used to sit here is gone: the rail's mode buttons
@@ -16,7 +16,10 @@ test("the header + opens the pane and offers a side chat", async ({ page }) => {
   await expect(actions.locator("#paneLayoutBtn")).toHaveCount(0);
   await actions.locator("#paneNewChatBtn").click();
   await expect(page.locator("#sidePane")).toBeVisible();
-  await page.getByRole("menuitem", { name: "New side chat" }).click();
+  // + opens the pane and nothing else: no dropdown of "New side chat / New
+  // terminal" to compete with the picker that already offers both.
+  await expect(page.locator("#paneHistoryMenu")).toBeHidden();
+  await page.locator('#panePicker [data-pane-pick="chat"]').click();
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
   await hidePane(page);
   // A tab is the pane's content, not its open state.
@@ -47,16 +50,18 @@ test("the readings sit left of the icon row and never push it sideways", async (
   expect(Math.abs(after.actions - before.actions)).toBeLessThan(1);
 });
 
-test("browser has one entry, on the rail, and the + menu offers both pane kinds", async ({ page }) => {
+test("browser has one entry, on the rail, and the + picker offers every pane kind", async ({ page }) => {
   await expect(page.locator("#paneBrowserBtn")).toHaveCount(0);
   // Exactly one Browser control, and it is the rail's mode button.
   await expect(page.getByRole("tab", { name: "Browser", exact: true })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Browser", exact: true })).toHaveCount(0);
   await page.locator("#paneNewChatBtn").click();
-  await expect(page.getByRole("menuitem", { name: "New side chat" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "New terminal" })).toBeVisible();
-  await expect(page.locator("#paneHistoryMenu")).toContainText("No saved side chats");
-  await page.getByRole("menuitem", { name: "New terminal" }).click();
+  const picker = page.locator("#panePicker");
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole("button", { name: /Side chat/ })).toBeVisible();
+  await expect(picker.getByRole("button", { name: /Terminal/ })).toBeVisible();
+  await expect(picker.getByRole("button", { name: /Browser/ })).toBeVisible();
+  await picker.getByRole("button", { name: /Terminal/ }).click();
   await expect(page.locator("#sidePane .pane-terminal")).toBeVisible();
 });
 
@@ -74,8 +79,7 @@ test("the header keeps one height as the pane opens and the mode changes", async
   });
   const closed = await measure();
   await showPane(page);
-  await page.locator("#paneActions #paneNewChatBtn").click();
-  await page.getByRole("menuitem", { name: "New side chat" }).click();
+  await page.locator('#panePicker [data-pane-pick="chat"]').click();
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
   const withPane = await measure();
 

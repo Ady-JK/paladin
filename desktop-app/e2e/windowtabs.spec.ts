@@ -2,6 +2,7 @@
 // switching conversation does not take the tabs away. Each tab remembers
 // the session it was opened for.
 import { expect, test, type Page } from "@playwright/test";
+import { addToPane } from "./modes";
 
 async function start(page: Page, text: string): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -12,8 +13,7 @@ async function start(page: Page, text: string): Promise<void> {
 }
 
 async function openSideChat(page: Page): Promise<void> {
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane")).toBeVisible();
 }
 

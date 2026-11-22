@@ -4,7 +4,7 @@
 // horizontal strip of the things it owns — side chats, terminals and browser.
 import { expect, test, type Page } from "@playwright/test";
 
-import { showPane } from "./modes";
+import { showPane, addToPane } from "./modes";
 
 async function start(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -16,8 +16,7 @@ async function start(page: Page): Promise<void> {
 
 async function openSideChat(page: Page): Promise<void> {
   await showPane(page);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
 }
 

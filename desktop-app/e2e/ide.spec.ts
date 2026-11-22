@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { showPane } from "./modes";
+import { showPane, addToPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -531,8 +531,7 @@ test("reopening the current workspace keeps the active conversation and draft", 
 test("IDE keeps the editor and chat visible when a terminal opens", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideWorkspace")).toBeVisible();
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect(page.locator("#ideWorkspace")).toBeVisible();
   await expect(page.locator("#promptInput")).toBeVisible();
   await expect(page.locator(".pane-terminal")).toBeVisible();
@@ -609,8 +608,7 @@ test("IDE starts with workspace sessions and opens a selected chat", async ({ pa
 test("terminal opens below editor in IDE and survives hide and mode changes", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#ideWorkspace")).toBeVisible();
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect(page.locator("#ideTerminalDock .pane-terminal .xterm")).toBeVisible();
   await expect(page.locator("#ideSessionList")).toBeVisible();
   const editor = await page.locator(".ide-editor-area").boundingBox();

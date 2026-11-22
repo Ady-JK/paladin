@@ -3,7 +3,7 @@
 // window and its own bar. The old split/tabs layout toggle is gone.
 import { expect, test } from "@playwright/test";
 
-import { hidePane, showPane } from "./modes";
+import { hidePane, showPane, addToPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -34,8 +34,7 @@ test("the pane narrows the conversation and gives it back when closed", async ({
 
 test("a side chat keeps working across open and close", async ({ page }) => {
   await showPane(page);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane .side-chat")).toBeVisible();
   const splitWidth = (await page.locator("#sidePane").boundingBox())!.width;
   const fullWidth = (await page.locator("#agentSplit").boundingBox())!.width;
@@ -71,8 +70,17 @@ test("the mode survives a reload", async ({ page }) => {
   await expect(page.locator("#browserView")).toBeVisible();
 });
 
-test("the saved-side-chat menu still works from the header +", async ({ page }) => {
+test("the header + opens the pane and does not open a menu over it", async ({ page }) => {
   await page.locator("#paneNewChatBtn").click();
+  await expect(page.locator("#sidePane")).toBeVisible();
+  // + is one gesture: reveal the pane. The "New side chat / New terminal"
+  // dropdown it used to drop competed with the picker that says the same thing.
+  await expect(page.locator("#paneHistoryMenu")).toBeHidden();
+
+  // Saved side chats stay reachable from the strip's own +, once the pane holds
+  // something.
+  await addToPane(page, "chat");
+  await page.locator("#paneTabsAdd").click();
   await expect(page.locator("#paneHistoryMenu")).toBeVisible();
   await expect(page.locator("#paneHistoryMenu")).toContainText("New side chat");
   await expect(page.locator("#paneHistoryMenu")).toContainText("No saved side chats");

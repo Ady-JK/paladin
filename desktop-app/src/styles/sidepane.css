@@ -499,6 +499,9 @@ body.is-splitting {
   flex: 1;
   flex-direction: column;
 }
+.pane-body[hidden] {
+  display: none;
+}
 .pane-body > [hidden] {
   display: none !important;
 }
@@ -1503,9 +1506,15 @@ body.is-splitting {
 }
 
 /* ---- the pane's empty state: a picker, not a blank column ---- */
+/* The picker IS the pane's empty state, so it takes the pane's whole body and
+   centres its rows. As a bare sibling below a `flex: 1` body it was pushed to
+   the bottom of the column, which read as stray content rather than a choice. */
 .pane-picker {
   display: flex;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
+  justify-content: center;
   gap: 8px;
   padding: 14px 12px;
 }

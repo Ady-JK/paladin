@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { showPane } from "./modes";
+import { showPane, addToPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -87,10 +87,8 @@ test("terminal button opens a full terminal tab beside chat", async ({ page }) =
   await startSplit(page);
   await page.locator("#promptInput").fill("start");
   await page.locator("#promptInput").press("Enter");
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "chat");
+  await addToPane(page, "terminal");
   await expect(page.locator(".pane-terminal")).toBeVisible();
   await expect(page.locator(".xterm")).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
@@ -102,8 +100,7 @@ test("terminal button opens a full terminal tab beside chat", async ({ page }) =
 
 test("an interactive terminal works before the first chat message", async ({ page }) => {
   await startSplit(page);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect(page.locator(".pane-terminal .xterm")).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
   const start = await page.evaluate(() => (window as any).__e2eTerminalStarts[0]);
@@ -114,8 +111,7 @@ test("an interactive terminal works before the first chat message", async ({ pag
   await page.keyboard.type("pwd");
   await page.keyboard.press("Enter");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalWrites?.length ?? 0)).toBeGreaterThan(0);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator(".side-chat")).toHaveCount(0);
   await expect(page.locator(".pane-terminal")).toBeVisible();
   await page.locator("#paneTabs .pane-tab-close").click();
@@ -134,8 +130,7 @@ test("typing while the terminal is starting is delivered once it is ready", asyn
       return base(method, args);
     };
   });
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect(page.locator(".xterm")).toBeVisible();
   await expect.poll(() => page.evaluate(() => typeof (window as any).__finishTerminalStart)).toBe("function");
   await page.locator(".xterm-helper-textarea").focus();
@@ -168,23 +163,20 @@ test("a terminal exiting before its start reply shows its output and exit", asyn
       return base(method, args);
     };
   });
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect(page.locator(".xterm-rows")).toContainText("goodbye");
   await expect(page.locator(".xterm-rows")).toContainText("terminal exited: 1");
 });
 
 test("a terminal opened before the first message remains usable after starting a chat", async ({ page }) => {
   await startSplit(page);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
   await page.locator("#promptInput").fill("hello");
   await page.locator("#promptInput").press("Enter");
   await expect(page.locator("#messages")).toContainText("hello");
   await expect(page.locator(".pane-terminal .xterm")).toBeVisible();
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await page.locator("#paneTabs .pane-tab").filter({ hasText: "Terminal" }).locator(".pane-tab-pick").click();
   await page.locator(".xterm-helper-textarea").focus();
   await page.keyboard.type("pwd");
@@ -206,15 +198,13 @@ test("a side chat requires a main message even after a local command", async ({ 
   await page.locator("#promptInput").fill("!! pwd");
   await page.locator("#promptInput").press("Enter");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalRuns?.length ?? 0)).toBe(1);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#toastText")).toContainText("Send a message in the main chat");
   await expect(page.locator(".side-chat")).toHaveCount(0);
 });
 
 test("a standalone terminal follows the user when opening an existing chat", async ({ page }) => {
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-terminal]").click();
+  await addToPane(page, "terminal");
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
   await page.locator("#agentTab").click();
   await page.locator('#sessionList [data-session="sess-notify-1"]').first().click();

@@ -825,8 +825,13 @@ body {
 }
 .window-btn {
   display: flex;
+  /* 40px wide like a native title-bar button, but the height that puts its
+     icon centre on the same line as the header's + and moon (those sit at
+     y=31 in a 45px bar). 32px claimed the top of the bar and left them 6px
+     out of step, which is the kind of misalignment you see but cannot name. */
+  box-sizing: border-box;
   width: 40px;
-  height: 32px;
+  height: var(--titlebar-control-height, 44px);
   align-items: center;
   justify-content: center;
   color: var(--color-slate-500);

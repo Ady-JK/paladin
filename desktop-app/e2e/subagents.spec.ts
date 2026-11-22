@@ -3,7 +3,7 @@
 // and stream live into a side-pane tab opened from the spawn_agent row.
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
-import { showPane } from "./modes";
+import { showPane, addToPane } from "./modes";
 
 const now = Date.now();
 const link = (name: string, type: string, status: string) => ({
@@ -230,8 +230,7 @@ test("every working child gets a pane window without a click", async ({ page }) 
   await page.locator('[data-session="sess-parent"]').click();
 
   // Opening the pane any way at all shows the child's tab already there.
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane")).toBeVisible();
   const tabs = page.locator("#paneTabs");
   await expect(tabs.locator('[data-agent="sess-child-1"]')).toHaveCount(1);

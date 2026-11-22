@@ -3,7 +3,7 @@
 // double-click returns it to half.
 import { expect, test, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
-import { hidePane, showPane } from "./modes";
+import { hidePane, showPane, addToPane } from "./modes";
 
 async function openPane(page: Page): Promise<void> {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -14,8 +14,7 @@ async function openPane(page: Page): Promise<void> {
   // The border and the half/half split only exist in split layout, which the
   // app no longer opens in.
   await showPane(page);
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane")).toBeVisible();
 }
 
@@ -85,8 +84,7 @@ test("the pane width survives a reload", async ({ page }) => {
   await page.fill("#promptInput", "start");
   await page.press("#promptInput", "Enter");
   await expect(page.locator("#messages")).toContainText("start");
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await expect(page.locator("#sidePane")).toBeVisible();
   await expect.poll(() => paneWidth(page), { timeout: 4000 }).toBeGreaterThanOrEqual(widened - 2);
 });

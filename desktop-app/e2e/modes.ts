@@ -42,3 +42,18 @@ export async function hidePane(page: Page): Promise<void> {
   }
   await expect(page.locator("#sidePane")).toBeHidden();
 }
+
+// addToPane opens the pane and adds one thing to it, whichever way that has to
+// happen: the picker when the pane is empty, the strip's own + when it already
+// holds something. Specs should not care which — that is the UI's business.
+export async function addToPane(page: Page, kind: "chat" | "terminal"): Promise<void> {
+  if (await page.locator("#sidePane").isHidden()) await page.locator("#paneNewChatBtn").click();
+  await expect(page.locator("#sidePane")).toBeVisible();
+  const pick = page.locator(`#panePicker [data-pane-pick="${kind}"]`);
+  if (await pick.isVisible()) {
+    await pick.click();
+    return;
+  }
+  await page.locator("#paneTabsAdd").click();
+  await page.getByRole("menuitem", { name: kind === "chat" ? "New side chat" : "New terminal" }).click();
+}

@@ -185,7 +185,11 @@ export function setIDETerminalMode(on: boolean): void {
   // IDE mode lays out its own panels, and its terminals and pages live in the
   // dock, so the pane is only there when something else is open in it.
   if (on && !tabSet.tabs.some((tab) => tab.kind !== "terminal" && !isBrowserPage(tab))) paneOpen = false;
-  if (!on) paneOpen = true;
+  // Leaving IDE mode hands the window back to the conversation. Whether the
+  // pane comes with it depends on whether it has anything to show: an empty
+  // pane used to be forced open here, so Agent mode came back as a half-width
+  // column of nothing after any visit to the IDE.
+  if (!on) paneOpen = hasPaneContent();
   hideLiveChanges(state.sessionId);
   terminalDock.setEnabled(on);
   render();
@@ -1251,6 +1255,9 @@ function render(): void {
   const empty = shown.length === 0 && paneOpen;
   pickerEl.hidden = !empty;
   tabsAddBtn.hidden = empty;
+  // The body and the picker are both flex:1, so leaving both visible split the
+  // column in half and the picker landed mid-pane instead of centred in it.
+  bodyEl.hidden = empty;
   bodyEl.replaceChildren(...shown.map((t) => t.body));
   for (const tab of set.tabs) {
     if (ideTerminalMode && (tab.kind === "terminal" || isBrowserPage(tab))) continue;
@@ -1314,6 +1321,12 @@ onResync(() => {
   liveRoot(tab.agentId).remove();
   void loadAgent(tab);
 });
+
+// hasPaneContent reports whether the pane would show a tab. Terminals and
+// browser pages are IDE-owned when the IDE is showing, so they do not count.
+function hasPaneContent(): boolean {
+  return tabSet.tabs.some((tab) => !ideTerminalMode || (tab.kind !== "terminal" && !isBrowserPage(tab)));
+}
 
 function showPane(): void {
   paneOpen = true;
@@ -1740,11 +1753,13 @@ export function initSidePane(): void {
   });
   historyBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    // + means "open the pane": it reveals the pane and offers the ways to
-    // fill it in the same gesture.
-    if (!paneOpen) showPane();
-    if (menuEl.hidden) void openMenu();
-    else closeMenu();
+    // + means "open the pane" and nothing else. It used to also drop a menu of
+    // "New side chat / New terminal" over the header, which duplicated the
+    // picker the pane shows when empty and covered the conversation to offer
+    // the same three choices. The pane is the one place to choose. Closing is
+    // the pane's own ✕, so + never takes the pane away.
+    closeMenu();
+    showPane();
   });
   menuEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;

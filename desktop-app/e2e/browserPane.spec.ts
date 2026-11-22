@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { showPane } from "./modes";
+import { showPane, addToPane } from "./modes";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
@@ -14,8 +14,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("a session opens a local browser beside its conversation", async ({ page }) => {
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   await page.evaluate(() =>
     (window as any).__e2eHub.emit({
       event: "browser/opened",
@@ -63,8 +62,7 @@ test("a failed picker reset reports the error and leaves the button usable", asy
 });
 
 test("page annotations hand off saved comments without a separate comment panel", async ({ page }) => {
-  await page.locator("#paneNewChatBtn").click();
-  await page.locator("[data-pane-new-chat]").click();
+  await addToPane(page, "chat");
   // The agent's local browser owns the pane; Pass to agent needs the pane.
   await expect(page.locator("#sidePane")).toBeVisible();
   await page.evaluate(() =>
