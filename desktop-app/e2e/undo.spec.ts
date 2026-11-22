@@ -148,10 +148,10 @@ test("only snapshot failures are shown in history", async ({ page }) => {
       },
       {
         role: "user",
-        content: "expired turn",
+        content: "protected turn",
         createdAt: 4,
         index: 3,
-        protection: { turn: 3, state: "expired", reason: "Only the last three turns can be undone." },
+        protection: { turn: 3, state: "protected" },
       },
     ],
   });

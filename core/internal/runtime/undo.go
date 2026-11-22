@@ -54,16 +54,9 @@ type revertPlan struct {
 	skipped []string
 }
 
-func checkRevertTarget(sess transcript.Session, history undoHistory, index int) (transcript.Message, error) {
+func checkRevertTarget(history undoHistory, index int) (transcript.Message, error) {
 	if index < 0 || index >= history.length {
 		return transcript.Message{}, fmt.Errorf("no message at index %d", index)
-	}
-	floor, err := undoFloor(sess.Dir)
-	if err != nil {
-		return transcript.Message{}, fmt.Errorf("read undo retention boundary: %w", err)
-	}
-	if index < floor {
-		return transcript.Message{}, fmt.Errorf("only the last %d turns can be reverted", maxUndoTurns)
 	}
 	var m transcript.Message
 	start := 0
@@ -77,20 +70,14 @@ func checkRevertTarget(sess transcript.Session, history undoHistory, index int) 
 	if m.Role != transcript.RoleUser || m.Replay || session.IsNotifyMessage(m) {
 		return transcript.Message{}, fmt.Errorf("message %d is not a user message", index)
 	}
-	count, found := 0, false
+	found := false
 	for _, start := range history.starts {
 		if start == index {
 			found = true
 		}
-		if start >= index {
-			count++
-		}
 	}
 	if !found {
 		return transcript.Message{}, fmt.Errorf("message %d is not the start of a turn", index)
-	}
-	if count > maxUndoTurns {
-		return transcript.Message{}, fmt.Errorf("only the last %d turns can be reverted", maxUndoTurns)
 	}
 	return m, nil
 }
@@ -167,7 +154,7 @@ func (r *AgentRuntime) RevertPreview(sessionID, cwd string, index int) (RevertPr
 		return RevertPreview{}, err
 	}
 	index = history.revertTargetIndex(index)
-	if _, err := checkRevertTarget(sess, history, index); err != nil {
+	if _, err := checkRevertTarget(history, index); err != nil {
 		return RevertPreview{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), snapTimeout)
@@ -251,7 +238,7 @@ func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, ve
 		return RevertResult{}, err
 	}
 	index = history.revertTargetIndex(index)
-	msg, err := checkRevertTarget(sess, history, index)
+	msg, err := checkRevertTarget(history, index)
 	if err != nil {
 		return RevertResult{}, err
 	}
@@ -285,9 +272,6 @@ func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, ve
 	}
 	if err := saveRecovery(sess, current); err != nil {
 		return RevertResult{}, fmt.Errorf("save recovery snapshot: %w", err)
-	}
-	if err := advanceUndoFloor(sess.Dir, history.starts, false); err != nil {
-		return RevertResult{}, fmt.Errorf("save undo retention boundary: %w", err)
 	}
 	// A Codex session's thread goes back to the same point. Every check has
 	// passed, and this comes before files are touched, as in t3code; it never

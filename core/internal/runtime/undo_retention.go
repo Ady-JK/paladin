@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log"
 	"os"
@@ -25,9 +24,7 @@ import (
 )
 
 const (
-	turnsFile     = "turns.jsonl"
-	undoFloorFile = "undo-floor.json"
-	maxUndoTurns  = 3
+	turnsFile = "turns.jsonl"
 	// snapTimeout bounds one snapshot so a huge folder can't wedge a
 	// turn; undo is best-effort, the turn itself always runs.
 	snapTimeout = 60 * time.Second
@@ -109,16 +106,6 @@ func (r *AgentRuntime) recordTurnSnapshot(sess transcript.Session, workspace str
 			status.Reason = "Could not save snapshot protection details."
 		}
 	}()
-	if err := advanceUndoFloor(sess.Dir, history.starts, true); err != nil {
-		log.Printf("undo: update retention boundary: %v", err)
-		status.Reason = "Could not update the undo history limit."
-		return
-	}
-	status.Floor, err = undoFloor(sess.Dir)
-	if err != nil {
-		status.Reason = "Could not read the undo history limit."
-		return
-	}
 	if r.snaps == nil {
 		if strings.EqualFold(strings.TrimSpace(os.Getenv("PALADIN_SNAPSHOTS")), "off") {
 			status.Reason = "Snapshots are disabled."
@@ -152,27 +139,18 @@ func (r *AgentRuntime) recordTurnSnapshot(sess transcript.Session, workspace str
 		status.Reason = "Could not read saved snapshot history."
 		return
 	}
-	floor, readErr := undoFloor(sess.Dir)
-	if readErr != nil {
-		log.Printf("undo: read retention boundary: %v", readErr)
-		status.Reason = "Could not read the undo history limit."
-		return
-	}
-	list := make([]TurnSnapshot, 0, maxUndoTurns)
+	// Every turn is kept, however many there are: a snapshot costs one
+	// tree hash plus the files it actually changed, so history is never
+	// pruned for depth.
+	list := make([]TurnSnapshot, 0, len(all)+1)
 	for _, item := range all {
-		if item.Turn >= floor && item.Turn != history.length {
+		if item.Turn != history.length {
 			list = append(list, item)
 		}
 	}
-	pruned := len(list) < len(all)
 	if err == nil {
 		list = append(list, TurnSnapshot{Turn: history.length, Tree: tree, At: time.Now().UTC()})
-	}
-	if len(list) > maxUndoTurns {
-		list = list[len(list)-maxUndoTurns:]
-		pruned = true
-	}
-	if err != nil && !pruned {
+	} else if len(list) == len(all) {
 		return
 	}
 	if err := writeTurnSnapshots(sess.Dir, list); err != nil {
@@ -190,32 +168,7 @@ func (r *AgentRuntime) recordTurnSnapshot(sess transcript.Session, workspace str
 			status.State, status.Reason, status.Excluded, status.Truncated = "partial", "Some paths are excluded from snapshots.", paths, truncated
 		}
 	}
-	if pruned {
-		if err := r.collectSnapshots(ctx, repo); err != nil {
-			log.Printf("undo: snapshot cleanup: %v", err)
-		}
-	}
 	return
-}
-
-func undoFloor(dir string) (int, error) {
-	data, err := os.ReadFile(filepath.Join(dir, undoFloorFile))
-	if os.IsNotExist(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	var floor struct {
-		Index int `json:"index"`
-	}
-	if err := json.Unmarshal(data, &floor); err != nil {
-		return 0, err
-	}
-	if floor.Index < 0 {
-		return 0, fmt.Errorf("invalid undo retention boundary")
-	}
-	return floor.Index, nil
 }
 
 // undoHistory retains grouped turns so undo can check targets, handle
@@ -259,33 +212,6 @@ func (h undoHistory) revertTargetIndex(index int) int {
 	return index
 }
 
-// advanceUndoFloor makes the three-turn boundary permanent, even after
-// undo truncates the conversation or snapshots are disabled.
-func advanceUndoFloor(dir string, indices []int, addingTurn bool) error {
-	keep := maxUndoTurns
-	if addingTurn {
-		keep--
-	}
-	if len(indices) <= keep {
-		return nil
-	}
-	newFloor := indices[len(indices)-keep]
-	oldFloor, err := undoFloor(dir)
-	if err != nil {
-		return err
-	}
-	if newFloor <= oldFloor {
-		return nil
-	}
-	data, err := jsonx.Marshal(struct {
-		Index int `json:"index"`
-	}{Index: newFloor})
-	if err != nil {
-		return err
-	}
-	return atomicfile.Write(filepath.Join(dir, undoFloorFile), data)
-}
-
 func readAllTurnSnapshots(dir string) ([]TurnSnapshot, error) {
 	f, err := os.Open(filepath.Join(dir, turnsFile))
 	if err != nil {
@@ -310,25 +236,7 @@ func readAllTurnSnapshots(dir string) ([]TurnSnapshot, error) {
 }
 
 func readTurnSnapshots(dir string) ([]TurnSnapshot, error) {
-	list, err := readAllTurnSnapshots(dir)
-	if err != nil {
-		return nil, err
-	}
-	floor, err := undoFloor(dir)
-	if err != nil {
-		return nil, err
-	}
-	kept := list[:0]
-	for _, item := range list {
-		if item.Turn >= floor {
-			kept = append(kept, item)
-		}
-	}
-	list = kept
-	if len(list) > maxUndoTurns {
-		list = list[len(list)-maxUndoTurns:]
-	}
-	return list, err
+	return readAllTurnSnapshots(dir)
 }
 
 // collectSnapshots protects retained snapshots from every session before

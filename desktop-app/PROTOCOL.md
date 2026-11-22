@@ -96,7 +96,7 @@ separate setup command, not a JSONL method.
 | `contextSources` | `{cwd?}` | `ContextView` `{cwd,sections[],bytes,files,skills,mcp}`: everything a turn in `cwd` loads into its system prompt without user or agent action. Each `ContextEntry` is `{kind: instructions\|memory\|skills\|mcp, scope, title, path?, detail?, bytes, truncated?, content?}` — project instruction files in prompt order (global `AGENTS.md`, then the `.git` root → `cwd` chain of `AGENTS.override.md`/`AGENTS.md`/`CLAUDE.md`), each enabled memory scope with entries, the skill catalog and the MCP server notes; `content` is the text the prompt carries. `files`, `skills` and `mcp` are the counts the summary line uses |
 | `forkSession` | `{sessionId,cwd?,worktree?,name?}` | `SessionInfo` of the copy (title `… (fork)`); `worktree:true` forks into a new worktree, a plain fork stays in the source's folder (and worktree) |
 | `revertPreview` | `{sessionId,cwd?,index}` | `{index,turns,files[],deleted[],skipped[],snapshots,version?}`: what reverting to the user message at transcript `index` would restore, delete, or leave alone |
-| `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's latest three saved turn snapshots |
+| `sessionChanges` | `{sessionId,cwd?}` | `{available,turns:[{turn,files:[{path,status}],callIds:[]}],files:[{path,status}]}` from this session's saved turn snapshots, every turn retained |
 | `sessionDiff` | `{sessionId,cwd?,turn?,path}` | `{path,patch,truncated}`: unified diff for one changed file; `turn` is a transcript index or omitted for the retained session snapshots |
 | `fileExcerpt` | `{sessionId,cwd?,path,start,end}` | `{path,rel,startLine,lines,truncated}`: lines `start`..`end` plus 3 of context (at most 60) of a text file inside the session workspace; used by review findings |
 | `filePreview` | `{cwd?,path}` | `{path,rel,kind: text\|image\|binary\|dir\|outside\|missing,lines?,dataUrl?,truncated?}`: the first 4 non-empty lines of a workspace text file, or a small image as a data URL, for the composer's tag cards. A path outside the workspace or a folder yields its kind with no content |
@@ -458,8 +458,7 @@ More streaming events:
 - `chat/protection` reports the turn's snapshot status before the model
   starts. `state` is `protected`, `partial`, `unavailable`, or `unknown`;
   `reason` explains an issue, `excluded` lists up to 100 uncaptured files or
-  folders, `truncated` says the list is incomplete, and `floor` identifies
-  turns outside the three-turn window.
+  folders, and `truncated` says the list is incomplete.
 - Tool calls cut short by stop or a crash settle as `failed` `chat/tool`
   events with an `aborted` result, so no row is left spinning.
 
@@ -738,9 +737,10 @@ everything after it from the transcript. Before that, a recovery snapshot
 keeps the conversation and folder state so `recoverLatest` can restore them.
 Changes made by the user or another session after the turn can be overwritten;
 the preview lists affected files without claiming who changed them.
-Only the latest three user turns per session are eligible for revert,
-including after repeated reverts. The Changes and session-diff views use
-the same retained snapshot window.
+Every user turn stays eligible for revert, however
+many there are: snapshots are content-addressed, so retaining history
+costs one tree hash per turn plus the files it actually changed. The
+Changes and session-diff views use the same snapshot history.
 
 Shell commands belong to the session that started them: `status` and
 `cancel` with another session's `job_id` (including a subagent's) fails as an

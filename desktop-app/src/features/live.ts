@@ -409,19 +409,6 @@ function apply(e: Entry, ev: TurnEvent): void {
     case "chat/protection": {
       const row = e.users.get(ev.turnId);
       if (row && ev.protection) paintProtection(row, ev.protection);
-      if (ev.protection?.floor) {
-        const root = visible(e.sessionId) ? messagesEl : e.root;
-        for (const prior of Array.from(root.querySelectorAll<HTMLElement>("[data-turn-index]"))) {
-          const index = Number(prior.dataset.turnIndex);
-          if (Number.isFinite(index) && index < ev.protection.floor) {
-            paintProtection(prior, {
-              turn: index,
-              state: "expired",
-              reason: "Only the last three turns can be undone.",
-            });
-          }
-        }
-      }
       const view = e.views.get(ev.turnId);
       if (view) view.lastSeq = Math.max(view.lastSeq, ev.seq || 0);
       return;

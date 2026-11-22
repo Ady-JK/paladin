@@ -42,21 +42,14 @@ func saveProtection(dir string, value session.SnapshotProtection) error {
 	if err != nil {
 		return err
 	}
-	floor, err := undoFloor(dir)
-	if err != nil {
-		return err
-	}
-	kept := make([]session.SnapshotProtection, 0, maxUndoTurns)
+	kept := make([]session.SnapshotProtection, 0, len(entries)+1)
 	for _, entry := range entries {
-		if entry.Turn >= floor && entry.Turn != value.Turn {
+		if entry.Turn != value.Turn {
 			kept = append(kept, entry)
 		}
 	}
 	kept = append(kept, value)
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Turn < kept[j].Turn })
-	if len(kept) > maxUndoTurns {
-		kept = kept[len(kept)-maxUndoTurns:]
-	}
 	return writeProtection(dir, kept)
 }
 
@@ -64,10 +57,6 @@ func annotateProtection(sess transcript.Session, rows []session.HistoryMessage, 
 	entries, err := readProtection(sess.Dir)
 	if err != nil {
 		return fmt.Errorf("read snapshot status: %w", err)
-	}
-	floor, err := undoFloor(sess.Dir)
-	if err != nil {
-		return err
 	}
 	byTurn := make(map[int]session.SnapshotProtection, len(entries))
 	for _, entry := range entries {
@@ -97,8 +86,6 @@ func annotateProtection(sess transcript.Session, rows []session.HistoryMessage, 
 		}
 		if sess.Meta.Subagent != nil {
 			row.Protection = &session.SnapshotProtection{Turn: *row.Index, State: "unavailable", Reason: "Subagent turns do not create their own snapshots."}
-		} else if *row.Index < floor {
-			row.Protection = &session.SnapshotProtection{Turn: *row.Index, State: "expired", Reason: "Only the last three turns can be undone."}
 		} else if status, ok := byTurn[*row.Index]; ok {
 			copy := status
 			row.Protection = &copy

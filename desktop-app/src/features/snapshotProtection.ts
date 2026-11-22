@@ -40,7 +40,7 @@ export function paintProtection(row: HTMLElement, protection: SnapshotProtection
     body.append(more);
   }
   const note = document.createElement("p");
-  note.textContent = "Undo covers the last three turns. New or ignored files may not be captured.";
+  note.textContent = "Every turn is revertible. New or ignored files may not be captured.";
   body.append(note);
   details.replaceChildren(summary, body);
 }

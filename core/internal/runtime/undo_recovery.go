@@ -42,7 +42,6 @@ type recoverySnapshot struct {
 	Tree       string                       `json:"tree,omitempty"`
 	Transcript []byte                       `json:"transcript"`
 	Turns      []TurnSnapshot               `json:"turns"`
-	Floor      int                          `json:"floor"`
 	Protection []session.SnapshotProtection `json:"protection,omitempty"`
 }
 
@@ -67,15 +66,11 @@ func saveRecovery(sess transcript.Session, tree string) error {
 	if err != nil {
 		return err
 	}
-	floor, err := undoFloor(sess.Dir)
-	if err != nil {
-		return err
-	}
 	protection, err := readProtection(sess.Dir)
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(recoverySnapshot{Tree: tree, Transcript: compressed.Bytes(), Turns: turns, Floor: floor, Protection: protection})
+	data, err := json.Marshal(recoverySnapshot{Tree: tree, Transcript: compressed.Bytes(), Turns: turns, Protection: protection})
 	if err != nil {
 		return err
 	}
@@ -91,7 +86,7 @@ func readRecovery(dir string) (recoverySnapshot, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return s, err
 	}
-	if s.Transcript == nil || s.Floor < 0 {
+	if s.Transcript == nil {
 		return s, fmt.Errorf("invalid recovery snapshot")
 	}
 	return s, nil
@@ -289,15 +284,6 @@ func (r *AgentRuntime) RecoverLatestChecked(sessionID, cwd, version string) (Rev
 		return out, err
 	}
 	syncRecalled(sess)
-	floor, err := json.Marshal(struct {
-		Index int `json:"index"`
-	}{saved.Floor})
-	if err != nil {
-		return out, err
-	}
-	if err := atomicfile.Write(filepath.Join(sess.Dir, undoFloorFile), floor); err != nil {
-		return out, err
-	}
 	if err := writeProtection(sess.Dir, saved.Protection); err != nil {
 		return out, err
 	}

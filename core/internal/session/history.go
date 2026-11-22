@@ -37,7 +37,6 @@ type HistoryMessage struct {
 // SnapshotProtection describes the undo coverage for one user turn.
 type SnapshotProtection struct {
 	Turn      int      `json:"turn"`
-	Floor     int      `json:"floor,omitempty"`
 	State     string   `json:"state"`
 	Reason    string   `json:"reason,omitempty"`
 	Excluded  []string `json:"excluded,omitempty"`

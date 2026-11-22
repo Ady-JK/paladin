@@ -62,7 +62,7 @@ func TestUndoCountsTurnsRatherThanSteeringMessages(t *testing.T) {
 		}
 	}
 	if _, err := rt.RevertPreview(sid, ws, 0); err != nil {
-		t.Fatalf("three turns with steering should be undoable: %v", err)
+		t.Fatalf("turns with steering should be undoable: %v", err)
 	}
 	fork, err := rt.ForkSession(sid, ws)
 	if err != nil {
@@ -88,108 +88,80 @@ func TestUndoCountsTurnsRatherThanSteeringMessages(t *testing.T) {
 	}
 }
 
-func TestUndoRetainsOnlyThreeTurnsPerSession(t *testing.T) {
+// Every turn stays revertible, however many there are: snapshots are
+// content-addressed, so keeping history costs one tree hash per turn plus
+// the files it actually changed. Ten turns later the first is still
+// revertible, its tree still stored, and a revert of it succeeds.
+func TestUndoRetainsEveryTurn(t *testing.T) {
 	rt, ws, sid := undoRuntime(t,
-		"echo one > a.txt", "", "echo two > a.txt", "", "echo three > a.txt", "", "echo four > a.txt", "")
+		"echo one > a.txt", "", "echo two > a.txt", "", "echo three > a.txt", "",
+		"echo four > a.txt", "", "echo five > a.txt", "", "echo six > a.txt", "")
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("original\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	turn(t, rt, sid, ws, "first")
-	firstSession, err := rt.transcripts.Load(ws, sid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstSnapshots, err := readTurnSnapshots(firstSession.Dir)
-	if err != nil || len(firstSnapshots) != 1 {
-		t.Fatalf("first snapshots = %v, %v", firstSnapshots, err)
-	}
-	oldTree := firstSnapshots[0].Tree
-	objects, err := filepath.Glob(filepath.Join(rt.dataDir, "snapshots", "*", "objects", oldTree[:2], oldTree[2:]))
-	if err != nil || len(objects) != 1 {
-		t.Fatalf("old tree objects = %v, %v", objects, err)
-	}
-	old := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(objects[0], old, old); err != nil {
-		t.Fatal(err)
-	}
-	other, err := rt.OpenSession("", ws)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn(t, rt, other.SessionID, ws, "other chat")
-	otherSession, err := rt.transcripts.Load(ws, other.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherSnapshots, err := readTurnSnapshots(otherSession.Dir)
-	if err != nil || len(otherSnapshots) != 1 {
-		t.Fatalf("other snapshots = %v, %v", otherSnapshots, err)
-	}
-	otherTree := otherSnapshots[0].Tree
-	otherObjects, err := filepath.Glob(filepath.Join(rt.dataDir, "snapshots", "*", "objects", otherTree[:2], otherTree[2:]))
-	if err != nil || len(otherObjects) != 1 {
-		t.Fatalf("other tree objects = %v, %v", otherObjects, err)
-	}
-	if err := os.Chtimes(otherObjects[0], old, old); err != nil {
-		t.Fatal(err)
-	}
-	for _, msg := range []string{"second", "third", "fourth"} {
+	msgs := []string{"first", "second", "third", "fourth", "fifth", "sixth"}
+	for _, msg := range msgs {
 		turn(t, rt, sid, ws, msg)
 	}
-	rows := userRows(t, rt, sid)
-	list, err := readTurnSnapshots(firstSession.Dir)
-	if err != nil || len(list) != 3 {
+	sess, err := rt.transcripts.Load(ws, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := readTurnSnapshots(sess.Dir)
+	if err != nil || len(list) != len(msgs) {
 		t.Fatalf("retained snapshots = %v, %v", list, err)
+	}
+	rows := userRows(t, rt, sid)
+	if len(rows) != len(msgs) {
+		t.Fatalf("user rows = %d", len(rows))
+	}
+	// The first turn, six turns back, is still previewable and revertible.
+	first := *rows[0].Index
+	if first != list[0].Turn {
+		t.Fatalf("first row index %d, first snapshot turn %d", first, list[0].Turn)
+	}
+	if _, err := rt.RevertPreview(sid, ws, first); err != nil {
+		t.Fatalf("the oldest turn must still be revertible: %v", err)
+	}
+	if _, err := rt.SessionDiff(sid, ws, first, "a.txt"); err != nil {
+		t.Fatalf("the oldest turn must still diff: %v", err)
 	}
 	changes, err := rt.SessionChanges(sid, ws)
 	if err != nil {
 		t.Fatalf("session changes: %v", err)
 	}
+	oldestIncluded := false
 	for _, change := range changes.Turns {
-		if change.Turn == *rows[0].Index {
-			t.Fatal("changes included an expired turn")
+		if change.Turn == first {
+			oldestIncluded = true
 		}
 	}
-	if _, err := rt.SessionDiff(sid, ws, *rows[0].Index, "a.txt"); err == nil {
-		t.Fatal("expired turn diff remained available")
+	if !oldestIncluded {
+		t.Fatalf("changes dropped the oldest turn: %+v", changes.Turns)
 	}
-	if _, err := rt.RevertPreview(sid, ws, *rows[0].Index); err == nil {
-		t.Fatal("old revert preview accepted")
-	}
-	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
-		t.Fatal("old revert accepted")
-	}
-	if _, err := rt.RevertPreview(other.SessionID, ws, 0); err != nil {
-		t.Fatalf("other chat lost its snapshot: %v", err)
-	}
-	repo := rt.snapRepo(ws)
-	if _, err := repo.Changed(context.Background(), oldTree, list[0].Tree); err == nil {
-		t.Fatal("expired snapshot tree still stored")
-	}
-	res, err := rt.RevertSession(sid, ws, *rows[1].Index)
+	res, err := rt.RevertSession(sid, ws, first)
 	if err != nil || !res.Snapshots {
-		t.Fatalf("three-turn revert = %+v, %v", res, err)
+		t.Fatalf("oldest revert = %+v, %v", res, err)
 	}
-	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
-		t.Fatal("sequential revert crossed the retention boundary")
+	if readFile(t, filepath.Join(ws, "a.txt")) != "original" {
+		t.Fatalf("revert did not restore the original file: %q", readFile(t, filepath.Join(ws, "a.txt")))
 	}
 }
 
-func TestUndoLimitAppliesWithoutSnapshots(t *testing.T) {
-	rt, ws, sid := undoRuntime(t, "", "", "", "")
+// Without snapshots, every turn still reverts the conversation alone —
+// the limit was a snapshot-retention device and is gone entirely.
+func TestUndoWithoutSnapshotsRevertsAnyTurn(t *testing.T) {
+	rt, ws, sid := undoRuntime(t, "", "", "", "", "")
 	rt.snaps = nil
-	for _, msg := range []string{"one", "two", "three", "four"} {
+	for _, msg := range []string{"one", "two", "three", "four", "five", "six"} {
 		turn(t, rt, sid, ws, msg)
 	}
 	rows := userRows(t, rt, sid)
-	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
-		t.Fatal("old conversation-only revert accepted")
+	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err != nil {
+		t.Fatalf("the oldest conversation-only revert must work: %v", err)
 	}
-	if _, err := rt.RevertSession(sid, ws, *rows[1].Index); err != nil {
-		t.Fatalf("three-turn conversation revert: %v", err)
-	}
-	if _, err := rt.RevertSession(sid, ws, *rows[0].Index); err == nil {
-		t.Fatal("sequential conversation revert crossed the retention boundary")
+	if rows := userRows(t, rt, sid); len(rows) != 0 {
+		t.Fatalf("conversation kept rows after the oldest revert: %+v", rows)
 	}
 }
 
@@ -236,7 +208,10 @@ func TestSnapshotFailureReportsReason(t *testing.T) {
 	}
 }
 
-func TestTurnHistoryShowsExclusionsAndExpiresAfterThreeTurns(t *testing.T) {
+// Exclusion details ride on every turn's protection row, and every turn
+// keeps them however many turns pass — protection entries are never
+// dropped for depth.
+func TestTurnHistoryShowsExclusionsOnEveryTurn(t *testing.T) {
 	rt, ws, sid := undoRuntime(t, "", "", "", "", "", "", "", "")
 	if err := os.WriteFile(filepath.Join(ws, ".gitignore"), []byte("private.txt\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -253,19 +228,19 @@ func TestTurnHistoryShowsExclusionsAndExpiresAfterThreeTurns(t *testing.T) {
 	if p == nil || p.State != "partial" || !slices.Contains(p.Excluded, "private.txt") || !slices.Contains(p.Excluded, "binary.dat") {
 		t.Fatalf("missing exclusions: %+v", p)
 	}
-	turn(t, rt, sid, ws, "second")
-	turn(t, rt, sid, ws, "third")
-	turn(t, rt, sid, ws, "fourth")
+	for _, msg := range []string{"second", "third", "fourth", "fifth", "sixth", "seventh"} {
+		turn(t, rt, sid, ws, msg)
+	}
 	rows = userRows(t, rt, sid)
-	if rows[0].Protection == nil || rows[0].Protection.State != "expired" {
-		t.Fatalf("old turn not expired: %+v", rows[0])
+	if rows[0].Protection == nil || rows[0].Protection.State != "partial" {
+		t.Fatalf("old turn lost its protection details: %+v", rows[0])
 	}
 	sess, err := rt.transcripts.Load(ws, sid)
 	if err != nil {
 		t.Fatal(err)
 	}
 	status, err := readProtection(sess.Dir)
-	if err != nil || len(status) != 3 {
+	if err != nil || len(status) != 7 {
 		t.Fatalf("protection retention = %+v %v", status, err)
 	}
 }

@@ -455,8 +455,7 @@ export type MessageInfo = {
 
 export type SnapshotProtection = {
   turn: number;
-  floor?: number;
-  state: "pending" | "protected" | "partial" | "unavailable" | "unknown" | "expired";
+  state: "pending" | "protected" | "partial" | "unavailable" | "unknown";
   reason?: string;
   excluded?: string[];
   truncated?: boolean;
