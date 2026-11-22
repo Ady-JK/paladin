@@ -809,3 +809,47 @@ body {
 #chatList .pick-row:hover {
   transform: none;
 }
+
+/* ---- the window's own controls ----
+   Pinned to the card's top-right corner in every mode. They used to live in
+   the agent header, which Browser mode hides — so the window became impossible
+   to minimise or close there. They are the window's, not the agent's. */
+.window-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+.window-btn {
+  display: flex;
+  width: 40px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-slate-500);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.window-btn:hover {
+  background: var(--color-slate-200);
+  color: var(--color-slate-800);
+}
+.dark .window-btn {
+  color: var(--color-slate-400);
+}
+.dark .window-btn:hover {
+  background: var(--color-slate-800);
+  color: var(--color-slate-100);
+}
+.window-btn.is-close:hover {
+  background: var(--color-agent-rose, #e11d48);
+  color: white;
+}
+.window-btn :is(svg, span) {
+  height: 12px;
+  width: 12px;
+}

@@ -194,35 +194,104 @@
   color: var(--color-slate-500);
 }
 
-/* The rail's mode buttons read as a segmented pair: the active one is filled,
-   so "where am I" needs no tooltip. */
-#railPanels [data-mode] {
+/* The rail's mode pair. These are a choice between two whole windows, so they
+   are not plain icons: each carries a label, and the active one is filled, so
+   "which mode am I in" and "how do I leave" are both answered at a glance. */
+#railModes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 0;
+  margin: 2px 0;
+  border-top: 1px solid var(--color-slate-200);
+  border-bottom: 1px solid var(--color-slate-200);
+}
+.dark #railModes {
+  border-color: var(--color-slate-800);
+}
+.rail-mode {
   position: relative;
+  display: flex;
+  width: 44px;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 0 3px;
+  border-radius: 9px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
 }
-#railPanels [data-mode][aria-selected="true"] {
-  background: rgb(0 0 0 / 0.07);
+.rail-mode:hover {
+  background: rgb(0 0 0 / 0.05);
+  color: var(--color-slate-800);
+}
+.dark .rail-mode {
+  color: var(--color-slate-400);
+}
+.dark .rail-mode:hover {
+  background: rgb(255 255 255 / 0.06);
+  color: var(--color-slate-100);
+}
+.rail-mode[aria-selected="true"] {
+  background: rgb(0 0 0 / 0.08);
   color: var(--color-slate-900);
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06);
 }
-.dark #railPanels [data-mode][aria-selected="true"] {
+.dark .rail-mode[aria-selected="true"] {
   background: rgb(255 255 255 / 0.1);
   color: var(--color-slate-50);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
 }
-/* A short rule between the mode pair and the plain panel buttons, so the two
-   kinds of control do not read as one list. */
-#railPanels [data-mode] + [data-mode] {
-  margin-top: 0;
+.rail-mode-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-#modeBrowserBtn::after {
-  content: "";
-  position: absolute;
-  right: 6px;
-  bottom: -5px;
-  left: 6px;
-  height: 1px;
-  background: var(--color-slate-200);
+.rail-mode-ico :is(svg, span) {
+  height: 17px;
+  width: 17px;
 }
-.dark #modeBrowserBtn::after {
-  background: var(--color-slate-700);
+.rail-mode-label {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* The way back to the conversation, in the bar you are already reading. */
+.browser-to-agent {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  margin-right: 132px; /* clear of the pinned window controls */
+  padding: 4px 9px;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 7px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-slate-600);
+  -webkit-app-region: no-drag;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+.browser-to-agent:hover {
+  border-color: var(--color-slate-300);
+  background: var(--color-slate-100);
+  color: var(--color-slate-900);
+}
+.dark .browser-to-agent {
+  border-color: var(--color-slate-800);
+  color: var(--color-slate-300);
+}
+.dark .browser-to-agent:hover {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-50);
+}
+.browser-to-agent-ico :is(svg, span) {
+  height: 13px;
+  width: 13px;
 }

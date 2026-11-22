@@ -106,13 +106,13 @@ body.is-splitting {
 }
 #headerStatusActions {
   order: 3;
-  /* Stretch to the title bar's height so the window buttons fill the
-     top-right corner (they grow by their negative margins). The Plugins
-     menu button used to give this row its height; with it gone the row
-     must take it from the title bar itself. */
   align-self: stretch;
   display: flex;
   align-items: stretch;
+  /* The window controls are pinned over this corner in every mode (see
+     .window-controls), so the header keeps clear of them: 3 × 40px plus a
+     little breathing room. Nothing here may sit under them. */
+  margin-right: 132px;
 }
 /* The readings change width as a turn runs (session id, context fill,
    process load). Pinning them to the left of the header keeps the icon

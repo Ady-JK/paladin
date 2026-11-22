@@ -50,17 +50,22 @@ test("the separate chat window is gone and the agent keeps one header", async ({
   await expect(page.locator("#modeBrowserBtn")).toBeVisible();
 });
 
-test("window buttons fill the top-right corner", async ({ page }) => {
-  const header = await page.locator("#titleBar").boundingBox();
-  const minimize = await page.locator("#windowMinimizeBtn").boundingBox();
-  const close = await page.locator("#windowCloseBtn").boundingBox();
-  expect(header).toBeTruthy();
-  expect(minimize).toBeTruthy();
-  expect(close).toBeTruthy();
-  expect(Math.abs(header!.y - minimize!.y)).toBeLessThanOrEqual(1);
-  expect(Math.abs(header!.x + header!.width - (close!.x + close!.width))).toBeLessThanOrEqual(1);
-  expect(Math.abs(header!.y + header!.height - (close!.y + close!.height))).toBeLessThanOrEqual(2);
-  expect(Math.abs(minimize!.height - close!.height)).toBeLessThanOrEqual(1);
+test("window buttons fill the top-right corner of the window, in every mode", async ({ page }) => {
+  // They are pinned to the card, not the header: Browser mode hides the header,
+  // and a window that cannot be closed is not a window.
+  const card = (await page.locator("#mainCard").boundingBox())!;
+  const minimize = (await page.locator("#windowMinimizeBtn").boundingBox())!;
+  const close = (await page.locator("#windowCloseBtn").boundingBox())!;
+  expect(Math.abs(card.y - minimize.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(card.x + card.width - (close.x + close.width))).toBeLessThanOrEqual(1);
+  expect(Math.abs(card.y - close.y)).toBeLessThanOrEqual(1);
+  // Still there with the pages owning the window.
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#titleBar")).toBeHidden();
+  await expect(page.locator("#windowCloseBtn")).toBeVisible();
+  await expect(page.locator("#windowMinimizeBtn")).toBeVisible();
+  await expect(page.locator("#windowMaximizeBtn")).toBeVisible();
+  expect(Math.abs(minimize.height - close.height)).toBeLessThanOrEqual(1);
 });
 
 test("browser menu remains inside the window", async ({ page }) => {

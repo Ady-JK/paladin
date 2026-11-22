@@ -64,7 +64,9 @@ test("the rail holds sessions, shortcuts and settings, with no separate sidebar 
   }
   await expect(page.locator("#rail #ideProblemsToggle")).toBeHidden();
   await expect(page.locator("#titleBar #sessionChangesBtn, #titleBar #ideModeBtn")).toHaveCount(0);
-  await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
+  // An expand toggle, not a current-view tab: it must not claim selection.
+  await expect(page.locator("#agentTab")).not.toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", /true|false/);
 });
 
 test("sessions nest under their project folder, newest project first", async ({ page }) => {
@@ -244,7 +246,8 @@ test("the Sessions button reports the drawer state", async ({ page }) => {
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "true");
   await page.click("#agentTab");
   await expect(page.locator("#agentTab")).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator("#agentTab")).toHaveAttribute("aria-selected", "true");
+  // Collapsed, and still not claiming to be the selected view.
+  await expect(page.locator("#agentTab")).not.toHaveAttribute("aria-selected", "true");
 });
 
 test("switching to IDE closes the sessions drawer and keeps Sessions available", async ({ page }) => {

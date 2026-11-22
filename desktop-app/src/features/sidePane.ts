@@ -1671,6 +1671,7 @@ export function initSidePane(): void {
   // selects and closes pages. There is no vertical list: the strip is the
   // whole inventory.
   $("#browserNewTab").addEventListener("click", () => window.dispatchEvent(new Event("paladin:browser-menu")));
+  $("#browserToAgentBtn").addEventListener("click", () => setAppMode("agent"));
   $("#browserTabs").addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     const closeKey = target.closest<HTMLElement>("[data-page-close]")?.dataset.pageClose;

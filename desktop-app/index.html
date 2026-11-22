@@ -132,7 +132,14 @@
         </div>
         <div id="railPanels" class="mt-1 flex flex-col items-center gap-1">
           <div role="tablist" aria-label="Session navigation">
-            <button id="agentTab" role="tab" class="rail-btn" title="Sessions" aria-label="Sessions">
+            <button
+              id="agentTab"
+              type="button"
+              class="rail-btn"
+              title="Sessions"
+              aria-label="Sessions"
+              aria-expanded="true"
+            >
               <span data-icon="home" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
             </button>
           </div>
@@ -141,31 +148,36 @@
           </button>
           <!-- App mode. Agent is the default; Browser gives the pages the whole
                window; IDE is its own workspace. Selecting a mode replaces the
-               old split/tabs layout toggle: there is one mode at a time. -->
-          <div role="tablist" aria-label="App mode" class="flex flex-col items-center gap-1">
+               old split/tabs layout toggle: there is one mode at a time.
+               These carry a label, unlike the plain panel toggles below them:
+               they are a choice between two whole windows, and an unlabelled
+               pair read as "one random icon is always lit". -->
+          <div id="railModes" role="tablist" aria-label="App mode">
             <button
               id="modeAgentBtn"
               type="button"
               role="tab"
-              class="rail-btn"
-              title="Agent"
+              class="rail-mode"
+              title="Agent — the conversation"
               aria-label="Agent"
               aria-selected="true"
               data-mode="agent"
             >
-              <span data-icon="rl-agent" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+              <span data-icon="rl-agent" class="rail-mode-ico"></span>
+              <span class="rail-mode-label">Agent</span>
             </button>
             <button
               id="modeBrowserBtn"
               type="button"
               role="tab"
-              class="rail-btn"
-              title="Browser"
+              class="rail-mode"
+              title="Browser — the pages own the window"
               aria-label="Browser"
               aria-selected="false"
               data-mode="browser"
             >
-              <span data-icon="globe" class="[&>svg]:h-[18px] [&>svg]:w-[18px]"></span>
+              <span data-icon="globe" class="rail-mode-ico"></span>
+              <span class="rail-mode-label">Browser</span>
               <span id="modeBrowserCount" class="rail-count"></span>
             </button>
           </div>
@@ -374,6 +386,8 @@
             >
               <span data-icon="terminal"></span><span id="runningJobsCount"></span>
             </button>
+            <!-- The theme lives in the agent header only; Browser mode's bar
+                 carries the window controls instead. -->
             <button
               id="themeToggleBtn"
               class="rounded-md p-1.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
@@ -382,32 +396,29 @@
               <span data-icon="moon"></span>
             </button>
 
-            <!-- The buttons of the window -->
-            <div class="-mb-2 -mr-4 -mt-2 flex items-stretch self-stretch">
-              <button
-                id="windowMinimizeBtn"
-                class="flex w-11 items-center justify-center text-slate-500 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800"
-                title="Minimize"
-              >
-                <span data-icon="window-minimize"></span>
-              </button>
-              <button
-                id="windowMaximizeBtn"
-                class="flex w-11 items-center justify-center text-slate-500 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800"
-                title="Maximize"
-              >
-                <span data-icon="window-maximize"></span>
-              </button>
-              <button
-                id="windowCloseBtn"
-                class="flex w-11 items-center justify-center text-slate-500 hover:bg-agent-rose hover:text-white dark:text-slate-400"
-                title="Close"
-              >
-                <span data-icon="window-close"></span>
-              </button>
-            </div>
+            <!-- The window controls are NOT here. They belong to the window, not
+                 to the agent header, and Browser mode hides that header: they
+                 live in #windowControls, pinned to the card's top-right corner
+                 in every mode. -->
           </div>
         </header>
+
+        <!-- The window's own controls. Outside the header on purpose: the header
+             switches its contents per mode (readings in Agent, nothing in
+             Browser), but minimize/maximize/close belong to the window and must
+             be reachable in every one of them. Pinned top-right, above the views
+             and below the header, so it never moves. -->
+        <div id="windowControls" class="window-controls" aria-label="Window controls">
+          <button id="windowMinimizeBtn" class="window-btn" title="Minimize" aria-label="Minimize">
+            <span data-icon="window-minimize"></span>
+          </button>
+          <button id="windowMaximizeBtn" class="window-btn" title="Maximize" aria-label="Maximize">
+            <span data-icon="window-maximize"></span>
+          </button>
+          <button id="windowCloseBtn" class="window-btn is-close" title="Close" aria-label="Close">
+            <span data-icon="window-close"></span>
+          </button>
+        </div>
 
         <!-- The agent -->
         <div id="agentView" class="flex min-h-0 flex-1 flex-col">
@@ -679,6 +690,18 @@
               <span data-icon="plus"></span>
             </button>
             <div class="browser-drag" aria-hidden="true"></div>
+            <!-- The way back. The rail has a labelled Agent button, but that is
+                 in the far left corner and reads as part of the app chrome; this
+                 says where it goes, in the bar you are already looking at. -->
+            <button
+              id="browserToAgentBtn"
+              type="button"
+              class="browser-to-agent"
+              title="Back to the conversation (Agent mode)"
+            >
+              <span data-icon="rl-agent" class="browser-to-agent-ico"></span>
+              <span>Agent</span>
+            </button>
           </div>
           <div id="browserBody" class="browser-body"></div>
         </div>

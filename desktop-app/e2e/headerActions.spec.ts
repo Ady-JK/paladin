@@ -61,7 +61,9 @@ test("browser has one entry, on the rail, and the + menu offers both pane kinds"
 });
 
 // Switching modes must not resize the header: the bar belongs to Agent mode
-// only, and opening or closing the pane used to be able to grow it.
+// only, and opening or closing the pane used to be able to grow it. The window
+// controls are pinned outside the header, so they are measured for "does not
+// move", not for "gives the header its height".
 test("the header keeps one height as the pane opens and the mode changes", async ({ page }) => {
   const bar = page.locator("#titleBar");
   const measure = async (): Promise<{ bar: number; actions: number; close: number; closeY: number }> => ({

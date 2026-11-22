@@ -60,7 +60,11 @@ function paintSideVisibility(): void {
   sidebarEl.classList.toggle("is-closed", !open);
   sidebarEl.inert = !open;
   agentTabEl.setAttribute("aria-expanded", String(open));
-  agentTabEl.setAttribute("aria-selected", "true");
+  // It is a toggle, not a "you are here" tab. Marking it aria-selected
+  // unconditionally told every screen reader (and any [aria-selected] style)
+  // that Sessions was the current view in every mode — the highlight that
+  // looked stuck on the rail.
+  agentTabEl.removeAttribute("aria-selected");
   agentTabEl.setAttribute("aria-label", "Sessions");
   agentTabEl.title = open ? "Hide sessions" : "Show sessions";
 }
