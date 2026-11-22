@@ -485,3 +485,22 @@ test("ChatGPT opens in the right pane in split and is reachable from the drawer 
   await expect(page.locator("#browserTabs .browser-tab")).toHaveCount(1);
   await expect.poll(() => viewShown(page)).toBe("web:t1");
 });
+
+test("Browser mode's strip is its whole inventory — no vertical list", async ({ page }) => {
+  await startSession(page);
+  await openSite(page, "https://gemini.google.com/");
+  await openSite(page, "https://chatgpt.com/");
+  await page.locator("#modeBrowserBtn").click();
+  await expect(page.locator("#browserView")).toBeVisible();
+
+  const strip = page.locator("#browserTabs .browser-tab");
+  await expect(strip).toHaveCount(2);
+  // The strip is horizontal, and it is the only list of pages on screen.
+  expect(await page.locator("#browserTabs").evaluate((el) => getComputedStyle(el).flexDirection)).toBe("row");
+  await expect(page.locator(".browser-drawer, #browserDrawer, #browserDockBtn, .browser-dock")).toHaveCount(0);
+  // Selecting a page and closing one both happen in the strip.
+  await strip.nth(0).click();
+  await expect(strip.nth(0)).toHaveClass(/is-active/);
+  await strip.nth(1).locator(".browser-tab-close").click();
+  await expect(strip).toHaveCount(1);
+});

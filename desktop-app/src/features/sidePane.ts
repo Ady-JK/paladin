@@ -13,7 +13,7 @@ import type { RunningJob, SessionChanges, SideChatMessage } from "../core/types"
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { appMode, onChange as onModeChange, setAppMode, toggleAppModeFromKey } from "./appMode";
-import { browserDrawerElement, isBrowserDrawerOpen, setBrowserDrawer, setBrowserPages } from "./browserMode";
+import { setBrowserPages } from "./browserMode";
 import { registerChangesLink } from "./findings";
 import { abortAttach, hasRunningTurn, liveBadge, liveRoot, onResync, runningTurnIndex, runningUserRow } from "./live";
 import { agentStatus, openSession, refreshSessions, renderSessions } from "./sessions";
@@ -842,8 +842,7 @@ function nativeTarget(): { web: WebTab | null; browser: BrowserTab | null; surfa
   // Browser mode shows the pages itself, so the pane's copy steps aside.
   const shellBrowser = appMode() === "browser";
   const pageVisible =
-    !!idePage ||
-    (shellBrowser ? !isBrowserDrawerOpen() : paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
+    !!idePage || (shellBrowser ? true : paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
   const web = pageVisible && tab?.kind === "web" && tab.url !== "" ? tab : null;
   const browser = pageVisible && tab?.kind === "browser" ? tab : null;
   const surface = shellBrowser
@@ -1668,49 +1667,27 @@ export function initSidePane(): void {
     render();
     paintBrowserMode();
   });
-  // Browser mode's own bar: the dock button floats the vertical list, + opens
-  // the address/sites menu, and the strip selects and closes pages.
-  $("#browserDockBtn").addEventListener("click", () => setBrowserDrawer(!isBrowserDrawerOpen()));
-  const drawer = browserDrawerElement();
-  drawer.addEventListener("click", (event) => {
+  // Browser mode's own bar: + opens the address/sites menu, and the strip
+  // selects and closes pages. There is no vertical list: the strip is the
+  // whole inventory.
+  $("#browserNewTab").addEventListener("click", () => window.dispatchEvent(new Event("paladin:browser-menu")));
+  $("#browserTabs").addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
-    if (target.closest("[data-drawer-close]")) {
-      setBrowserDrawer(false);
-      $("#browserDockBtn").focus();
-      return;
-    }
-    if (target.closest("[data-drawer-new]")) {
-      setBrowserDrawer(false);
-      window.dispatchEvent(new Event("paladin:browser-menu"));
+    const closeKey = target.closest<HTMLElement>("[data-page-close]")?.dataset.pageClose;
+    if (closeKey) {
+      closeTab(closeKey);
       return;
     }
     const key = target.closest<HTMLElement>("[data-page]")?.dataset.page;
     if (!key) return;
     tabSet.active = key;
-    setBrowserDrawer(false);
+    showPane();
     render();
   });
-  // Escape closes the list. It is handled on the document in the capture phase
-  // so it wins over the shell's other Escape handlers (which close menus and
-  // settings) whatever has focus — the drawer is never focusable as a whole.
-  document.addEventListener(
-    "keydown",
-    (event) => {
-      if (event.key !== "Escape" || !isBrowserDrawerOpen()) return;
-      event.stopPropagation();
-      event.preventDefault();
-      setBrowserDrawer(false);
-      $("#browserDockBtn").focus();
-    },
-    true,
-  );
   // Passing comments to the agent lands in the composer, so come back to the
   // mode that owns it.
   window.addEventListener("paladin:pass-to-agent", () => setAppMode("agent"));
-  // Leaving Browser mode closes the list: it belongs to that mode's window.
-  window.addEventListener("paladin:app-mode-changed", (event) => {
-    if ((event as CustomEvent<string>).detail !== "browser") setBrowserDrawer(false);
-  });
+
   $("#browserNewTab").addEventListener("click", () => window.dispatchEvent(new Event("paladin:browser-menu")));
   $("#browserTabs").addEventListener("click", (event) => {
     const target = event.target as HTMLElement;

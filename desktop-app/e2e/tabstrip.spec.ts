@@ -39,10 +39,14 @@ test("there is no vertical tab list anywhere", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await openSideChat(page);
-  // The shell drawer and the vertical column it used are both gone.
+  // Every vertical list is gone, in the shell and in the browser.
   await expect(page.locator("#paneTabsDrawer")).toHaveCount(0);
   await expect(page.locator("#paneDrawerTabs")).toHaveCount(0);
   await expect(page.locator(".pane-strip.is-vertical")).toHaveCount(0);
+  await expect(page.locator("#browserDrawer")).toHaveCount(0);
+  await expect(page.locator("#browserDockBtn")).toHaveCount(0);
+  await expect(page.locator(".browser-drawer")).toHaveCount(0);
+  await expect(page.locator("#browserBar [aria-label='Show all tabs']")).toHaveCount(0);
   await expect(page.locator("#paneRailToggle")).toBeHidden();
 });
 
