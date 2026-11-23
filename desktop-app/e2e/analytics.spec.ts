@@ -25,6 +25,31 @@ test("the analytics pane shows the fleet dashboard", async ({ page }) => {
   await expect(page.locator("#settingsModal")).toBeHidden();
 });
 
+// The dashboard is the machine's ledger: every workspace's sessions,
+// not just the open one. Pin the wire call's cwd being null.
+test("the analytics rollup pulls every workspace", async ({ page }) => {
+  await page.evaluate(() => {
+    const w = window as any;
+    const base = w.paladin.invoke.bind(w.paladin);
+    w.__overallCalls = [];
+    w.paladin = {
+      ...w.paladin,
+      invoke: async (cmd: string, args: any) => {
+        if (cmd === "overallUsage") w.__overallCalls.push(args);
+        return base(cmd, args);
+      },
+    };
+  });
+  await page.click("#settingsBtn");
+  await page.click("#settingsNavAnalytics");
+  await expect(page.locator("#analyticsBody")).toContainText("Total tokens");
+  const calls = await page.evaluate(() => (window as any).__overallCalls);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const call of calls) {
+    expect(call.cwd).toBeNull();
+  }
+});
+
 test("the analytics model filter narrows the table", async ({ page }) => {
   await page.click("#settingsBtn");
   await page.click("#settingsNavAnalytics");
@@ -32,7 +57,10 @@ test("the analytics model filter narrows the table", async ({ page }) => {
   await expect(body).toContainText("kimi-k2.6");
   await body.locator("#analyticsModelFilter").selectOption("kimi-k2.6");
   await expect(body).toContainText("kimi-k2.6");
-  await expect(body.locator("table")).not.toContainText("beam-free");
+  // The sessions audit narrows with the filter; the model-pricing table
+  // is fleet-wide by design and keeps showing every model.
+  const sessionsAudit = body.locator(".glass-panel").filter({ hasText: "Recent sessions" });
+  await expect(sessionsAudit).not.toContainText("beam-free");
   await page.click("#settingsCloseBtn");
 });
 
@@ -115,6 +143,13 @@ test("a legacy subscription ledger shows its list price, not $0", async ({ page 
   const body = page.locator("#analyticsBody");
   await expect(body).toContainText("Est. total cost");
   await expect(body).toContainText("$0.06");
-  await expect(body).not.toContainText("$0.00");
-  await expect(body.locator("table")).toContainText("EST.");
+  // The hero must show the list price, never a bare $0 for a subscription:
+  // the guard is the KPI's own value, since legitimate sub-cent figures
+  // (avg $/call) also begin with "$0.00".
+  const hero = body.locator(".settings-stat").filter({ hasText: "Est. total cost" });
+  await expect(hero).toContainText("$0.06");
+  // Both model views must mark the list price: the sessions audit's
+  // BILLED/EST. badge and the pricing table's EST tag.
+  const sessionsAudit = body.locator(".glass-panel").filter({ hasText: "Recent sessions" });
+  await expect(sessionsAudit).toContainText("EST.");
 });
