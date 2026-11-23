@@ -225,13 +225,17 @@ func TestSessionHistoryPageKeepsStatsForTheLastTurn(t *testing.T) {
 	if err := stored.AppendTurnWithStats(msgs, stats); err != nil {
 		t.Fatal(err)
 	}
-	// A page of the newest 3 rows begins mid-turn: the user row is gone.
+	// The newest page is turn-aligned now: a 3-row limit cannot cut the
+	// turn, so the user row stays and the whole turn arrives on attach.
 	page, err := rt.SessionHistoryPage(sess.SessionID, dir, 3, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Messages) != 3 {
-		t.Fatalf("page rows = %d", len(page.Messages))
+	if page.Start != 0 || page.HasMore {
+		t.Fatalf("page start = %d hasMore = %v, want the whole single turn", page.Start, page.HasMore)
+	}
+	if len(page.Messages) != 10 {
+		t.Fatalf("page rows = %d, want all 10", len(page.Messages))
 	}
 	found := false
 	for _, row := range page.Messages {

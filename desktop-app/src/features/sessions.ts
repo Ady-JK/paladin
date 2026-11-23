@@ -649,12 +649,36 @@ export function onAgentsChanged(agent: AgentInfo): void {
 
 // HISTORY_PAGE is how many transcript rows are painted at once. Long
 // sessions used to fetch, parse and build every message before the
-// first pixels; older rows now load on demand.
+// first pixels; older rows now load on demand. The core turn-aligns
+// every window, so each page is a whole number of turn groups.
 const HISTORY_PAGE = 120;
 let historyStart = 0;
 let historyHasMore = false;
 let historyLoading = false;
 let prefetchedHistory: { sessionId: string; before: number; page: Promise<HistoryPage> } | null = null;
+// Turn groups fetched but not yet painted. Scroll-to-top pops one group
+// per hit, so climbing into deep history happens one question at a time
+// instead of 120 rows at a jump. The queue is newest-first: the group
+// nearest the painted top is shifted from the head.
+let earlierGroups: MessageInfo[][] = [];
+
+// splitTurnGroups cuts a page into whole turn groups, the same way
+// buildHistory groups rows: a user row opens a new group. The page is
+// turn-aligned already (see the core's HistoryPageStats), so every
+// group here is complete.
+function splitTurnGroups(messages: MessageInfo[]): MessageInfo[][] {
+  const groups: MessageInfo[][] = [];
+  let current: MessageInfo[] = [];
+  for (const message of messages) {
+    if (message.role === "user" && current.length) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(message);
+  }
+  if (current.length) groups.push(current);
+  return groups;
+}
 
 function prefetchEarlierHistory(sessionId: string): void {
   if (!historyHasMore || !sessionId) {
@@ -677,33 +701,40 @@ export async function loadHistory(id: string): Promise<void> {
   if (generation === openGeneration && id === state.sessionId) renderHistory(page);
 }
 
+// earlierRow is the hairline at the top of the transcript. Loading is
+// automatic on scroll, so it is not a button any more: it says how much
+// older history remains, and a click still loads the next turn for the
+// rare case scrolling is impossible (a zero-height view, for instance).
 function earlierRow(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "history-earlier";
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "history-earlier-btn";
-  btn.textContent = "Load earlier messages";
-  btn.addEventListener("click", () => void loadEarlierHistory());
-  wrap.append(btn);
+  wrap.textContent = "";
+  wrap.addEventListener("click", () => void loadEarlierTurn());
   return wrap;
 }
 
-// loadEarlierHistory prepends the page before the first painted row.
-// Row ordinals count from the start of the session, so a turn landing
-// at the end meanwhile does not shift what `historyStart` points at.
-async function loadEarlierHistory(): Promise<void> {
+function paintEarlierRow(): void {
+  const wrap = messagesEl.querySelector<HTMLElement>(".history-earlier");
+  if (!wrap) return;
+  const left = earlierGroups.length;
+  if (historyLoading) wrap.textContent = "Loading…";
+  else if (historyHasMore)
+    wrap.textContent = `${left ? `${left} turn${left === 1 ? "" : "s"} ready · ` : ""}scroll for earlier messages`;
+  else wrap.textContent = "";
+}
+
+// fetchEarlierPage brings in the next page of older rows and parks its
+// turn groups in the queue. Row ordinals count from the start of the
+// session, so a turn landing at the end meanwhile does not shift what
+// `historyStart` points at.
+async function fetchEarlierPage(): Promise<void> {
   const id = state.sessionId;
-  if (!id || historyLoading || !historyHasMore) return;
+  if (!id || historyLoading || !historyHasMore || earlierGroups.length) return;
   const generation = openGeneration;
   historyLoading = true;
+  paintEarlierRow();
   const cwd = state.cwd || null;
   const before = historyStart;
-  const btn = messagesEl.querySelector<HTMLButtonElement>(".history-earlier-btn");
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Loading…";
-  }
   try {
     const cached = prefetchedHistory;
     let page: HistoryPage;
@@ -713,32 +744,71 @@ async function loadEarlierHistory(): Promise<void> {
       page = await api.sessionHistoryPage(id, cwd, HISTORY_PAGE, before);
     }
     if (generation !== openGeneration || id !== state.sessionId) return;
-    const holder = document.createElement("div");
-    buildHistory(holder, page.messages, !state.subagent);
-    const anchor = messagesEl.querySelector(".history-earlier");
-    const prevHeight = chatViewEl.scrollHeight;
-    const prevTop = chatViewEl.scrollTop;
-    const fragment = document.createDocumentFragment();
-    while (holder.firstChild) fragment.append(holder.firstChild);
-    messagesEl.insertBefore(fragment, anchor);
-    anchor?.remove();
+    // Groups nearest the painted top must prepend first, so the queue
+    // is newest-first and each hit shifts the head.
+    earlierGroups = splitTurnGroups(page.messages).reverse();
     historyStart = page.start;
     historyHasMore = page.hasMore;
-    if (page.hasMore) messagesEl.insertBefore(earlierRow(), messagesEl.firstChild);
+    if (!page.hasMore) {
+      messagesEl.querySelector(".history-earlier")?.remove();
+    }
     prefetchEarlierHistory(id);
-    // Keep the row the user was reading under the cursor.
-    chatViewEl.scrollTop = prevTop + (chatViewEl.scrollHeight - prevHeight);
   } catch (error) {
     if (generation === openGeneration && id === state.sessionId) {
       toast(`Could not load earlier messages: ${String(error)}`, "error");
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = "Load earlier messages";
-      }
     }
   } finally {
-    if (generation === openGeneration) historyLoading = false;
+    if (generation === openGeneration) {
+      historyLoading = false;
+      paintEarlierRow();
+      // A scroll-hit that arrived while this request was in flight
+      // could not act: with scrollTop already 0 no new scroll event
+      // will ever come, so its turn is prepended here instead of
+      // leaving the user stuck at the top.
+      if (pendingTopHit && earlierGroups.length) {
+        pendingTopHit = false;
+        void loadEarlierTurn();
+      }
+    }
   }
+}
+
+// pendingTopHit records a scroll-hit that arrived while a page fetch was
+// already in flight. The view is already at the top, so no further
+// scroll event would ever fire; the fetch serves it when it lands.
+let pendingTopHit = false;
+
+// loadEarlierTurn prepends exactly one whole turn group — the one just
+// above the current top — and fetches the next page when the queue runs
+// dry. Scroll-to-top calls this, so climbing into deep history happens
+// one question at a time.
+async function loadEarlierTurn(): Promise<void> {
+  if (!state.sessionId) return;
+  if (historyLoading) {
+    if (historyHasMore || earlierGroups.length) pendingTopHit = true;
+    return;
+  }
+  if (!earlierGroups.length) {
+    if (!historyHasMore) return;
+    await fetchEarlierPage();
+    if (!earlierGroups.length) return;
+  }
+  const group = earlierGroups.shift()!;
+  const generation = openGeneration;
+  const holder = document.createElement("div");
+  buildHistory(holder, group, !state.subagent);
+  const anchor = messagesEl.querySelector(".history-earlier");
+  const prevHeight = chatViewEl.scrollHeight;
+  const prevTop = chatViewEl.scrollTop;
+  const fragment = document.createDocumentFragment();
+  while (holder.firstChild) fragment.append(holder.firstChild);
+  messagesEl.insertBefore(fragment, anchor);
+  // Keep the row the user was reading under the cursor.
+  chatViewEl.scrollTop = prevTop + (chatViewEl.scrollHeight - prevHeight);
+  if (generation !== openGeneration) return;
+  paintEarlierRow();
+  // Warm the next page while the user reads this one.
+  if (!earlierGroups.length && historyHasMore) void fetchEarlierPage();
 }
 
 // renderHistory paints a persisted transcript page. An older core may
@@ -749,12 +819,14 @@ function renderHistory(raw: HistoryPage | MessageInfo[]): void {
   historyHasMore = page.hasMore === true;
   historyLoading = false;
   prefetchedHistory = null;
+  earlierGroups = [];
   messagesEl.innerHTML = "";
   // One layout for the whole transcript: keep the container display:none
   // while rows are appended, then paint once.
   messagesEl.style.display = "none";
   if (historyHasMore) {
     messagesEl.append(earlierRow());
+    paintEarlierRow();
   }
   // A subagent's conversation is driven by its parent: no rewinding it.
   buildHistory(messagesEl, page.messages ?? [], !state.subagent);
@@ -805,6 +877,15 @@ export function initSessions(): void {
   window.setInterval(() => void syncLinkedSession(), 3000);
   window.addEventListener("focus", () => void syncLinkedSession());
   document.addEventListener("visibilitychange", () => void syncLinkedSession());
+  // Scrolling to the top of the transcript loads the next older turn by
+  // itself: the old "Load earlier messages" button is gone, so deep
+  // history reads like one continuous climb. One hit prepends exactly
+  // one whole turn group (see loadEarlierTurn).
+  chatViewEl.addEventListener("scroll", () => {
+    if (chatViewEl.scrollTop <= 0 && (historyHasMore || earlierGroups.length)) {
+      void loadEarlierTurn();
+    }
+  });
   let searchTimer = 0;
   searchInputEl.addEventListener("input", () => {
     window.clearTimeout(searchTimer);

@@ -544,7 +544,14 @@ async function __paladinBaseInvoke(cmd, args) {
       const rows = Array.isArray(all) ? all : [];
       const limit = args && args.limit > 0 ? args.limit : 120;
       const before = args && args.before > 0 && args.before <= rows.length ? args.before : rows.length;
-      const start = Math.max(0, before - limit);
+      // Turn-aligned like the real core (session.HistoryPageStats): the
+      // window starts at the head of the turn that contains the raw
+      // slice's start, so a page never opens mid-turn.
+      const rawStart = Math.max(0, before - limit);
+      let start = 0;
+      for (let i = 0; i <= rawStart; i++) {
+        if (i === 0 || rows[i].role === "user") start = i;
+      }
       return { messages: rows.slice(start, before), start, hasMore: start > 0, total: rows.length };
     }
     case "sessionImages": {

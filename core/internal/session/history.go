@@ -264,18 +264,43 @@ type HistoryPage struct {
 
 // HistoryPageStats renders only the requested window while preserving the
 // full history's row numbering, tool-call links, and turn statistics.
+//
+// The window is turn-aligned: rows are grouped into turns the way the
+// renderer groups them (a user row begins one), and both edges of a page
+// sit on turn boundaries. A raw [before-limit, before) slice could start
+// mid-turn, which read as a page of orphaned tool calls with no question
+// above them — and when the newest turn alone was longer than the limit,
+// the question row fell out of the attach page entirely. The start edge
+// slides back to the head of the turn that contains it, so the last turn
+// is always whole and every older page begins where a question does.
 func HistoryPageStats(msgs []transcript.Message, stats map[int]*transcript.TurnStats, limit, before int) HistoryPage {
 	if limit <= 0 {
 		limit = 120
 	}
-	total := 0
+	var turnStarts []int
+	ordinal := 0
 	for _, msg := range msgs {
-		total += historyRowCount(msg)
+		count := historyRowCount(msg)
+		if count == 0 {
+			continue
+		}
+		if ordinal == 0 || msg.Role == transcript.RoleUser {
+			turnStarts = append(turnStarts, ordinal)
+		}
+		ordinal += count
 	}
+	total := ordinal
 	if before <= 0 || before > total {
 		before = total
 	}
-	start := max(0, before-limit)
+	want := max(0, before-limit)
+	start := 0
+	for _, s := range turnStarts {
+		if s > want {
+			break
+		}
+		start = s
+	}
 	return HistoryPage{Messages: historyViewRange(msgs, stats, start, before), Start: start, HasMore: start > 0, Total: total}
 }
 
