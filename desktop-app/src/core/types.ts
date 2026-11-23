@@ -90,6 +90,9 @@ export type SessionInfo = {
   subagent?: SubagentLink;
   // children lists the subagent sessions this session spawned.
   children?: string[];
+  // forkedFrom is the session this one was forked from (absent on a
+  // fresh session).
+  forkedFrom?: string;
   // damaged says why the host could not read this session.
   damaged?: string;
   // harness names the external agent that runs the session ("codex").

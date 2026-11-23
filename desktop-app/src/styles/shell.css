@@ -799,16 +799,6 @@ body {
     0 32px 72px -20px rgb(0 0 0 / 0.8);
 }
 
-#sessionList .session-count {
-  flex-shrink: 0;
-  min-width: 14px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-align: right;
-  color: var(--color-slate-400);
-  font-variant-numeric: tabular-nums;
-}
-
 #sessionList .session-row:hover,
 #chatList .pick-row:hover {
   transform: none;

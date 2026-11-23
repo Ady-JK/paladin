@@ -190,3 +190,50 @@ test("a transient empty listSessions does not blank a populated sidebar", async 
   console.log("AFTER_EMPTY:", JSON.stringify(text.slice(0, 70)));
   expect(text).not.toContain("no sessions yet");
 });
+
+// The row used to end with the session's message count, which was noise
+// nobody acted on; it is gone. A fork now wears a small fork glyph so a
+// copy is recognisable in the list.
+test("a forked session is marked and no row shows a message count", async ({ page }) => {
+  await page.addInitScript({ path: "e2e/paladin-stub.js" });
+  await page.addInitScript(
+    (s) => {
+      const w = window as any;
+      const base = w.__paladinBaseInvoke;
+      w.__paladinBaseInvoke = async (cmd: string, args: any) => (cmd === "listSessions" ? s : base(cmd, args));
+    },
+    [
+      {
+        sessionId: "s1",
+        cwd: "/home/tester/project",
+        createdAt: 2,
+        provider: "p",
+        model: "m",
+        messageCount: 3296,
+        title: "original",
+      },
+      {
+        sessionId: "s2",
+        cwd: "/home/tester/project",
+        createdAt: 1,
+        provider: "p",
+        model: "m",
+        messageCount: 12,
+        title: "the copy",
+        forkedFrom: "s1",
+      },
+    ],
+  );
+  await page.goto("/");
+  await expect(page.locator("#promptInput")).toBeVisible();
+  const rows = page.locator("#sessionList .session-row");
+  await expect(rows).toHaveCount(2);
+  // No count digits anywhere in the list.
+  await expect(page.locator("#sessionList .session-count")).toHaveCount(0);
+  await expect(page.locator("#sessionList")).not.toContainText("3296");
+  // Exactly one row wears the fork badge: the copy, not its source.
+  await expect(page.locator("#sessionList .session-forked")).toHaveCount(1);
+  const forked = rows.filter({ hasText: "the copy" });
+  await expect(forked.locator(".session-forked")).toHaveCount(1);
+  await expect(rows.filter({ hasText: "original" }).locator(".session-forked")).toHaveCount(0);
+});

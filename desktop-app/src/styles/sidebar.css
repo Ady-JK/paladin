@@ -109,14 +109,16 @@ body.harness-codex #skillChipSlot {
   color: var(--color-slate-100);
 }
 
-#sessionList .session-count {
-  opacity: 0;
-  transition: opacity 120ms ease;
+/* A forked session wears the fork glyph instead of the message count the
+   row used to carry: the count was noise nobody acted on. */
+#sessionList .session-forked {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--color-slate-400);
 }
-
-#sessionList .session-row:hover .session-count,
-#sessionList .session-row.is-active .session-count {
-  opacity: 1;
+.dark #sessionList .session-forked {
+  color: var(--color-slate-500);
 }
 
 /* A session the host could not read; the title carries the reason. */

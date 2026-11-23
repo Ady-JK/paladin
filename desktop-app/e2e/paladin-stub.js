@@ -393,6 +393,7 @@ async function __paladinBaseInvoke(cmd, args) {
           cwd: "/wt/demo",
           title: "notify demo (fork)",
           messageCount: 2,
+          forkedFrom: args.sessionId,
           createdAt: Math.floor(Date.now() / 1000),
           worktree: {
             repoRoot: "/home/tester/project",
@@ -408,6 +409,7 @@ async function __paladinBaseInvoke(cmd, args) {
         cwd: "/home/tester/project",
         title: "notify demo (fork)",
         messageCount: 2,
+        forkedFrom: args.sessionId,
         createdAt: Math.floor(Date.now() / 1000),
       };
     case "renameSession":

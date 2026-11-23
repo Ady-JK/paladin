@@ -154,10 +154,16 @@ export function agentStatusHtml(status: AgentStatus): string {
 function childRow(child: SessionInfo): string {
   const sub = child.subagent!;
   const active = child.sessionId === state.sessionId;
+  // A child can be a fork too (spawn_agent with fork:"all"), so it wears
+  // the same glyph the parent rows use.
+  const forked = child.forkedFrom
+    ? `<span class="session-forked" title="Forked from another session" aria-label="Forked">${icon("sl-fork", "h-3 w-3")}</span>`
+    : "";
   return `
     <button type="button" data-child="${escapeAttr(child.sessionId)}" class="session-child${active ? " is-active" : ""}" title="${escapeAttr(sub.task || sub.name)}">
       <span class="child-ico">${icon("rl-agent", "h-3 w-3")}</span>
       <span class="child-name truncate">${escapeHtml(sub.name || child.title)}</span>
+      ${forked}
       <span class="agent-type">${escapeHtml(sub.type)}</span>
       ${hasAgentBrowser(child.sessionId) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
       ${agentStatusHtml(agentStatus(child))}
@@ -201,12 +207,12 @@ function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
       </button>`
       }
       ${engineChip(session)}
+      ${session.forkedFrom ? `<span class="session-forked" title="Forked from another session" aria-label="Forked">${icon("sl-fork", "h-3 w-3")}</span>` : ""}
       ${session.worktree ? `<span class="session-branch" title="Worktree ${escapeAttr(session.worktree.path)}">${icon("code-branch", "h-2.5 w-2.5")}<span>${escapeHtml(session.worktree.branch.replace(/^paladin\//, ""))}</span></span>` : ""}
       ${session.damaged ? `<span class="session-damaged" title="Unreadable: ${escapeAttr(session.damaged)}">${icon("warning", "h-3 w-3")}</span>` : ""}
       ${hasAgentBrowser(session.sessionId) || kids.some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
       ${liveIndicator(session.sessionId, live)}
       ${resBadge(session.sessionId)}
-      <span class="session-count">${session.messageCount}</span>
       <button data-row-menu="${escapeAttr(session.sessionId)}" class="session-del session-more" title="More" aria-haspopup="menu">
         ${icon("sl-more", "h-3.5 w-3.5")}
       </button>

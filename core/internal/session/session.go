@@ -69,6 +69,9 @@ type SessionInfo struct {
 	Subagent *SubagentInfo `json:"subagent,omitempty"`
 	// Children lists the subagent sessions this session spawned.
 	Children []string `json:"children,omitempty"`
+	// ForkedFrom is the session this one was forked from, so the client
+	// can mark a fork in the sidebar. Empty means a fresh session.
+	ForkedFrom string `json:"forkedFrom,omitempty"`
 	// Damaged says why the session could not be read (it can still be
 	// deleted).
 	Damaged string `json:"damaged,omitempty"`
@@ -160,6 +163,7 @@ func InfoFrom(meta transcript.Meta, messageCount int, title string) SessionInfo 
 		Worktree:     WorktreeView(meta.Worktree),
 		Subagent:     SubagentView(meta.Subagent),
 		Children:     meta.Children,
+		ForkedFrom:   meta.ForkedFrom,
 		Harness:      HarnessName(meta.Harness),
 	}
 }

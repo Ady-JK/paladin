@@ -78,6 +78,29 @@ func TestInfoFromShapes(t *testing.T) {
 	}
 }
 
+// A fork's row is marked in the sidebar, which needs the source id on the
+// wire; a fresh session must not carry the field at all.
+func TestInfoFromCarriesForkProvenance(t *testing.T) {
+	fork := InfoFrom(transcript.Meta{SessionID: "s2", ForkedFrom: "s1"}, 1, "copy")
+	if fork.ForkedFrom != "s1" {
+		t.Fatalf("fork provenance lost: %+v", fork)
+	}
+	raw, err := json.Marshal(fork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(raw), `"forkedFrom":"s1"`) {
+		t.Fatalf("forkedFrom missing from the wire: %s", raw)
+	}
+	fresh, err := json.Marshal(InfoFrom(transcript.Meta{SessionID: "s3"}, 0, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(string(fresh), "forkedFrom") {
+		t.Fatalf("a fresh session must not carry forkedFrom: %s", fresh)
+	}
+}
+
 // The desktop frontend reads camelCase (sessionId/createdAt/messageCount);
 // snake_case leaves every id undefined, so the delete buttons send
 // "undefined" and the core rejects the id. Lock the wire shape.

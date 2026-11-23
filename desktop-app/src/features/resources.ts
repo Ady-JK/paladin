@@ -106,7 +106,7 @@ function paintRows(): void {
     badge.dataset.resFor = id;
     badge.title = title;
     badge.textContent = text;
-    row.insertBefore(badge, row.querySelector(".session-count"));
+    row.insertBefore(badge, row.querySelector(".session-more"));
   }
 }
 
