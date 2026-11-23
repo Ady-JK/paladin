@@ -48,7 +48,7 @@ func TestCustomizedTextReachesTheAgent(t *testing.T) {
 	if _, err := rt.CustomSet("prompt.tool-guidance", "Tools:\n- Always grep before reading."); err != nil {
 		t.Fatal(err)
 	}
-	sys := prompt.ToolSystem("BASE", ws)
+	sys := prompt.ToolSystem("BASE", ws, prompt.ModelInfo{})
 	if !strings.Contains(sys, "Always grep before reading.") || strings.Contains(sys, "Read a file before you describe") {
 		t.Fatalf("guidance not replaced: %.300s", sys)
 	}

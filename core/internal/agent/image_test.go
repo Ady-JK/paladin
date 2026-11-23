@@ -127,3 +127,36 @@ func TestTextOnlyModelGetsNotesInsteadOfReplayedImages(t *testing.T) {
 type blindProvider struct{ mockProvider }
 
 func (*blindProvider) AcceptsImages() bool { return false }
+
+// The live tool-result path is guarded too: a read that returns an
+// image to a text-only model must never place an image part in the
+// in-flight message list — that is the leak that failed whole turns at
+// the endpoint before the tools checked the capability themselves.
+func TestAppendToolResultStripsImageForTextOnlyModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "screen.png")
+	raw, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := media.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _, _, done := testAgent(t, &mockProvider{})
+	defer close(done)
+	a.provider = &blindProvider{}
+	call := &inference.ToolCall{ID: "c1", Name: "read", Arguments: `{}`}
+	a.appendToolResult(call, &tools.ToolResult{CallID: "c1", Name: "read", Content: "image", Image: ref})
+	last := a.messages[len(a.messages)-1]
+	if last.Image != nil {
+		t.Fatal("live tool result carried an image part to a text-only model")
+	}
+	if !strings.Contains(last.Content, "does not accept image inputs") {
+		t.Fatalf("strip note missing: %q", last.Content)
+	}
+	// The record keeps the image for the transcript: a later switch to
+	// a vision model replays it correctly.
+	if a.records[len(a.records)-1].Image == nil {
+		t.Fatal("transcript record lost the image")
+	}
+}

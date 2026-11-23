@@ -154,7 +154,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 		return nil, err
 	}
 
-	system := ComposeSystem(d.Prompts.SystemPrompt(strVal(req.SystemPrompt)), sess, d.Sections)
+	system := ComposeSystem(d.Prompts.SystemPrompt(strVal(req.SystemPrompt)), sess, d.Sections, ModelInfoOf(provider))
 	registry, shell, err := t.buildRegistry(d, input.commandTools)
 	if err != nil {
 		return nil, err
@@ -436,6 +436,22 @@ var planWriteTools = map[string]bool{"write": true, "edit": true}
 // refuses anything but inspection commands. MCP tools stay; the
 // plan-mode gate asks for each call. The real shell stays as the agent's
 // job-notice source.
+// ModelInfoOf derives the environment block's model identity from the
+// turn's provider. Only a provider whose model listing documented the
+// input modalities may claim text-only; anything else stays permissive
+// so a vision model is never told it is blind.
+func ModelInfoOf(p inference.Provider) prompt.ModelInfo {
+	if p == nil {
+		return prompt.ModelInfo{}
+	}
+	info := prompt.ModelInfo{Name: p.Model()}
+	if c, ok := p.(inference.ImageCapable); ok {
+		info.ImagesKnown = true
+		info.SupportsImage = c.AcceptsImages()
+	}
+	return info
+}
+
 func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *tools.ShellTool) {
 	out := tools.NewRegistry()
 	for _, name := range r.Names() {
@@ -459,9 +475,10 @@ func planRegistry(r *tools.Registry, shell *tools.ShellTool) (*tools.Registry, *
 
 // ComposeSystem is a session's full system prompt: the base prompt with
 // tool guidance and environment, then the runtime's sections
-// (instructions, skills, MCP).
-func ComposeSystem(base string, sess transcript.Session, sections SectionSource) string {
-	system := prompt.ToolSystem(base, sess.Meta.Cwd)
+// (instructions, skills, MCP). Model identifies the turn's model in
+// the environment block; a zero value omits the line.
+func ComposeSystem(base string, sess transcript.Session, sections SectionSource, model prompt.ModelInfo) string {
+	system := prompt.ToolSystem(base, sess.Meta.Cwd, model)
 	if sections != nil {
 		for _, section := range sections.SystemSections(sess) {
 			if section = strings.TrimSpace(section); section != "" {

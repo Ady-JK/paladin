@@ -54,7 +54,7 @@ func (ReadTool) ParallelSafe() bool { return true }
 func (ReadTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "read",
-		Description: "Read a text file or PNG, JPEG, GIF or WebP image from disk. Images are sent visually to the model. Pass path as a full " +
+		Description: "Read a text file or PNG, JPEG, GIF or WebP image from disk. Images are sent visually when the active model accepts image inputs (see the model's modalities in the system prompt); a text-only model gets a note instead. Pass path as a full " +
 			"absolute path; bare relative paths are rejected. " +
 			"The reply holds the file content, the line range that " +
 			"was returned, and whether more lines follow: when has_more is true, " +
@@ -93,6 +93,19 @@ func (t ReadTool) CallRich(raw json.RawMessage, ctx *ToolCtx) (RichOutput, error
 		return RichOutput{}, ArgsError(fmt.Sprintf("read: image: %v", err))
 	}
 	if image {
+		// A text-only model must not receive the image: the endpoint
+		// rejects image parts and the turn fails. The file still reads
+		// as an image — the model just gets a note saying so.
+		if !ctx.ImagesOK() {
+			data, err := jsonx.Marshal(map[string]any{
+				"requested_path": args.Path, "resolved_path": resolved, "scope": scope,
+				"mime_type": ref.MIMEType, "size": ref.Size, "content": ImageRefusalNote(resolved),
+			})
+			if err != nil {
+				return RichOutput{}, ArgsError(fmt.Sprintf("read: encode image metadata: %v", err))
+			}
+			return RichOutput{Content: string(data)}, nil
+		}
 		data, err := jsonx.Marshal(map[string]any{
 			"requested_path": args.Path, "resolved_path": resolved, "scope": scope,
 			"mime_type": ref.MIMEType, "size": ref.Size, "content": "[image attached]",

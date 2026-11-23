@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -47,6 +48,29 @@ type ToolCtx struct {
 	TrustProject func(tool string) bool
 	// Web holds the user's web settings for web_fetch.
 	Web WebOptions
+	// ModelImages says whether the turn's model accepts image inputs.
+	// nil means unknown, which stays permissive (a vision model must
+	// never be blinded by a listing that said nothing). A tool that
+	// produces an image checks this before returning it: a text-only
+	// model gets a note instead, so the call never sends an image part
+	// the endpoint would reject and fail the turn over.
+	ModelImages *bool
+}
+
+// ImagesOK reports whether the turn's model takes image inputs. An
+// unset capability is permissive for the same reason the provider
+// layer's is: only a listing that documented the modalities may say no.
+func (c *ToolCtx) ImagesOK() bool {
+	return c.ModelImages == nil || *c.ModelImages
+}
+
+// ImageRefusalNote is the model-facing text a text-only model gets in
+// place of an image. Path is the file that was read; the note says the
+// image exists and was not sent, and points at text alternatives so the
+// model adapts instead of retrying the same call.
+func ImageRefusalNote(path string) string {
+	return "[image not sent: this model does not accept image inputs, so " + filepath.Base(path) +
+		" was not attached. Read the image's source or ask the user for a text description instead.]"
 }
 
 // ToolDefinition is the tool schema sent to the model.

@@ -864,11 +864,13 @@ func AssembleSystemPrompt(base, toolGuidance, environment, examples, schemas str
 // the base, the OS-specific tool guidance, then the machine +
 // workspace environment block (always injected, never empty), then
 // the OS-specific tool examples. Prefix order stays stable for prompt
-// cache friendliness: base, guidance, environment, examples.
-func ToolSystem(base, sessionCwd string) string {
+// cache friendliness: base, guidance, environment, examples. Model
+// carries the turn's model identity for the environment block; a zero
+// value omits the model line.
+func ToolSystem(base, sessionCwd string, model ModelInfo) string {
 	guidance := "\n\n" + strings.TrimSpace(custom.Text("prompt.tool-guidance")) + "\n\n" + strings.TrimSpace(custom.Text("prompt.shell-guidance"))
 	examples := "\n" + strings.TrimSpace(custom.Text("prompt.examples")) + "\n"
-	return AssembleSystemPrompt(base, guidance, EnvironmentBlock(OSName(), sessionCwd), examples, "")
+	return AssembleSystemPrompt(base, guidance, EnvironmentBlock(OSName(), sessionCwd, model), examples, "")
 }
 
 // The user can replace each built-in section in Settings → Customize.
@@ -892,12 +894,43 @@ func init() {
 	)
 }
 
+// ModelInfo is the active model's identity and input modalities for the
+// environment block: the name the provider reports plus whether its
+// listing documented image inputs. Unknown stays permissive — the block
+// never tells a vision model it is blind.
+type ModelInfo struct {
+	Name          string
+	ImagesKnown   bool
+	SupportsImage bool
+}
+
+// Modalities renders the model's input modalities for the environment
+// block: "text and image inputs" or, when the listing is authoritative,
+// "text-only (no image inputs)". An unknown listing says just "text" —
+// it must not claim either way about images.
+func (m ModelInfo) Modalities() string {
+	switch {
+	case m.ImagesKnown && m.SupportsImage:
+		return "text and image inputs"
+	case m.ImagesKnown && !m.SupportsImage:
+		return "text-only (no image inputs: never call read on an image file expecting to see it; ask the user to describe it or read its text source)"
+	default:
+		return "text inputs (image support undocumented)"
+	}
+}
+
 // EnvironmentBlock reports the machine and workspace every turn runs
 // in: OS + shell, CPU arch, and the session workspace root. It is
 // always appended by ToolSystem, so turns never lose machine context
-// even when the user rewrites their prompt file.
-func EnvironmentBlock(os, workspace string) string {
-	return "- The harness runs on " + os + " (arch " + runtime.GOARCH + "); write shell commands in its syntax.\n- The session workspace is " + workspace + "; file answers flag each path as inside or outside it."
+// even when the user rewrites their prompt file. The model line tells
+// the model its own name and modalities, so a text-only model knows
+// not to reach for image reads it cannot use.
+func EnvironmentBlock(os, workspace string, model ModelInfo) string {
+	out := "- The harness runs on " + os + " (arch " + runtime.GOARCH + "); write shell commands in its syntax.\n- The session workspace is " + workspace + "; file answers flag each path as inside or outside it."
+	if strings.TrimSpace(model.Name) != "" {
+		out += "\n- The active model is " + model.Name + " and accepts " + model.Modalities() + "."
+	}
+	return out
 }
 
 func OSName() string {

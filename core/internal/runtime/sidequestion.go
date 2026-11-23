@@ -91,7 +91,7 @@ func (r *AgentRuntime) SideQuestion(ctx context.Context, req SideQuestionRequest
 		messages = append(messages, inference.LlmMessage{Role: string(m.Role), Content: content})
 	}
 	messages = append(messages, inference.LlmMessage{Role: "user", Content: sideQuestionPrompt(question)})
-	system := agent.ComposeSystem(r.systemPrompt(""), sess, runtimeSections{r})
+	system := agent.ComposeSystem(r.systemPrompt(""), sess, runtimeSections{r}, agent.ModelInfoOf(provider))
 
 	ctx, cancel := context.WithTimeout(ctx, sideQuestionTimeout)
 	defer cancel()

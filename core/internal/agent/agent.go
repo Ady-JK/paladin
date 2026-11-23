@@ -406,7 +406,7 @@ func newAgent(c runConfig) *Agent {
 			window = unknownWindowTokens
 		}
 	}
-	return &Agent{
+	a := &Agent{
 		interactionID: uuid.NewString(),
 		window:        window,
 		compactPct:    c.compactPct,
@@ -455,6 +455,14 @@ func newAgent(c runConfig) *Agent {
 		live:           c.live,
 		permissionMode: c.permissionMode,
 	}
+	// The turn's model decides whether tools may return images. Set
+	// here rather than in the literal: the capability is derived from
+	// the provider, which the literal already owns for other fields.
+	if c.provider != nil {
+		images := inference.ModelAcceptsImages(c.provider)
+		a.toolCtx.ModelImages = &images
+	}
+	return a
 }
 
 // Run executes the built agent's turn.
@@ -850,11 +858,24 @@ func (a *Agent) appendToolResult(call *inference.ToolCall, result *tools.ToolRes
 		content = result.Content
 		image = result.Image
 	}
+	// Defense in depth: tools check the capability themselves, but a
+	// text-only model must never see an image part from any path — a
+	// single leak fails the whole turn at the endpoint. The note keeps
+	// the result legible instead of silently dropping the image. The
+	// transcript record keeps the image: a later switch to a vision
+	// model replays it, and LlmMessages already filters at send time.
+	sentImage := image
+	if image != nil && !a.imagesAccepted() {
+		if trimmed := strings.TrimSpace(content + "\n" + tools.ImageRefusalNote(image.Path)); trimmed != "" {
+			content = trimmed
+		}
+		sentImage = nil
+	}
 	callID := call.ID
 	name := call.Name
 	a.messages = append(a.messages, inference.LlmMessage{
 		Role: "tool", Content: content,
-		Image:      image,
+		Image:      sentImage,
 		ToolCallID: &callID, Name: &name,
 	})
 	a.publishLive()

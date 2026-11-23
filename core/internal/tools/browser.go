@@ -256,5 +256,11 @@ func (t *BrowserTool) CallRich(raw json.RawMessage, ctx *ToolCtx) (RichOutput, e
 		return RichOutput{}, err
 	}
 	content := string(jsonx.MustMarshal(map[string]any{"path": path, "mime_type": ref.MIMEType, "size": ref.Size, "result": reply.Result}))
+	if !ctx.ImagesOK() {
+		// The page state is already in the text result; a text-only
+		// model just does not get the pixels with it.
+		content = string(jsonx.MustMarshal(map[string]any{"path": path, "mime_type": ref.MIMEType, "size": ref.Size, "screenshot": ImageRefusalNote(path), "result": reply.Result}))
+		return RichOutput{Content: content}, nil
+	}
 	return RichOutput{Content: content, Image: ref}, nil
 }

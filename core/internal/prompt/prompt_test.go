@@ -14,7 +14,7 @@ func TestKeepsStablePrefixOrder(t *testing.T) {
 }
 
 func TestToolSystemMentionsWorkspace(t *testing.T) {
-	p := ToolSystem(SystemPrompt, "/tmp/proj")
+	p := ToolSystem(SystemPrompt, "/tmp/proj", ModelInfo{Name: "vision-x", ImagesKnown: true, SupportsImage: true})
 	if !strings.Contains(p, "/tmp/proj") || !strings.Contains(p, "full absolute paths") {
 		t.Fatal("workspace missing from prompt")
 	}
@@ -39,14 +39,14 @@ func TestAssembleIncludesSchemasOnlyWhenSet(t *testing.T) {
 }
 
 func TestEnvironmentBlockAndOSName(t *testing.T) {
-	block := EnvironmentBlock("Linux", "/tmp/w")
+	block := EnvironmentBlock("Linux", "/tmp/w", ModelInfo{Name: "texty-1", ImagesKnown: true})
 	if !strings.Contains(block, "Linux") || !strings.Contains(block, "/tmp/w") || !strings.Contains(block, "inside or outside") {
 		t.Fatalf("got %q", block)
 	}
 	if OSName() == "" {
 		t.Fatal("empty OS name")
 	}
-	if !strings.Contains(ToolSystem("b", "/w"), "b") {
+	if !strings.Contains(ToolSystem("b", "/w", ModelInfo{}), "b") {
 		t.Fatal("base missing")
 	}
 }
@@ -193,7 +193,7 @@ func TestShellGuidanceHasNoWaitAction(t *testing.T) {
 // every compiled turn carries the machine (OS + arch) and the session
 // workspace, no matter what the prompt file holds.
 func TestMachineDetailsAlwaysInjected(t *testing.T) {
-	p := AssembleSystemPrompt("user base", ToolGuidanceFor("linux"), EnvironmentBlock(OSName(), "/w/proj"), UsageExamplesFor("linux"), "")
+	p := AssembleSystemPrompt("user base", ToolGuidanceFor("linux"), EnvironmentBlock(OSName(), "/w/proj", ModelInfo{}), UsageExamplesFor("linux"), "")
 	for _, want := range []string{"user base", "/w/proj", "scope flag", "arch "} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("compiled prompt lost %q", want)
@@ -232,5 +232,28 @@ func TestExplorationBudgetGuidance(t *testing.T) {
 	}
 	if !strings.Contains(ToolGuidance(), "A read you already made this turn is current") {
 		t.Fatal("tool guidance lost the one-read rule")
+	}
+}
+
+// The environment block names the model and its modalities so a
+// text-only model knows not to expect image reads, and a vision model
+// is never told it is blind.
+func TestEnvironmentBlockNamesModelAndModalities(t *testing.T) {
+	vision := EnvironmentBlock("Linux", "/tmp/w", ModelInfo{Name: "vision-x", ImagesKnown: true, SupportsImage: true})
+	if !strings.Contains(vision, "The active model is vision-x") || !strings.Contains(vision, "text and image inputs") {
+		t.Fatalf("vision block: %q", vision)
+	}
+	textOnly := EnvironmentBlock("Linux", "/tmp/w", ModelInfo{Name: "texty-1", ImagesKnown: true})
+	if !strings.Contains(textOnly, "text-only (no image inputs") {
+		t.Fatalf("text-only block: %q", textOnly)
+	}
+	// An undocumented listing never claims either way about images.
+	unknown := EnvironmentBlock("Linux", "/tmp/w", ModelInfo{Name: "mystery"})
+	if strings.Contains(unknown, "text-only") || !strings.Contains(unknown, "image support undocumented") {
+		t.Fatalf("unknown block: %q", unknown)
+	}
+	// No model, no model line.
+	if strings.Contains(EnvironmentBlock("Linux", "/tmp/w", ModelInfo{}), "The active model is") {
+		t.Fatal("zero ModelInfo must not emit a model line")
 	}
 }
