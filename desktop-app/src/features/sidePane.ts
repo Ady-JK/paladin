@@ -872,13 +872,19 @@ function nativeTarget(): { web: WebTab | null; browser: BrowserTab | null; surfa
     !!idePage || (shellBrowser ? true : paneOpen && (!ideTerminalMode || !tab || !isBrowserPage(tab)));
   const web = pageVisible && tab?.kind === "web" && tab.url !== "" ? tab : null;
   const browser = pageVisible && tab?.kind === "browser" ? tab : null;
-  const surface = shellBrowser
-    ? bodyEl.querySelector<HTMLElement>(".web-surface, .browser-surface")
-    : web
+  // The surface is searched from the body that really holds it: Browser
+  // mode MOVES the active body under #browserBody, so looking only inside
+  // the pane's #paneBody found nothing there and an overlay over a page in
+  // Browser mode never froze it (the menu opened underneath the page).
+  const host = shellBrowser ? document.getElementById("browserBody") : null;
+  const inShell = host?.querySelector<HTMLElement>(".web-surface, .browser-surface") ?? null;
+  const surface =
+    inShell ??
+    (web
       ? web.body.querySelector<HTMLElement>(".web-surface")
       : browser
         ? browser.body.querySelector<HTMLElement>(".browser-surface")
-        : null;
+        : null);
   return { web, browser, surface };
 }
 

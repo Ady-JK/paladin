@@ -512,3 +512,41 @@ test("Browser mode's strip is its whole inventory — no vertical list", async (
   await strip.nth(1).locator(".browser-tab-close").click();
   await expect(strip).toHaveCount(1);
 });
+
+// A native page is drawn above every HTML element, so an overlay opened
+// over it must freeze the page to a still first (Electron's capturePage)
+// and detach the live view. Browser mode MOVES the page body into
+// #browserBody, so a surface lookup rooted in the side pane found nothing
+// there and the browser bar's dropdown opened underneath the live page.
+test("an overlay over a page in Browser mode freezes it instead of hiding under it", async ({ page }) => {
+  // Browser mode needs a window wide enough for its surface to have a size;
+  // a zero-width surface is not "on screen" and never attaches a live view.
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.click("#modeBrowserBtn");
+  await expect(page.locator("#browserView")).toBeVisible();
+  await page.click("#browserNewTab");
+  await expect(page.locator("#webMenu")).toBeVisible();
+  await page.locator('[data-web-open="https://chatgpt.com/"]').click();
+  const surface = page.locator("#browserBody .web-surface");
+  await expect(surface).toBeVisible();
+  // The live view must really be attached before the menu opens, or the
+  // freeze has no page to capture: undefined is not null, so a null check
+  // would pass before syncNativeSurfaces ever ran.
+  await expect.poll(async () => String(await viewShown(page)).startsWith("web:")).toBe(true);
+
+  // The bar's + opens the menu over the running page.
+  await page.click("#browserNewTab");
+  await expect(page.locator("#webMenu")).toBeVisible();
+  // Freezing a page means asking the main process for a still...
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eSnapshots || 0)).toBeGreaterThan(0);
+  // ...and painting it behind the overlay while the live view is detached
+  // ("agent" is showOnly's name for "no page attached").
+  await expect.poll(() => surface.evaluate((el) => (el as HTMLElement).style.backgroundImage)).toContain("data:image");
+  await expect.poll(() => viewShown(page)).toBe("agent");
+
+  // Closing the menu brings the live page back and drops the still.
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#webMenu")).toBeHidden();
+  await expect.poll(async () => String(await viewShown(page)).startsWith("web:")).toBe(true);
+  await expect.poll(() => surface.evaluate((el) => (el as HTMLElement).style.backgroundImage)).toBe("");
+});
