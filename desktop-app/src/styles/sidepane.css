@@ -650,12 +650,17 @@ body.is-splitting {
 /* ---- history menu ---- */
 .pane-menu {
   position: absolute;
-  left: 0;
+  /* Anchored to the button's RIGHT edge, not its left: the + sits in a
+     right-aligned header group, so `left: 0` pushed the 260px menu past
+     the card's edge and off the window. `right: 0` makes it hang inward
+     instead, which is the only direction with room. */
+  right: 0;
+  left: auto;
   top: calc(100% + 8px);
   z-index: 30;
   width: 260px;
   max-width: calc(100vw - 24px);
-  max-height: 360px;
+  max-height: min(360px, calc(100vh - 120px));
   overflow-y: auto;
   border: 1px solid var(--color-slate-200);
   border-radius: 12px;

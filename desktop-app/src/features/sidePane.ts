@@ -483,6 +483,7 @@ function openChangesTab(turn: number | null, selectFirst = false): void {
   if (!sessionId) return;
   const set = currentSet();
   let tab = set.tabs.find((t): t is ChangesTab => t.kind === "changes");
+  const existing = tab !== undefined;
   if (!tab) {
     tab = newChangesTab(sessionId, `t${++nextKey}`, () => changesCache.get(sessionId));
     set.tabs.push(tab);
@@ -490,12 +491,17 @@ function openChangesTab(turn: number | null, selectFirst = false): void {
   tab.turn = turn;
   const cached = changesCache.get(sessionId);
   const files = turn === null ? cached?.files : cached?.turns.find((item) => item.turn === turn)?.files;
-  tab.selected = selectFirst ? (files?.[0]?.path ?? null) : null;
-  tab.mark = null;
+  // Re-opening an already-open Changes tab must not throw away what the
+  // user was reading: keep the selection and its scroll unless the
+  // caller asked for a specific row (a turn's "view changes" link).
+  if (!existing || selectFirst) {
+    tab.selected = selectFirst ? (files?.[0]?.path ?? null) : null;
+    tab.mark = null;
+  }
   set.active = tab.key;
   showPane();
   paintChangesTab(tab, cached);
-  if (tab.selected) void loadChangeDiff(tab, tab.selected);
+  if (tab.selected && !existing) void loadChangeDiff(tab, tab.selected);
   void refreshChanges(sessionId);
 }
 
@@ -1814,6 +1820,29 @@ export function initSidePane(): void {
     if (target.closest("[data-pane-new-terminal]")) {
       closeMenu();
       openTerminalTab(visibleSessionId());
+      return;
+    }
+    // Browser, Changes and Running commands are single-instance tabs:
+    // their openers focus the tab that already exists rather than adding
+    // a duplicate, so picking one twice is a no-op that just brings it
+    // forward.
+    if (target.closest("[data-pane-new-browser]")) {
+      closeMenu();
+      openBrowserTab(visibleSessionId(), "");
+      return;
+    }
+    if (target.closest("[data-pane-new-changes]")) {
+      closeMenu();
+      if (!state.sessionId) {
+        toast("Open a session to see its changes.", "error");
+        return;
+      }
+      openChangesTab(null);
+      return;
+    }
+    if (target.closest("[data-pane-new-jobs]")) {
+      closeMenu();
+      openJobsTab();
       return;
     }
     const row = target.closest<HTMLElement>(".pane-hist-item");

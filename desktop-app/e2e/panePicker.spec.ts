@@ -208,6 +208,67 @@ test("closing the last tab brings the picker back", async ({ page }) => {
   await expect(page.locator("#panePicker")).toBeVisible();
 });
 
+// The header + drops a menu once the pane holds something. It carries
+// every choice the picker offers, and it must stay inside the window:
+// anchored to its button's right edge, never hanging past the card.
+test("the + menu offers every pane kind and stays in bounds", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page.locator('#panePicker [data-pane-pick="terminal"]').click();
+  await page.locator("#paneTabsAdd").click();
+  const menu = page.locator("#paneHistoryMenu");
+  await expect(menu).toBeVisible();
+  for (const label of [/New side chat/, /New terminal/, /^Browser$/, /^Changes$/, /Running commands/]) {
+    await expect(menu.getByRole("menuitem", { name: label })).toBeVisible();
+  }
+  const box = (await menu.boundingBox())!;
+  const card = (await page.locator("#mainCard").boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(card.x + card.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+});
+
+// Changes, Browser and Running commands are single-instance: picking one
+// that is already open brings it forward instead of adding a duplicate.
+test("re-picking an open tab brings it forward, never duplicates", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page.locator('#panePicker [data-pane-pick="changes"]').click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+
+  // Add a terminal so Changes is no longer the active tab.
+  await page.locator("#paneTabsAdd").click();
+  await page.locator("#paneHistoryMenu [data-pane-new-terminal]").click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
+  await expect(page.locator("#paneTabs .pane-tab.is-active")).toContainText("Terminal");
+
+  // Picking Changes again focuses the existing tab.
+  await page.locator("#paneTabsAdd").click();
+  await page.locator("#paneHistoryMenu [data-pane-new-changes]").click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
+  await expect(page.locator("#paneTabs .pane-tab.is-active")).toContainText("Changes");
+});
+
+test("browser and running commands never duplicate either", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page.locator('#panePicker [data-pane-pick="browser"]').click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+  await page.locator("#paneTabsAdd").click();
+  await page.locator("#paneHistoryMenu [data-pane-new-browser]").click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+
+  await page.locator("#paneTabsAdd").click();
+  await page.locator("#paneHistoryMenu [data-pane-new-jobs]").click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
+  await page.locator("#paneTabsAdd").click();
+  await page.locator("#paneHistoryMenu [data-pane-new-jobs]").click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
+});
+
 test("a terminal is never given the whole card", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
