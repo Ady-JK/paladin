@@ -170,19 +170,22 @@ function childRow(child: SessionInfo): string {
     </button>`;
 }
 
-function childrenBlock(parent: SessionInfo, kids: SessionInfo[]): string {
+function childrenBlock(parent: SessionInfo, kids: SessionInfo[], tree?: sessionTree): string {
   if (kids.length === 0) return "";
   const busy = kids.some((k) => ["running", "queued"].includes(agentStatus(k)));
   // Collapsed unless the user opened it for this parent.
   const open = kidsOpen.get(parent.sessionId) ?? false;
   const id = escapeAttr(parent.sessionId);
+  // A child can itself have forked chats; they hang under the child, so a
+  // fork of a subagent is still reachable.
+  const row = (kid: SessionInfo): string => `${childRow(kid)}${tree ? forkRows(kid, tree, 1) : ""}`;
   return `
     <button type="button" class="session-kids-toggle" data-kids-toggle="${id}" aria-expanded="${open}">
       <span class="project-caret">${icon("rl-chevron", "h-2.5 w-2.5")}</span>
       <span>${kids.length} ${kids.length === 1 ? "subagent" : "subagents"}</span>
       ${busy ? `<span class="agent-dot" data-status="running" aria-hidden="true"></span>` : ""}
     </button>
-    <div class="session-children" data-kids-of="${id}"${open ? "" : " hidden"}>${kids.map(childRow).join("")}</div>`;
+    <div class="session-children" data-kids-of="${id}"${open ? "" : " hidden"}>${kids.map(row).join("")}</div>`;
 }
 
 // engineChip says which engine runs a session: Codex (the user's own CLI) or
@@ -193,7 +196,7 @@ function engineChip(session: SessionInfo): string {
   return `<span class="session-harness" data-engine="${codex ? "codex" : "paladin"}" title="${title}">${codex ? "Codex" : "Paladin"}</span>`;
 }
 
-function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
+function sessionRow(session: SessionInfo, kids: SessionInfo[] = [], tree?: sessionTree): string {
   const active = session.sessionId === state.sessionId;
   const title = session.title || "untitled session";
   const live = liveBadge(session.sessionId);
@@ -216,7 +219,127 @@ function sessionRow(session: SessionInfo, kids: SessionInfo[] = []): string {
       <button data-row-menu="${escapeAttr(session.sessionId)}" class="session-del session-more" title="More" aria-haspopup="menu">
         ${icon("sl-more", "h-3.5 w-3.5")}
       </button>
-    </div>${childrenBlock(session, kids)}`;
+    </div>${childrenBlock(session, kids, tree)}`;
+}
+
+// sessionTree is the sidebar's shape: every session nests under the one
+// it came from. A fork hangs under the chat it forked, a subagent under
+// the chat that spawned it, and the two nest further (a fork's subagents
+// under the fork), like folders in an explorer.
+type sessionTree = {
+  // forksOf maps a session id to the chats forked from it.
+  forksOf: Map<string, SessionInfo[]>;
+  // agentsOf maps a session id to the subagents it spawned.
+  agentsOf: Map<string, SessionInfo[]>;
+  // tops are the sessions drawn at a project's top level: everything
+  // whose parent is not in the list.
+  tops: SessionInfo[];
+};
+
+// buildSessionTree links the flat list into that shape. A child whose
+// parent is missing from the list (a deleted parent, a truncated page)
+// stands on its own instead of vanishing. A parent cycle is cut the same
+// way, so a corrupt pair of links can never hide both sessions.
+//
+// The result must not depend on the order sessions arrive in: the core
+// sends them interleaved by time, so a fork of a fork can be listed
+// BEFORE the chat it forked from. Only the upward loop check decides.
+function buildSessionTree(sessions: SessionInfo[]): sessionTree {
+  const known = new Set(sessions.map((s) => s.sessionId));
+  const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+  const forksOf = new Map<string, SessionInfo[]>();
+  const agentsOf = new Map<string, SessionInfo[]>();
+  const parentOf = (session: SessionInfo): string => session.forkedFrom || session.subagent?.parentId || "";
+  // Walk up to see whether a chain of links loops back to this session.
+  // Depth is bounded by the list size, so this cannot spin.
+  const loopsBack = (session: SessionInfo): boolean => {
+    let cur = session;
+    for (let step = 0; step <= sessions.length; step++) {
+      const parent = parentOf(cur);
+      if (!parent || !known.has(parent)) return false;
+      if (parent === session.sessionId) return true;
+      const next = byId.get(parent);
+      if (!next) return false;
+      cur = next;
+    }
+    return true;
+  };
+  const tops: SessionInfo[] = [];
+  for (const session of sessions) {
+    const parentId = parentOf(session);
+    if (!parentId || !known.has(parentId) || loopsBack(session)) {
+      tops.push(session);
+      continue;
+    }
+    const into = session.forkedFrom ? forksOf : agentsOf;
+    const siblings = into.get(parentId);
+    if (siblings) siblings.push(session);
+    else into.set(parentId, [session]);
+  }
+  // Safety net: everything must be reachable from a top row. A relation
+  // the renderers do not walk (a new kind of child, a shape this tree did
+  // not anticipate) would otherwise hide a session entirely, so anything
+  // unreachable is promoted to a top row rather than lost.
+  const reachable = new Set<string>();
+  const walk = (session: SessionInfo, depth: number): void => {
+    if (depth > sessions.length || reachable.has(session.sessionId)) return;
+    reachable.add(session.sessionId);
+    for (const child of [...(forksOf.get(session.sessionId) ?? []), ...(agentsOf.get(session.sessionId) ?? [])]) {
+      walk(child, depth + 1);
+    }
+  };
+  for (const top of tops) walk(top, 0);
+  const reachTops = tops.filter((s) => reachable.has(s.sessionId));
+  for (const session of sessions) {
+    if (!reachable.has(session.sessionId)) reachTops.push(session);
+  }
+  return { forksOf, agentsOf, tops: reachTops };
+}
+
+// ---- forks and subagents under their parent ----
+
+// forkRows draws a parent's forks, recursively: each fork carries its own
+// forks and subagents beneath it. Unlike the subagent list (collapsed by
+// default), forks are always shown — a fork is a chat the user made on
+// purpose, and hiding it would leave two copies of one title with no
+// visible relation.
+function forkRows(parent: SessionInfo, tree: sessionTree, depth: number): string {
+  const forks = tree.forksOf.get(parent.sessionId) ?? [];
+  if (forks.length === 0) return "";
+  // A fork carries its own subagents and its own forks beneath it.
+  const body = forks
+    .map(
+      (fork) =>
+        `${forkRow(fork)}${childrenBlock(fork, tree.agentsOf.get(fork.sessionId) ?? [], tree)}${forkRows(fork, tree, depth + 1)}`,
+    )
+    .join("");
+  return `<div class="session-forks" data-forks-of="${escapeAttr(parent.sessionId)}" style="--fork-depth:${depth}">${body}</div>`;
+}
+
+// forkRow is one forked chat, nested one level in. It carries the same
+// actions as a top-level row (open, rename, fork again, delete).
+function forkRow(session: SessionInfo): string {
+  const active = session.sessionId === state.sessionId;
+  const title = session.title || "untitled session";
+  const live = liveBadge(session.sessionId);
+  return `
+    <div${live ? ` data-live="${live}"` : ""} class="session-row session-fork-row group${active ? " is-active" : ""}" data-fork-of="${escapeAttr(session.forkedFrom ?? "")}">
+      <span class="fork-guide" aria-hidden="true">${icon("sl-fork", "h-3 w-3")}</span>
+      ${
+        renaming?.id === session.sessionId
+          ? `<input class="session-rename" data-rename="${escapeAttr(session.sessionId)}" value="${escapeHtml(renaming.draft)}" spellcheck="false" aria-label="Session title" />`
+          : `<button data-session="${escapeAttr(session.sessionId)}" class="session-pick" title="${escapeHtml(title)}">
+        <span class="truncate">${escapeHtml(title)}</span>
+      </button>`
+      }
+      ${engineChip(session)}
+      ${hasAgentBrowser(session.sessionId) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
+      ${liveIndicator(session.sessionId, live)}
+      ${resBadge(session.sessionId)}
+      <button data-row-menu="${escapeAttr(session.sessionId)}" class="session-del session-more" title="More" aria-haspopup="menu">
+        ${icon("sl-more", "h-3.5 w-3.5")}
+      </button>
+    </div>`;
 }
 
 // renderSessions draws the sidebar like Codex: sessions nested under
@@ -235,22 +358,19 @@ export function renderSessions(): void {
   paintAgentTabs();
   const filter = searchInputEl.value.trim().toLowerCase();
 
-  // Children nest under their parent; one whose parent is not listed
-  // stands on its own.
-  const known = new Set(state.sessions.map((s) => s.sessionId));
-  const kidsOf = new Map<string, SessionInfo[]>();
-  for (const session of state.sessions) {
-    const parentId = session.subagent?.parentId;
-    if (parentId && known.has(parentId)) {
-      const children = kidsOf.get(parentId);
-      if (children) children.push(session);
-      else kidsOf.set(parentId, [session]);
-    }
-  }
-  const tops = state.sessions.filter((s) => !s.subagent || !known.has(s.subagent.parentId));
+  const tree = buildSessionTree(state.sessions);
+  const { tops } = tree;
+  // A search matches a whole subtree: typing a fork's title must keep the
+  // chat it was forked from, or the fork would show with no parent.
   const titled = (s: SessionInfo): boolean => s.title.toLowerCase().includes(filter);
-  const matches = (s: SessionInfo): boolean => titled(s) || (kidsOf.get(s.sessionId) ?? []).some(titled);
-  const visible = filter ? tops.filter(matches) : tops;
+  const subtreeMatches = (s: SessionInfo, seen: Set<string> = new Set()): boolean => {
+    if (titled(s)) return true;
+    if (seen.has(s.sessionId)) return false;
+    seen.add(s.sessionId);
+    const kin = [...(tree.forksOf.get(s.sessionId) ?? []), ...(tree.agentsOf.get(s.sessionId) ?? [])];
+    return kin.some((child) => subtreeMatches(child, seen));
+  };
+  const visible = filter ? tops.filter((s) => subtreeMatches(s)) : tops;
 
   if (visible.length === 0) {
     const empty = `<p class="px-2 py-1 text-slate-400">${filter ? "no session matches" : "no sessions yet"}</p>`;
@@ -281,7 +401,7 @@ export function renderSessions(): void {
           <span class="project-name">${cwd ? escapeHtml(shortPath(cwd)) : "Unknown folder"}</span>
           <span class="project-caret">${icon("rl-chevron", "h-3 w-3")}</span>
         </button>
-        <div class="project-list"${open ? "" : " hidden"}>${group.map((s) => sessionRow(s, kidsOf.get(s.sessionId))).join("")}</div>
+        <div class="project-list"${open ? "" : " hidden"}>${group.map((s) => sessionRow(s, tree.agentsOf.get(s.sessionId), tree) + forkRows(s, tree, 1)).join("")}</div>
       </div>`;
   }
 
@@ -298,7 +418,7 @@ export function renderSessions(): void {
             <span class="truncate">${escapeHtml(title)}</span>
           </button>
           ${engineChip(session)}
-          ${hasAgentBrowser(session.sessionId) || (kidsOf.get(session.sessionId) ?? []).some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
+          ${hasAgentBrowser(session.sessionId) || (tree.agentsOf.get(session.sessionId) ?? []).some((kid) => hasAgentBrowser(kid.sessionId)) || (tree.forksOf.get(session.sessionId) ?? []).some((kid) => hasAgentBrowser(kid.sessionId)) ? `<span title="Agent browser open" aria-label="Agent browser open">${icon("globe", "h-3 w-3")}</span>` : ""}
           ${liveIndicator(session.sessionId, live)}
         </div>`;
     }

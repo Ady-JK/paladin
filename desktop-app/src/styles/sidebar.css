@@ -110,7 +110,8 @@ body.harness-codex #skillChipSlot {
 }
 
 /* A forked session wears the fork glyph instead of the message count the
-   row used to carry: the count was noise nobody acted on. */
+   row used to carry: the count was noise nobody acted on. A fork whose
+   parent is not in the list keeps this glyph on its top-level row. */
 #sessionList .session-forked {
   display: inline-flex;
   flex-shrink: 0;
@@ -118,6 +119,38 @@ body.harness-codex #skillChipSlot {
   color: var(--color-slate-400);
 }
 .dark #sessionList .session-forked {
+  color: var(--color-slate-500);
+}
+
+/* ---- forks nested under the chat they came from ----
+   Like an explorer's subfolder: a fork hangs one indent in with a guide
+   line down its left edge, so two copies of one title read as parent and
+   child instead of as unrelated rows. Always shown (see forkRows); the
+   nesting deepens with --fork-depth for a fork of a fork. */
+#sessionList .session-forks {
+  margin: 0 0 2px 12px;
+  padding-left: calc(6px + 10px * (var(--fork-depth, 1) - 1));
+  border-left: 1px solid var(--color-slate-200);
+}
+.dark #sessionList .session-forks {
+  border-left-color: var(--color-slate-700);
+}
+#sessionList .session-fork-row {
+  font-size: 0.78125rem;
+}
+#sessionList .session-forks .session-kids-toggle {
+  margin-left: 4px;
+}
+#sessionList .session-forks .session-children {
+  margin-left: 8px;
+}
+#sessionList .fork-guide {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--color-slate-400);
+}
+.dark #sessionList .fork-guide {
   color: var(--color-slate-500);
 }
 
