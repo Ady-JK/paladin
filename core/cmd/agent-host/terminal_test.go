@@ -4,33 +4,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestTerminalRunUsesWorkspaceAndKeepsOutput(t *testing.T) {
-	t.Setenv("SHELL", "") // Exercise the platform fallback: zsh on macOS, sh on Linux.
-	dir := t.TempDir()
-	result, err := terminalRun("printf 'hello'; pwd; exit 7", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.ExitCode != 7 || !strings.Contains(result.Output, "hello") || !strings.Contains(result.Output, dir) {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-}
-
 func TestStandaloneTerminalStdioProtocol(t *testing.T) {
 	h := startHost(t, buildHost(t), t.TempDir())
 	dir := t.TempDir()
-	if reply := h.call("run", "terminalRun", map[string]any{"cwd": dir, "command": "printf rpc-output"}); reply["ok"] != true {
-		t.Fatalf("terminalRun: %v", reply)
-	} else if got := reply["result"].(map[string]any)["output"]; got != "rpc-output" {
-		t.Fatalf("terminalRun output = %v", got)
-	}
 	started := h.call("start", "terminalStart", map[string]any{"sessionId": "__standalone_pane__", "cwd": dir, "cols": 80, "rows": 24})
 	if started["ok"] != true {
 		t.Fatalf("terminalStart: %v", started)
@@ -111,23 +94,6 @@ func TestTerminalPTYStreamsAndAcceptsInput(t *testing.T) {
 	}
 }
 
-func TestTerminalRunLoadsZshEnvironment(t *testing.T) {
-	if _, err := os.Stat("/bin/zsh"); err != nil {
-		t.Skip("zsh unavailable")
-	}
-	zdot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("export PALADIN_TERMINAL_TEST=available\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("ZDOTDIR", zdot)
-	t.Setenv("SHELL", "/bin/zsh")
-	t.Setenv("PALADIN_TERMINAL_TEST", "")
-	result, err := terminalRun(`printf %s "$PALADIN_TERMINAL_TEST"`, t.TempDir())
-	if err != nil || result.ExitCode != 0 || result.Output != "available" {
-		t.Fatalf("terminal environment: %+v %v", result, err)
-	}
-}
-
 func TestOneSessionCannotOpenEveryTerminal(t *testing.T) {
 	hub := newTerminalHub(func(terminalEvent) {})
 	for i := 0; i < maxTerminalsPerSession; i++ {
@@ -149,16 +115,47 @@ func TestOneSessionCannotOpenEveryTerminal(t *testing.T) {
 	hub.closeAll()
 }
 
-func TestTerminalRunIgnoresTerminalAppSessions(t *testing.T) {
-	if _, err := os.Stat("/bin/zsh"); err != nil {
-		t.Skip("zsh unavailable")
+// A terminal that stops reading (a paste into a program that ignores its
+// input) must not stall the caller: input is queued and written off the
+// request loop.
+func TestTerminalWriteNeverBlocksTheCaller(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("SHELL", "/bin/zsh")
-	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
-	t.Setenv("TERM_SESSION_ID", "6F1B2C3D-0000-4000-8000-ABCDEF123456")
-	result, err := terminalRun("printf ok", t.TempDir())
-	if err != nil || result.Output != "ok" {
-		t.Fatalf("Terminal.app's session hook leaked into the output: %+v %v", result, err)
+	defer r.Close()
+	defer w.Close()
+	entry := &terminalProcess{sessionID: "s", file: w}
+	done := make(chan error, 1)
+	go func() {
+		var last error
+		for i := 0; i < 40; i++ { // far more than a pipe buffers
+			last = entry.send(strings.Repeat("x", 32*1024))
+		}
+		done <- last
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("send blocked on a terminal that is not reading")
 	}
+}
+
+func TestTerminalWriteDeliversQueuedInputInOrder(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &terminalProcess{sessionID: "s", file: w}
+	for _, s := range []string{"one ", "two ", "three"} {
+		if err := entry.send(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	buf := make([]byte, 13)
+	if _, err := io.ReadFull(r, buf); err != nil || string(buf) != "one two three" {
+		t.Fatalf("got %q, %v", buf, err)
+	}
+	_ = w.Close()
+	_ = r.Close()
 }

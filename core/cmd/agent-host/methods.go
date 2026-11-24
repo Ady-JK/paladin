@@ -8,7 +8,6 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/config"
 	"github.com/Ady-JK/paladin/core/internal/harness"
 	"github.com/Ady-JK/paladin/core/internal/mcp"
-	"github.com/Ady-JK/paladin/core/internal/permission"
 	"github.com/Ady-JK/paladin/core/internal/procstat"
 	"github.com/Ady-JK/paladin/core/internal/runtime"
 	"github.com/Ady-JK/paladin/core/internal/tools"
@@ -39,9 +38,6 @@ var methods = map[string]handler{
 	},
 	"terminalClose": func(_ *runtime.AgentRuntime, a args) (any, error) {
 		return true, userTerminals.close(a.str("sessionId"), a.str("terminalId"))
-	},
-	"terminalRun": func(_ *runtime.AgentRuntime, a args) (any, error) {
-		return terminalRun(a.str("command"), a.str("cwd"))
 	},
 	"browserReply": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		var reply tools.BrowserReply
@@ -238,6 +234,20 @@ var methods = map[string]handler{
 		return rt.ContextSources(a.str("cwd")), nil
 	},
 
+	// Claude Code harness (Go-native stream-json transport).
+	"claudeStatus": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ClaudeStatus(a.flag("deep")), nil
+	},
+	"claudeCommands": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ClaudeCommands(a.str("cwd"))
+	},
+	"importClaudeSession": func(rt *runtime.AgentRuntime, a args) (any, error) {
+		return rt.ImportClaudeSession(a.str("threadId"), a.str("cwd"))
+	},
+	"startClaudeDiscovery": func(rt *runtime.AgentRuntime, _ args) (any, error) {
+		rt.StartClaudeDiscovery()
+		return true, nil
+	},
 	// Codex harness
 	"codexStatus": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.CodexStatus(a.flag("deep")), nil
@@ -450,20 +460,12 @@ var methods = map[string]handler{
 	"answerApproval": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.AnswerApproval(a.str("sessionId"), a.str("callId"), a.str("decision"))
 	},
-	// Native tool permissions expose Read-Only/Full Access and rules; no OS sandbox status.
+	// Full access always; kept so older clients still get an answer. No rules exist.
 	"permissionsGet": func(rt *runtime.AgentRuntime, a args) (any, error) {
 		return rt.PermissionsGet(a.str("cwd"), a.str("sessionId"))
 	},
 	"permissionsSet": func(rt *runtime.AgentRuntime, a args) (any, error) {
-		var p struct {
-			Scope string            `json:"scope"`
-			Cwd   string            `json:"cwd"`
-			Rules []permission.Rule `json:"rules"`
-		}
-		if err := a.decode(&p); err != nil {
-			return nil, err
-		}
-		return rt.PermissionsSet(p.Scope, p.Cwd, p.Rules)
+		return rt.PermissionsSet(a.str("scope"), a.str("cwd"))
 	},
 
 	// Subagents

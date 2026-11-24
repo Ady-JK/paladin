@@ -30,15 +30,30 @@ var stdoutMu sync.Mutex
 
 // emit writes one JSONL line to stdout; responses and turn events share
 // the stream, so writes are serialized.
-func emit(v any) {
-	data := jsonx.MustMarshal(v)
+func emit(v any) { emitLine(jsonx.MustMarshal(v)) }
+
+func emitLine(data []byte) {
 	data = append(data, '\n')
 	stdoutMu.Lock()
 	defer stdoutMu.Unlock()
 	_, _ = os.Stdout.Write(data)
 }
 
-func emitResponse(r Response) { emit(r) }
+// encodeResponse marshals a response. A result that cannot be encoded (a
+// NaN, say) becomes an error answer for the same id rather than an empty
+// object, so the client is never left waiting for it.
+func encodeResponse(r Response) []byte {
+	data, err := jsonx.Marshal(r)
+	if err != nil {
+		data, err = jsonx.Marshal(errResponse(r.ID, "encode response: "+err.Error()))
+		if err != nil {
+			return []byte(`{"id":null,"ok":false,"error":"encode response failed"}`)
+		}
+	}
+	return data
+}
+
+func emitResponse(r Response) { emitLine(encodeResponse(r)) }
 
 func okResponse(id json.RawMessage, result any) Response {
 	return Response{ID: id, OK: true, Result: result}
@@ -56,7 +71,7 @@ func runHandler(rt *runtime.AgentRuntime, req *Request, a args) Response {
 	if !ok {
 		// A method the host does not know is a protocol mismatch worth a
 		// record: it names exactly what the client asked for.
-		errlog.Global(dataRoot, "rpc:unknown", req.Method+" "+string(req.Params))
+		errlog.Global(dataRoot, "rpc:unknown", req.Method+" "+clipLog(req.Params))
 		return errResponse(req.ID, fmt.Sprintf("unknown method %q", req.Method))
 	}
 	result, err := handle(rt, a)

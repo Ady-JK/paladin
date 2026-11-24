@@ -56,7 +56,7 @@ func main() {
 		var req Request
 		if err := json.Unmarshal(line, &req); err != nil {
 			logf("WARN bad request line: %v", err)
-			errlog.Global(dataRoot, "protocol:bad-request", err.Error()+"\n"+string(line))
+			errlog.Global(dataRoot, "protocol:bad-request", err.Error()+"\n"+clipLog(line))
 			return
 		}
 		requests.dispatch(&req)
@@ -87,4 +87,14 @@ func handleSignals(rt *runtime.AgentRuntime, sigs <-chan os.Signal, exit func(in
 	userTerminals.closeAll()
 	rt.ShutdownTurns(10 * time.Second)
 	exit(0)
+}
+
+// clipLog is a request line for the error log: bounded, since a line can be
+// megabytes (an attachment) and only its start says what went wrong.
+func clipLog(line []byte) string {
+	const max = 4096
+	if len(line) <= max {
+		return string(line)
+	}
+	return string(line[:max]) + "…"
 }

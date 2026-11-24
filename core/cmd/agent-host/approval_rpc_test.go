@@ -5,18 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 )
 
 func TestStdioApprovalFlow(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "inspect.txt")
-	if err := os.WriteFile(target, []byte("approval test"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	toolArgs, err := json.Marshal(map[string]string{"reason": "test", "path": target})
+	// A command the guard flags (a tunnel binary that does not exist, so it
+	// fails harmlessly once approved).
+	const flagged = "ngrok http 3000"
+	toolArgs, err := json.Marshal(map[string]string{"reason": "test", "cmd": flagged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +26,7 @@ func TestStdioApprovalFlow(t *testing.T) {
 		n++
 		mu.Unlock()
 		if i == 0 {
-			fmt.Fprintf(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read","arguments":%q}}]}}]}`+"\n\ndata: [DONE]\n\n", string(toolArgs))
+			fmt.Fprintf(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"shell","arguments":%q}}]}}]}`+"\n\ndata: [DONE]\n\n", string(toolArgs))
 			return
 		}
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
@@ -49,14 +46,14 @@ func TestStdioApprovalFlow(t *testing.T) {
 	h.call("submitChat", map[string]any{"sessionId": sid, "message": "go", "cwd": cwd})
 	ev := h.event("chat/approval", sid, nil)
 	ap := ev["approval"].(map[string]any)
-	if ap["id"] != "c1" || ap["state"] != "pending" || ap["path"] != target {
+	if ap["id"] != "c1" || ap["state"] != "pending" || ap["command"] != flagged {
 		t.Fatalf("approval %v", ap)
 	}
 	att := h.call("attach", map[string]any{"sessionId": sid})["result"].(map[string]any)
 	if turn := att["turn"].(map[string]any); turn["awaitingApproval"] != true {
 		t.Fatalf("turn %v", turn)
 	}
-	h.call("answerApproval", map[string]any{"sessionId": sid, "callId": "c1", "decision": "folder"})
+	h.call("answerApproval", map[string]any{"sessionId": sid, "callId": "c1", "decision": "once"})
 	h.event("chat/approval", sid, func(m map[string]any) bool {
 		a, _ := m["approval"].(map[string]any)
 		return a["state"] == "approved"
@@ -64,15 +61,7 @@ func TestStdioApprovalFlow(t *testing.T) {
 	h.event("turn/done", sid, nil)
 
 	view := h.call("permissionsGet", map[string]any{"cwd": cwd})["result"].(map[string]any)
-	if folder := view["folder"].([]any); len(folder) == 0 {
-		t.Fatalf("folder rule not saved: %v", view)
-	}
-	h.call("permissionsSet", map[string]any{"scope": "folder", "cwd": cwd, "rules": []any{}})
-	view = h.call("permissionsGet", map[string]any{"cwd": cwd})["result"].(map[string]any)
-	if folder := view["folder"].([]any); len(folder) != 0 {
-		t.Fatalf("folder rules not cleared: %v", view)
-	}
-	if _, ok := view["sandbox"]; ok {
-		t.Fatalf("obsolete sandbox field present: %v", view)
+	if presets := view["presets"].([]any); len(presets) != 1 || presets[0] != "full-access" {
+		t.Fatalf("presets: %v", view)
 	}
 }

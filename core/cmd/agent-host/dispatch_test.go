@@ -307,3 +307,38 @@ func TestDispatcherCloseDrains(t *testing.T) {
 		t.Fatalf("responses = %d", got.count())
 	}
 }
+
+// A stop must not hold up the request loop while a turn request of its
+// session is still starting: later requests are read and answered meanwhile.
+func TestStopDoesNotBlockTheRequestLoop(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	realSubmit := methods["submitChat"]
+	methods["submitChat"] = func(*runtime.AgentRuntime, args) (any, error) { close(entered); <-release; return "started", nil }
+	t.Cleanup(func() { methods["submitChat"] = realSubmit })
+	d, got := newTestDispatcher(t, testRuntime(t), 2, 1, 64)
+
+	d.dispatch(request("submit", "submitChat", map[string]string{"sessionId": "sess-a", "message": "hi"}))
+	<-entered
+	done := make(chan struct{})
+	go func() {
+		d.dispatch(request("stop", "stopChat", map[string]string{"sessionId": "sess-a"}))
+		d.dispatch(request("ping", "ping", map[string]string{}))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stop blocked the request loop")
+	}
+	got.await(t, "ping", time.Second)
+	close(release)
+	got.await(t, "stop", 5*time.Second)
+}
+
+// Slow host-sampling calls run on the worker pool, not on the request loop.
+func TestSlowControlCallsLeaveTheRequestLoop(t *testing.T) {
+	if methodClass["resources"] == runInline {
+		t.Fatal("resources runs ps and must not answer on the request loop")
+	}
+}

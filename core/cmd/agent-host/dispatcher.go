@@ -34,10 +34,10 @@ var methodClass = map[string]runClass{
 	"terminalWrite": runInline, "terminalResize": runInline, "terminalClose": runInline,
 	"browserReply":   runInline,
 	"answerApproval": runInline, "answerAsk": runInline, "cancelAsk": runInline,
-	"turns": runInline, "resources": runInline, "runningJobs": runInline, "killJob": runInline, "getWorkspace": runInline,
+	"turns": runInline, "runningJobs": runInline, "killJob": runInline, "getWorkspace": runInline,
 	"fsHome": runInline, "resolveWorkspace": runInline,
 
-	"listProviders": runRead, "codexStatus": runRead, "ideReadFile": runRead, "ideFileStatuses": runRead, "ideList": runRead, "ideSearch": runRead, "ideLayoutGet": runRead, "ideExplorerSettingsGet": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
+	"listProviders": runRead, "resources": runRead, "codexStatus": runRead, "ideReadFile": runRead, "ideFileStatuses": runRead, "ideList": runRead, "ideSearch": runRead, "ideLayoutGet": runRead, "ideExplorerSettingsGet": runRead, "fsList": runRead, "fileComplete": runRead, "gitInfo": runRead,
 	"getPrompt": runRead, "listSkills": runRead, "listCommands": runRead, "memoryGet": runRead, "memoryConfig": runRead,
 	"contextSources": runRead,
 	"memoryProjects": runRead, "listSessions": runRead, "sessionHistory": runRead,
@@ -67,10 +67,12 @@ var methodClass = map[string]runClass{
 	"mcpAdd": runGlobal, "toolsSet": runGlobal, "toolsAccept": runGlobal, "toolBehaviorSet": runGlobal,
 	"customSet": runGlobal, "customReset": runGlobal, "skillEnabledSet": runGlobal,
 
-	"refreshProviders": runLong, "codexThreads": runLong, "deleteCodexThread": runLong, "codexSkills": runLong, "importCodexThread": runLong, "sideQuestion": runLong, "terminalRun": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
+	"refreshProviders": runLong, "codexThreads": runLong, "deleteCodexThread": runLong, "codexSkills": runLong, "importCodexThread": runLong, "sideQuestion": runLong, "suggestPrompt": runLong, "ideDiagnose": runLong,
 	"copilotSignInStart": runLong, "copilotSignInPoll": runLong, "copilotSignInCancel": runLong,
-	"syncSession":         runLong,
-	"startCodexDiscovery": runInline,
+	"syncSession":  runLong,
+	"claudeStatus": runRead, "claudeCommands": runRead, "importClaudeSession": runLong,
+	"startClaudeDiscovery": runInline,
+	"startCodexDiscovery":  runInline,
 }
 
 // startsTurn marks the requests a later stopChat for the same session
@@ -223,9 +225,13 @@ func (d *dispatcher) stop(session string, run func()) {
 	d.stops[session]++
 	gate := d.startGateLocked(session)
 	d.mu.Unlock()
-	gate.Lock()
-	defer gate.Unlock()
-	run()
+	// The count above is what refuses queued requests; waiting for a start
+	// that is under way happens off the request loop.
+	go func() {
+		gate.Lock()
+		defer gate.Unlock()
+		run()
+	}()
 }
 
 func (d *dispatcher) startGateLocked(session string) *sync.Mutex {

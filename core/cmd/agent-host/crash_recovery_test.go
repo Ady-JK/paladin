@@ -133,7 +133,7 @@ func TestStdioRecoversCompletedParallelToolBeforeBatchFinishes(t *testing.T) {
 	for {
 		paths, _ := filepath.Glob(filepath.Join(dataDir, "sessions", "*", sid, "active-turn.json"))
 		if len(paths) == 1 {
-			data, _ := os.ReadFile(paths[0])
+			data, _ := os.ReadFile(filepath.Join(filepath.Dir(paths[0]), "active-turn.msgs"))
 			_, markerErr := os.Stat(filepath.Join(cwd, "marker.txt"))
 			if markerErr == nil && strings.Contains(string(data), "fast-complete") {
 				break

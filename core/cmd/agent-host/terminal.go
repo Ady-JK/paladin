@@ -3,7 +3,6 @@ package main
 // User terminals run with the user's normal OS permissions. They are
 // separate from the agent's permission-gated shell tool and its transcript.
 import (
-	"context"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -11,9 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/creack/pty"
 	"github.com/google/uuid"
@@ -30,16 +27,58 @@ type terminalEvent struct {
 	ExitCode   *int   `json:"exitCode,omitempty"`
 }
 
-type terminalResult struct {
-	Output    string `json:"output"`
-	ExitCode  int    `json:"exitCode"`
-	Truncated bool   `json:"truncated"`
-}
-
 type terminalProcess struct {
 	sessionID string
 	cmd       *exec.Cmd
 	file      *os.File
+
+	// Input is queued and written by a goroutine of its own: a PTY write
+	// blocks once the shell's input buffer is full, and the request loop
+	// that called send must not wait for that.
+	wmu    sync.Mutex
+	wq     []string
+	wbytes int
+	wbusy  bool
+}
+
+// maxQueuedInput bounds what a terminal that is not reading can hold.
+const maxQueuedInput = 1 << 20
+
+// send queues data for the terminal and returns at once.
+func (e *terminalProcess) send(data string) error {
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+	if e.wbytes+len(data) > maxQueuedInput {
+		return errors.New("terminal is not accepting input right now")
+	}
+	e.wq = append(e.wq, data)
+	e.wbytes += len(data)
+	if !e.wbusy {
+		e.wbusy = true
+		go e.drain()
+	}
+	return nil
+}
+
+func (e *terminalProcess) drain() {
+	for {
+		e.wmu.Lock()
+		if len(e.wq) == 0 {
+			e.wbusy = false
+			e.wmu.Unlock()
+			return
+		}
+		data := e.wq[0]
+		e.wq = e.wq[1:]
+		e.wbytes -= len(data)
+		e.wmu.Unlock()
+		if _, err := io.WriteString(e.file, data); err != nil {
+			e.wmu.Lock()
+			e.wq, e.wbytes, e.wbusy = nil, 0, false
+			e.wmu.Unlock()
+			return
+		}
+	}
 }
 
 type terminalHub struct {
@@ -168,8 +207,7 @@ func (h *terminalHub) write(sessionID, id, data string) error {
 	if len(data) > 64*1024 {
 		return errors.New("terminal input is too large")
 	}
-	_, err = io.WriteString(entry.file, data)
-	return err
+	return entry.send(data)
 }
 
 func (h *terminalHub) resize(sessionID, id string, cols, rows uint16) error {
@@ -197,65 +235,4 @@ func (h *terminalHub) closeAll() {
 	for _, entry := range h.entries {
 		_ = killTerminalProcess(entry.cmd)
 	}
-}
-
-type limitedOutput struct {
-	mu        sync.Mutex
-	data      []byte
-	truncated bool
-}
-
-func (w *limitedOutput) Write(chunk []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	const limit = 1024 * 1024
-	if len(chunk) > limit-len(w.data) {
-		w.truncated = true
-	}
-	if space := limit - len(w.data); space > 0 {
-		w.data = append(w.data, chunk[:min(space, len(chunk))]...)
-	}
-	return len(chunk), nil
-}
-
-func terminalRun(command, dir string) (terminalResult, error) {
-	if strings.TrimSpace(command) == "" {
-		return terminalResult{}, errors.New("terminal command is empty")
-	}
-	var err error
-	if dir, err = terminalDir(dir); err != nil {
-		return terminalResult{}, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	shell := terminalShell()
-	args := []string{"-lc", command}
-	if strings.EqualFold(filepath.Base(shell), "zsh") {
-		args = []string{"-ilc", command}
-	}
-	if runtime.GOOS == "windows" {
-		args = []string{"/d", "/s", "/c", command}
-	}
-	cmd := exec.CommandContext(ctx, shell, args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "SHELL_SESSIONS_DISABLE=1")
-	detachFromTerminal(cmd)
-	cmd.WaitDelay = 2 * time.Second
-	output := &limitedOutput{}
-	cmd.Stdout, cmd.Stderr = output, output
-	err = cmd.Run()
-	result := terminalResult{Output: string(output.data), Truncated: output.truncated}
-	if ctx.Err() != nil {
-		result.ExitCode = -1
-		result.Output += "\n[command timed out after 10 minutes]"
-		return result, nil
-	}
-	if err == nil {
-		return result, nil
-	}
-	if exit := new(exec.ExitError); errors.As(err, &exit) {
-		result.ExitCode = exit.ExitCode()
-		return result, nil
-	}
-	return result, err
 }
