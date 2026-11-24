@@ -1,0 +1,8 @@
+package claude
+
+import (
+	"os/exec"
+	"syscall"
+)
+
+func parentDeath(cmd *exec.Cmd) { cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL }
