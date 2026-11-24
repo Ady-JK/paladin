@@ -22,11 +22,11 @@ import { initChat } from "./features/chat";
 import { clearTodos, initTodos } from "./features/todos";
 import { renderGreeting } from "./features/chatView";
 import { initModelPicker, loadProviders, refreshDefaultCatalog, resetDefaultRefresh } from "./features/models";
-import { syncPermChip } from "./features/permissions";
-import { closeConfirm, initSessions, openSession, refreshSessions } from "./features/sessions";
+import { closeConfirm, initSessions, openSession, reattachSession, refreshSessions } from "./features/sessions";
 import { initSidePane } from "./features/sidePane";
 import { initCodexAdapter } from "./adapters/codex";
 import { closeNewSession, initSessionDialog, openNewSession } from "./features/sessionDialog";
+import { initProjectNew } from "./features/projectNew";
 import { closeNewSite, initWeb } from "./features/web";
 import { clearUsage, closeUsageDashboard, initUsage } from "./features/usage";
 import { closeSettings, initSettings, openSettings } from "./features/settings";
@@ -70,7 +70,6 @@ async function connect(): Promise<void> {
     window.dispatchEvent(new Event("paladin:workspace-changed"));
 
     state.sessionId = "";
-    syncPermChip();
     syncMcp();
     syncTools();
     void syncBudget();
@@ -131,6 +130,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initThinking();
   initWeb();
   initSessionDialog();
+  initProjectNew();
   initSettings(connect);
   initMemory();
   initSessions();
@@ -202,7 +202,10 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   ideButton.addEventListener("click", loadIDE);
   initUndo();
-  initLive((id) => void openSession(id));
+  initLive(
+    (id) => void openSession(id),
+    (id) => void reattachSession(id).catch((error) => console.debug("session refresh will retry", error)),
+  );
   initIDEActivity();
   initUsage();
   initResources();
@@ -210,10 +213,6 @@ window.addEventListener("DOMContentLoaded", () => {
   initShortcuts();
   initVoiceFeature();
 
-  $("#resPill").addEventListener("click", () => {
-    openSettings();
-    $("#settingsNavResources").click();
-  });
   $("#resTotal").addEventListener("click", () => {
     openSettings();
     $("#settingsNavResources").click();

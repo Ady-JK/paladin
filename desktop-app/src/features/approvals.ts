@@ -5,24 +5,14 @@
 
 import * as api from "../core/api";
 import { escapeHtml, revealHidden } from "../core/format";
-import type { Approval, ApprovalDecision, PermissionRule } from "../core/types";
+import type { Approval, ApprovalDecision } from "../core/types";
 import { icon } from "../icons";
 import { toast } from "../ui/toast";
 import { argsHtml } from "./toolBodies";
 
-function code(text: string): string {
-  return `<code>${escapeHtml(text)}</code>`;
-}
-
-function patterns(rules: PermissionRule[] | undefined): string {
-  return (rules ?? []).map((r) => code(r.pattern)).join(", ");
-}
-
 function title(ap: Approval): string {
   if (ap.kind === "permissions") return "Grant additional permissions?";
   if (ap.kind === "mcp") return ap.destructive ? "Call a destructive MCP tool?" : "Call this MCP tool?";
-  if (ap.kind === "web") return ap.tool === "browser" ? "Open this site in the browser?" : "Fetch from this site?";
-  if (ap.kind === "project") return "Run this project's own tool?";
   if (ap.destructive) return "Run a destructive command?";
   if (ap.tool === "shell") return "Run this command?";
   if (ap.kind === "read") return "Read this file?";
@@ -31,30 +21,19 @@ function title(ap: Approval): string {
 
 function subject(ap: Approval): string {
   if (ap.kind === "mcp" && ap.server) return `${ap.server} › ${ap.mcpTool || ap.tool}`;
-  if (ap.kind === "web") return ap.url || ap.host || ap.tool;
   return ap.command || ap.path || ap.tool;
 }
 
-// choiceLabel names each reply with the rule it would save.
-function choiceLabel(ap: Approval, choice: ApprovalDecision): string {
-  const what = patterns(ap.remember);
-  const ruleTool = ap.remember?.[0]?.tool;
-  const prefix =
-    ruleTool === "write" ? "writes to " : ruleTool === "read" ? "reads in " : ruleTool === "web" ? "visits to " : "";
-  if (ruleTool === "project") {
-    if (choice === "session") return "Allow this project's tools for this session";
-    if (choice === "folder") return "Always allow this project's tools";
-    if (choice === "deny") return "Don't run them";
-  }
+function choiceLabel(choice: ApprovalDecision): string {
   switch (choice) {
     case "once":
       return "Allow once";
     case "session":
-      return what ? `Allow ${prefix}${what} for this session` : "Allow for this session";
+      return "Allow for this session";
     case "folder":
-      return what ? `Always allow ${prefix}${what} in this folder` : "Always allow in this folder";
+      return "Always allow in this folder";
     case "global":
-      return what ? `Always allow ${prefix}${what} everywhere` : "Always allow everywhere";
+      return "Always allow everywhere";
     case "deny":
       return "Deny";
   }
@@ -89,27 +68,17 @@ function pendingHtml(ap: Approval): string {
     .map((c, i) => {
       const cls = c === "deny" ? "approval-btn is-deny" : i === 0 ? "approval-btn is-primary" : "approval-btn";
       const key = c === "deny" ? `<kbd>Esc</kbd>` : i === 0 ? `<kbd>⏎</kbd>` : "";
-      return `<button type="button" class="${cls}" data-approve="${c}"><span>${choiceLabel(ap, c)}</span>${key}</button>`;
+      return `<button type="button" class="${cls}" data-approve="${c}"><span>${choiceLabel(c)}</span>${key}</button>`;
     })
     .join("");
   const kindIcon =
-    ap.destructive || ap.kind === "permissions"
-      ? "sl-shield-off"
-      : ap.kind === "mcp"
-        ? "sl-plug"
-        : ap.kind === "web"
-          ? "globe"
-          : "sl-shield";
+    ap.destructive || ap.kind === "permissions" ? "sl-shield-off" : ap.kind === "mcp" ? "sl-plug" : "sl-shield";
   const body =
     ap.kind === "mcp"
       ? `<div class="approval-mcp"><span class="approval-mcp-server">${escapeHtml(ap.server ?? "")}</span>` +
         `<span class="approval-mcp-sep" aria-hidden="true">›</span><span class="approval-mcp-tool">${escapeHtml(ap.mcpTool || ap.tool)}</span></div>` +
         `<div class="approval-args">${argsHtml(ap.args ?? "")}</div>`
-      : ap.kind === "web"
-        ? `<div class="approval-web"><span class="approval-web-host">${escapeHtml(ap.host ?? "")}</span>` +
-          `<span class="approval-web-url" title="${escapeHtml(ap.url ?? "")}">${revealHidden(escapeHtml(ap.url ?? ""))}</span>` +
-          `<span class="approval-web-note">Page content is treated as untrusted data.</span></div>`
-        : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>`;
+      : `<pre class="approval-subject"><span class="approval-prompt" aria-hidden="true">${ap.tool === "shell" ? "$" : "›"}</span>${revealHidden(escapeHtml(subject(ap)))}</pre>`;
   return (
     `<div class="approval-head">` +
     `<span class="approval-ico">${icon(kindIcon, "h-4 w-4")}</span>` +

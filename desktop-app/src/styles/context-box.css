@@ -45,6 +45,11 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+}
+.thinking-row:has(> .context-box-slot:empty) {
+  display: none;
+}
+.thinking-row > .context-box-slot:not(:empty) {
   padding-top: 6px;
 }
 .thinking-row .think-inline {

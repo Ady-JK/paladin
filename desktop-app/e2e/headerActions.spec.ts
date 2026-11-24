@@ -27,27 +27,19 @@ test("the header + opens the pane, whose picker offers a side chat", async ({ pa
   await expect(page.locator("#sidePane .side-chat:visible")).toBeVisible();
 });
 
-test("the readings sit left of the icon row and never push it sideways", async ({ page }) => {
+test("the header carries only the icon row; readings live in the composer", async ({ page }) => {
+  await expect(page.locator("#headerMetrics")).toHaveCount(0);
+  await expect(page.locator("#titleBar #usagePill")).toHaveCount(0);
+  await expect(page.locator("#titleBar #resPill")).toHaveCount(0);
+  // The donut sits in the composer toolbar, and changing its text never
+  // moves the header's icon row.
+  await expect(page.locator(".composer-toolbar #usagePill")).toBeVisible();
   const actions = page.locator("#paneActions");
-  const metrics = page.locator("#headerMetrics");
-  await expect(metrics).toBeVisible();
-  await expect(page.locator("#headerMetrics #usagePill")).toBeVisible();
-
-  // Readings left, action icons right: a growing pill extends into the
-  // free space instead of shifting the IDE/Creator/layout icons.
-  const read = async (): Promise<{ metrics: number; actions: number }> => ({
-    metrics: (await metrics.boundingBox())!.x,
-    actions: (await actions.boundingBox())!.x,
-  });
-  const before = await read();
-  expect(before.metrics).toBeLessThan(before.actions);
-
-  await page.locator("#headerMetrics #usageLabel").evaluate((el) => {
+  const before = (await actions.boundingBox())!.x;
+  await page.locator("#usageLabel").evaluate((el) => {
     el.textContent = "100% · $1234.5678 · 120k tok";
   });
-  const after = await read();
-  expect(after.metrics).toBeGreaterThanOrEqual(before.metrics);
-  expect(Math.abs(after.actions - before.actions)).toBeLessThan(1);
+  expect(Math.abs((await actions.boundingBox())!.x - before)).toBeLessThan(1);
 });
 
 test("browser has one entry, on the rail, and the + picker offers every pane kind", async ({ page }) => {
@@ -94,4 +86,22 @@ test("the header keeps one height as the pane opens and the mode changes", async
   await page.locator("#modeAgentBtn").click();
   await expect(bar).toBeVisible();
   expect((await measure()).bar).toBe(closed.bar);
+});
+
+test("+, theme, minimize, maximize and close sit on one even pitch", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const selectors = [
+    "#paneNewChatBtn",
+    "#themeToggleBtn",
+    "#windowMinimizeBtn",
+    "#windowMaximizeBtn",
+    "#windowCloseBtn",
+  ];
+  const centers: number[] = [];
+  for (const selector of selectors) {
+    const box = (await page.locator(selector).boundingBox())!;
+    centers.push(box.x + box.width / 2);
+  }
+  const gaps = centers.slice(1).map((x, i) => Math.round(x - centers[i]));
+  expect(gaps, `centres ${centers.join(", ")}`).toEqual([40, 40, 40, 40]);
 });

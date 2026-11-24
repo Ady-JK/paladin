@@ -111,7 +111,7 @@ export function loadAgent(tab: AgentTab): Promise<void> {
   tab.loading = (async () => {
     beginAttach(tab.agentId);
     try {
-      const snap = await api.attachSession(tab.agentId, 1000);
+      const snap = await api.attachSession(tab.agentId, 300);
       const history = view.querySelector<HTMLElement>(".pane-agent-history")!;
       history.replaceChildren();
       const rows = Array.isArray(snap.history) ? snap.history : (snap.history?.messages ?? []);

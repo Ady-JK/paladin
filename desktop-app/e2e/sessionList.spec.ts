@@ -267,12 +267,12 @@ test("a fork nests under its parent instead of standing beside it", async ({ pag
 
   // Rows carry data-session ids; the row's text also holds the engine
   // chip, so titles are matched by id rather than by text.
-  const parent = list.locator('.project-list > .session-row:has([data-session="p1"])');
+  const parent = list.locator('.project-engine > .session-row:has([data-session="p1"])');
   await expect(parent).toHaveCount(1);
   // The fork is NOT a top-level row...
-  await expect(list.locator('.project-list > .session-row:has([data-session="f1"])')).toHaveCount(0);
+  await expect(list.locator('.project-engine > .session-row:has([data-session="f1"])')).toHaveCount(0);
   // ...it is inside the parent's fork container.
-  const parentBlock = list.locator('.project-list > .session-row:has([data-session="p1"]) + .session-forks');
+  const parentBlock = list.locator('.project-engine > .session-row:has([data-session="p1"]) + .session-forks');
   await expect(parentBlock).toHaveCount(1);
   await expect(parentBlock.locator("> .session-fork-row")).toHaveCount(1);
   await expect(parentBlock.locator('> .session-fork-row:has([data-session="f1"])')).toHaveCount(1);

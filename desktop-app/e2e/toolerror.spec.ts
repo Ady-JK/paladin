@@ -1,5 +1,6 @@
 // A failed tool call shows its reason in the transcript, not a generic
 // line. The reason comes from the tool result the core stores.
+import { openWork } from "./work";
 import { test, expect } from "@playwright/test";
 
 test("a failed shell status check shows the job's reason", async ({ page }) => {
@@ -25,6 +26,7 @@ test("a failed shell status check shows the job's reason", async ({ page }) => {
   await page.click("#sendBtn");
   const messages = page.locator("#messages");
   await expect(messages).toContainText("done");
+  await openWork(page);
   await messages.getByRole("button", { name: /Ran 1 command/ }).click();
   await messages.getByText("status job-15").click();
   await expect(messages).toContainText("shell: job job-15 failed");

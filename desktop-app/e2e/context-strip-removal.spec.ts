@@ -24,8 +24,10 @@ test("the working status remains visible without the context strip", async ({ pa
   await expect(page.locator("#workingBar")).toBeVisible();
   expect(await page.locator("#workingBar").evaluate((el) => Boolean(el.closest(".composer-float")))).toBe(true);
   const status = (await page.locator("#workingBar").boundingBox())!;
-  const thinking = (await page.locator("#thinkingMore").boundingBox())!;
-  expect(Math.abs(status.y + status.height / 2 - (thinking.y + thinking.height / 2))).toBeLessThan(4);
+  // The thinking level sits quietly in the toolbar beside the model; the
+  // working status keeps its own line above the text.
+  expect(await page.locator("#thinkingMore").evaluate((el) => Boolean(el.closest(".composer-toolbar")))).toBe(true);
+  expect(status.y).toBeLessThan((await page.locator("#promptInput").boundingBox())!.y);
   const composer = (await page.locator(".composer-float").boundingBox())!;
   expect(composer.x + composer.width - (status.x + status.width)).toBeLessThan(32);
   await expect(page.locator("#contextToggle")).toBeHidden();

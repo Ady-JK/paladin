@@ -47,6 +47,13 @@ function toolSummary(name: string, raw: string): string {
   return short(raw);
 }
 
+// taskCommand is the first line of a Claude background task's command, the
+// one thing its row needs to say about it.
+function taskCommand(args: Record<string, unknown>): string {
+  const text = typeof args.description === "string" ? args.description.trim().split("\n")[0] : "";
+  return text.length > 90 ? `${text.slice(0, 90)}…` : text;
+}
+
 // ToolLabel is the one-line reading of a call: a verb, a muted detail,
 // and an optional inline code chip (the command for shell).
 export type ToolLabel = { verb: string; detail: string; chip: string; server?: string };
@@ -96,6 +103,12 @@ const KINDS: Record<string, ToolKind> = {
   edit: { icon: "tl-pencil", past: "Edited", now: "Editing", noun: plural("file", "files") },
   ask: { icon: "tl-ask", past: "Asked", now: "Asking", noun: plural("question", "questions") },
   web_fetch: { icon: "globe", past: "Fetched", now: "Fetching", noun: plural("page", "pages") },
+  claude_task: {
+    icon: "tl-term",
+    past: "Ran",
+    now: "Running",
+    noun: plural("background task", "background tasks"),
+  },
   todo: {
     icon: "tl-list",
     past: "Updated",
@@ -189,6 +202,8 @@ export function toolLabel(tool: ToolInfo): ToolLabel {
       return { verb, detail: summary, chip: typeof args.path === "string" ? relPath(args.path) : "" };
     case "list":
       return { verb, detail: typeof args.path === "string" ? relPath(args.path) : "the workspace", chip: "" };
+    case "claude_task":
+      return { verb, detail: "in the background", chip: taskCommand(args) };
     case "todo": {
       const todos = Array.isArray(args.todos) ? args.todos.length : 0;
       return { verb, detail: todos ? `the plan · ${todos} ${todos === 1 ? "item" : "items"}` : "the plan", chip: "" };
@@ -314,6 +329,14 @@ export function createToolActivity(tool: ToolInfo): ToolView {
   toggle.innerHTML =
     '<span class="tool-ico"></span><span class="tool-verb"></span><span class="tool-server"></span><span class="tool-detail"></span>' +
     '<code class="tool-chip"></code><span class="tool-add"></span><span class="tool-del"></span><span class="tool-fail"></span>';
+  if (current.name === "claude_task") {
+    // Claude Code runs under Paladin's own approval, so a task never waits on
+    // the user: one small mark replaces repeating what was approved.
+    toggle.insertAdjacentHTML(
+      "beforeend",
+      `<span class="tool-auto" role="img" title="Auto-approved: Paladin allowed this task without asking" aria-label="Auto-approved">${icon("sl-shield-check", "h-3.5 w-3.5")}</span>`,
+    );
+  }
   const isShell = current.name === "shell";
   if (isShell) {
     // A command is one terminal card: "$ cmd" is the toggle, output folds below.

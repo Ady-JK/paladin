@@ -458,6 +458,23 @@
   width: 4px;
 }
 
+/* In the wide IDE layout the explorer is a column of the workspace. It is the
+   containing block of its own splitter (which sits on its right edge), and it
+   draws the same 1px line the chat draws on its left edge. The narrow layout
+   floats the explorer and positions it already, so it keeps its own rules. */
+@media (min-width: 1100px) {
+  #ideWorkspace > .ide-explorer {
+    position: relative;
+    border-right: 1px solid var(--color-slate-200);
+  }
+  .dark #ideWorkspace > .ide-explorer {
+    border-right-color: var(--color-slate-800);
+  }
+  #ideWorkspace > .ide-explorer.is-closed {
+    border-right-width: 0;
+  }
+}
+
 .ide-chat-head strong {
   margin-right: auto;
 }

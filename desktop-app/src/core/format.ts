@@ -18,7 +18,7 @@ export function formatTurnStats(stats: TurnStats): string {
   return `${duration} · ${rate.toFixed(1)} tok/s`;
 }
 
-function formatTurnDuration(ms: number): string {
+export function formatTurnDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -82,8 +82,29 @@ function protectMath(text: string, held: string[]): string {
       return match;
     }
     const tex = (display ?? inline ?? "").trim();
-    return hold(held, katex.renderToString(tex, { displayMode: display !== undefined, throwOnError: false }));
+    return hold(held, renderTex(tex, display !== undefined));
   });
+}
+
+// renderTex renders one formula, remembering recent results: a streaming
+// reply is re-rendered every few tokens and its earlier formulas have not
+// changed.
+const TEX_CACHE_MAX = 200;
+const texCache = new Map<string, string>();
+function renderTex(tex: string, displayMode: boolean): string {
+  const key = (displayMode ? "d" : "i") + tex;
+  const hit = texCache.get(key);
+  if (hit !== undefined) {
+    texCache.delete(key); // re-insert: most recently used last
+    texCache.set(key, hit);
+    return hit;
+  }
+  const html = katex.renderToString(tex, { displayMode, throwOnError: false });
+  if (texCache.size >= TEX_CACHE_MAX) {
+    texCache.delete(texCache.keys().next().value as string);
+  }
+  texCache.set(key, html);
+  return html;
 }
 
 function hold(held: string[], html: string): string {
@@ -214,8 +235,11 @@ function renderBlocks(src: string): string {
       const taken: string[] = [];
       while (i < lines.length) {
         if (/^\s*$/.test(lines[i])) {
-          const next = lines.slice(i + 1).find((l) => !/^\s*$/.test(l));
-          if (next && /^\s*(?:[-*+]|\d+[.)])\s+/.test(next)) {
+          let at = i + 1;
+          while (at < lines.length && /^\s*$/.test(lines[at])) {
+            at++;
+          }
+          if (at < lines.length && /^\s*(?:[-*+]|\d+[.)])\s+/.test(lines[at])) {
             i++;
             continue;
           }
@@ -389,7 +413,7 @@ function mdInline(src: string): string {
   s = s.replace(/(^|[^\w])_([^_\n]+?)_(?![\w])/g, "$1<em>$2</em>");
   s = s.replace(/~~([^~\n]+?)~~/g, "<del>$1</del>");
   s = s.replace(/&lt;(https?:[^&\s]+?)&gt;/g, (_m, url: string) => stash(mdLink(url, url)));
-  s = s.replace(/(^|[\s(>])(https?:\/\/[^\s<]+)/g, (_m, pre: string, url: string) => {
+  s = s.replace(/(^|[\s(>])(https?:\/\/[^\s<]+)/g, (_m, pre: string, url: string) => {
     let clean = url.replace(/(?:[.,;:!?]|&quot;|&#39;)+$/, "");
     let opens = 0;
     let closes = 0;
@@ -406,7 +430,12 @@ function mdInline(src: string): string {
     }
     return `${pre}${stash(mdLink(clean, clean))}${url.slice(clean.length)}`;
   });
-  return s.replace(/(\d+)/g, (_m, n: string) => chunks[Number(n)] ?? "");
+  // A stashed chunk can hold an earlier marker (code inside a link's text),
+  // so restore until none is left.
+  for (let pass = 0; pass < 4 && s.includes(""); pass++) {
+    s = s.replace(/(\d+)/g, (_m, n: string) => chunks[Number(n)] ?? "");
+  }
+  return s;
 }
 
 // renderText is the plain-text
@@ -432,17 +461,34 @@ export function renderText(text: string): string {
 }
 
 // tryParseJson parses a JSON string into a record.
-// It returns null when the text is not a JSON object.
+// It returns null when the text is not a JSON object. The big strings (a
+// write's file content, a command's output) are remembered: one tool row
+// asks for the same arguments from half a dozen places on every update, and
+// callers only read what comes back.
+const PARSE_MEMO_MIN = 512;
+const PARSE_MEMO_MAX = 64;
+const parseMemo = new Map<string, Record<string, unknown> | null>();
 export function tryParseJson(raw: string): Record<string, unknown> | null {
+  const memo = raw.length >= PARSE_MEMO_MIN;
+  if (memo && parseMemo.has(raw)) {
+    return parseMemo.get(raw) ?? null;
+  }
+  let out: Record<string, unknown> | null = null;
   try {
     const value: unknown = JSON.parse(raw);
     if (typeof value === "object" && value !== null) {
-      return value as Record<string, unknown>;
+      out = value as Record<string, unknown>;
     }
   } catch {
     // Not JSON: the caller falls back to the raw text.
   }
-  return null;
+  if (memo) {
+    if (parseMemo.size >= PARSE_MEMO_MAX) {
+      parseMemo.delete(parseMemo.keys().next().value as string);
+    }
+    parseMemo.set(raw, out);
+  }
+  return out;
 }
 
 export function shortPath(path: string): string {

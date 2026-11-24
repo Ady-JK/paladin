@@ -13,6 +13,7 @@ import { forkSessionById, renameSessionById } from "./sessionActions";
 import { openSettings } from "./settings";
 import { loadSkills, parseSkillLine } from "./skills";
 import { startCodexSession } from "../adapters/codex/harness";
+import { startClaudeSession } from "../adapters/claude/harness";
 import { openToolsMenu } from "./toolSwitches";
 import { openUsageDashboard } from "./usage";
 import { askSideQuestion, openSideChat } from "./sidePane";
@@ -61,7 +62,7 @@ export async function routeSlash(message: string): Promise<"local" | "none" | Ag
   const clear = () => {
     inputEl.value = "";
   };
-  if (state.harness === "codex") return routeCodexSlash(parsed);
+  if (state.harness) return routeCodexSlash(parsed);
   switch (name) {
     case "skill":
       // chat.ts splits `/skill <name> [message]` and sends the name
@@ -218,13 +219,19 @@ async function routeCodexSlash(parsed: { trimmed: string; name: string; rest: st
       clear();
       toast("Plan mode off");
       return "local";
-    case "new":
+    case "new": {
+      const claude = state.harness === "claude";
       clear();
       newSession();
-      if (!(await startCodexSession())) return "local";
+      if (!(await (claude ? startClaudeSession() : startCodexSession()))) return "local";
       inputEl.value = rest;
-      toast(rest ? "New Codex session started" : "New Codex session");
+      toast(
+        rest
+          ? `New ${claude ? "Claude Code" : "Codex"} session started`
+          : `New ${claude ? "Claude Code" : "Codex"} session`,
+      );
       return "local";
+    }
     case "fork":
       clear();
       void forkCurrent();

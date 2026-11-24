@@ -164,19 +164,21 @@ function pillTitle(usage: SessionUsage): string {
 // refreshUsage; direct calls only re-render already-fetched state.
 function renderUsage(): void {
   const usage = state.usage;
-  // The pill shares the session pill's responsive pattern (flex from sm
-  // up), so hiding must drop sm:flex too or `hidden` loses to it.
   if (!usage || !state.sessionId) {
     usagePillEl.classList.add("hidden");
-    usagePillEl.classList.remove("sm:flex");
     return;
   }
   usagePillEl.classList.remove("hidden");
-  usagePillEl.classList.add("sm:flex");
   usageLabelEl.textContent = pillText(usage);
   usagePillEl.title = pillTitle(usage);
   usagePillEl.classList.toggle("text-agent-amber", knownFillAtLeast(usage, 70));
   usagePillEl.classList.toggle("text-agent-rose", knownFillAtLeast(usage, 90));
+  // The donut: a ring filled to the context window's fill. With no known
+  // window it stays an empty track rather than claiming a percentage.
+  const known = usage.contextKnown && usage.fillPercent !== undefined;
+  const fill = known ? Math.max(0, Math.min(100, usage.fillPercent ?? 0)) : 0;
+  usagePillEl.style.setProperty("--usage-fill", String(fill));
+  usagePillEl.dataset.known = String(known);
 }
 
 function knownFillAtLeast(usage: SessionUsage, pct: number): boolean {

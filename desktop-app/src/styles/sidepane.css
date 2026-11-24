@@ -70,18 +70,24 @@ body.is-splitting {
      `min-width` snaps at once on the way OPEN (a delayed snap would clamp
      the basis to zero for the whole animation); on the way CLOSED it is
      held back by the is-closed rule so the slide is not cut short. */
+  /* Opening: `min-width` grows with the basis. Snapping it to 240px on the
+     first frame made the pane jump to that width before it started to slide.
+     There is no `visibility` entry here on purpose: a delay on the open side
+     kept the pane invisible for the whole slide and popped it in at the end,
+     which is what made + feel like a cut. Only the closed rule delays it. */
   transition:
     flex-basis var(--panel-anim) var(--panel-ease),
+    min-width var(--panel-anim) var(--panel-ease),
     opacity var(--panel-anim) ease,
-    border-left-width var(--panel-anim) var(--panel-ease),
-    visibility 0s linear var(--panel-anim);
+    border-left-width var(--panel-anim) var(--panel-ease);
 }
 
 /* The pane is a column of the card, not a floating card of its own: it
    shares the card's rounded outer edge and stays square where the two
-   meet, so the header and the pane read as one surface. */
+   meet, so the header and the pane read as one surface. Its top edge sits
+   flush under the header, so only the bottom-right corner is rounded. */
 #agentView #sidePane:not([hidden]) {
-  border-top-right-radius: var(--panel-radius, 14px);
+  border-top-right-radius: 0;
   border-bottom-right-radius: var(--panel-radius, 14px);
   overflow: hidden;
 }
@@ -109,8 +115,11 @@ body.is-splitting {
     min-width 0s,
     visibility 0s linear var(--panel-anim);
 }
+/* The contents leave with the pane, not before it: hiding them on the first
+   frame left an empty white column sliding shut. */
 .side-pane.is-closed > * {
   visibility: hidden;
+  transition: visibility 0s linear var(--panel-anim);
 }
 /* Nothing to drag when the pane is closed. */
 #agentSplit:has(#sidePane[hidden]) .pane-split-resize,
@@ -126,10 +135,10 @@ body.is-splitting {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   order: 2;
   margin-left: auto;
-  margin-right: 14px;
+  margin-right: 0;
 }
 .pane-inner-close {
   position: absolute;
@@ -145,28 +154,17 @@ body.is-splitting {
   align-self: stretch;
   display: flex;
   align-items: stretch;
+  gap: 0;
   /* The window controls are pinned over this corner in every mode (see
-     .window-controls), so the header keeps clear of them: 3 × 40px plus a
-     little breathing room. Nothing here may sit under them. */
-  margin-right: 132px;
+     .window-controls), so the header keeps clear of them: exactly their
+     3 × 40px less the header's own 1rem of right padding. Nothing here may sit under them, and nothing may leave a gap
+     beside them either: + and the theme button are spaced on the same 40px
+     pitch as minimize, maximize and close, so the five read as one row. */
+  margin-right: calc(120px - 1rem);
 }
-/* The readings change width as a turn runs (session id, context fill,
-   process load). Pinning them to the left of the header keeps the icon
-   row and window controls from sliding sideways whenever a pill grows
-   or shrinks. */
-#headerMetrics {
-  display: flex;
-  min-width: 0;
-  flex-shrink: 1;
-  align-items: center;
-  gap: 12px;
-  order: 0;
-}
-#headerMetrics:empty {
-  display: none;
-}
-#mainCard:has(#agentView.hidden) #headerMetrics {
-  display: none;
+#headerStatusActions > button,
+.pane-actions > .pane-btn {
+  margin-inline: 6px;
 }
 #headerIdentity {
   order: 1;
@@ -263,6 +261,119 @@ body.is-splitting {
   color: var(--color-slate-200);
 }
 .live-changes:hover {
+  filter: brightness(1.1);
+}
+
+/* "Starting Codex…": shown while an engine's CLI loads. It fades in after a
+   beat, so a quick start never flashes it, and never takes pointer events. */
+.start-pill {
+  position: absolute;
+  z-index: 16;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 92%;
+  transform: translateX(-50%);
+  border: 1px solid var(--color-slate-200);
+  border-radius: 999px;
+  background: var(--color-slate-50);
+  padding: 7px 14px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  box-shadow: 0 5px 18px rgb(0 0 0 / 0.12);
+  pointer-events: none;
+  animation: start-pill-in 200ms ease-out 250ms both;
+}
+.start-pill[hidden] {
+  display: none;
+}
+.dark .start-pill {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+}
+.start-spin {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border-width: 2px;
+  color: var(--color-accent-700);
+}
+.dark .start-spin {
+  color: var(--color-accent-400);
+}
+.start-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(
+    90deg,
+    var(--color-slate-700) 30%,
+    var(--color-slate-400) 50%,
+    var(--color-slate-700) 70%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+.dark .start-pill-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-slate-400) 30%,
+    var(--color-slate-100) 50%,
+    var(--color-slate-400) 70%
+  );
+}
+.start-pill-where {
+  flex: none;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 11px;
+  color: var(--color-slate-500);
+}
+.dark .start-pill-where {
+  border-color: var(--color-slate-700);
+  color: var(--color-slate-400);
+}
+@keyframes start-pill-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+
+/* Shown while the reader is scrolled away from the newest row; it sits in the
+   same float layer as the live changes pill, on the right so they never meet. */
+.jump-latest {
+  position: absolute;
+  z-index: 15;
+  bottom: calc(100% + 8px);
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--color-slate-200);
+  border-radius: 999px;
+  background: var(--color-slate-50);
+  padding: 6px 12px;
+  color: var(--color-slate-600);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: 0 5px 18px rgb(0 0 0 / 0.12);
+  cursor: pointer;
+}
+.jump-latest[hidden] {
+  display: none;
+}
+.dark .jump-latest {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.jump-latest:hover {
   filter: brightness(1.1);
 }
 
@@ -1686,4 +1797,13 @@ body.is-splitting {
 .pane-tab-add :is(svg, span) {
   height: 12px;
   width: 12px;
+}
+#themeToggleBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
 }

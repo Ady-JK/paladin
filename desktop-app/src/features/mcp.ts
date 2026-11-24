@@ -572,7 +572,7 @@ function ensureChip(): HTMLButtonElement {
   chip.className = "mcp-chip";
   chip.hidden = true;
   chip.addEventListener("click", () => openPane());
-  const anchor = document.querySelector(".perm-wrap") ?? modelSelectBtn.parentElement;
+  const anchor = modelSelectBtn.parentElement;
   anchor?.after(chip);
   return chip;
 }

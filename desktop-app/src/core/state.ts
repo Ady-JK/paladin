@@ -19,9 +19,11 @@ export const state = {
   // harness is the external agent running the open (or about to start)
   // session: "" for Paladin's own agent. While it is "codex" the model
   // picker lists Codex's models instead of the configured providers.
-  harness: "" as "" | "codex",
-  // codex is what the Codex CLI reported, once asked.
+  harness: "" as "" | "codex" | "claude",
+  // External agent catalogs, once asked.
   codex: null as CodexStatus | null,
+  claude: null as CodexStatus | null,
+  claudeCommands: [] as { name: string; description: string; argumentHint?: string }[],
   selectedProvider: "",
   selectedLab: "",
   selectedModel: "",

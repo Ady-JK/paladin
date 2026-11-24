@@ -1,6 +1,7 @@
 // thinking.spec.ts covers the per-model thinking level (the composer
 // chip and its slider card) and the model's streamed thinking, live and
 // from history.
+import { openWork } from "./work";
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
@@ -222,6 +223,7 @@ test("saved thinking shows as a folded block from history", async ({ page }) => 
   await showSidebar(page);
   await page.click('[data-session="sess-notify-1"]');
   await expect(page.locator("#messages")).toContainText("Because.");
+  await openWork(page);
   const block = page.locator("#messages .think-block");
   await expect(block).toHaveCount(1);
   await expect(block).toHaveAttribute("data-state", "done");

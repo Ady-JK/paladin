@@ -148,6 +148,15 @@ function ensureChrome(): void {
   });
 }
 
+// paintLevel shows just the level on the toggle ("High"), muted beside the
+// model. The word "Thinking: " stays in the text for screen readers.
+function paintLevel(toggle: HTMLElement, label: string): void {
+  const prefix = document.createElement("span");
+  prefix.className = "sr-only";
+  prefix.textContent = "Thinking: ";
+  toggle.replaceChildren(prefix, label);
+}
+
 // paintStrip repaints the compact toggle: a brain plus the current
 // level, or a disabled "Thinking: n/a" for a model with nothing to
 // adjust. The toggle opens the card; it never picks a level itself.
@@ -168,14 +177,14 @@ function paintStrip(): void {
   if (view.levels.length === 0) {
     // Not adjustable: a disabled stub, so the composer layout stays
     // put instead of hiding the whole control.
-    toggle.textContent = "Thinking: n/a";
+    paintLevel(toggle, "n/a");
     chip!.disabled = true;
     closeCard();
     return;
   }
   chip!.disabled = false;
   const label = thinkingLabel(view.level);
-  toggle.textContent = `Thinking: ${label}`;
+  paintLevel(toggle, label);
   chip!.title = `${shortModel(view.model)}: ${label} — ${HINTS[view.level] ?? ""}. Change the thinking level`;
   chip!.setAttribute("aria-label", `Thinking: ${label}. Change the thinking level`);
 }
@@ -224,7 +233,7 @@ function showStop(level: string): void {
   if (!view) return;
   const label = thinkingLabel(level);
   const toggle = strip?.querySelector<HTMLElement>(".think-toggle-level");
-  if (toggle && view.levels.length > 0) toggle.textContent = `Thinking: ${label}`;
+  if (toggle && view.levels.length > 0) paintLevel(toggle, label);
   if (!card) return;
   card.dataset.level = level || "default";
   card.style.setProperty("--think-i", intensity(view, level).toFixed(3));

@@ -1,3 +1,4 @@
+import { openWork } from "./work";
 import { test, expect } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
@@ -159,6 +160,7 @@ test("an edit applied by a fuzzy match is labeled", async ({ page }) => {
   });
   await page.fill("#promptInput", "edit it");
   await page.click("#sendBtn");
+  await openWork(page);
   await page.locator('[data-tool="edit"] button').first().click();
   await expect(page.locator('[data-tool="edit"]')).toContainText("matched ignoring whitespace");
   await expect(page.locator('[data-tool="edit"]')).toContainText("formatted · gofmt");

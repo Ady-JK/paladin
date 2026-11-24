@@ -166,7 +166,7 @@ test("picking Terminal from the picker puts a terminal in the pane", async ({ pa
   await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
 });
 
-test("picking Browser from the picker opens a page in the pane", async ({ page }) => {
+test("picking Browser from the picker opens a personal page in the pane", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await page.locator("#paneNewChatBtn").click();
@@ -174,7 +174,7 @@ test("picking Browser from the picker opens a page in the pane", async ({ page }
     .locator("#panePicker")
     .getByRole("button", { name: /Browser/ })
     .click();
-  await expect(page.locator("#sidePane .pane-browser")).toBeVisible();
+  await expect(page.locator("#sidePane .pane-web")).toBeVisible();
   await expect(page.locator("#agentMain")).toBeVisible();
 });
 
@@ -251,22 +251,32 @@ test("re-picking an open tab brings it forward, never duplicates", async ({ page
   await expect(page.locator("#paneTabs .pane-tab.is-active")).toContainText("Changes");
 });
 
-test("browser and running commands never duplicate either", async ({ page }) => {
+test("Browser opens the user's own browser, not the agent's", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await start(page);
   await page.locator("#paneNewChatBtn").click();
   await page.locator('#panePicker [data-pane-pick="browser"]').click();
   await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+  // A personal tab (address field, shared sign-ins), never the agent browser.
+  await expect(page.locator("#sidePane .web-url")).toBeVisible();
+  await expect(page.locator("#sidePane .browser-url")).toHaveCount(0);
+  await expect(page.locator("#paneTabs .pane-tab")).not.toContainText("Agent browser");
+  // A browser takes as many tabs as the user wants.
   await page.locator("#paneTabsAdd").click();
   await page.locator("#paneHistoryMenu [data-pane-new-browser]").click();
-  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
+  await expect(page.locator("#sidePane .browser-url")).toHaveCount(0);
+});
 
+test("running commands never duplicate", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  await page.locator('#panePicker [data-pane-pick="jobs"]').click();
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
   await page.locator("#paneTabsAdd").click();
   await page.locator("#paneHistoryMenu [data-pane-new-jobs]").click();
-  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
-  await page.locator("#paneTabsAdd").click();
-  await page.locator("#paneHistoryMenu [data-pane-new-jobs]").click();
-  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(2);
+  await expect(page.locator("#paneTabs .pane-tab")).toHaveCount(1);
 });
 
 test("a terminal is never given the whole card", async ({ page }) => {
@@ -283,4 +293,14 @@ test("a terminal is never given the whole card", async ({ page }) => {
   // The conversation keeps its share: the terminal is a column, not the view.
   expect(chat.width).toBeGreaterThan(pane.width);
   expect(pane.x).toBeGreaterThan(chat.x);
+});
+
+test("the side pane rounds only its bottom-right corner", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await start(page);
+  await page.locator("#paneNewChatBtn").click();
+  const pane = page.locator("#sidePane");
+  await expect(pane).toBeVisible();
+  await expect(pane).toHaveCSS("border-top-right-radius", "0px");
+  await expect(pane).not.toHaveCSS("border-bottom-right-radius", "0px");
 });

@@ -439,10 +439,9 @@ function syncWorkspace(): void {
 // so it is a column of the shell beside the chat instead.
 function placeExplorer(): void {
   const explorer = $(".ide-explorer");
-  const resize = $("#ideExplorerResize");
   if (enabled) {
     const workspace = $(".ide-workspace");
-    if (explorer.parentElement !== workspace) workspace.prepend(explorer, resize);
+    if (explorer.parentElement !== workspace) workspace.prepend(explorer);
     // Inside the editor it is a column, not a drawer: no card surface.
     explorer.classList.remove("side-drawer");
     return;
@@ -523,19 +522,15 @@ export async function initIDE(): Promise<void> {
   chatResize.setAttribute("aria-label", "Resize chat");
   chatResize.setAttribute("aria-orientation", "vertical");
   $("#agentSplit").prepend(root, chatResize);
-  // The explorer stays inside the IDE workspace, where it is a column of
-  // that flex row: opening it narrows the editor, and the chat and the
-  // card keep their widths. Pulling it out to the shell made it compete
-  // with the whole card, which squeezed the IDE until the terminal dock's
-  // head collapsed to nothing.
+  // The explorer is placed in the tree where the current mode expects it.
+  // In Agent mode it is a column of #appShell wearing .side-drawer, so it
+  // must be mounted into the DOM closed and laid out there before its
+  // first open, or the width transition has no start point and snaps open.
   const explorer = $(".ide-explorer");
   explorer.append($("#ideExplorerResize"));
+  placeExplorer();
   explorer.classList.add("is-closed");
   explorer.inert = true;
-  // The lazy load's first click mounts the explorer and shows it in the same
-  // task: the browser never paints the closed state, so the width transition
-  // has no start point and the panel snaps open. Mount closed, then let one
-  // frame paint before the caller's show event lands.
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   explorer.getBoundingClientRect();
   explorer.addEventListener("transitionend", (event) => {

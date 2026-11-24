@@ -172,7 +172,6 @@ test("every settings section keeps the shared layout", async ({ page }) => {
     ["Appearance", "Appearance"],
     ["Resources", "Resources"],
     ["Memory", "Memory"],
-    ["Permissions", "Permissions"],
     ["Mcp", "MCP servers"],
     ["Hooks", "Hooks"],
     ["Tools", "Tools"],

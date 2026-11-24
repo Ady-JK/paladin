@@ -1,6 +1,6 @@
 // settings.ts owns the settings modal and its panes: workspace,
 // providers, prompt, connection, analytics, appearance, resources,
-// memory and permissions.
+// and memory.
 
 import * as api from "../core/api";
 import { bridge } from "../core/bridge";
@@ -22,8 +22,6 @@ import {
   settingsNavResourcesEl,
   settingsNavMemoryEl,
   settingsPaneMemoryEl,
-  settingsNavPermissionsEl,
-  settingsPanePermissionsEl,
   settingsNavMcpEl,
   settingsPaneMcpEl,
   settingsNavHooksEl,
@@ -71,7 +69,6 @@ import { load as loadAnalytics } from "./analytics";
 import { initBudgetSettings, loadDefaultBudget } from "./budget";
 import { refreshResources } from "./resources";
 import { loadMemory } from "./memory";
-import { initPermissionsPane, loadPermissions } from "./permissions";
 import { initMcp, loadMcp, syncMcp } from "./mcp";
 import { loadHooks } from "./hooks";
 import { initToolSwitches, loadTools, syncTools } from "./toolSwitches";
@@ -88,7 +85,6 @@ export type SettingsNav =
   | "appearance"
   | "resources"
   | "memory"
-  | "permissions"
   | "mcp"
   | "hooks"
   | "tools"
@@ -115,7 +111,6 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     appearance: "Set the app's color, text size, and motion.",
     resources: "Inspect processes and resources used by the current session.",
     memory: "Review the context Paladin carries into future turns.",
-    permissions: "Control what the agent may run or change.",
     mcp: "Manage connected tool servers.",
     hooks: "Manage actions that run at defined points in a turn.",
     tools: "Choose which tools are available to the agent.",
@@ -131,7 +126,6 @@ const paintSettingsNav = (tab: SettingsNav): void => {
     ["appearance", settingsNavAppearanceEl, settingsPaneAppearanceEl, "Appearance"],
     ["resources", settingsNavResourcesEl, settingsPaneResourcesEl, "Resources"],
     ["memory", settingsNavMemoryEl, settingsPaneMemoryEl, "Memory"],
-    ["permissions", settingsNavPermissionsEl, settingsPanePermissionsEl, "Permissions"],
     ["mcp", settingsNavMcpEl, settingsPaneMcpEl, "MCP servers"],
     ["hooks", settingsNavHooksEl, settingsPaneHooksEl, "Hooks"],
     ["tools", settingsNavToolsEl, settingsPaneToolsEl, "Tools"],
@@ -303,7 +297,7 @@ async function connectCopilot(button: HTMLButtonElement): Promise<void> {
     openModal($("#copilotSignIn"));
     const deadline = Date.now() + info.expiresIn * 1000;
     while (generation === copilotSignInGeneration && Date.now() < deadline) {
-      await new Promise<void>((resolve) => setTimeout(resolve, info.interval * 1000));
+      await new Promise<void>((resolve) => setTimeout(resolve, (info.interval > 0 ? info.interval : 5) * 1000));
       if (generation !== copilotSignInGeneration) return;
       if ((await api.pollCopilotSignIn()) === "connected") {
         if (generation !== copilotSignInGeneration) return;
@@ -473,8 +467,6 @@ export const openSettings = (tab: SettingsNav = "workspace"): void => {
   paintSettingsNav(tab);
   if (tab === "memory") {
     void loadMemory();
-  } else if (tab === "permissions") {
-    void loadPermissions(state.cwd);
   } else if (tab === "mcp") {
     void loadMcp();
   } else if (tab === "hooks") {
@@ -592,11 +584,6 @@ export function initSettings(reconnect: () => Promise<void>): void {
     if (input.name === "motion" && input.checked) {
       setMotionPref(input.value as MotionPref);
     }
-  });
-  initPermissionsPane();
-  settingsNavPermissionsEl.addEventListener("click", () => {
-    paintSettingsNav("permissions");
-    void loadPermissions(state.cwd);
   });
   initMcp(() => openSettings("mcp"));
   initToolSwitches(() => openSettings("tools"));

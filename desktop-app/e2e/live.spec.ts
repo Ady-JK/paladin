@@ -304,3 +304,27 @@ test("after a reload a running turn is re-attached and keeps streaming", async (
   });
   await expect(page.locator("#pauseBtn")).toBeHidden();
 });
+
+test("a session/refresh re-reads history without reopening the session or touching the draft", async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__opens = 0;
+    const base = w.__paladinBaseInvoke;
+    w.__paladinBaseInvoke = async (cmd: string, args: any) => {
+      if (cmd === "openSession") w.__opens++;
+      return base(cmd, args);
+    };
+  });
+  await showSidebar(page);
+  await page.click('[data-session="sess-a"]');
+  await expect(page.locator("#sessionLabel")).toHaveText("sess-a");
+  const opensBefore = await page.evaluate(() => (window as any).__opens);
+  await page.fill("#promptInput", "half-typed thought");
+  await page.evaluate(() =>
+    (window as any).__e2eHub.emit({ event: "session/refresh", sessionId: "sess-a", turnId: "" }),
+  );
+  await page.waitForTimeout(300);
+  await expect(page.locator("#promptInput")).toHaveValue("half-typed thought");
+  expect(await page.evaluate(() => (window as any).__opens)).toBe(opensBefore);
+});

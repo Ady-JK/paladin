@@ -233,32 +233,22 @@ test("a linked Codex conversation also refreshes while the window stays open", a
   await expect(page.locator("#messages")).toContainText("periodically synced answer", { timeout: 8000 });
 });
 
-test("Codex mode drops Paladin's own controls and offers only the permissions Codex accepts", async ({ page }) => {
+test("Codex mode drops Paladin's own controls and brings them back in a Paladin session", async ({ page }) => {
   await page.addInitScript(() => {
-    // An administrator-managed Codex that rules out full access.
     (window as any).__e2eCodex = {
       installed: true,
       loggedIn: true,
-      permissions: ["read-only"],
       models: [{ id: "gpt-5.6-luna", displayName: "GPT-5.6-Luna", efforts: ["low"], isDefault: true }],
     };
-    // The user had picked full access in a Paladin session.
-    localStorage.setItem("paladin.permissions.default", "full-access");
   });
   await page.reload();
   await expect(page.locator("#promptInput")).toBeVisible();
-  await expect(page.locator("#permChip")).toContainText("Full access");
 
   await showSidebar(page);
   await page.click("#newSessionBtn");
   await page.click("#sessionStartCodexBtn");
 
   await expect(page.locator("#promptInput")).toHaveAttribute("placeholder", /Ask Codex/);
-  await expect(page.locator("#permChip")).toContainText("Read-only");
-  await page.click("#permChip");
-  await expect(page.locator("#permMenu [data-preset]")).toHaveCount(1);
-  await expect(page.locator('#permMenu [data-preset="full-access"]')).toHaveCount(0);
-  await page.keyboard.press("Escape");
   for (const own of [".tools-wrap", ".mcp-chip", ".budget-wrap", ".context-control"]) {
     await expect(page.locator(own)).toBeHidden();
   }
@@ -266,14 +256,11 @@ test("Codex mode drops Paladin's own controls and offers only the permissions Co
   await page.fill("#promptInput", "hi");
   await page.click("#sendBtn");
   await expect(page.locator("#messages")).toContainText("Stub reply to: hi");
-  const submits = await page.evaluate(() => (window as any).__e2eSubmits);
-  expect(submits[0].permissions).toBe("read-only");
 
-  // Back in a Paladin session the saved choice and every control return.
+  // Back in a Paladin session every control returns.
   await showSidebar(page);
   await page.click("#newSessionBtn");
   await page.click("#sessionStartBtn");
-  await expect(page.locator("#permChip")).toContainText("Full access");
   await expect(page.locator("#promptInput")).toHaveAttribute("placeholder", /Ask paladin/);
 });
 

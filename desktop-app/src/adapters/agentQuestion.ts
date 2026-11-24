@@ -9,7 +9,6 @@ import * as api from "../core/api";
 import { state } from "../core/state";
 import { escapeHtml } from "../core/format";
 import type { ToolInfo } from "../core/types";
-import { currentPreset } from "../features/permissions";
 import { toast } from "../ui/toast";
 
 type Question = { question: string; options: string[]; multiple?: boolean };
@@ -231,7 +230,6 @@ async function send(card: HTMLElement, sessionId: string, callId: string): Promi
       provider: state.selectedProvider || null,
       model: state.selectedModel || null,
       mode: state.mode,
-      permissions: currentPreset(),
     });
     settled.set(key(sessionId, callId), answers);
     drafts.delete(key(sessionId, callId));

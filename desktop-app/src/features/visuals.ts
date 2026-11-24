@@ -108,7 +108,7 @@ function visualDocument(v: Visual, token: string, theme: "dark" | "light"): stri
     .join(" ");
   const bridge =
     `(function(){var t=${JSON.stringify(token)},g=0;function send(m){m.__paladinVisual=t;parent.postMessage(m,"*");}` +
-    `function gesture(){g=Date.now();}` +
+    `function gesture(e){if(e&&e.isTrusted)g=Date.now();}` +
     `addEventListener("pointerdown",gesture,true);addEventListener("keydown",gesture,true);` +
     `window.paladin=Object.freeze({sendPrompt:function(text){send({type:"prompt",text:String(text).slice(0,${MAX_PROMPT}),gesture:g});},theme:${JSON.stringify(theme)}});` +
     `function size(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);send({type:"size",height:h});}` +

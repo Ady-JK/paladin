@@ -36,9 +36,6 @@ import type {
   MCPOverview,
   MCPScope,
   ToolsOverview,
-  PermissionPreset,
-  PermissionRule,
-  PermissionsView,
   CommandEntry,
   MemoryConfigView,
   MemoryProject,
@@ -78,10 +75,6 @@ function invoke<T>(method: string, args: unknown = {}): Promise<T> {
   }
 }
 
-export type TerminalResult = { output: string; exitCode: number; truncated: boolean };
-export function terminalRun(cwd: string, command: string): Promise<TerminalResult> {
-  return invoke("terminalRun", { cwd, command });
-}
 export function terminalStart(sessionId: string, cwd: string, cols: number, rows: number): Promise<string> {
   return invoke("terminalStart", { sessionId, cwd, cols, rows });
 }
@@ -479,7 +472,6 @@ export type SubmitArgs = {
   command?: string | null;
   mode?: "build" | "plan";
   compact?: boolean;
-  permissions?: PermissionPreset;
   attachmentIds?: string[];
   taggedPaths?: string[];
 };
@@ -588,17 +580,15 @@ export function answerApproval(sessionId: string, callId: string, decision: Appr
   return invoke<boolean>("answerApproval", { sessionId, callId, decision });
 }
 
-export function permissionsGet(cwd: string | null, sessionId?: string | null): Promise<PermissionsView> {
-  return invoke<PermissionsView>("permissionsGet", { cwd, sessionId: sessionId ?? null });
+// Claude Code is driven by the Go sidecar, not a renderer SDK.
+export function claudeStatus(deep = false): Promise<CodexStatus> {
+  return invoke<CodexStatus>("claudeStatus", { deep });
 }
-
-// permissionsSet replaces the global or one folder's saved rules.
-export function permissionsSet(
-  scope: "global" | "folder",
-  cwd: string | null,
-  rules: PermissionRule[],
-): Promise<PermissionsView> {
-  return invoke<PermissionsView>("permissionsSet", { scope, cwd, rules });
+export function claudeCommands(cwd: string): Promise<{ name: string; description: string; argumentHint?: string }[]> {
+  return invoke<{ name: string; description: string; argumentHint?: string }[]>("claudeCommands", { cwd });
+}
+export function startClaudeDiscovery(): Promise<boolean> {
+  return invoke<boolean>("startClaudeDiscovery", {});
 }
 
 // ---- MCP servers ----
@@ -672,7 +662,6 @@ export type AnswerQuestionArgs = {
   provider: string | null;
   model: string | null;
   mode?: "build" | "plan";
-  permissions?: PermissionPreset;
 };
 
 // answerQuestion sends the answers: the core writes them in the agent's own reply

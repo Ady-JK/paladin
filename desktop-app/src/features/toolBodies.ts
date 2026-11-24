@@ -3,7 +3,7 @@
 // checklist for todo, Q&A for ask and key/value tables for anything
 // else. Raw JSON never reaches the screen.
 
-import { escapeHtml } from "../core/format";
+import { escapeHtml, tryParseJson } from "../core/format";
 import type { ToolInfo } from "../core/types";
 import { state } from "../core/state";
 
@@ -28,6 +28,10 @@ function capText(text: string): string {
 function parse(raw: string): unknown {
   if (!raw) {
     return null;
+  }
+  const object = tryParseJson(raw); // remembered for the big ones
+  if (object) {
+    return object;
   }
   try {
     const value: unknown = JSON.parse(raw);
@@ -438,6 +442,23 @@ function webHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null)
   return `${html}</div></div>`;
 }
 
+// taskHtml renders a Claude Code background task: its command once, then what
+// it printed. The ids Claude tracks it by are not for people.
+function taskHtml(tool: ToolInfo, args: Obj, result: unknown, err: string | null): string {
+  const command = str(args.description);
+  let html = `<div data-body="task" class="task-view">`;
+  if (command) {
+    html += `<pre class="task-cmd"><span class="approval-prompt" aria-hidden="true">$</span>${escapeHtml(capText(command))}</pre>`;
+  }
+  if (err) return `${html}${errBlock(err)}</div>`;
+  if (tool.status === "running") return `${html}<div class="tb-muted">running…</div></div>`;
+  const output = isObj(result) ? trimEnd(str(result.output)) : "";
+  html += output
+    ? `<pre class="kv-text task-out">${escapeHtml(capText(output))}</pre>`
+    : `<div class="tb-muted">no output</div>`;
+  return `${html}</div>`;
+}
+
 // toolBodyHtml renders a call's body. Write and edit keep their own rich
 // file views (passed in); everything else is handled here.
 export function toolBodyHtml(tool: ToolInfo, rich: string | null = null): string {
@@ -463,6 +484,8 @@ export function toolBodyHtml(tool: ToolInfo, rich: string | null = null): string
       return askHtml(tool, args, result, err);
     case "web_fetch":
       return webHtml(tool, args, result, err);
+    case "claude_task":
+      return taskHtml(tool, args, result, err);
     default:
       return genericHtml(tool, rawArgs, result, err);
   }

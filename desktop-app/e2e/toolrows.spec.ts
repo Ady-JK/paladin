@@ -2,6 +2,7 @@
 // line per call ("Ran `pytest -q`", "Read src/conf.py"), consecutive
 // calls folded into one summarized group ("Ran 2 commands"), live
 // running/failed states, and the same layout for persisted history.
+import { openWork } from "./work";
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
@@ -280,6 +281,7 @@ test("history transcripts group calls the same way", async ({ page }) => {
   await showSidebar(page);
   await page.click('[data-session="sess-hist"]');
   await expect(page.locator("#messages")).toContainText("All good.");
+  await openWork(page);
   await expect(runs(page)).toHaveCount(2);
   await expect(runs(page).nth(0).locator(".tool-run-head")).toHaveText(/Read 3 files/);
   await expect(runs(page).nth(1).locator(".tool-run-head")).toHaveText("Ran 1 command");

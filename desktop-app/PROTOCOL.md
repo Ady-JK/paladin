@@ -40,7 +40,6 @@ separate setup command, not a JSONL method.
 | `terminalWrite` | `{sessionId,terminalId,data}` | `bool`: sends UTF-8 or control characters to that PTY |
 | `terminalResize` | `{sessionId,terminalId,cols,rows}` | `bool`: resizes that PTY |
 | `terminalClose` | `{sessionId,terminalId}` | `bool`: stops that PTY |
-| `terminalRun` | `{cwd,command}` | `{output,exitCode,truncated}`: runs a user-entered `!` or `!!` command with the user account permissions in the workspace, with a 10-minute limit and 1 MiB output cap. It never writes a transcript entry by itself |
 | `listProviders` | `{}` | `ProviderInfo[]` (`name,apiType,apiUrl,model,models,default,hasKey,meta?`); `meta` is each listed model's catalog metadata, published by providers that describe their models (OpenCode Go and GitHub Copilot): `contextWindow,maxInput,maxOutput,protocol,thinkingLevels,thinkingKnown,supportsImages,imagesKnown,priceInput,priceOutput,priceCacheRead,priceCacheWrite`, with prices in USD per 1M tokens. `supportsImages`/`imagesKnown` say whether the model accepts image inputs (`imagesKnown` makes it authoritative; a model the listing did not describe stays permissive). Optional `pricing` has `source`, `fetchedAt` (Unix seconds), and `tiers[]` with `aboveInputTokens`, `input`, `output`, `cacheRead`, and `cacheWrite`; omitted rates are unknown. Copilot prices are published estimates, not account charges, and retained prices retain their original timestamp. Models the listing said nothing about are absent |
 | `copilotSignInStart` | `{}` | Starts GitHub device sign-in and returns `{userCode,interval,expiresIn}`; the device secret stays in the sidecar |
 | `copilotSignInPoll` | `{}` | Polls the pending GitHub sign-in; returns `pending` or `connected` and stores the token in the key store |
@@ -55,12 +54,16 @@ separate setup command, not a JSONL method.
 | `fsHome` | `{}` | `string` |
 | `fsList` | `{path?}` | `FsList` |
 | `fileComplete` | `{query,cwd?,limit?}` | `FileEntry[]` (`path` chat path, `resolvedPath` OS-absolute path to insert, `outside`, `isDir`; gitignored paths never suggested; `../` completes from the workspace parent) |
+| `claudeStatus` | `{deep?}` | `{installed,version?,loggedIn,account?,models:[{id,displayName,description?,efforts[],isDefault}],permissions[],error?}`. Without `deep`, checks installation only; `deep:true` reads CLI auth status and initializes a no-inference process to query Claude's actual model catalog. The deep result is cached: once read it answers at once, and a result older than a minute is refreshed in the background. |
+| `claudeCommands` | `{cwd}` | `[{name,description,argumentHint?}]`: Claude Code's built-in and workspace commands/skills for slash completion. No model turn is started. The list is cached per folder and refreshed in the background, so only the first call for a folder launches the CLI. |
+| `importClaudeSession` | `{threadId,cwd?}` | `Session`: links an existing Claude Code UUID, imports its transcript, and resumes it on the next message. `cwd` is a fallback for a missing original folder. |
+| `startClaudeDiscovery` | `{}` | `true` immediately: starts a single background indexer for local Claude project transcripts. Saved sessions appear in the sidebar without inference; deleted links remain hidden. |
 | `codexStatus` | `{deep?}` | `{installed,version?,loggedIn,account?,models:[{id,displayName,description?,defaultEffort?,efforts[],isDefault}],permissions[],error?}`: whether the OpenAI Codex CLI can run Codex sessions (see Codex sessions). Without `deep` only checks that the CLI is installed (no process starts); `deep:true` starts `codex app-server`, reads the account and lists the visible models |
 | `codexThreads` | `{cwd?,search?,cursor?}` | `{threads:[{id,title,preview,cwd,model?,source?,updatedAt,sessionId?}],next?}`: the threads Codex has saved from any client (its CLI, editor extension, another app), most recently updated first. `cwd` keeps one folder's, `search` filters by title, `next` is the cursor of the next page. `sessionId` names the Paladin session that already holds the thread |
 | `deleteCodexThread` | `{threadId}` | Deletes the saved Codex thread; threads linked to a Paladin session are refused. |
 | `importCodexThread` | `{threadId,cwd?}` | `Session`: opens a saved Codex thread as a Codex session. Its history is brought in (messages, commands and file changes as the usual cards) and the next message continues the very thread. A thread already imported opens its session. `cwd` is the folder to use when the thread's own is gone. A thread open in another Codex window cannot be resumed until it is closed there |
 | `codexSkills` | `{cwd}` | `[{name,title?,description?,scope?}]`: the enabled skills Codex has for the folder (the user's, the repo's and Codex's own), for the composer's `$` menu. A message that names one as `$name` goes to Codex as typed, with the skill attached as Codex's structured skill item |
-| `openSession` | `{sessionId?,cwd?,worktree?,name?,harness?,model?}` | `Session` (`sessionId,cwd,provider,model,harness?,revert?,worktree?,subagent?`; `harness:"codex"` on a new session makes Codex run its turns, with `model` a Codex model id (see Codex sessions); `subagent` is set for a subagent session, with its live `status`, see Subagents); `worktree:true` creates the session in a new git worktree of `cwd`'s repo on branch `paladin/<name>` (see Undo and worktrees) |
+| `openSession` | `{sessionId?,cwd?,worktree?,name?,harness?,model?}` | `Session` (`sessionId,cwd,provider,model,harness?,revert?,worktree?,subagent?`; `harness:"codex"` on a new session makes Codex run its turns, with `model` a Codex model id (see Codex sessions); `subagent` is set for a subagent session, with its live `status`, see Subagents); opening an existing linked session answers from the history on disk at once: what an external client (Codex, Claude Code) wrote since is read afterwards, and a change is announced with `session/refresh`; `worktree:true` creates the session in a new git worktree of `cwd`'s repo on branch `paladin/<name>` (see Undo and worktrees) |
 | `listSessions` | `{cwd?,limit?}` | `SessionInfo[]` (with `harness?` on a Codex session), newest first; only the `limit` newest sessions' transcripts are read. A session that cannot be read is still listed with `damaged` (the reason) so it can be deleted; its `cwd` may be empty (see Transcript format) |
 | `sessionHistory` | `{sessionId,cwd?}` | `HistoryMessage[]` (the whole transcript; the renderer paints a page instead) |
 | `sessionHistoryPage` | `{sessionId,cwd?,limit?,before?}` | `HistoryPage` (`messages`, `start`, `hasMore`, `total`); `before` is the row ordinal to end at (`0` = newest), so appending a turn never shifts an older page. `limit` defaults to 120. The renderer uses this for the initial paint and for "load earlier" |
@@ -113,8 +116,8 @@ separate setup command, not a JSONL method.
 | `answerQuestion` | submitChat's params without `message`, plus `{callId,answers:[{question,answer,selected?}]}` | `TurnInfo`. Answers an `agent_question` card, a question an agent (Codex) asked without stopping its work. The core writes the reply in the agent's own format (for Codex a `<send_user_message_question_reply>` message naming each question) and sends it as the user's message: into the running turn when there is one (a steer), otherwise as a new turn. The row it leaves shows the short form (`> question` then the answer). |
 | `cancelAsk` | `{sessionId,callId}` | `bool` |
 | `answerApproval` | `{sessionId,callId,decision}` | `bool`; `decision` is `once`, `session`, `folder`, `global` or `deny` (must be one of the card's `choices`); unknown calls fail |
-| `permissionsGet` | `{cwd?,sessionId?}` | `{global: Rule[], folder: Rule[], session: Rule[], folders: [{cwd,rules}], presets}`; presets are `read-only` and `full-access` |
-| `permissionsSet` | `{scope,cwd?,rules}` | same view; `scope` is `global` or `folder` (session rules come only from approvals). `Rule` is `{tool: shell\|write\|read\|mcp\|web\|project, pattern, action: allow\|deny}`: shell patterns are word prefixes (`npm test`), write and read patterns absolute directories (an allow-write rule also allows reading there), mcp patterns `server`, `server/*` or `server/tool`, web patterns a domain (`example.com`, covering its subdomains); `*` matches all |
+| `permissionsGet` | `{cwd?,sessionId?}` | `{global,folder,session,folders,presets}`; the lists are always empty (there are no rules any more) and `presets` is `["full-access"]` |
+| `permissionsSet` | `{scope?,cwd?,rules?}` | same view; kept for older clients, it saves nothing |
 | `mcpList` | `{cwd?}` | `MCPOverview`: `{servers: ServerStatus[], globalPath, folderPath?, hasFolderConfig, trusted, errors?: {global?, folder?}}` — global servers plus `cwd`'s own (see MCP servers) |
 | `mcpConfig` | `{scope,cwd?}` | `{path, text, exists}`: one `mcp.json` for editing (`scope` `global` or `folder`; a missing file returns a starter `text`) |
 | `mcpSetConfig` | `{scope,cwd?,text}` | `MCPOverview`; validates, writes and applies the file. A folder file saved here is trusted |
@@ -143,7 +146,7 @@ separate setup command, not a JSONL method.
 | `customReset` | `{id}` | `CustomState`; deletes the override so the default applies (for `settings.json`: every setting returns to its default) |
 | `skillEnabledSet` | `{name,enabled}` | `true`; turns a skill on or off by name (`settings.json` `disabledSkills`), whatever its source |
 | `toolsAccept` | `{cwd?,sessionId,names?}` | `ToolsOverview`; the session uses these pending tools (all when `names` is empty) from its next turn |
-| `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?,attachmentIds?,taggedPaths?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is `read-only` (default) or `full-access`; legacy `auto` migrates to `read-only` (see Approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
+| `submitChat` | `{sessionId?,message,cwd,provider?,model?,systemPrompt?,resume?,skill?,display?,command?,mode?,compact?,permissions?,attachmentIds?,taggedPaths?}` | `TurnInfo` at once (`state` `running` or `queued`); progress arrives as events (below). `permissions` is ignored: every turn runs with full access (the older `read-only`, `auto` and `full-access` values are still accepted; see Tool permissions and approvals); `command` runs a prompt command with `message` as its arguments; `mode` is `build` (default) or `plan` (read-only tools); `compact:true` runs a manual compaction instead of a model turn (no message needed) |
 | `steerChat` | `{sessionId,message,display?}` | `TurnInfo` of the running turn; fails when the session has nothing running (submit instead). The message joins that turn before its next model call (see Steering) |
 | `turns` | `{}` | `TurnInfo[]`: every running and queued turn, all sessions |
 | `resources` | `{}` | `{at, supported, self:{cpu,rss,procs}, sessions:{[id]:{cpu,rss,procs}}}`: the core process plus each session's running shell process trees (one `ps` sample, cached 1.5s; `cpu` is % of one core, `rss` bytes). `supported:false` off unix |
@@ -183,9 +186,8 @@ questions (`request_user_input`) arrive as an `ask` card answered with
 Newer Codex asks questions without stopping its work (`request_user_input_async`): an agent message with `delivery:"async"` and `questions`, which does not end the turn. Paladin shows it as an `agent_question` card, a `chat/tool` with `arguments` `{questions:[{question,options?}]}` and result `{status:"pending"}` (never as message text), and the user answers whenever they like with `answerQuestion`. The answer is an ordinary user message in Codex's reply envelope (`<send_user_message_question_reply>` around a JSON array of `{answer,question,questionItemId}`, the id being `["request_user_input_async","<card id>",<index>]`), steered into the running turn or sent as a new one. A card reads `{status:"answered",answers:[{question,answer}]}` once a later user message names it: the core works that out from the conversation each time the history is read (`attach`, `sessionHistory`), so it holds across turns, restarts and imported threads, and a reply row carries the short form as `display`.
 A command Codex runs in a background terminal outlives its turn: its `shell` card closes with result `{status:"running",output}` and `background:true` in its arguments instead of failing, and Codex's own `item/completed` for it, which arrives after the turn ended, with the old turn's id, rewrites the stored row with the real outcome (`exit_code`, `output`) and publishes `{"event":"session/refresh","sessionId":"..."}` (no turn), on which a client that shows the session re-attaches it. Opening a Codex session also repairs, from Codex's own record, rows an older version closed as `unknown` or `interrupted`, and a running row Paladin can no longer follow reads `unknown`.
 Every turn asks Codex for reasoning summaries (`summary`: the style set in Codex's own config, else `auto`), which is what makes its thinking stream as `chat/reasoning`.
-`permissions` maps to Codex's policy: `read-only` (including legacy
-`auto` selections) is read-only, and
-`full-access` is no sandbox and no questions. Codex rejects settings its
+`permissions` is ignored: Codex always runs with `full-access`, which is no
+sandbox and no questions. Codex rejects settings its
 managed requirements forbid, so the core reads them (`configRequirements/read`)
 and asks for the closest allowed preset, never a looser one (full access
 may use Codex workspace-write where an administrator rules it out); `codexStatus.permissions`
@@ -276,8 +278,8 @@ Code. `transcript_path` is the session's `messages.jsonl` (see
 Transcript format below). Exit 2 blocks (stderr is the reason) for events that can block;
 stdout JSON may set `continue: false`, `systemMessage`,
 `decision: "block"` + `reason`, or `hookSpecificOutput` with
-`additionalContext`, `permissionDecision` (`allow` skips the approval
-prompt but never read-only restrictions or deny rules; `ask` forces one; `deny`
+`additionalContext`, `permissionDecision` (`allow` skips the guard's
+question; `ask` forces one; `deny`
 refuses) and `updatedInput`. A blocking `Stop` hook continues the turn
 with its reason (at most 8 times per turn). Folder files only run once
 trusted; every run emits `chat/hook`.
@@ -300,7 +302,9 @@ persisted?, reply?, stopped?, cancelled?, awaitingApproval?, error?,
 queuedAt, startedAt?, endedAt?, stats?, index?}`. `index` is the
 transcript position of the turn's user row (absent on a resume turn), so
 the renderer can attach the turn's change card once it ends. `stats` is the turn's cost,
-`{durationMs, tokens, genMs}`: `tokens` counts generated (completion)
+`{durationMs, tokens, genMs, incomplete?}`: `incomplete: true` marks a stopped or
+failed turn, whose working stays expanded in the UI. Older turns omit it.
+`tokens` counts generated (completion)
 tokens and therefore includes reasoning, `durationMs` is the whole turn's
 wall time (tool runs, approvals and retries included), and `genMs` is the
 part of it spent inside the model calls themselves, so `tokens / genMs`
@@ -476,48 +480,44 @@ with ", ").
 ### Tool permissions and approvals
 
 Paladin does not install an OS sandbox around native tools, shell jobs or
-formatters. Approved processes run with the user's ordinary account privileges.
-Browser and Electron isolation are separate and remain enabled.
+formatters. Agents run with full freedom and the user's ordinary account
+privileges; browser and Electron isolation are separate and remain enabled.
+There are no session modes and no saved rules. The older `permissions` values
+(`read-only`, `auto`, `full-access`) are accepted on the wire and mean the same.
 
-Selectable session presets:
+One safety net remains, the guard in `core/internal/permission/`. It reads each
+native shell command (quotes, pipes, `sudo`, `bash -c` and `$(...)` unwrapped) and
+each file tool path, and asks the user once before:
 
-- `read-only` (default): reads and inspection-only shell commands are permitted.
-  File writes/edits, non-inspection shell commands, browser actions, visual
-  generation and MCP tools are refused. Saved allow rules and
-  hook `allow` verdicts cannot bypass these refusals. Switch to Full Access to
-  perform those actions. Project-supplied executables are not trusted in this mode.
-- `full-access`: tools execute without permission prompts, subject to explicit
-  deny rules and hooks that request confirmation. Shell processes can write
-  anywhere the user's account can write; there is no workspace or cache boundary.
+- wipe-style deletes: `rm -rf` on `/`, the home folder or a parent of it, a system
+  folder, a top-level folder of the home folder, or the workspace itself or its
+  parent; `find -delete` there; `dd`/`mkfs`/`diskutil erase` on disks; fork bombs;
+  recursive `chmod`/`chown` on those places;
+- exposing ports: tunnels (ngrok, cloudflared), `ssh -R`, listeners on all
+  interfaces (`0.0.0.0`, `nc -l`, `python -m http.server`), published container
+  ports, firewall changes;
+- credential theft or startup persistence: SSH, cloud, kube, keychain and similar
+  files, environment variables sent to the network, downloads piped into a
+  shell, edits to shell startup files, cron and launchd.
 
-Legacy `auto` selections migrate to `read-only`, both on the wire and in saved
-renderer preferences. Plan/Build is a separate task mode; plan mode continues
-filtering tools and restricting shell commands.
-
-Rules are checked per session, folder (`permissions/folders/<key>.json`) and
-globally (`permissions/global.json`). Explicit deny rules win. Native Read-Only
-is application-level enforcement, not a guarantee that a permitted executable
-has no side effects. A rule on a built-in file tool does not confine shell code.
-
-Reads outside the workspace and web visits can ask for approval in Read-Only.
-Recognized safe operations run, and calls needing approval offer once, session,
-folder, global (where appropriate), or deny. Full Access does not implicitly
-trust arbitrary calls. Pending approvals are persisted and
-replayed at their latest state by `attach`.
+A card offers only `once` or `deny`; nothing is remembered. A PreToolUse hook's
+`allow` skips the question and `ask` forces one. Plan mode (a task mode, not a
+permission mode) still refuses edits and non-inspection commands and asks for every
+MCP call. Pending approvals are persisted and replayed at their latest state by
+`attach`.
 
 ```json
-{"event":"chat/approval","sessionId":"...","approval":{"id":"c1","tool":"read","kind":"read","path":"/opt/app/example.txt","reasons":["outside the workspace"],"choices":["once","session","folder","global","deny"],"remember":[{"tool":"read","pattern":"/opt/app","action":"allow"}],"state":"pending"}}
+{"event":"chat/approval","sessionId":"...","approval":{"id":"c1","tool":"shell","kind":"shell","command":"rm -rf ~","reasons":["would delete a very broad or protected location"],"destructive":true,"choices":["once","deny"],"state":"pending"}}
 ```
 
 The turn waits for `answerApproval`; the card then becomes approved or denied
-(`decision: "interrupted"` if stopped). Standing approvals save the displayed
-rules only. They do not grant OS-level directory access or rerun failed commands.
-There are no sandbox status fields, sandbox-block markers or local escalation
-cards. External Codex permissions requests use `kind: "permissions"` and retain
-Codex's own approval semantics.
+(`decision: "interrupted"` if stopped). The guard is a seatbelt, not a sandbox: it
+reads commands the way a person would and can be evaded by obfuscation. There are
+no sandbox status fields or local escalation cards. External Codex permissions
+requests use `kind: "permissions"` and retain Codex's own approval semantics.
 
-**External Codex sessions.** Codex owns its execution policy. Read-Only maps to
-Codex's read-only policy; Full Access requests its unrestricted policy where
+**External Codex sessions.** Codex owns its execution policy and always runs with
+its unrestricted policy where
 managed requirements permit it. Removing Paladin's sandbox does not disable
 Codex's or an administrator's enforcement.
 
@@ -724,7 +724,9 @@ with the previous `start` loads older rows. `sessionImages` returns
 just the image rows, which is what a finished turn needs to mount a
 screenshot without downloading the transcript.
 
-`sessionHistory` rows carry `stats` (`{durationMs, tokens, genMs}`, optional) on
+`sessionHistory` rows set `incomplete: true` throughout a stopped/failed persisted
+turn (including pre-steer rows on older pages), so partial work stays expanded.
+Rows carry `stats` (`{durationMs, tokens, genMs, incomplete?}`, optional) on
 the row that ends a turn — its last row, which is what survives paging:
 a page of the newest rows begins mid-turn, so the turn's first row is
 often not in it. A user row also carries `index`, its transcript
@@ -862,8 +864,7 @@ skipped.
   `id -> {resolve, reject}`; unary `agent:invoke` resolves on the
   matching `{id}` line, whatever order replies arrive in.
 - Every call has a deadline: 30s for reads (the dispatcher's read
-  methods), 10 min for `sideQuestion` and `refreshProviders`, 11 min for
-  `terminalRun` (the host stops it at 10 min), and 120s for
+  methods), 10 min for `sideQuestion` and `refreshProviders`, and 120s for
   everything else. A timed-out mutation rejects with `agent-host did not
   answer <method> within <n>s; it may still have completed, ...`. The
   bridge never retries a call; a late reply is dropped.

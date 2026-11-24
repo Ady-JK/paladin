@@ -10,6 +10,8 @@ export const CODEX = "codex";
 
 // CODEX_MODEL_KEY remembers the Codex model the user chose last.
 export const CODEX_MODEL_KEY = "paladin.codexModel";
+export const CLAUDE = "claude";
+export const CLAUDE_MODEL_KEY = "paladin.claudeModel";
 
 let built: { from: CodexStatus; provider: ProviderInfo } | null = null;
 
@@ -36,6 +38,20 @@ export function codexProvider(): ProviderInfo {
 // activeProviders are the providers the picker may choose from right now.
 const noProviders: ProviderInfo[] = [];
 export function activeProviders(): ProviderInfo[] {
+  if (state.harness === CLAUDE) {
+    if (!state.claude) return noProviders;
+    return [
+      {
+        name: CLAUDE,
+        apiType: CLAUDE,
+        apiUrl: "",
+        model: state.selectedModel,
+        models: state.claude.models.map((m) => m.id),
+        default: true,
+        hasKey: state.claude.loggedIn,
+      },
+    ];
+  }
   if (state.harness !== CODEX) return state.providers;
   if (!state.codex) return noProviders;
   return [codexProvider()];

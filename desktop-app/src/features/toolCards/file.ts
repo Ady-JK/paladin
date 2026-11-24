@@ -4,6 +4,11 @@ import { escapeHtml, ordinal, splitLines, tryParseJson } from "../../core/format
 import type { DiffRow, MatchSpan, ToolInfo } from "../../core/types";
 import type { LineDiffer } from "./lineDiff";
 
+// A write or edit can carry a whole file: only the top of it is drawn, the
+// way other tool bodies are capped.
+const MAX_FILE_LINES = 400;
+const MAX_DIFF_SPANS = 20;
+
 // errorsChip names the language server errors a write or edit got.
 function errorsChip(result: Record<string, unknown> | null): string {
   const n = result && typeof result.errors === "number" ? result.errors : 0;
@@ -158,8 +163,12 @@ export function richWriteHtml(tool: ToolInfo): string | null {
     chips.push("writing…");
   }
   const content = args.content;
+  const lines = content ? splitLines(content) : [];
   const body = content
-    ? fileLinesHtml(splitLines(content))
+    ? fileLinesHtml(lines.slice(0, MAX_FILE_LINES)) +
+      (lines.length > MAX_FILE_LINES
+        ? `<div class="px-2 py-1 text-slate-400">… ${lines.length - MAX_FILE_LINES} more lines in the file</div>`
+        : "")
     : '<div class="px-2 py-1 text-slate-400">(empty file)</div>';
   return (
     `<div data-fileview="write" class="overflow-hidden rounded-md border border-slate-200/70 dark:border-slate-700/70">` +
@@ -285,15 +294,18 @@ export function richEditHtml(tool: ToolInfo, lineDiff: LineDiffer): string | nul
   }
   const spans = matchSpans(result);
   const base = lineDiff(splitLines(oldText), splitLines(newText));
-  const sections = spans
-    .map((span) => {
-      const label =
-        spans.length > 1
-          ? `<div class="px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">lines ${span.start}–${span.end}</div>`
-          : "";
-      return label + sideBySideDiffHtml(offsetDiffRows(base, span.start - 1));
-    })
-    .join("");
+  const hidden = Math.max(0, spans.length - MAX_DIFF_SPANS);
+  const sections =
+    spans
+      .slice(0, MAX_DIFF_SPANS)
+      .map((span) => {
+        const label =
+          spans.length > 1
+            ? `<div class="px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">lines ${span.start}–${span.end}</div>`
+            : "";
+        return label + sideBySideDiffHtml(offsetDiffRows(base, span.start - 1));
+      })
+      .join("") + (hidden > 0 ? `<div class="px-2 py-1 text-slate-400">… ${hidden} more matches not shown</div>` : "");
   return (
     `<div data-filediff="edit" class="overflow-hidden rounded-md border border-slate-200/70 dark:border-slate-700/70">` +
     `<div class="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white px-2 py-1.5 dark:border-slate-700/70 dark:bg-slate-900/60">` +

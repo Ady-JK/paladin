@@ -6,7 +6,7 @@
    setting always goes through the card it opens. */
 .think-inline {
   position: relative;
-  padding: 6px 12px 0;
+  padding: 0;
 }
 .think-inline.hidden {
   display: none;
@@ -18,11 +18,9 @@
   min-width: 0;
   border-radius: 9999px;
   border: 1px solid transparent;
-  padding: 2px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-slate-400);
   transition:
     background-color 120ms ease,
@@ -62,8 +60,8 @@
   background: none;
 }
 .think-inline .think-card {
-  bottom: calc(100% + 6px);
-  left: 8px;
+  bottom: calc(100% + 10px);
+  left: 0;
 }
 
 .think-wrap {
@@ -502,4 +500,10 @@ html[data-think-level="max"] .think-block[data-state="streaming"] .think-title {
   .think-fill {
     transition: none;
   }
+}
+
+/* In the toolbar beside the model the toggle is a quiet word: the brain icon
+   stays only as the level's colour cue, so it carries no extra width. */
+.think-inline .think-toggle-icon {
+  display: none;
 }

@@ -332,30 +332,6 @@
           id="titleBar"
           class="flex select-none items-center justify-between border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-900"
         >
-          <div id="headerMetrics" aria-label="Session readings">
-            <div
-              class="hidden items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300"
-            >
-              <span data-icon="code-branch" class="text-slate-400"></span>
-              <span id="sessionLabel">—</span>
-            </div>
-            <button
-              id="usagePill"
-              class="hidden cursor-pointer items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 hover:bg-slate-200 sm:flex dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700/60"
-              title="No usage yet"
-            >
-              <span data-icon="microchip" class="text-accent-500"></span>
-              <span id="usageLabel">—</span>
-            </button>
-            <button
-              id="resPill"
-              class="res-pill hidden cursor-pointer items-center gap-1.5 rounded border border-slate-200 bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600 hover:bg-slate-200 dark:border-slate-700/60 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700/60"
-              title="This session's processes"
-            >
-              <span data-icon="rl-pulse" class="res-pill-ico"></span>
-              <span id="resPillLabel">idle</span>
-            </button>
-          </div>
           <div id="paneActions" class="pane-actions" aria-label="Agent pane actions">
             <button
               id="paneNewChatBtn"
@@ -454,18 +430,32 @@
                 <button id="recoverLatestBtn" type="button">Recover before undo</button>
               </div>
               <!-- The conversation -->
-              <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
-                <div id="messages" class="w-full"></div>
+              <div class="chat-stage relative flex min-h-0 flex-1 flex-col">
+                <div id="chatView" class="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 md:p-6">
+                  <div id="messages" class="w-full"></div>
+                </div>
+                <!-- Shown over the conversation while another chat is being read in. -->
+                <div id="chatLoading" class="chat-loading" role="status" aria-live="polite" hidden>
+                  <span class="live-spinner chat-loading-spin" aria-hidden="true"></span>
+                  <span id="chatLoadingText" class="chat-loading-text">Opening chat…</span>
+                </div>
               </div>
 
               <!-- The composer -->
               <footer class="border-0 bg-transparent px-4 pb-4 pt-2 md:px-6">
                 <div class="composer-stack w-full">
+                  <button id="jumpLatestBtn" class="jump-latest" type="button" hidden>
+                    <span aria-hidden="true">↓</span> Jump to latest
+                  </button>
                   <button id="liveChanges" class="live-changes" type="button" hidden></button>
+                  <div id="startPill" class="start-pill" role="status" aria-live="polite" hidden>
+                    <span class="live-spinner start-spin" aria-hidden="true"></span>
+                    <span id="startPillText" class="start-pill-text"></span>
+                    <span id="startPillWhere" class="start-pill-where"></span>
+                  </div>
                   <div class="composer-float relative rounded-3xl">
                     <div id="skillChipSlot" class="px-4 pt-2"></div>
                     <div class="thinking-row">
-                      <div id="thinkingSlot" class="thinking-slot"></div>
                       <div id="contextBoxSlot" class="context-box-slot"></div>
                     </div>
                     <div id="voiceStatus" class="voice-status" hidden>
@@ -479,8 +469,7 @@
                     <div id="tagCards" class="tag-cards" aria-label="Tagged files"></div>
                     <textarea
                       id="promptInput"
-                      title="! runs a workspace command and shares its output with the agent. !! runs it without starting a turn."
-                      rows="3"
+                      rows="1"
                       placeholder="Ask paladin to build, fix or explain… (@ to tag files, / for commands)"
                       class="max-h-[35vh] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none dark:text-slate-100 dark:placeholder-slate-500"
                       spellcheck="false"
@@ -500,10 +489,11 @@
                           class="flex min-w-0 max-w-64 items-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-600 dark:hover:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
                           title="Pick the provider and the model"
                         >
-                          <span id="modelSelectProvider" class="truncate"></span><span aria-hidden="true"> / </span>
+                          <span id="modelSelectProvider" class="sr-only"></span>
                           <span id="modelSelectLabel" class="truncate">—</span>
                           <span data-icon="chevron-down" class="flex-shrink-0"></span>
                         </button>
+                        <div id="thinkingSlot" class="thinking-slot"></div>
                         <div class="context-control relative shrink-0">
                           <button
                             id="contextButton"
@@ -585,6 +575,20 @@
                         </div>
                       </div>
                       <div class="ml-auto flex flex-shrink-0 items-center gap-2">
+                        <span id="sessionLabel" class="sr-only">—</span>
+                        <button
+                          id="usagePill"
+                          type="button"
+                          class="usage-donut hidden"
+                          title="No usage yet"
+                          aria-label="Context and usage"
+                        >
+                          <svg class="usage-ring" viewBox="0 0 20 20" aria-hidden="true">
+                            <circle class="usage-ring-track" cx="10" cy="10" r="7.5" />
+                            <circle class="usage-ring-fill" cx="10" cy="10" r="7.5" />
+                          </svg>
+                          <span id="usageLabel" class="sr-only">—</span>
+                        </button>
                         <div class="voice-control relative flex flex-shrink-0 items-center">
                           <button
                             id="voiceBtn"
@@ -688,7 +692,7 @@
                 <button type="button" class="pane-picker-row" data-pane-pick="browser">
                   <span class="pane-picker-ico" data-icon="globe"></span>
                   <span class="pane-picker-text"
-                    ><strong>Browser</strong><small>a page, with its own tab strip</small></span
+                    ><strong>Browser</strong><small>your browser: saved sites and sign-ins</small></span
                   >
                 </button>
                 <button type="button" class="pane-picker-row" data-pane-pick="changes">
@@ -824,14 +828,6 @@
           >
             <span data-icon="sl-memory"></span>
             <span>Memory</span>
-          </button>
-          <button
-            id="settingsNavPermissions"
-            role="tab"
-            class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-medium"
-          >
-            <span data-icon="sl-shield"></span>
-            <span>Permissions</span>
           </button>
           <button
             id="settingsNavMcp"
@@ -1150,10 +1146,6 @@
               <div id="memoryBody" class="text-xs"></div>
             </div>
 
-            <div id="settingsPanePermissions" class="hidden">
-              <div id="permBody" class="text-xs"></div>
-            </div>
-
             <div id="settingsPaneMcp" class="hidden">
               <div id="mcpBody" class="text-xs"></div>
             </div>
@@ -1367,6 +1359,12 @@
                 class="rounded border border-accent-600 px-4 py-2 text-xs font-semibold text-accent-600 hover:bg-accent-600/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-accent-400"
               >
                 Codex
+              </button>
+              <button
+                id="sessionStartClaudeBtn"
+                class="rounded border border-accent-600 px-4 py-2 text-xs font-semibold text-accent-600 hover:bg-accent-600/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-accent-400"
+              >
+                Claude Code
               </button>
             </div>
           </div>

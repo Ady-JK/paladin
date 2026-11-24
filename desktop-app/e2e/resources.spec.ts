@@ -101,17 +101,6 @@ test("row badges update live without rebuilding the list", async ({ page }) => {
   await expect(row.locator(".session-res")).toHaveCount(0);
 });
 
-test("the header pill follows the open session", async ({ page }) => {
-  await setup(page, SNAP);
-  await showSidebar(page);
-  await page.click('[data-session="sess-busy"]');
-  await expect(page.locator("#resPill")).toBeVisible();
-  await expect(page.locator("#resPillLabel")).toHaveText("20% · 100 MB");
-  await showSidebar(page);
-  await page.click('[data-session="sess-idle"]');
-  await expect(page.locator("#resPillLabel")).toHaveText("idle");
-});
-
 test("settings lists the app, the core and each busy session", async ({ page }) => {
   await setup(page, SNAP);
   await page.click("#settingsBtn");
@@ -133,9 +122,6 @@ test("an unsupported core hides the figures instead of showing zeros", async ({ 
   await setup(page, { at: 1, supported: false, self: { cpu: 0, rss: 0, procs: 0 }, sessions: {} }, null);
   await page.waitForFunction(() => (window as any).__resCalls > 0);
   await expect(page.locator("#resTotal")).toBeHidden();
-  await showSidebar(page);
-  await page.click('[data-session="sess-busy"]');
-  await expect(page.locator("#resPill")).toBeHidden();
 });
 
 test("polling pauses while the window is hidden", async ({ page }) => {

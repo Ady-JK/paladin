@@ -1,4 +1,5 @@
 import * as api from "../../core/api";
+import { appMode } from "../appMode";
 
 type OpenFile = { cwd: string; path: string; version: string; content: string; saving: boolean };
 type FileStatus = { path: string; state: "same" | "changed" | "unavailable"; version?: string };
@@ -120,7 +121,11 @@ export function monitorDiskChanges(
   });
   // Focus and file events still check immediately; a slower background poll
   // avoids repeatedly querying the core while the editor is idle.
-  window.setInterval(() => void check(), 3000);
+  // The poll only matters while the editor is on screen; focus and file
+  // events cover coming back to it.
+  window.setInterval(() => {
+    if (appMode() === "ide") void check();
+  }, 3000);
   window.addEventListener("paladin:ide-file-changed", () => {
     serial++;
     clear();

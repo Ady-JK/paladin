@@ -62,6 +62,24 @@ function items(): Item[] {
     tag: c.hint,
   }));
   // A Codex session has no Paladin prompt commands or skills.
+  if (state.harness === "claude") {
+    const names = new Set(["plan", "build", "new", "fork", "undo", "rename", "model", "thinking", "help"]);
+    const shared = out.filter((item) => names.has(item.name));
+    for (const command of state.claudeCommands) {
+      if (names.has(command.name)) continue;
+      shared.push({
+        kind: "command",
+        name: command.name,
+        label: command.name,
+        desc: command.description,
+        icon: "sl-prompt",
+        args: command.argumentHint ? "optional" : "none",
+        chevron: false,
+        tag: `/${command.name}${command.argumentHint ? " " + command.argumentHint : ""}`,
+      });
+    }
+    return shared;
+  }
   if (codex) return out;
   const local = new Set(out.map((i) => i.name.toLowerCase()));
   for (const c of cachedPrompts()) {

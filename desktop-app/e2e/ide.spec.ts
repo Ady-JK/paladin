@@ -23,6 +23,19 @@ test("IDE panel controls live in the workspace rail", async ({ page }) => {
   await expect(page.locator(".ide-explorer")).toBeVisible();
 });
 
+test("the explorer's splitter sits on its own right edge, with a line there", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.locator("#ideModeBtn").click();
+  await expect(page.locator(".ide-explorer")).not.toHaveClass(/is-closed/);
+  const explorer = (await page.locator(".ide-explorer").boundingBox())!;
+  const splitter = (await page.locator("#ideExplorerResize").boundingBox())!;
+  // Its right edge is the explorer's, not the window's (the splitter used to
+  // float at the far right of the window, leaving no line between the panels).
+  expect(Math.abs(splitter.x + splitter.width - (explorer.x + explorer.width))).toBeLessThanOrEqual(2);
+  const border = await page.locator(".ide-explorer").evaluate((el) => getComputedStyle(el).borderRightWidth);
+  expect(border).toBe("1px");
+});
+
 test("the agent pane can be hidden and restored from the editor", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   await page.getByRole("button", { name: "Hide agent" }).click();
@@ -96,9 +109,10 @@ test("Explorer pushes the editor instead of covering it", async ({ page }) => {
   await page.locator("#ideModeBtn").click();
   const explorer = page.locator(".ide-explorer");
   const editor = page.locator(".ide-editor-area");
-  // A column of the IDE workspace now, not a panel floating over it.
+  // A column of the IDE workspace now, not a panel floating over it. Relative
+  // is still a column: it only makes the explorer the splitter's container.
   const explorerStyle = await explorer.evaluate((el) => getComputedStyle(el).position);
-  expect(explorerStyle).toBe("static");
+  expect(["static", "relative"]).toContain(explorerStyle);
   // Both rectangles in one read: the drawer animates its width, so two
   // separate boundingBox() calls can land on different frames and compare a
   // wide drawer against an editor that has already reflowed.
@@ -140,7 +154,17 @@ test("Explorer collapses to no width and stays safe to toggle quickly", async ({
   // blank strip where the panel used to be.
   const width = (): Promise<number> => explorer.evaluate((el) => el.getBoundingClientRect().width);
   await expect.poll(width, { timeout: 4000 }).toBeGreaterThan(300);
-  const before = await width();
+  // Record the settled width, not whatever the slide-open animation has
+  // reached by now: wait until two reads a frame-ish apart agree.
+  let before = await width();
+  await expect
+    .poll(async () => {
+      const previous = before;
+      await page.waitForTimeout(100);
+      before = await width();
+      return before === previous;
+    })
+    .toBe(true);
   await page.locator("#ideExplorerToggle").click();
   await expect(explorer).toHaveClass(/is-closed/);
   await expect(explorer).toHaveAttribute("inert", "");
@@ -732,41 +756,6 @@ test("IDE terminals stay with their workspace when choosing another folder", asy
   expect(await page.evaluate(() => (window as any).__e2eTerminalStarts)).toHaveLength(1);
 });
 
-test("terminal-only commands open the IDE dock without creating a chat", async ({ page }) => {
-  await page.locator("#ideModeBtn").click();
-  await expect(page.locator("#ideSessionList")).toBeVisible();
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect(page.locator("#ideTerminalDock .xterm-rows")).toContainText("/home/tester/project");
-  await expect(page.locator("#ideSessionList")).toBeVisible();
-  expect(await page.evaluate(() => (window as any).__e2eOpens?.length ?? 0)).toBe(0);
-});
-
-test("terminal-only output follows the workspace if a chat opens while the command runs", async ({ page }) => {
-  await page.evaluate(() => {
-    const w = window as any;
-    const base = w.__paladinBaseInvoke;
-    w.__paladinBaseInvoke = (method: string, args: unknown) => {
-      if (method === "terminalRun")
-        return new Promise((resolve) => {
-          w.__finishTerminalRun = resolve;
-        });
-      return base(method, args);
-    };
-  });
-  await page.locator("#ideModeBtn").click();
-  await expect(page.locator("#ideSessionList")).toBeVisible();
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect.poll(() => page.evaluate(() => typeof (window as any).__finishTerminalRun)).toBe("function");
-  await page.locator('#ideSessionList [data-ide-session="sess-notify-1"]').click();
-  await expect(page.locator("#messages")).toContainText("run the slow job");
-  await page.evaluate(() =>
-    (window as any).__finishTerminalRun({ output: "finished-output", exitCode: 0, truncated: false }),
-  );
-  await expect(page.locator("#ideTerminalDock .xterm-rows")).toContainText("finished-output");
-});
-
 test("folder picker waits for the selected folder to finish loading", async ({ page }) => {
   await page.evaluate(() => {
     const w = window as any;
@@ -785,20 +774,6 @@ test("folder picker waits for the selected folder to finish loading", async ({ p
   await expect.poll(() => page.evaluate(() => typeof (window as any).__finishFolderList)).toBe("function");
   await page.evaluate(() => (window as any).__finishFolderList());
   await expect(page.locator("#sessionStartBtn")).toBeEnabled();
-});
-
-test("terminal-only command output goes to the selected IDE terminal", async ({ page }) => {
-  await page.locator("#ideModeBtn").click();
-  await page.locator("#ideTerminalToggle").click();
-  await expect(page.locator("#ideTerminalDock .xterm")).toBeVisible();
-  await page.locator("#ideTerminalNew").click();
-  await expect(page.getByRole("tab", { name: "Terminal 2" })).toHaveAttribute("aria-selected", "true");
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect(page.locator("#ideTerminalDock .pane-terminal:visible .xterm-rows")).toContainText(
-    "/home/tester/project",
-  );
-  await expect(page.getByRole("tab", { name: "Terminal 2" })).toHaveAttribute("aria-selected", "true");
 });
 
 test("agent browser remains visible alongside the IDE terminal", async ({ page }) => {
@@ -865,44 +840,6 @@ test("personal browser moves into and out of the IDE editor with its native view
   await page.locator("#ideModeBtn").click();
   await expect(page.locator("#sidePane .pane-web")).toBeVisible();
   await expect(page.locator("#sidePane .web-url")).toHaveValue("https://example.com/");
-});
-
-test("a command finishing in another workspace does not interrupt the selected terminal", async ({ page }) => {
-  await page.evaluate(() => {
-    const w = window as any;
-    const base = w.__paladinBaseInvoke;
-    w.__paladinBaseInvoke = (method: string, args: unknown) => {
-      if (method === "terminalRun")
-        return new Promise((resolve) => {
-          w.__finishTerminalRun = resolve;
-        });
-      return base(method, args);
-    };
-  });
-  await page.locator("#ideModeBtn").click();
-  await expect(page.locator("#ideSessionList")).toBeVisible();
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect.poll(() => page.evaluate(() => typeof (window as any).__finishTerminalRun)).toBe("function");
-  if (await page.locator(".ide-explorer.is-closed").count()) await page.locator("#ideExplorerToggle").click();
-  await page.locator("#ideChooseFolder").click();
-  await page.locator('#newSessionList button[data-fb-select$="/project"]').first().click();
-  await page.locator("#sessionStartBtn").click();
-  await expect(page.locator("#ideFolderName")).toHaveAttribute("title", "/home/tester/project/project");
-  await page.locator("#ideTerminalToggle").click();
-  await expect(page.locator("#ideTerminalDock .xterm")).toBeVisible();
-  await page.locator("#ideTerminalNew").click();
-  await expect(page.getByRole("tab", { name: "Terminal 2" })).toHaveAttribute("aria-selected", "true");
-  await page.evaluate(() =>
-    (window as any).__finishTerminalRun({ output: "old-workspace-output", exitCode: 0, truncated: false }),
-  );
-  await expect(page.getByRole("tab", { name: "Terminal 2" })).toHaveAttribute("aria-selected", "true");
-  if (await page.locator(".ide-explorer.is-closed").count()) await page.locator("#ideExplorerToggle").click();
-  await page.locator("#ideChooseFolder").click();
-  await page.locator('#newSessionCrumbs button[data-fb-crumb="/home/tester/project"]').click();
-  await expect(page.locator("#newSessionPath")).toHaveText("/home/tester/project");
-  await page.locator("#sessionStartBtn").click();
-  await expect(page.locator("#ideTerminalDock .xterm-rows")).toContainText("old-workspace-output");
 });
 
 test("composer controls fit inside a narrow IDE chat pane", async ({ page }) => {
@@ -1004,7 +941,8 @@ test("sessions lead the rail and both drawers fit narrow windows", async ({ page
   const explorer = page.locator(".ide-explorer");
   await expect(explorer).toBeVisible();
   await expect(explorer.getByText("Files", { exact: true })).toBeVisible();
-  expect((await explorer.boundingBox())!.width).toBeGreaterThan(300);
+  // The explorer animates its width from 0, so wait for the settled size.
+  await expect.poll(async () => (await explorer.boundingBox())!.width, { timeout: 4000 }).toBeGreaterThan(300);
   await page.locator("#agentTab").click();
   const sidebar = page.locator("#sidebar");
   await expect(sidebar).toBeVisible();

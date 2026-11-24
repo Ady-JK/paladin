@@ -41,8 +41,16 @@ test("selected IDE terminal output can be added to the agent draft", async ({ pa
   await expect(page.locator("#ideWorkspace")).toBeVisible();
   await page.locator("#ideTerminalToggle").click();
   await expect(page.locator("#ideTerminalDock .xterm")).toBeVisible();
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__e2eHub.emit({
+      event: "terminal/data",
+      sessionId: w.__e2eTerminalStarts[0].sessionId,
+      terminalId: "terminal-1",
+      data: btoa("/home/tester/project\r\n"),
+    });
+  });
   const row = page.locator("#ideTerminalDock .xterm-rows > div").filter({ hasText: "/home/tester/project" }).first();
   await expect(row).toBeVisible();
   // The Explorer overlay covers the left of the terminal; close it so the drag reaches the text.
@@ -56,31 +64,6 @@ test("selected IDE terminal output can be added to the agent draft", async ({ pa
   await page.getByRole("button", { name: "Add selected output to agent" }).click();
   await expect(page.locator("#promptInput")).toHaveValue(/Terminal output:[\s\S]*\/home\/tester\/project/);
   expect(await page.evaluate(() => (window as any).__e2eSubmits?.length ?? 0)).toBe(0);
-});
-
-test("bang runs a workspace command then starts a turn with its result", async ({ page }) => {
-  await page.locator("#promptInput").fill("! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalRuns?.length ?? 0)).toBe(1);
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eSubmits?.length ?? 0)).toBe(1);
-  const result = await page.evaluate(() => ({
-    run: (window as any).__e2eTerminalRuns[0],
-    submit: (window as any).__e2eSubmits[0],
-  }));
-  expect(result.run.command).toBe("pwd");
-  expect(result.run.cwd).toBe("/home/tester/project");
-  expect(result.submit.message).toContain("/home/tester/project");
-  expect(result.submit.message).toContain("pwd");
-});
-
-test("double bang shows output without adding agent history", async ({ page }) => {
-  await startSplit(page);
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalRuns?.length ?? 0)).toBe(1);
-  await expect(page.locator(".pane-terminal .xterm-rows")).toContainText("/home/tester/project");
-  expect(await page.evaluate(() => (window as any).__e2eSubmits?.length ?? 0)).toBe(0);
-  expect(await page.evaluate(() => (window as any).__e2eOpens?.length ?? 0)).toBe(0);
 });
 
 test("terminal button opens a full terminal tab beside chat", async ({ page }) => {
@@ -194,10 +177,9 @@ test("a terminal opened before the first message remains usable after starting a
   expect(await page.evaluate(() => (window as any).__e2eTerminalStarts.length)).toBe(1);
 });
 
-test("a side chat requires a main message even after a local command", async ({ page }) => {
-  await page.locator("#promptInput").fill("!! pwd");
-  await page.locator("#promptInput").press("Enter");
-  await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalRuns?.length ?? 0)).toBe(1);
+test("a side chat requires a main message even after opening a terminal", async ({ page }) => {
+  await addToPane(page, "terminal");
+  await expect.poll(() => page.evaluate(() => (window as any).__e2eTerminalStarts?.length ?? 0)).toBe(1);
   await addToPane(page, "chat");
   await expect(page.locator("#toastText")).toContainText("Send a message in the main chat");
   await expect(page.locator(".side-chat")).toHaveCount(0);

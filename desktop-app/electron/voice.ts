@@ -264,6 +264,8 @@ export class VoiceManager {
       case "error":
         this.running = false;
         this.rejectPending(new Error(event.message || "voice: unknown error"));
+        // A failed run must not leave the model loaded for good.
+        this.scheduleIdle();
         break;
       default:
         break;
@@ -280,6 +282,7 @@ export class VoiceManager {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending = null;
+        this.scheduleIdle();
         reject(new Error("voice: the model took too long to load"));
       }, LOAD_TIMEOUT_MS);
       this.pending = { resolve, reject, timer };

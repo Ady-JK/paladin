@@ -329,5 +329,14 @@ test("open larger fills the window and returns to its row", async ({ page }) => 
   });
   expect(restored.inMessages).toBe(true);
   expect(restored.parent).toBe(true);
-  expect(restored.h).toBe(Math.round(inlineHeight));
+  // Closing remounts the frame at its 160px placeholder; the frame then
+  // reports its content height over postMessage, so the card reaches its
+  // inline size a moment later rather than synchronously.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Math.round(document.querySelector('.visual-card[data-visual="v1"]')!.getBoundingClientRect().height),
+      ),
+    )
+    .toBe(Math.round(inlineHeight));
 });

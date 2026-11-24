@@ -10,7 +10,7 @@ import {
   modelTreeEl,
 } from "../core/dom";
 import { bare, escapeAttr, escapeHtml, modelsOf, splitModel } from "../core/format";
-import { CODEX_MODEL_KEY, activeProviders } from "../core/harness";
+import { CLAUDE_MODEL_KEY, CODEX_MODEL_KEY, activeProviders } from "../core/harness";
 import { state } from "../core/state";
 import { loadJson, saveJson } from "../core/storage";
 import { closeMenu, isMenuOpen, toggleMenu } from "../ui/anim";
@@ -217,7 +217,7 @@ export function pickModel(name: string, model: string): void {
 
 export function persistModelChoice(): void {
   if (state.harness) {
-    saveJson(CODEX_MODEL_KEY, state.selectedModel);
+    saveJson(state.harness === "claude" ? CLAUDE_MODEL_KEY : CODEX_MODEL_KEY, state.selectedModel);
     return;
   }
   saveJson(MODEL_KEY, { provider: state.selectedProvider, model: state.selectedModel });
@@ -239,7 +239,7 @@ function paintModel(): void {
   const label = state.selectedModel ? bare(splitModel(state.selectedModel).short) : "default";
   providerLabel.textContent = bare(state.selectedProvider);
   modelSelectLabelEl.textContent = label;
-  modelSelectLabelEl.title = label;
+  modelSelectLabelEl.title = `${bare(state.selectedProvider)} / ${label}`;
 }
 
 export function openModelMenu(): void {
@@ -313,8 +313,13 @@ export function initModelPicker(): void {
             : all.length - 1
           : (current + (event.key === "ArrowDown" ? 1 : -1) + all.length) % all.length;
       highlighted = all[next];
-      syncModelSelects();
-      modelTreeEl.querySelectorAll<HTMLElement>("[data-mpick]")[next]?.scrollIntoView({ block: "nearest" });
+      // Move the highlight in place: no rebuild of up to 300 rows per key.
+      const rows = modelTreeEl.querySelectorAll<HTMLElement>("[data-mpick]");
+      rows[current]?.classList.remove("bg-slate-100", "dark:bg-slate-800");
+      rows[current]?.classList.add("hover:bg-slate-100", "dark:hover:bg-slate-800");
+      rows[next]?.classList.remove("hover:bg-slate-100", "dark:hover:bg-slate-800");
+      rows[next]?.classList.add("bg-slate-100", "dark:bg-slate-800");
+      rows[next]?.scrollIntoView({ block: "nearest" });
     } else if (event.key === "Enter") {
       event.preventDefault();
       const choice = highlighted ?? all[0];

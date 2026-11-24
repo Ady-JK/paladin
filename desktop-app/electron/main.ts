@@ -35,6 +35,7 @@ import { remoteOpenRefusal } from "./browserPolicy";
 import { runBrowserSmoke } from "./browserSmoke";
 import { runWindowSmoke } from "./smokeTest";
 import { refuseAll } from "./browserEgress";
+import { keepLogins } from "./sessionCookies";
 import { appFrameNavigationAllowed, appNavigationAllowed, isMainWindowFrame } from "./mainWindowPolicy";
 
 type ViewBounds = { x: number; y: number; width: number; height: number };
@@ -282,9 +283,15 @@ function sendToRenderer(msg: HostMessage): void {
   const note = noteFor(msg);
   if (!note || !Notification.isSupported()) return;
   const n = new Notification({ title: note.title, body: note.body, silent: false });
+  // Hold it until it is gone: an unreferenced Notification can be collected
+  // and its click never fires.
+  liveNotifications.add(n);
   n.on("click", () => openSessionFromNotification(note.sessionId));
+  n.on("close", () => liveNotifications.delete(n));
   n.show();
 }
+
+const liveNotifications = new Set<Notification>();
 
 function forwardEvent(msg: HostMessage): void {
   if (msg.event === "chat/delta" || msg.event === "chat/reasoning") {
@@ -363,7 +370,8 @@ function dropView(name: string): void {
     }
   }
   try {
-    (entry.view.webContents as { destroy?: () => void }).destroy?.();
+    const wc = entry.view.webContents as { close?: () => void; destroy?: () => void };
+    (wc.close ?? wc.destroy)?.call(wc);
   } catch {
     // Ignore.
   }
@@ -399,10 +407,15 @@ function defuseGuestDrag(view: WebContentsView): void {
 // lockGuestSession applies the site-pane permission policy to a
 // partition once (its popups share it).
 const lockedGuests = new WeakSet<Electron.Session>();
+// guestPartitions are the personal profiles opened so far; their cookies are
+// flushed to disk on quit so a fresh sign-in is never lost to a fast exit.
+const guestPartitions = new Set<string>();
 function lockGuestSession(partition: string): void {
   const jar = session.fromPartition(partition);
   if (lockedGuests.has(jar)) return;
   lockedGuests.add(jar);
+  keepLogins(jar);
+  guestPartitions.add(partition);
   jar.setPermissionRequestHandler((_contents, permission, callback) => callback(guestPermissionAllowed(permission)));
   jar.setPermissionCheckHandler((_contents, permission) => guestPermissionAllowed(permission));
   jar.setDevicePermissionHandler(() => false);
@@ -712,6 +725,9 @@ function createWindow(): void {
   // macOS; guest views die with the window, so forget them.
   win.on("closed", () => {
     browsers.windowClosed();
+    // Destroy the guest pages, not just forget them: a closed window leaves
+    // their renderers (about 300MB each) running with no owner.
+    for (const name of [...views.keys()]) dropView(name);
     win = null;
     views.clear();
     visibleView = null;
@@ -732,9 +748,11 @@ function createWindow(): void {
   const notifyResized = (): void => {
     win?.webContents.send("window:resized");
   };
-  win.on("resize", notifyResized);
+  // The renderer only needs to know when maximized flips, not every frame of a drag.
   win.on("maximize", notifyResized);
   win.on("unmaximize", notifyResized);
+  win.on("enter-full-screen", notifyResized);
+  win.on("leave-full-screen", notifyResized);
   win.contentView.on("bounds-changed", layoutVisible);
 }
 
@@ -861,13 +879,20 @@ app
     });
 
     handleTrusted("window:minimize", () => win?.minimize());
+    // On macOS "maximize" only zooms the window to the area between the menu
+    // bar and the Dock, which leaves a frame of desktop around the card. The
+    // button means what the green one does: the window takes its own full
+    // screen. Elsewhere it is the ordinary maximize.
     handleTrusted("window:toggleMaximize", () => {
       if (!win) return;
-      if (win.isMaximized()) win.unmaximize();
+      if (process.platform === "darwin") win.setFullScreen(!win.isFullScreen());
+      else if (win.isMaximized()) win.unmaximize();
       else win.maximize();
     });
     handleTrusted("window:close", () => win?.close());
-    handleTrusted("window:isMaximized", () => win?.isMaximized() ?? false);
+    handleTrusted("window:isMaximized", () =>
+      process.platform === "darwin" ? (win?.isFullScreen() ?? false) : (win?.isMaximized() ?? false),
+    );
 
     handleTrusted("views:setTheme", (_e, theme: string) => {
       const next = theme === "light" ? "light" : "dark";
@@ -978,6 +1003,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", (event) => {
   voice.dispose();
   void browsers.stop();
+  for (const partition of guestPartitions) void session.fromPartition(partition).cookies.flushStore();
   if (quitting || !agent.running) return;
   quitting = true;
   event.preventDefault();

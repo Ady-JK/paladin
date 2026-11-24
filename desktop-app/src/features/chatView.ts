@@ -1,6 +1,6 @@
 // chatView.ts renders the conversation turns.
 
-import { chatViewEl, inputEl, messagesEl } from "../core/dom";
+import { chatViewEl, inputEl, jumpLatestEl, messagesEl } from "../core/dom";
 import { approxTokens, escapeHtml, renderMarkdown, renderText, shortPath } from "../core/format";
 import { state } from "../core/state";
 import type { CompactionInfo, RetryInfo, Turn } from "../core/types";
@@ -16,56 +16,35 @@ import { openLocalBrowserURL, openWebTab } from "./sidePane";
 // way the assignment alone lands the conversation above its newest row, so
 // follow the view while it is still growing and keep it at the end.
 export function scrollToBottom(): void {
-  chatViewEl.scrollTop = chatViewEl.scrollHeight;
+  pinned = true;
+  keepAtEnd();
+  updateJumpLatest();
+}
+
+// Our own scroll writes update the baseline immediately: the browser's
+// queued scroll event must not be mistaken for the reader moving up.
+function keepAtEnd(): void {
+  if (chatViewEl.clientHeight > 0) {
+    chatViewEl.scrollTop = chatViewEl.scrollHeight;
+    rememberScroll();
+  }
+  updateJumpLatest();
   watchBottomLayout();
 }
 
-// bottomObserver follows the transcript while it grows. It watches the
-// view's own size — which changes both when rows finish laying out and
-// when the view regains layout (a side tab closing, the shell being
-// revealed) — and re-pins the end on each change until the height has
-// been quiet for a moment.
-const BOTTOM_SETTLE_MS = 300;
-const BOTTOM_MAX_MS = 4000;
+// Keep one observer for the page's lifetime. Tool groups can settle after a
+// quiet gap, and the composer/view can resize without another text delta.
+// The observer follows only while pinned; it never opts a reader back in.
 let bottomObserver: ResizeObserver | null = null;
-let bottomSettleTimer = 0;
-let bottomDeadline = 0;
 
 function watchBottomLayout(): void {
-  const now = Date.now();
-  if (!bottomObserver) {
-    if (typeof ResizeObserver === "undefined") return;
-    bottomObserver = new ResizeObserver(() => {
-      if (chatViewEl.scrollHeight === 0) return;
-      chatViewEl.scrollTop = chatViewEl.scrollHeight;
-      scheduleBottomSettle();
-    });
-    bottomObserver.observe(chatViewEl);
-    // The observed element is the scroll container: its own box does not
-    // change when its content grows, so watch the content box too.
-    bottomObserver.observe(messagesEl);
-    bottomDeadline = now + BOTTOM_MAX_MS;
-  }
-  scheduleBottomSettle();
-}
-
-// scheduleBottomSettle releases the follow after the height stops
-// changing, bounded by BOTTOM_MAX_MS so a streaming turn cannot hold it
-// forever (the turn's own followTail keeps that case working).
-function scheduleBottomSettle(): void {
-  window.clearTimeout(bottomSettleTimer);
-  const left = bottomDeadline - Date.now();
-  bottomSettleTimer = window.setTimeout(stopBottomWatch, Math.max(0, Math.min(BOTTOM_SETTLE_MS, left)));
-}
-
-function stopBottomWatch(): void {
-  if (bottomObserver) {
-    bottomObserver.disconnect();
-    bottomObserver = null;
-  }
-  window.clearTimeout(bottomSettleTimer);
-  bottomSettleTimer = 0;
-  bottomDeadline = 0;
+  if (bottomObserver || typeof ResizeObserver === "undefined") return;
+  bottomObserver = new ResizeObserver(() => {
+    updateJumpLatest();
+    if (pinned && chatViewEl.clientHeight > 0) followTail();
+  });
+  bottomObserver.observe(chatViewEl);
+  bottomObserver.observe(messagesEl);
 }
 
 // STARTERS are the hero suggestion chips on an empty conversation.
@@ -271,30 +250,135 @@ export function createTurn(
   return { wrapper, textEl };
 }
 
-// Stick-to-bottom: live output only drags the view down while the user
-// is already reading the tail.
-let stick = true;
-let stickWired = false;
+// Follow mode: the transcript sticks to its end while the reader is at it.
+// Only the reader's own input changes that: a wheel, touch or scrollbar move
+// up, or scrolling back down to the end. Our own pins never change it, so a
+// reply that keeps growing cannot drag a reader who scrolled away back down.
+const PIN_GAP_PX = 96;
+// scrollTop is fractional, while scrollHeight/clientHeight are rounded.
+const BOTTOM_EPSILON_PX = 1;
+let pinned = true;
+let lastTop = 0;
+let lastHeight = 0;
+let lastClientHeight = 0;
+let lastClientWidth = 0;
+let touchY: number | null = null;
 let scrollQueued = false;
 
+function bottomGap(): number {
+  return Math.max(0, chatViewEl.scrollHeight - chatViewEl.scrollTop - chatViewEl.clientHeight);
+}
+
+function rememberScroll(): void {
+  lastTop = chatViewEl.scrollTop;
+  lastHeight = chatViewEl.scrollHeight;
+  lastClientHeight = chatViewEl.clientHeight;
+  lastClientWidth = chatViewEl.clientWidth;
+}
+
 export function followTail(): void {
-  if (!stickWired) {
-    stickWired = true;
-    chatViewEl.addEventListener("scroll", () => {
-      const gap = chatViewEl.scrollHeight - chatViewEl.scrollTop - chatViewEl.clientHeight;
-      stick = gap < 96;
-    });
-  }
-  if (!stick || scrollQueued) {
-    return;
-  }
+  if (!pinned || scrollQueued) return;
   scrollQueued = true;
   requestAnimationFrame(() => {
     scrollQueued = false;
-    if (stick) {
-      scrollToBottom();
-    }
+    if (pinned) keepAtEnd();
   });
+}
+
+// A wheel/touch inside a thinking block or tool output belongs to that
+// scroller, not the transcript. At its boundary, respect scroll containment.
+function nestedScroll(target: EventTarget | null, deltaY: number): boolean {
+  for (let el = target instanceof Element ? target : null; el && el !== chatViewEl; el = el.parentElement) {
+    if (el.scrollHeight <= el.clientHeight + BOTTOM_EPSILON_PX) continue;
+    const style = getComputedStyle(el);
+    if (style.overflowY !== "auto" && style.overflowY !== "scroll") continue;
+    if (deltaY < 0 ? el.scrollTop > 0 : el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_EPSILON_PX)
+      return true;
+    if (style.overscrollBehaviorY === "contain" || style.overscrollBehaviorY === "none") return true;
+  }
+  return false;
+}
+
+// Input opts out before a queued pin can overtake the reader's scroll.
+export function initChatFollow(): void {
+  rememberScroll();
+  watchBottomLayout();
+  chatViewEl.addEventListener("scroll", onScroll, { passive: true });
+  chatViewEl.addEventListener(
+    "wheel",
+    (event) => {
+      if (
+        !event.defaultPrevented &&
+        event.deltaY < 0 &&
+        chatViewEl.scrollTop > 0 &&
+        !nestedScroll(event.target, event.deltaY)
+      )
+        unpin();
+    },
+    { passive: true },
+  );
+  chatViewEl.addEventListener(
+    "touchstart",
+    (event) => {
+      touchY = event.touches.item(0)?.clientY ?? null;
+    },
+    { passive: true },
+  );
+  chatViewEl.addEventListener(
+    "touchmove",
+    (event) => {
+      const y = event.touches.item(0)?.clientY;
+      if (y === undefined || touchY === null) return;
+      const deltaY = touchY - y;
+      if (!event.defaultPrevented && deltaY < 0 && chatViewEl.scrollTop > 0 && !nestedScroll(event.target, deltaY))
+        unpin();
+      touchY = y;
+    },
+    { passive: true },
+  );
+  chatViewEl.addEventListener("click", (event) => {
+    // Opening details is inspection, not a request to chase their new height.
+    // Capture the resulting gap before the resize observer can pin it away.
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      target?.closest(".worked-fold > summary") ||
+      (target?.closest(".tool-run-head, .tool-row-head, .tool-step-head, .think-block > summary") &&
+        bottomGap() > BOTTOM_EPSILON_PX)
+    )
+      unpin();
+  });
+  jumpLatestEl.addEventListener("click", scrollToBottom);
+}
+
+function onScroll(): void {
+  // Hidden views report zero geometry; retain the held follow request.
+  if (chatViewEl.clientHeight === 0) {
+    updateJumpLatest();
+    return;
+  }
+  const top = chatViewEl.scrollTop;
+  const gap = bottomGap();
+  const layoutChanged =
+    chatViewEl.scrollHeight !== lastHeight ||
+    chatViewEl.clientHeight !== lastClientHeight ||
+    chatViewEl.clientWidth !== lastClientWidth;
+  if (!layoutChanged && top < lastTop && gap > BOTTOM_EPSILON_PX) {
+    unpin();
+  } else if (gap <= BOTTOM_EPSILON_PX || (!layoutChanged && top > lastTop && gap < PIN_GAP_PX)) {
+    pinned = true;
+  }
+  rememberScroll();
+  if (layoutChanged && pinned) followTail();
+  updateJumpLatest();
+}
+
+function unpin(): void {
+  pinned = false;
+  updateJumpLatest();
+}
+
+function updateJumpLatest(): void {
+  jumpLatestEl.hidden = pinned || chatViewEl.clientHeight === 0 || bottomGap() <= BOTTOM_EPSILON_PX;
 }
 
 // compactionText is the divider label for a compaction event.

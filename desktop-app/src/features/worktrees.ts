@@ -34,7 +34,7 @@ function chipEl(): HTMLButtonElement {
     wanted = !wanted;
     paintChip();
   });
-  const anchor = document.querySelector(".perm-wrap") ?? modelSelectBtn.parentElement;
+  const anchor = modelSelectBtn.parentElement;
   anchor?.after(el);
   chip = el;
   return el;

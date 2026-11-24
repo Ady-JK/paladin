@@ -1,6 +1,7 @@
 // subagents.spec.ts covers subagent navigation: children nest under
 // their parent in the sidebar, open in the main view with a way back,
 // and stream live into a side-pane tab opened from the spawn_agent row.
+import { openWork } from "./work";
 import { test, expect, type Page } from "@playwright/test";
 import { showSidebar } from "./drawer";
 import { showPane, addToPane } from "./modes";
@@ -184,6 +185,7 @@ test("a tool card opens a child using its short agent ID", async ({ page }) => {
   await showSidebar(page);
   await expect(page.locator('[data-child="sess-child-1-long"]')).toHaveCount(1);
   await page.locator('[data-session="sess-parent"]').first().click();
+  await openWork(page);
   await page.locator('[data-open-agent="sess-child-1"]').click();
   const child = page.locator('.pane-agent[data-agent="sess-child-1-long"]');
   await expect(child).toBeVisible();
@@ -343,6 +345,7 @@ test("agents/changed repaints a child's status and finds new children", async ({
 test("a spawn_agent row opens the child live in the side pane", async ({ page }) => {
   await showSidebar(page);
   await page.locator('[data-session="sess-parent"]').click();
+  await openWork(page);
   const row = page.locator('.tool-row[data-tool="spawn_agent"]');
   await expect(row).toContainText("Spawned");
   await expect(row).toContainText("explore-1");
@@ -418,6 +421,7 @@ test("a child's finished turn does not toast like a user session", async ({ page
 test("deleting a parent drops its and its children's views, even with a child open", async ({ page }) => {
   await showSidebar(page);
   await page.locator('[data-session="sess-parent"]').click();
+  await openWork(page);
   await page.locator('.tool-row[data-tool="spawn_agent"] [data-open-agent]').click();
   await expect(page.locator('.pane-agent[data-agent="sess-child-1"]')).toContainText("Child found login.go.");
   await expect(page.locator('#paneTabs [data-agent="sess-child-1"]')).toHaveCount(1);

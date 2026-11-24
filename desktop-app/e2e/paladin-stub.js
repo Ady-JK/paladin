@@ -80,9 +80,6 @@ async function __paladinBaseInvoke(cmd, args) {
     case "terminalClose":
       window.__e2eTerminalCloses = (window.__e2eTerminalCloses || []).concat([args]);
       return true;
-    case "terminalRun":
-      window.__e2eTerminalRuns = (window.__e2eTerminalRuns || []).concat([args]);
-      return { output: args.cwd + "\n", exitCode: 0, truncated: false };
     case "resolveWorkspace":
       return (args && args.cwd) || "/home/tester/project";
     case "listSessions":
@@ -174,26 +171,6 @@ async function __paladinBaseInvoke(cmd, args) {
       delete window.__e2eApprovalWaits[args.callId];
       waiter(args.decision);
       return true;
-    }
-    case "permissionsGet":
-    case "permissionsSet": {
-      const p = (window.__e2ePerms = window.__e2ePerms || { global: [], folders: {} });
-      if (cmd === "permissionsSet") {
-        window.__e2ePermSets = (window.__e2ePermSets || []).concat([JSON.parse(JSON.stringify(args))]);
-        if (args.scope === "global") p.global = args.rules || [];
-        else if (args.scope === "folder") {
-          if ((args.rules || []).length) p.folders[args.cwd] = args.rules;
-          else delete p.folders[args.cwd];
-        } else throw new Error("scope must be global or folder");
-      }
-      const cwd = (args && args.cwd) || "/home/tester/project";
-      return {
-        global: p.global,
-        folder: p.folders[cwd] || [],
-        session: [],
-        folders: Object.entries(p.folders).map(([c, rules]) => ({ cwd: c, rules })),
-        presets: ["read-only", "full-access"],
-      };
     }
     case "mcpList":
     case "mcpConfig":
@@ -415,6 +392,39 @@ async function __paladinBaseInvoke(cmd, args) {
     case "renameSession":
       window.__e2eRenames = (window.__e2eRenames || []).concat([args]);
       return true;
+    case "claudeStatus": {
+      window.__e2eClaudeCalls = (window.__e2eClaudeCalls || []).concat([args]);
+      const status = window.__e2eClaude || {
+        installed: true,
+        loggedIn: true,
+        version: "2.1.326",
+        models: [
+          { id: "claude-haiku-5-5", displayName: "Haiku 5.5", efforts: ["low", "high"], isDefault: true },
+          { id: "claude-sonnet-5-5", displayName: "Sonnet 5.5", efforts: ["low", "high"], isDefault: false },
+        ],
+      };
+      return args && args.deep
+        ? status
+        : { installed: status.installed, loggedIn: false, models: [], error: status.error };
+    }
+    case "claudeCommands":
+      return (
+        window.__e2eClaudeCommands || [
+          { name: "review", description: "Review code", argumentHint: "[target]" },
+          { name: "compact", description: "Compact context" },
+        ]
+      );
+    case "startClaudeDiscovery":
+      window.__e2eClaudeDiscoveryStarts = (window.__e2eClaudeDiscoveryStarts || 0) + 1;
+      return true;
+    case "importClaudeSession":
+      return {
+        sessionId: "sess-claude-1",
+        cwd: args.cwd || "/home/tester/project",
+        provider: "claude",
+        harness: "claude",
+        model: "claude-haiku-5-5",
+      };
     case "codexStatus": {
       window.__e2eCodexCalls = (window.__e2eCodexCalls || []).concat([args]);
       const status = window.__e2eCodex || {
@@ -422,13 +432,12 @@ async function __paladinBaseInvoke(cmd, args) {
         version: "0.154.0",
         loggedIn: true,
         account: "me@example.com",
-        permissions: ["read-only", "full-access"],
         models: [
           { id: "gpt-5.6-sol", displayName: "GPT-5.6-Sol", efforts: ["low", "medium"], isDefault: true },
           { id: "gpt-5.6-luna", displayName: "GPT-5.6-Luna", efforts: ["low", "medium"], isDefault: false },
         ],
       };
-      return args && args.deep ? status : { installed: status.installed, loggedIn: false, models: [], permissions: [] };
+      return args && args.deep ? status : { installed: status.installed, loggedIn: false, models: [] };
     }
     case "codexSkills":
       window.__e2eSkillCalls = (window.__e2eSkillCalls || []).concat([args]);
@@ -918,7 +927,12 @@ async function __paladinBaseInvoke(cmd, args) {
       const model = (args && args.model) || "";
       const info = (window.__e2eProviders || []).find((p) => p.name === provider);
       const meta = (info && info.meta && info.meta[model]) || {};
-      const levels = meta.thinkingKnown ? meta.thinkingLevels || [] : [];
+      const levels =
+        provider === "claude"
+          ? ((window.__e2eClaude?.models || []).find((m) => m.id === model)?.efforts ?? ["low", "high"])
+          : meta.thinkingKnown
+            ? meta.thinkingLevels || []
+            : [];
       const key = provider + "\u0000" + model;
       if (cmd === "thinkingSet") {
         window.__e2eThinkingSets = (window.__e2eThinkingSets || []).concat([JSON.parse(JSON.stringify(args))]);

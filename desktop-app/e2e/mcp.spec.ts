@@ -1,6 +1,7 @@
 // mcp.spec.ts covers the MCP UI: Settings → MCP (server cards, trust,
 // config editor, live status), the composer's MCP chip, /mcp, MCP
-// approval cards, MCP tool rows and mcp permission rules.
+// approval cards and MCP tool rows.
+import { openWork } from "./work";
 import { test, expect, type Page } from "@playwright/test";
 
 const CWD = "/home/tester/project";
@@ -205,8 +206,7 @@ test("an MCP approval card shows server, tool and arguments", async ({ page }) =
           mcpTool: "slow",
           args: JSON.stringify({ ms: 250, label: "nap" }),
           reasons: ["MCP tool without a read-only hint"],
-          choices: ["once", "session", "folder", "deny"],
-          remember: [{ tool: "mcp", pattern: "dummy/slow", action: "allow" }],
+          choices: ["once", "deny"],
           state: "pending",
         },
       },
@@ -222,7 +222,6 @@ test("an MCP approval card shows server, tool and arguments", async ({ page }) =
   await expect(card.locator(".approval-mcp-tool")).toHaveText("slow");
   await expect(card.locator(".approval-args .kv-key").first()).toHaveText("ms");
   await expect(card.locator(".approval-args")).toContainText("250");
-  await expect(card.locator('[data-approve="folder"]')).toContainText("dummy/slow");
   await card.locator('[data-approve="once"]').click();
   await expect(card).toContainText(/Allowed once/);
   await expect(card.locator(".approval-receipt-cmd")).toContainText("dummy › slow");
@@ -256,6 +255,7 @@ test("an MCP tool row names the server and renders args and output", async ({ pa
   });
   await page.fill("#promptInput", "echo");
   await page.click("#sendBtn");
+  await openWork(page);
   const row = page.locator('.tool-row[data-tool="mcp__dummy__echo"]');
   await expect(row).toBeVisible();
   await expect(row.locator(".tool-server")).toHaveText("dummy");
@@ -264,18 +264,4 @@ test("an MCP tool row names the server and renders args and output", async ({ pa
   await row.locator(".tool-row-head").click();
   await expect(row.locator('[data-body="args"] .kv-key')).toHaveText("text");
   await expect(row.locator('[data-body="result"]')).toContainText("echo: hi there");
-});
-
-test("the permissions pane adds and labels mcp rules", async ({ page }) => {
-  await boot(page);
-  await page.click("#settingsBtn");
-  await page.click("#settingsNavPermissions");
-  const global = page.locator('[data-rules="global"]');
-  await global.locator("[data-rule-tool]").selectOption("mcp");
-  await expect(global.locator("[data-rule-pattern]")).toHaveAttribute("placeholder", /server\/tool/);
-  await global.locator("[data-rule-pattern]").fill("dummy / slow");
-  await global.locator("[data-rule-add]").click();
-  await expect(global.locator(".perm-rule")).toHaveCount(1);
-  await expect(global.locator(".perm-rule-tool")).toHaveText("mcp");
-  await expect(global.locator(".perm-rule-pattern")).toHaveText("dummy/slow");
 });

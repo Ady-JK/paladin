@@ -4,7 +4,11 @@ import { escapeHtml } from "../../core/format";
 import type { ChangedFile, SessionChanges } from "../../core/types";
 import { icon } from "../../icons";
 
-type ChangeTotal = { added: number; removed: number; files?: Record<string, { added: number; removed: number }> };
+export type ChangeTotal = {
+  added: number;
+  removed: number;
+  files?: Record<string, { added: number; removed: number }>;
+};
 
 function countPatch(patch: string): ChangeTotal {
   let added = 0;
@@ -21,6 +25,33 @@ const changeTotals = new Map<string, Map<number, CachedTotal>>();
 
 export function clearChangeTotals(sessionIds: string[]): void {
   for (const sessionId of sessionIds) changeTotals.delete(sessionId);
+}
+
+// dropLiveTotal forgets only the newest turn's counts. A settling tool can
+// change that turn's files without changing its file list (the cache key), but
+// it cannot touch finished turns: clearing every turn made each tool re-ask
+// the host for a diff of every file in the whole session.
+export function dropLiveTotal(sessionId: string): void {
+  const session = changeTotals.get(sessionId);
+  if (!session || session.size === 0) return;
+  session.delete(Math.max(...session.keys()));
+}
+
+// A turn's counts need one diff per file. Two at a time keeps a long list from
+// filling the host's per-session queue ahead of a diff the user just opened.
+const DIFF_LANES = 2;
+let freeLanes = DIFF_LANES;
+const laneWaiters: (() => void)[] = [];
+async function inLane<T>(work: () => Promise<T>): Promise<T> {
+  if (freeLanes === 0) await new Promise<void>((resolve) => laneWaiters.push(resolve));
+  else freeLanes--;
+  try {
+    return await work();
+  } finally {
+    const next = laneWaiters.shift();
+    if (next) next();
+    else freeLanes++;
+  }
 }
 
 export function retainChangeTotals(sessionId: string, turns: SessionChanges["turns"]): void {
@@ -48,7 +79,7 @@ export async function turnTotal(sessionId: string, turn: SessionChanges["turns"]
       // counts of the rest: the card would drop every +x -y and fall back to
       // status words, which is what a turn full of edits looked like.
       const patches = await Promise.allSettled(
-        turn.files.map((file) => api.sessionDiff(sessionId, null, turn.turn, file.path)),
+        turn.files.map((file) => inLane(() => api.sessionDiff(sessionId, null, turn.turn, file.path))),
       );
       const total: ChangeTotal = { added: 0, removed: 0, files: {} };
       for (const patch of patches) {

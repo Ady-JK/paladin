@@ -11,7 +11,6 @@ import { stripHtml, type BrowserPage } from "./browserMode/tabs";
 
 const tabsEl = $<HTMLElement>("#browserTabs");
 const bodyEl = $<HTMLElement>("#browserBody");
-const barEl = $<HTMLElement>("#browserBar");
 
 let pages: BrowserPage[] = [];
 let stripCache = "";
@@ -36,8 +35,4 @@ export function setBrowserPages(next: BrowserPage[], bodies: HTMLElement[]): voi
     bodyEl.replaceChildren();
     bodyEl.innerHTML = emptyMarkup();
   }
-}
-
-export function browserBarElement(): HTMLElement {
-  return barEl;
 }

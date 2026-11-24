@@ -93,6 +93,23 @@ body.harness-codex #skillChipSlot {
   display: none;
 }
 
+/* Claude owns its tools, MCP configuration, and compaction policy. */
+body.harness-claude .tools-wrap,
+body.harness-claude .mcp-chip,
+body.harness-claude #skillChipSlot,
+body.harness-claude .context-control,
+body.harness-claude #modelRefresh,
+body.harness-claude #modelProviderFilter {
+  display: none;
+}
+#sessionList .session-harness[data-engine="claude"] {
+  color: var(--color-accent-700);
+  background: color-mix(in srgb, var(--color-accent-600) 12%, transparent);
+}
+.dark #sessionList .session-harness[data-engine="claude"] {
+  color: var(--color-accent-400);
+}
+
 #sessionList .session-row {
   border-color: transparent;
   border-radius: 8px;

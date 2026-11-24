@@ -43,16 +43,6 @@ export function setAppMode(next: AppMode): void {
   for (const listener of listeners) listener(mode);
 }
 
-// syncMode records a mode that was entered through another control (the IDE
-// button), so the rail highlights the right entry without dispatching the
-// enter events again.
-export function syncMode(next: AppMode): void {
-  if (mode === next) return;
-  mode = next;
-  saveText(MODE_KEY, next);
-  for (const listener of listeners) listener(mode);
-}
-
 // toggleAppModeFromKey flips Agent <-> Browser, the same as the rail's mode
 // buttons. IDE is left to its own control so the shortcut never drops a user
 // into the editor by accident.

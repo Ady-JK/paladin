@@ -317,7 +317,7 @@ function ensureChip(): void {
     `<button type="button" id="toolsChip" class="perm-chip tools-chip" aria-haspopup="menu" aria-expanded="false"></button>` +
     `<button type="button" id="toolsPendingChip" class="tools-pending-chip" hidden></button>` +
     `<div id="toolsMenu" class="perm-menu tools-menu hidden" role="menu"></div>`;
-  const anchor = document.querySelector(".perm-wrap") ?? modelSelectBtn.parentElement;
+  const anchor = modelSelectBtn.parentElement;
   anchor?.after(wrap);
   chip = wrap.querySelector<HTMLButtonElement>("#toolsChip")!;
   pendingChip = wrap.querySelector<HTMLButtonElement>("#toolsPendingChip")!;

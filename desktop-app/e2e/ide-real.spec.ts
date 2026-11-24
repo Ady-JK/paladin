@@ -100,7 +100,6 @@ process.stdin.on('data', chunk => {
             "ideReadFile",
             "ideFileStatuses",
             "ideSaveFile",
-            "terminalRun",
             "terminalStart",
             "terminalWrite",
             "terminalResize",
@@ -183,11 +182,6 @@ process.stdin.on('data', chunk => {
     await page.keyboard.type("printf 'real-%s-ok\\n' shell");
     await page.keyboard.press("Enter");
     await expect(page.locator("#ideTerminalDock .xterm-rows")).toContainText("real-shell-ok");
-    await page.locator("#promptInput").fill("!! printf standalone-command-ok");
-    await page.locator("#promptInput").press("Enter");
-    await expect(page.locator("#ideTerminalDock .xterm-rows")).toContainText("standalone-command-ok");
-    await expect(page.locator("#ideSessionList")).toBeVisible();
-    expect(await page.evaluate(() => (window as any).__e2eOpens?.length ?? 0)).toBe(0);
     await expect
       .poll(async () =>
         page.evaluate(async (cwd) => {

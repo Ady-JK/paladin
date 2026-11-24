@@ -22,7 +22,9 @@
 #messages,
 #agentView footer > div.w-full {
   width: 100%;
-  max-width: 64rem;
+  /* A reading column, not the window: about 95 characters a line at the
+     message size. 64rem ran past 115, which is hard to track line to line. */
+  max-width: 48rem;
   margin-inline: auto;
 }
 
@@ -437,6 +439,69 @@
   opacity: 0.3;
 }
 
+/* ---- Composer toolbar rhythm ----
+   Every control shares one centre line and one scale: round icon buttons are
+   32px with 16px glyphs, text chips are 30px tall at 13px/500 with 14px
+   chevrons. Declared after the Tailwind utilities on the markup so it wins. */
+.composer-toolbar {
+  --tb-btn: 2rem;
+  --tb-chip: 1.875rem;
+  align-items: center;
+}
+.composer-toolbar #attachBtn,
+.composer-toolbar #voiceBtn,
+.composer-toolbar #pauseBtn,
+.composer-toolbar #steerBtn,
+.composer-toolbar #sendBtn {
+  box-sizing: border-box;
+  width: var(--tb-btn);
+  height: var(--tb-btn);
+  padding: 0;
+}
+.composer-toolbar #pauseBtn,
+.composer-toolbar #steerBtn {
+  border-radius: 9999px;
+}
+.composer-toolbar #voiceMenuBtn {
+  box-sizing: border-box;
+  width: 1.25rem;
+  height: var(--tb-chip);
+  padding: 0;
+}
+.composer-toolbar :is(#attachBtn, #voiceBtn, #sendBtn, #pauseBtn, #steerBtn) svg {
+  width: 16px;
+  height: 16px;
+}
+.composer-toolbar :is(#modelSelectBtn, #thinkingMore, #contextButton, .perm-chip) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: var(--tb-chip);
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+}
+.composer-toolbar #modelSelectBtn {
+  gap: 6px;
+  min-width: 3.75rem;
+}
+.composer-toolbar #modelSelectLabel,
+.composer-toolbar .think-toggle-level {
+  line-height: 1;
+}
+.composer-toolbar :is(#modelSelectBtn, #thinkingMore, #voiceMenuBtn, .perm-chip) svg:not(.usage-ring) {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.composer-toolbar .usage-donut {
+  width: var(--tb-btn);
+  height: var(--tb-btn);
+}
+
 #promptInput {
   font-size: 0.9375rem;
   /* The thinking toggle above already supplies the breathing room. */
@@ -841,4 +906,120 @@ html.light .image-viewer-count {
 
 .tool-run.is-group.has-reasons .tool-step:not(.has-reason) {
   padding: 4px 14px;
+}
+
+/* ---- "Worked for 8m 2s": a finished turn's working, folded ---- */
+.worked-fold {
+  margin: 0.25rem 0 0.9rem;
+}
+.worked-fold > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border-radius: 6px;
+  color: var(--color-slate-500);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: color 120ms ease;
+}
+.worked-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.worked-fold > summary:hover {
+  color: var(--color-slate-800);
+}
+.dark .worked-fold > summary:hover {
+  color: var(--color-slate-200);
+}
+.worked-fold > summary:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+.worked-caret {
+  display: inline-flex;
+  transition: transform 160ms var(--panel-ease);
+}
+.worked-fold[open] > summary .worked-caret {
+  transform: rotate(90deg);
+}
+/* Opened, the working reads as the aside it is: indented under a hairline,
+   so the reply below stays the one thing at full width. */
+.worked-body {
+  margin: 6px 0 4px 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--color-slate-200);
+}
+.dark .worked-body {
+  border-left-color: var(--color-slate-800);
+}
+.worked-fold[open] > .worked-body {
+  animation: worked-open 160ms ease-out;
+}
+@keyframes worked-open {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---- Switching chats ----
+   The old transcript is dimmed the moment another chat is picked, and a small
+   "Opening chat…" pill fades in after a beat, so a quick switch never flashes
+   it and a slow one never looks frozen. */
+.chat-stage {
+  position: relative;
+}
+#chatView.is-switching {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 140ms ease 60ms;
+}
+#chatView {
+  transition: opacity 120ms ease;
+}
+.chat-loading {
+  position: absolute;
+  z-index: 12;
+  top: 28%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+  border: 1px solid var(--color-slate-200);
+  border-radius: 9999px;
+  background: var(--color-slate-50);
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--color-slate-600);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 0.12);
+  pointer-events: none;
+  animation: chat-loading-in 180ms ease-out 140ms both;
+}
+.chat-loading[hidden] {
+  display: none;
+}
+.dark .chat-loading {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.chat-loading-spin {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-width: 2px;
+  color: var(--color-accent-700);
+}
+.dark .chat-loading-spin {
+  color: var(--color-accent-400);
+}
+@keyframes chat-loading-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
 }

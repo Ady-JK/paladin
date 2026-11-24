@@ -48,6 +48,26 @@
   margin: 4px 6px;
   background: var(--color-slate-200);
 }
+.row-menu-label {
+  max-width: 230px;
+  overflow: hidden;
+  padding: 4px 10px 5px;
+  font-size: 11.5px;
+  color: var(--color-slate-400);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-menu-item small {
+  margin-left: auto;
+  padding-left: 14px;
+  font-size: 11px;
+  color: var(--color-slate-400);
+}
+.row-menu-item:disabled {
+  opacity: 0.5;
+  background: none;
+  cursor: default;
+}
 .dark .row-menu-sep {
   background: rgb(255 255 255 / 0.07);
 }

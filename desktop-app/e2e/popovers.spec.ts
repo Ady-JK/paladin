@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#promptInput")).toBeVisible();
 });
 
-const menus = ["#permMenu", "#toolsMenu", "#budgetMenu", "#modelMenu"];
+const menus = ["#toolsMenu", "#budgetMenu", "#modelMenu"];
 
 async function onlyOpen(page: Page, open: string): Promise<void> {
   for (const m of menus) {
@@ -18,16 +18,14 @@ async function onlyOpen(page: Page, open: string): Promise<void> {
 }
 
 test("opening a composer popover closes the others", async ({ page }) => {
-  await page.click("#permChip");
-  await onlyOpen(page, "#permMenu");
   await page.click("#toolsChip");
   await onlyOpen(page, "#toolsMenu");
   await page.click("#budgetChip");
   await onlyOpen(page, "#budgetMenu");
   await page.click("#modelSelectBtn");
   await onlyOpen(page, "#modelMenu");
-  await page.click("#permChip");
-  await onlyOpen(page, "#permMenu");
+  await page.click("#toolsChip");
+  await onlyOpen(page, "#toolsMenu");
 });
 
 test("the thinking card is exclusive with the other popovers", async ({ page }) => {

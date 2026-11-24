@@ -15,7 +15,15 @@ import { toast } from "../ui/toast";
 import { appMode, onChange as onModeChange, setAppMode, toggleAppModeFromKey } from "./appMode";
 import { setBrowserPages } from "./browserMode";
 import { registerChangesLink } from "./findings";
-import { abortAttach, hasRunningTurn, liveBadge, liveRoot, onResync, runningTurnIndex, runningUserRow } from "./live";
+import {
+  abortAttach,
+  detachLiveRoot,
+  hasRunningTurn,
+  liveBadge,
+  onResync,
+  runningTurnIndex,
+  runningUserRow,
+} from "./live";
 import { agentStatus, openSession, refreshSessions, renderSessions } from "./sessions";
 import { formatElapsed } from "./workingBar";
 import { createAgentTab, loadAgent, paintHead } from "./sidePane/agentTab";
@@ -28,7 +36,9 @@ import { navigateBrowser, newBrowserTab, stopBrowserPick, updateBrowserToolbar }
 import { loadChangeDiff, newChangesTab, paintChangesTab } from "./sidePane/changesTab";
 import { wireSplitResize } from "./sidePane/splitResize";
 import {
+  type ChangeTotal,
   clearChangeTotals,
+  dropLiveTotal,
   paintTurnMarker,
   retainChangeTotals,
   runningTurn,
@@ -226,33 +236,6 @@ function attachStandaloneTerminals(sessionId: string): void {
   }
 }
 
-export function showTerminalResult(sessionId: string, cwd: string, command: string, result: api.TerminalResult): void {
-  // A standalone result belongs to whichever tab is running in that
-  // workspace; find the tab itself rather than a set that owns it.
-  const standalone = sessionId === STANDALONE_PANE_SESSION;
-  const match = tabSet.tabs.find((tab): tab is TerminalTab => tab.kind === "terminal" && tab.cwd === cwd);
-  const paneSession = standalone
-    ? state.cwd === cwd
-      ? visibleSessionId()
-      : (match?.sessionId ?? sessionId)
-    : sessionId;
-  const set = browserSet(paneSession);
-  const visible = visibleSessionId() === paneSession && state.cwd === cwd;
-  const selected = ideTerminalMode && visible ? terminalDock?.active() : undefined;
-  const tab =
-    (selected?.cwd === cwd ? selected : undefined) ??
-    set.tabs.find((t): t is TerminalTab => t.kind === "terminal" && t.cwd === cwd) ??
-    openTerminalTab(paneSession, cwd);
-  if (ideTerminalMode && visible) terminalDock?.show(tab.key);
-  else if (visible || visibleSessionId() !== paneSession) {
-    set.active = tab.key;
-    if (visible) showPane();
-  }
-  const text = `\r\n$ ${command}\r\n${result.output.replace(/\n/g, "\r\n")}${result.truncated ? "\r\n[output truncated]" : ""}\r\n[exit ${result.exitCode}]\r\n`;
-  if (tab.term) tab.term.write(text);
-  else tab.pendingText.push(text);
-}
-
 // currentSet is the window's tab strip. It always exists: with one set
 // there is no "this session has no tabs yet" state to special-case.
 function currentSet(): TabSet {
@@ -304,6 +287,16 @@ function openBrowserTab(sessionId: string, url = ""): void {
     pendingBrowserSessions.add(sessionId);
   }
   renderSessions();
+}
+
+// openPersonalBrowser is what the user's own Browser choices open: a tab in
+// the person's browser, with their saved sites and sign-ins, address field
+// focused. The agent browser is a different surface (its own in-memory
+// profile) that the agent opens itself and that stays reachable from its
+// tool, localhost links and its tab; picking Browser here must not hand the
+// user that one.
+function openPersonalBrowser(): void {
+  openWebTab(visibleSessionId(), "", "New tab");
 }
 
 export function hasAgentBrowser(sessionId: string): boolean {
@@ -362,6 +355,8 @@ function paintChangesHeader(data: SessionChanges | undefined): void {
 }
 
 let changeRequest = 0;
+// The last counts read for each turn, so a refresh can repaint at once.
+const knownTotals = new Map<string, Map<number, ChangeTotal>>();
 let floatingChange: { sessionId: string; turn: number } | null = null;
 
 export function hideLiveChanges(sessionId: string): void {
@@ -375,10 +370,15 @@ function paintLiveChanges(
   turn: SessionChanges["turns"][number] | null,
   total: Awaited<ReturnType<typeof turnTotal>>,
 ): void {
-  if (ideTerminalMode || sessionId !== state.sessionId || !hasRunningTurn(sessionId) || !turn?.files.length) {
+  if (ideTerminalMode || sessionId !== state.sessionId || !hasRunningTurn(sessionId)) {
     hideLiveChanges(sessionId);
     return;
   }
+  // A refresh that cannot place the running turn (a request that raced a
+  // settling tool, or a moment with no listed files) says nothing about the
+  // turn having stopped: keep the marker until the turn really ends or the
+  // session changes, instead of letting it blink out mid-work.
+  if (!turn?.files.length) return;
   floatingChange = { sessionId, turn: turn.turn };
   liveChangesBtn.innerHTML =
     `${turn.files.length} ${turn.files.length === 1 ? "file" : "files"} changed` +
@@ -395,7 +395,7 @@ function paintLiveChanges(
 let toolChangeTimer = 0;
 let toolChangePending: { sessionId: string; liveRow: HTMLElement | null; callId?: string } | null = null;
 export function noteToolChange(sessionId: string, liveRow: HTMLElement | null | undefined, callId?: string): void {
-  clearChangeTotals([sessionId]);
+  dropLiveTotal(sessionId);
   toolChangePending = { sessionId, liveRow: liveRow ?? null, callId };
   if (toolChangeTimer) return;
   toolChangeTimer = window.setTimeout(() => {
@@ -424,36 +424,48 @@ export async function refreshChanges(
     paintChangesHeader(data);
     window.dispatchEvent(new CustomEvent("paladin:changes-updated", { detail: { sessionId, data } }));
     const byTurn = new Map(data.turns.map((turn) => [turn.turn, turn.files]));
-    const totals = new Map(
-      await Promise.all(data.turns.map(async (turn) => [turn.turn, await turnTotal(sessionId, turn)] as const)),
-    );
-    if (sessionId !== state.sessionId || request !== changeRequest) return;
-    const activeRow = runningUserRow(sessionId);
-    const sameLiveRow = !liveRow || !activeRow || liveRow === activeRow;
-    const activeIndex = activeRow?.dataset.turnIndex ?? runningTurnIndex(sessionId);
-    const activeTurn = hasRunningTurn(sessionId)
-      ? (data.turns.find((item) => sameLiveRow && item.callIds?.includes(callId ?? "")) ??
-        data.turns.find((item) => activeIndex !== undefined && item.turn === Number(activeIndex)) ??
-        runningTurn(data.turns))
-      : null;
-    paintLiveChanges(sessionId, activeTurn, activeTurn ? (totals.get(activeTurn.turn) ?? null) : null);
-    for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
-      const turn = Number(row.dataset.turnIndex);
-      if (!ideTerminalMode && (row === activeRow || (activeTurn && turn === activeTurn.turn))) {
-        paintTurnMarker(row, turn, []);
-        continue;
+    // Paint everything the change list alone can show right away, with the
+    // counts last known for each turn, then fill in fresh counts once the
+    // per-file diffs have been read. Waiting for them first held back the
+    // live marker and the open Changes tab behind one diff request per file.
+    const known = knownTotals.get(sessionId) ?? new Map<number, ChangeTotal>();
+    knownTotals.set(sessionId, known);
+    const paintAll = (): void => {
+      const activeRow = runningUserRow(sessionId);
+      const sameLiveRow = !liveRow || !activeRow || liveRow === activeRow;
+      const activeIndex = activeRow?.dataset.turnIndex ?? runningTurnIndex(sessionId);
+      const activeTurn = hasRunningTurn(sessionId)
+        ? (data.turns.find((item) => sameLiveRow && item.callIds?.includes(callId ?? "")) ??
+          data.turns.find((item) => activeIndex !== undefined && item.turn === Number(activeIndex)) ??
+          runningTurn(data.turns))
+        : null;
+      paintLiveChanges(sessionId, activeTurn, activeTurn ? (known.get(activeTurn.turn) ?? null) : null);
+      for (const row of Array.from($("#messages").querySelectorAll<HTMLElement>("[data-turn-index]"))) {
+        const turn = Number(row.dataset.turnIndex);
+        if (!ideTerminalMode && (row === activeRow || (activeTurn && turn === activeTurn.turn))) {
+          paintTurnMarker(row, turn, []);
+          continue;
+        }
+        paintTurnMarker(row, turn, byTurn.get(turn) ?? [], known.get(turn));
       }
-      paintTurnMarker(row, turn, byTurn.get(turn) ?? [], totals.get(turn));
-    }
-    if (!ideTerminalMode && activeRow && activeTurn) paintTurnMarker(activeRow, activeTurn.turn, []);
-    if (liveRow && (ideTerminalMode || sameLiveRow) && (callId || !hasRunningTurn(sessionId))) {
-      const turn = data.turns.find((item) => callId && item.callIds?.includes(callId)) ?? runningTurn(data.turns);
-      if (turn && (ideTerminalMode || !activeRow))
-        paintTurnMarker(liveRow, turn.turn, turn.files, totals.get(turn.turn));
-      else if (turn && activeRow) paintTurnMarker(liveRow, turn.turn, []);
-    }
+      if (!ideTerminalMode && activeRow && activeTurn) paintTurnMarker(activeRow, activeTurn.turn, []);
+      if (liveRow && (ideTerminalMode || sameLiveRow) && (callId || !hasRunningTurn(sessionId))) {
+        const turn = data.turns.find((item) => callId && item.callIds?.includes(callId)) ?? runningTurn(data.turns);
+        if (turn && (ideTerminalMode || !activeRow))
+          paintTurnMarker(liveRow, turn.turn, turn.files, known.get(turn.turn));
+        else if (turn && activeRow) paintTurnMarker(liveRow, turn.turn, []);
+      }
+    };
+    paintAll();
     const tab = tabsFor(sessionId).find((t): t is ChangesTab => t.kind === "changes");
     if (tab) paintChangesTab(tab, data);
+    const fresh = await Promise.all(
+      data.turns.map(async (turn) => [turn.turn, await turnTotal(sessionId, turn)] as const),
+    );
+    if (sessionId !== state.sessionId || request !== changeRequest) return;
+    known.clear();
+    for (const [turn, total] of fresh) if (total) known.set(turn, total);
+    paintAll();
   } catch {
     if (sessionId === state.sessionId && request === changeRequest) paintChangesHeader(undefined);
   }
@@ -940,8 +952,10 @@ async function freezeSurface(surface: HTMLElement): Promise<void> {
 }
 
 // watchOverlays re-syncs when an overlay opens or closes over the page.
-// Chat streaming only touches #messages, which is never over the pane, so
-// those mutations are skipped.
+// Chat streaming only touches #messages, a subagent tab's live rows and the
+// working bar, none of which is ever over the pane, so those mutations are
+// skipped.
+const QUIET_REGIONS = "#messages, .pane-agent-body, #contextBox";
 function watchOverlays(): void {
   let queued = false;
   const check = (): void => {
@@ -956,7 +970,7 @@ function watchOverlays(): void {
   };
   const schedule = (records: MutationRecord[]): void => {
     if (queued) return;
-    if (records.every((r) => r.target instanceof Element && r.target.closest("#messages"))) return;
+    if (records.every((r) => r.target instanceof Element && r.target.closest(QUIET_REGIONS))) return;
     queued = true;
     requestAnimationFrame(check);
   };
@@ -1357,7 +1371,7 @@ onResync(() => {
   const set = paneOpen && state.sessionId ? currentSet() : undefined;
   const tab = set && activeTab(set);
   if (tab?.kind !== "agent") return;
-  liveRoot(tab.agentId).remove();
+  detachLiveRoot(tab.agentId);
   void loadAgent(tab);
 });
 
@@ -1440,7 +1454,7 @@ function closeTab(key: string, dropBrowser = true, _sessionId = visibleSessionId
   }
   if (removed.kind === "agent") {
     if (removed.loading) abortAttach(removed.agentId);
-    liveRoot(removed.agentId).remove();
+    detachLiveRoot(removed.agentId);
     dismissedAgents.add(removed.agentId);
   }
   if (removed.kind === "browser" && dropBrowser && hasBridge()) void bridge().browser?.drop(removed.sessionId);
@@ -1473,6 +1487,7 @@ function closeTab(key: string, dropBrowser = true, _sessionId = visibleSessionId
 export function disposeSidePanes(ids: string[]): void {
   const gone = new Set(ids);
   clearChangeTotals(ids);
+  for (const id of ids) knownTotals.delete(id);
   for (const id of ids) {
     changesCache.delete(id);
     pendingBrowserSessions.delete(id);
@@ -1480,7 +1495,7 @@ export function disposeSidePanes(ids: string[]): void {
   const drop = (tab: Tab): void => {
     if (tab.kind === "agent") {
       if (tab.loading) abortAttach(tab.agentId);
-      liveRoot(tab.agentId).remove();
+      detachLiveRoot(tab.agentId);
     }
     if (tab.kind === "browser" && hasBridge()) void bridge().browser?.drop(tab.sessionId);
     if (tab.kind === "browser") stopBrowserPick(tab);
@@ -1722,21 +1737,7 @@ export function initSidePane(): void {
   // Browser mode's own bar: + opens the address/sites menu, and the strip
   // selects and closes pages. There is no vertical list: the strip is the
   // whole inventory.
-  $("#browserNewTab").addEventListener("click", () => window.dispatchEvent(new Event("paladin:browser-menu")));
   $("#browserToAgentBtn").addEventListener("click", () => setAppMode("agent"));
-  $("#browserTabs").addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    const closeKey = target.closest<HTMLElement>("[data-page-close]")?.dataset.pageClose;
-    if (closeKey) {
-      closeTab(closeKey);
-      return;
-    }
-    const key = target.closest<HTMLElement>("[data-page]")?.dataset.page;
-    if (!key) return;
-    tabSet.active = key;
-    showPane();
-    render();
-  });
   // Passing comments to the agent lands in the composer, so come back to the
   // mode that owns it.
   window.addEventListener("paladin:pass-to-agent", () => setAppMode("agent"));
@@ -1778,7 +1779,10 @@ export function initSidePane(): void {
       openTerminalTab(visibleSessionId());
       return;
     }
-    if (kind === "browser") openBrowserTab(visibleSessionId(), "");
+    if (kind === "browser") {
+      openPersonalBrowser();
+      return;
+    }
     if (kind === "changes") {
       if (!state.sessionId) {
         toast("Open a session to see its changes.", "error");
@@ -1834,7 +1838,7 @@ export function initSidePane(): void {
     // forward.
     if (target.closest("[data-pane-new-browser]")) {
       closeMenu();
-      openBrowserTab(visibleSessionId(), "");
+      openPersonalBrowser();
       return;
     }
     if (target.closest("[data-pane-new-changes]")) {

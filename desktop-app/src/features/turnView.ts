@@ -380,14 +380,16 @@ export class TurnView {
     }
     if (think.queued) return;
     think.queued = true;
-    requestAnimationFrame(() => {
+    // The same cadence as the reply text: repainting a long reasoning block
+    // every frame costs more than anyone can read.
+    window.setTimeout(() => {
       think.queued = false;
       if (this.think === think) {
         this.thinkDirty = false;
         paintThinking(think.el, think.text);
         this.tail();
       }
-    });
+    }, SEGMENT_PAINT_MS);
   }
 
   // endThinking folds the open block away once the model moves on.

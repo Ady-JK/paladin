@@ -13,15 +13,26 @@ import { state } from "../core/state";
 import type { ResourceSnapshot, ResourceUsage } from "../core/types";
 
 const DEFAULT_INTERVAL = 3000;
+// With nothing running and no resource view open, a slow sample is enough.
+const IDLE_INTERVAL = 15000;
 
 let core: ResourceSnapshot | null = null;
 let app: ResourceUsage | null = null;
 let timer = 0;
 let inFlight = false;
 
+// busy reports whether anything shows live numbers: a session with processes
+// running, or the Resources pane open.
+function busy(): boolean {
+  if (core && Object.values(core.sessions).some((u) => u.procs > 0)) return true;
+  const pane = document.getElementById("settingsPaneResources");
+  return !!pane && !pane.classList.contains("hidden");
+}
+
 function interval(): number {
   const override = (window as unknown as { __paladinResInterval?: number }).__paladinResInterval;
-  return typeof override === "number" && override > 0 ? override : DEFAULT_INTERVAL;
+  if (typeof override === "number" && override > 0) return override;
+  return busy() ? DEFAULT_INTERVAL : IDLE_INTERVAL;
 }
 
 function fmtCpu(pct: number): string {
@@ -108,26 +119,6 @@ function paintRows(): void {
     badge.textContent = text;
     row.insertBefore(badge, row.querySelector(".session-more"));
   }
-}
-
-function paintPill(): void {
-  const pill = document.getElementById("resPill");
-  const label = document.getElementById("resPillLabel");
-  if (!pill || !label) {
-    return;
-  }
-  const show = !!core?.supported && !!state.sessionId;
-  pill.classList.toggle("hidden", !show);
-  pill.classList.toggle("sm:flex", show);
-  if (!show) {
-    return;
-  }
-  const u = sessionUsage(state.sessionId);
-  label.textContent = u ? fmt(u) : "idle";
-  pill.classList.toggle("is-busy", !!u);
-  pill.title = u
-    ? `This session's processes: ${plural(u.procs, "process")}, CPU ${fmtCpu(u.cpu)}, memory ${fmtBytes(u.rss)}`
-    : "No processes running for this session";
 }
 
 function paintFooter(): void {
@@ -265,7 +256,6 @@ function paintPane(): void {
 // paintResources repaints every surface from the last sample.
 export function paintResources(): void {
   paintRows();
-  paintPill();
   paintFooter();
   paintPane();
 }

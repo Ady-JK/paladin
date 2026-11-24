@@ -1,5 +1,6 @@
 // filetools.spec.ts covers the write/edit rich tool views.
 // It stubs a demo session and checks file view, diff, and matches.
+import { openWork } from "./work";
 import { test, expect } from "@playwright/test";
 import { showSidebar } from "./drawer";
 
@@ -148,6 +149,7 @@ test.beforeEach(async ({ page }) => {
   await showSidebar(page);
   await page.click(`[data-session="${SESSION}"]`);
   await expect(page.locator("#messages")).toContainText("Port bumped");
+  await openWork(page);
   // Consecutive calls fold into summary groups; open them all. Click
   // only closed heads and re-query each time: a run can gain its head
   // while the history paints, which used to shift indices and toggle

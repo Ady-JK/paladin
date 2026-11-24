@@ -88,6 +88,8 @@ const READ_METHODS = new Set([
   "resolveWorkspace",
   "listProviders",
   "codexStatus",
+  "claudeStatus",
+  "claudeCommands",
   "compactionGet",
   "fsList",
   "ideList",
@@ -142,9 +144,6 @@ export function isReadMethod(method: string): boolean {
 
 // deadlineFor is how long a call to method may wait for its reply.
 export function deadlineFor(method: string, deadlines: Deadlines): number {
-  // The host limits a user command to ten minutes. Leave time for its
-  // timeout result to cross the JSONL bridge before this call expires.
-  if (method === "terminalRun") return deadlines.longMs + 60_000;
   if (LONG_METHODS.has(method)) return deadlines.longMs;
   return isReadMethod(method) ? deadlines.readMs : deadlines.writeMs;
 }

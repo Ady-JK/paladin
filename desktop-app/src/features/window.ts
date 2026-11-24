@@ -132,7 +132,7 @@ function wireDrawer(): void {
         // revert popover is open. Named selectors, not [role=dialog]:
         // the sidebar itself contains dialogs, and matching one would
         // make Escape stop working.
-        ".modal-overlay:not(.hidden), #sessionRowMenu, .perm-menu:not(.hidden), #thinkingMenu:not(.hidden), #modelMenu:not(.hidden), input.session-rename, #revertPop, #sessionImageViewer:not(.hidden), .image-viewer:not(.hidden)",
+        ".modal-overlay:not(.hidden), #sessionRowMenu, #projectNewMenu, .perm-menu:not(.hidden), #thinkingMenu:not(.hidden), #modelMenu:not(.hidden), input.session-rename, #revertPop, #sessionImageViewer:not(.hidden), .image-viewer:not(.hidden)",
       );
       if (layered) return;
       event.stopImmediatePropagation();

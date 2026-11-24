@@ -13,9 +13,11 @@
 
 import { initCodexSkills } from "./skills";
 import { refreshCodexAvailability } from "./harness";
+import { refreshClaudeAvailability } from "../claude/harness";
 
 // initCodexAdapter wires the adapter's UI once at boot.
 export function initCodexAdapter(): void {
   void refreshCodexAvailability();
+  void refreshClaudeAvailability();
   initCodexSkills();
 }

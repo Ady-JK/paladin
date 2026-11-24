@@ -41,13 +41,13 @@ test("markdown tables get a scroll wrapper, taller ones a vertical box", () => {
   expect(tall).toContain('<div class="md-table-wrap is-tall" data-rows="11">');
 });
 
-test("a malicious URL on a web approval card and a todo status stay text", async ({ page }) => {
+test("a malicious command on an approval card and a todo status stay text", async ({ page }) => {
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.goto("/");
   await expect(page.locator("#promptInput")).toBeVisible();
-  const url = `https://evil.example/?q=${BREAKOUT}`;
+  const command = `echo ${BREAKOUT}`;
   await page.evaluate(
-    ({ url, breakout }) => {
+    ({ command, breakout }) => {
       (window as any).__e2eChatEvents = [
         {
           event: "chat/tool",
@@ -61,30 +61,29 @@ test("a malicious URL on a web approval card and a todo status stay text", async
         },
         {
           event: "chat/tool",
-          tool: { id: "w1", name: "web_fetch", arguments: JSON.stringify({ url }), result: "", status: "running" },
+          tool: { id: "w1", name: "shell", arguments: JSON.stringify({ cmd: command }), result: "", status: "running" },
         },
         {
           event: "chat/approval",
           approval: {
             id: "w1",
-            tool: "web_fetch",
-            kind: "web",
-            host: "evil.example",
-            url,
-            reasons: ["a new site"],
-            choices: ["once", "session", "deny"],
+            tool: "shell",
+            kind: "shell",
+            command,
+            reasons: ["would expose a local port or service beyond this machine"],
+            choices: ["once", "deny"],
             state: "pending",
           },
         },
       ];
     },
-    { url, breakout: BREAKOUT },
+    { command, breakout: BREAKOUT },
   );
   await page.fill("#promptInput", "go");
   await page.click("#sendBtn");
   const card = page.locator('.approval-card[data-approval="w1"]');
   await expect(card).toBeVisible();
-  await expect(card.locator(".approval-web-url")).toHaveAttribute("title", url);
+  await expect(card.locator(".approval-subject")).toContainText("echo");
   await page.waitForTimeout(1500);
   expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
   expect(await page.locator("[onanimationstart]").count()).toBe(0);
@@ -97,4 +96,22 @@ test("invisible and direction-changing characters are shown on approval cards", 
   expect(html).not.toContain("\u202e");
   expect(revealHidden("tab\there\nnewline")).toBe("tab\there\nnewline");
   expect(revealHidden(escapeHtml("zero\u200bwidth"))).toContain("⟨U+200B⟩");
+});
+
+test("inline code inside a link and next to a bare URL render instead of leaking markers", () => {
+  const linked = renderMarkdown("see [`code`](https://example.com/x) now");
+  expect(linked).toContain('<a class="md-link"');
+  expect(linked).toContain('<code class="md-code">code</code>');
+  expect(linked).not.toMatch(/[]/);
+  const bare = renderMarkdown("go to https://example.com`x` ok");
+  expect(bare).toContain('<code class="md-code">x</code>');
+  expect(bare).not.toMatch(/[]/);
+});
+
+test("repeated math renders identically and a loose list stays one list", () => {
+  const text = "the sum $a^2+b^2$ and $$x=\\frac{1}{2}$$";
+  expect(renderMarkdown(text)).toBe(renderMarkdown(text));
+  expect(renderMarkdown(text)).toContain("katex");
+  const loose = renderMarkdown("- one\n\n- two\n\n- three");
+  expect((loose.match(/<ul/g) ?? []).length).toBe(1);
 });

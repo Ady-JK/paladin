@@ -6,6 +6,9 @@ import { icon } from "../icons";
 let toastTimer = 0;
 
 export function toast(message: string, kind: "ok" | "error" = "ok"): void {
+  // Announce it: a notice nobody can see (or hear) is not delivered.
+  toastEl.setAttribute("role", kind === "error" ? "alert" : "status");
+  toastEl.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
   toastTextEl.textContent = message;
 
   toastEl.className = `pointer-events-none fixed left-1/2 top-20 z-[60] flex max-w-lg -translate-x-1/2 items-center gap-2 rounded-lg border px-4 py-2.5 text-xs backdrop-blur-md ${

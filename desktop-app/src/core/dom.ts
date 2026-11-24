@@ -10,6 +10,8 @@ export const $ = <T extends HTMLElement>(selector: string): T => document.queryS
 export const sidebarEl = $("#sidebar");
 export const messagesEl = $("#messages");
 export const chatViewEl = $("#chatView");
+// Jumps the transcript back to its newest row while the reader is scrolled away.
+export const jumpLatestEl = $<HTMLButtonElement>("#jumpLatestBtn");
 export const parentBarEl = $("#parentBar");
 export const sidePaneEl = $("#sidePane");
 export const inputEl = $<HTMLTextAreaElement>("#promptInput");
@@ -86,9 +88,6 @@ export const settingsNavResourcesEl = $<HTMLButtonElement>("#settingsNavResource
 export const settingsPaneResourcesEl = $("#settingsPaneResources");
 export const settingsNavMemoryEl = $<HTMLButtonElement>("#settingsNavMemory");
 export const settingsPaneMemoryEl = $("#settingsPaneMemory");
-export const settingsNavPermissionsEl = $<HTMLButtonElement>("#settingsNavPermissions");
-export const settingsPanePermissionsEl = $("#settingsPanePermissions");
-export const permBodyEl = $("#permBody");
 export const settingsNavMcpEl = $<HTMLButtonElement>("#settingsNavMcp");
 export const settingsPaneMcpEl = $("#settingsPaneMcp");
 export const mcpBodyEl = $("#mcpBody");

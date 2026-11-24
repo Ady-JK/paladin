@@ -116,8 +116,6 @@ export type CodexStatus = {
   loggedIn: boolean;
   account?: string;
   models: CodexModel[];
-  // permissions are the permission presets Codex accepts on this machine.
-  permissions: PermissionPreset[];
   error?: string;
 };
 
@@ -172,7 +170,7 @@ export type WorktreeInfo = {
   origin: string;
 };
 
-export type BlockingJob = { id: string; command?: string; pid?: number; live?: boolean };
+type BlockingJob = { id: string; command?: string; pid?: number; live?: boolean };
 
 export type RevertPreview = {
   index: number;
@@ -456,6 +454,9 @@ export type MessageInfo = {
   // stats is a user row's turn cost, so a reopened session shows the
   // same summary the live turn did.
   stats?: TurnStats;
+  // Incomplete applies to the whole persisted turn, including pre-steer
+  // rows on earlier history pages.
+  incomplete?: boolean;
   protection?: SnapshotProtection;
 };
 
@@ -620,7 +621,7 @@ type TurnState = "queued" | "running" | "done";
 
 // TurnStats is what a turn cost: wall time, generated tokens, and the
 // part of that wall time spent inside the model calls themselves.
-export type TurnStats = { durationMs: number; tokens: number; genMs: number };
+export type TurnStats = { durationMs: number; tokens: number; genMs: number; incomplete?: boolean };
 
 // TurnInfo describes one submitted message (see PROTOCOL.md).
 export type TurnInfo = {
@@ -764,43 +765,24 @@ export type ThinkingView = {
   level: string;
 };
 
-// Permission presets, rules and the approval card the gate sends.
-export type PermissionPreset = "read-only" | "full-access";
+// The approval card the guard (and Codex or Claude, for their own requests) sends.
 export type ApprovalDecision = "once" | "session" | "folder" | "global" | "deny";
-
-export type PermissionRule = {
-  tool: "shell" | "write" | "read" | "mcp" | "web" | "project";
-  pattern: string;
-  action: "allow" | "deny";
-};
 
 export type Approval = {
   id: string;
   tool: string;
-  kind: "shell" | "write" | "read" | "permissions" | "mcp" | "web" | "project" | string;
+  kind: "shell" | "write" | "read" | "permissions" | "mcp" | string;
   command?: string;
   path?: string;
   // MCP calls: the server, its own tool name and the JSON arguments.
   server?: string;
   mcpTool?: string;
   args?: string;
-  // Web requests (web_fetch, browser open): the site and full URL.
-  host?: string;
-  url?: string;
   reasons?: string[];
   destructive?: boolean;
   choices?: ApprovalDecision[];
-  remember?: PermissionRule[];
   state: "pending" | "approved" | "denied";
   decision?: ApprovalDecision | "interrupted";
-};
-
-export type PermissionsView = {
-  global: PermissionRule[];
-  folder: PermissionRule[];
-  session: PermissionRule[];
-  folders: { cwd: string; rules: PermissionRule[] }[];
-  presets: PermissionPreset[];
 };
 
 // HistoryPage is one window of a transcript. Start is the row ordinal

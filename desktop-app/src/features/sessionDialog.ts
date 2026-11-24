@@ -26,7 +26,9 @@ import { closeModal, openModal } from "../ui/anim";
 import { toast } from "../ui/toast";
 import { pickModel } from "./models";
 import { newSession, refreshSessions } from "./sessions";
-import { codexAvailability, refreshCodexAvailability, startCodexSession } from "../adapters/codex/harness";
+import { codexAvailability, loadCodex, refreshCodexAvailability, setHarness } from "../adapters/codex/harness";
+import { claudeAvailability, loadClaude, refreshClaudeAvailability } from "../adapters/claude/harness";
+import { beginStart } from "./startProgress";
 import { crumbsHTML, filterEntries, getShowHidden, rowsHTML, setShowHidden, type PickerSelection } from "./picker";
 import { syncMcp } from "./mcp";
 
@@ -102,6 +104,7 @@ async function browseNewSession(path?: string): Promise<void> {
   const startButton = $<HTMLButtonElement>("#sessionStartBtn");
   startButton.disabled = true;
   $<HTMLButtonElement>("#sessionStartCodexBtn").disabled = true;
+  $<HTMLButtonElement>("#sessionStartClaudeBtn").disabled = true;
   try {
     const list = await api.fsList(target);
     if (request !== browseGeneration) return;
@@ -134,6 +137,13 @@ function paintEngines(): void {
   codex.title = installed
     ? "Run the session on your Codex CLI, with Codex's models"
     : note || "Codex was not found on this Mac: install the Codex app or CLI to use it";
+  const claude = $<HTMLButtonElement>("#sessionStartClaudeBtn");
+  const availability = claudeAvailability();
+  claude.hidden = choosingFolder;
+  claude.disabled = !availability.installed || $<HTMLButtonElement>("#sessionStartBtn").disabled;
+  claude.title = availability.installed
+    ? "Run with your Claude Code CLI and subscription"
+    : availability.note || "Install Claude Code to use it";
 }
 
 export async function openNewSession(options?: { chooseFolder?: boolean }): Promise<void> {
@@ -157,6 +167,7 @@ export async function openNewSession(options?: { chooseFolder?: boolean }): Prom
   openModal(sessionModalEl);
   // Re-check Codex each time: it may have been installed or updated since launch.
   void refreshCodexAvailability().then(paintEngines);
+  void refreshClaudeAvailability().then(paintEngines);
   paintEngines();
 
   await browseNewSession();
@@ -167,33 +178,75 @@ export function closeNewSession(): void {
   closeModal(sessionModalEl);
 }
 
-function startNewSession(codex = false): void {
-  if (choosingFolder && state.pendingWorkspace.trim() === state.cwd) {
-    closeNewSession();
-    return;
+export type SessionEngine = "" | "codex" | "claude";
+
+const ENGINE_NAMES = { codex: "Codex", claude: "Claude Code" } as const;
+
+// launchGen numbers launches so a slow one that was overtaken stays quiet.
+let launchGen = 0;
+
+// launchSession starts a blank session in cwd on one engine: the same steps
+// the dialog's three buttons take, so a sidebar shortcut cannot drift from
+// them. beforeNew runs once the engine is ready, just before the view switches.
+//
+// Codex and Claude Code launch their CLI to read models and sign-in, which
+// takes a moment, and the app stays usable meanwhile (a status pill says so).
+// So nothing on screen changes until the engine is ready, and a launch that
+// the user has moved on from (opened another chat, started another session)
+// quietly drops instead of switching the view under them.
+async function launchSession(cwd: string, engine: SessionEngine, beforeNew?: () => void): Promise<void> {
+  const gen = ++launchGen;
+  const from = state.sessionId;
+  const target = cwd.trim() || state.cwd;
+  if (engine) {
+    const end = beginStart(ENGINE_NAMES[engine], target);
+    try {
+      const ready = engine === "codex" ? await loadCodex() : await loadClaude(target);
+      if (!ready || gen !== launchGen || state.sessionId !== from) return;
+    } finally {
+      end();
+    }
   }
-  if (state.pendingWorkspace.trim()) {
-    state.cwd = state.pendingWorkspace.trim();
+  if (cwd.trim()) {
+    state.cwd = target;
     workspaceLabelEl.textContent = shortPath(state.cwd);
     workspaceInputEl.value = state.cwd;
     syncMcp();
   }
 
-  if (!codex) pickModel(state.selectedProvider, state.selectedModel);
-  closeNewSession();
+  if (!engine) pickModel(state.selectedProvider, state.selectedModel);
+  beforeNew?.();
   newSession();
-  if (codex) void startCodexSession();
+  if (engine) setHarness(engine);
   // The workspace may have changed folders: refetch the global list so
   // sessions from other folders stay visible.
   void refreshSessions();
+}
+
+// startSessionIn is the sidebar's "+" on a folder: a new session there, on the
+// chosen engine, without opening the dialog.
+export function startSessionIn(cwd: string, engine: SessionEngine): Promise<void> {
+  return launchSession(cwd, engine);
+}
+
+async function startNewSession(engine: SessionEngine = ""): Promise<void> {
+  if (choosingFolder && state.pendingWorkspace.trim() === state.cwd) {
+    closeNewSession();
+    return;
+  }
+  // A CLI start can take a while: leave the dialog at once so the status pill
+  // behind it is visible, instead of a dialog that looks stuck.
+  if (engine) closeNewSession();
+  return launchSession(state.pendingWorkspace, engine, engine ? undefined : closeNewSession);
 }
 
 // initSessionDialog wires the new-session dialog controls.
 export function initSessionDialog(): void {
   $("#sessionCloseBtn").addEventListener("click", closeNewSession);
   $("#sessionCancelBtn").addEventListener("click", closeNewSession);
-  $("#sessionStartBtn").addEventListener("click", () => startNewSession(false));
-  $("#sessionStartCodexBtn").addEventListener("click", () => startNewSession(true));
+  $("#sessionStartBtn").addEventListener("click", () => void startNewSession(""));
+  $("#sessionStartCodexBtn").addEventListener("click", () => void startNewSession("codex"));
+  $("#sessionStartClaudeBtn").addEventListener("click", () => void startNewSession("claude"));
 
   newSessionFolderSearchEl.addEventListener("input", () => {
     query = newSessionFolderSearchEl.value;

@@ -30,10 +30,10 @@ import { buildHistory } from "./sessions/history";
 import { clearTodos, refreshTodos } from "./todos";
 import { clearUsage, refreshUsage } from "./usage";
 import { persistModelChoice, syncModelSelects } from "./models";
-import { openedHarness, setHarness } from "../adapters/codex/harness";
+import { openedHarness, previewHarness, setHarness } from "../adapters/codex/harness";
 import { abortAttach, beginAttach, finishAttach, forgetSession, liveBadge, queuedCount, syncComposer } from "./live";
+import { STARTING_CHANGED, startingIn } from "./startProgress";
 import { forkSessionById, renameSessionById } from "./sessionActions";
-import { resetDraft, syncPermChip } from "./permissions";
 import { forkIntoWorktree, setWorktree, syncWorktreeChip } from "./worktrees";
 import { syncMcp } from "./mcp";
 import { syncTools } from "./toolSwitches";
@@ -188,12 +188,55 @@ function childrenBlock(parent: SessionInfo, kids: SessionInfo[], tree?: sessionT
     <div class="session-children" data-kids-of="${id}"${open ? "" : " hidden"}>${kids.map(row).join("")}</div>`;
 }
 
-// engineChip says which engine runs a session: Codex (the user's own CLI) or
-// Paladin's agent.
+type Engine = "paladin" | "codex" | "claude";
+
+// ENGINES is the order a project lists its sections in; every session
+// belongs to exactly one (anything that is not Codex or Claude is Paladin's).
+const ENGINES: ReadonlyArray<{ id: Engine; label: string }> = [
+  { id: "paladin", label: "Paladin" },
+  { id: "codex", label: "Codex" },
+  { id: "claude", label: "Claude Code" },
+];
+
+function engineOf(session: SessionInfo): Engine {
+  return session.harness === CODEX ? "codex" : session.harness === "claude" ? "claude" : "paladin";
+}
+
+// engineChip says which engine runs a session: Codex or Claude Code (the
+// user's own CLIs) or Paladin's agent.
 function engineChip(session: SessionInfo): string {
-  const codex = session.harness === CODEX;
-  const title = codex ? "Runs on your Codex CLI" : "Runs on Paladin's agent";
-  return `<span class="session-harness" data-engine="${codex ? "codex" : "paladin"}" title="${title}">${codex ? "Codex" : "Paladin"}</span>`;
+  const engine = engineOf(session);
+  const title =
+    engine === "codex"
+      ? "Runs on your Codex CLI"
+      : engine === "claude"
+        ? "Runs on your Claude Code CLI"
+        : "Runs on Paladin's agent";
+  const label = ENGINES.find((e) => e.id === engine)?.label ?? "Paladin";
+  return `<span class="session-harness" data-engine="${engine}" title="${title}">${label}</span>`;
+}
+
+// projectAddButton is a folder's "+": it opens the engine menu, and shows a
+// spinner (and refuses a second start) while an engine is starting there.
+function projectAddButton(cwd: string): string {
+  const name = escapeAttr(shortPath(cwd));
+  const starting = startingIn(cwd);
+  if (starting) {
+    const label = `Starting ${escapeAttr(starting)}…`;
+    return `<button type="button" class="project-add is-starting" data-new-in="${escapeAttr(cwd)}" title="${label}" aria-label="${label}" aria-busy="true" disabled><span class="live-spinner start-spin" aria-hidden="true"></span></button>`;
+  }
+  return `<button type="button" class="project-add" data-new-in="${escapeAttr(cwd)}" title="New session in ${name}" aria-label="New session in ${name}" aria-haspopup="menu">${icon("plus", "h-3.5 w-3.5")}</button>`;
+}
+
+// engineSections splits one project's sessions into a labelled section per
+// engine, so a folder worked on with several agents stays readable. Empty
+// sections are not drawn.
+function engineSections(group: SessionInfo[], row: (session: SessionInfo) => string): string {
+  return ENGINES.map(({ id, label }) => {
+    const rows = group.filter((s) => engineOf(s) === id);
+    if (rows.length === 0) return "";
+    return `<div class="project-engine" data-engine-group="${id}"><div class="project-engine-label">${label}</div>${rows.map(row).join("")}</div>`;
+  }).join("");
 }
 
 function sessionRow(session: SessionInfo, kids: SessionInfo[] = [], tree?: sessionTree): string {
@@ -396,12 +439,15 @@ export function renderSessions(): void {
     const current = cwd === state.cwd;
     html += `
       <div class="project${open ? " is-open" : ""}${current ? " is-current" : ""}" data-cwd="${escapeAttr(cwd)}">
-        <button class="project-head" data-fold="${escapeAttr(cwd)}" title="${escapeAttr(cwd)}" aria-expanded="${open}">
-          <span class="project-ico">${icon("rl-folder", "h-4 w-4")}</span>
-          <span class="project-name">${cwd ? escapeHtml(shortPath(cwd)) : "Unknown folder"}</span>
-          <span class="project-caret">${icon("rl-chevron", "h-3 w-3")}</span>
-        </button>
-        <div class="project-list"${open ? "" : " hidden"}>${group.map((s) => sessionRow(s, tree.agentsOf.get(s.sessionId), tree) + forkRows(s, tree, 1)).join("")}</div>
+        <div class="project-row">
+          <button class="project-head" data-fold="${escapeAttr(cwd)}" title="${escapeAttr(cwd)}" aria-expanded="${open}">
+            <span class="project-ico">${icon("rl-folder", "h-4 w-4")}</span>
+            <span class="project-name">${cwd ? escapeHtml(shortPath(cwd)) : "Unknown folder"}</span>
+            <span class="project-caret">${icon("rl-chevron", "h-3 w-3")}</span>
+          </button>
+          ${cwd ? projectAddButton(cwd) : ""}
+        </div>
+        <div class="project-list"${open ? "" : " hidden"}>${engineSections(group, (s) => sessionRow(s, tree.agentsOf.get(s.sessionId), tree) + forkRows(s, tree, 1))}</div>
       </div>`;
   }
 
@@ -625,26 +671,14 @@ let syncingSession = false;
 // Paladin's app-server. Refresh the visible idle session without resetting the
 // composer, selected model, or history when nothing changed.
 async function syncLinkedSession(): Promise<void> {
-  if (syncingSession || document.hidden || state.harness !== "codex" || state.busy || !state.sessionId) return;
+  if (syncingSession || document.hidden || !state.harness || state.busy || !state.sessionId) return;
   const id = state.sessionId;
   const generation = openGeneration;
   syncingSession = true;
   try {
     const changed = await api.syncSession(id, state.cwd || null);
     if (changed && id === state.sessionId && generation === openGeneration) {
-      beginAttach(id);
-      try {
-        const snap = await api.attachSession(id, 0, state.cwd);
-        if (id !== state.sessionId || generation !== openGeneration) {
-          abortAttach(id);
-          return;
-        }
-        renderHistory(snap.history);
-        finishAttach(id, snap);
-      } catch (error) {
-        abortAttach(id);
-        throw error;
-      }
+      await reattachSession(id, generation);
       void refreshSessions();
     }
   } catch (error) {
@@ -654,13 +688,75 @@ async function syncLinkedSession(): Promise<void> {
   }
 }
 
+// reattachSession reads the visible session's history again without
+// reopening it: the composer, model, panes and chips stay as they are, and a
+// reader scrolled up stays where they were. The two callers are a linked
+// agent's periodic sync and a "session/refresh" (a background command ended).
+export async function reattachSession(id: string, generation = openGeneration): Promise<void> {
+  if (id !== state.sessionId || generation !== openGeneration) return;
+  const fromBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  beginAttach(id);
+  try {
+    const snap = await api.attachSession(id, 0, state.cwd);
+    if (id !== state.sessionId || generation !== openGeneration) {
+      abortAttach(id);
+      return;
+    }
+    renderHistory(snap.history);
+    finishAttach(id, snap);
+    // A reader who had scrolled up keeps their place; one at the bottom follows.
+    if (fromBottom > 80) {
+      messagesEl.scrollTop = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight - fromBottom);
+    }
+  } catch (error) {
+    abortAttach(id);
+    throw error;
+  }
+}
+
+// showSwitching tells the reader another chat is on its way: the old transcript
+// dims and an "Opening chat…" pill fades in after a beat (CSS), so a quick
+// switch never flashes it and a slow one never looks frozen.
+function showSwitching(label: string, id: string): void {
+  chatViewEl.classList.add("is-switching");
+  // The sidebar selection moves to the clicked chat now, not when it has opened.
+  document.querySelectorAll<HTMLElement>("#sidebar .is-pending").forEach((row) => row.classList.remove("is-pending"));
+  document.querySelectorAll<HTMLElement>("#sidebar [data-session]").forEach((pick) => {
+    if (pick.dataset.session === id) pick.closest(".session-row, .recent-row")?.classList.add("is-pending");
+  });
+  const pill = document.getElementById("chatLoading");
+  if (!pill) return;
+  pill.querySelector("#chatLoadingText")!.textContent = label;
+  pill.hidden = false;
+}
+
+function hideSwitching(): void {
+  chatViewEl.classList.remove("is-switching");
+  document.querySelectorAll<HTMLElement>("#sidebar .is-pending").forEach((row) => row.classList.remove("is-pending"));
+  const pill = document.getElementById("chatLoading");
+  if (pill) pill.hidden = true;
+}
+
+function switchingLabel(id: string): string {
+  switch (state.sessions.find((s) => s.sessionId === id)?.harness) {
+    case "claude":
+      return "Opening Claude Code chat…";
+    case "codex":
+      return "Opening Codex chat…";
+    default:
+      return "Opening chat…";
+  }
+}
+
 export async function openSession(id: string): Promise<void> {
   const generation = ++openGeneration;
   const damaged = state.sessions.find((s) => s.sessionId === id)?.damaged;
   if (damaged) {
+    hideSwitching();
     setStatus(`This session can't be opened (${damaged}). You can still delete it.`, "error");
     return;
   }
+  showSwitching(switchingLabel(id), id);
   try {
     // Use the listed workspace to avoid searching every namespace.
     const session = await api.openSession(id, state.sessions.find((item) => item.sessionId === id)?.cwd || null);
@@ -673,7 +769,6 @@ export async function openSession(id: string): Promise<void> {
     state.cwd = session.cwd;
     paintParentBar();
     syncSidePane();
-    syncPermChip();
     syncMcp();
     syncTools();
     void syncBudget();
@@ -689,10 +784,17 @@ export async function openSession(id: string): Promise<void> {
     workspaceLabelEl.textContent = shortPath(state.cwd);
     workspaceInputEl.value = state.cwd;
 
-    await openedHarness(session.harness, session.model);
+    // An engine's catalog (models, commands) comes from launching its CLI,
+    // which takes seconds. The composer takes the session's look now and the
+    // history is read in parallel; the catalog finishes in the background.
+    previewHarness(session.harness, session.model);
+    const catalog = openedHarness(session.harness, session.model);
+    // A Paladin chat has no catalog to wait for, so its provider and model
+    // are applied right here before the history is read.
+    if (!session.harness) await catalog;
     if (generation !== openGeneration) return;
     if (session.harness) {
-      // The Codex model list is already in the picker.
+      // The harness picker is already showing the session's model.
     } else if (session.provider) {
       state.selectedProvider = session.provider;
       state.selectedLab = session.model ? splitModel(session.model).lab : "";
@@ -722,15 +824,11 @@ export async function openSession(id: string): Promise<void> {
       abortAttach(session.sessionId);
       return;
     }
-    if (generation !== openGeneration || state.sessionId !== session.sessionId) {
-      abortAttach(session.sessionId);
-      return;
-    }
     renderHistory(snap.history);
     finishAttach(session.sessionId, snap);
+    hideSwitching();
     void refreshRecovery(session.sessionId);
 
-    renderSessions();
     // The ledger persists across restarts, so opening a session shows
     // its last-known totals immediately. The todo hat shows its plan.
     void refreshUsage();
@@ -738,8 +836,13 @@ export async function openSession(id: string): Promise<void> {
     if (!state.busy) {
       setStatus("ready", "ok");
     }
+    // Last: the engine's model list and commands, whenever its CLI is up.
+    await catalog;
   } catch (error) {
-    if (generation === openGeneration) setStatus(String(error), "error");
+    if (generation === openGeneration) {
+      hideSwitching();
+      setStatus(String(error), "error");
+    }
   }
 }
 
@@ -969,6 +1072,7 @@ function renderHistory(raw: HistoryPage | MessageInfo[]): void {
 
 export function newSession(): void {
   openGeneration++;
+  hideSwitching();
   setHarness("");
   state.sessionId = "";
   window.dispatchEvent(new Event("paladin:session-selected"));
@@ -976,7 +1080,6 @@ export function newSession(): void {
   state.subagent = null;
   paintParentBar();
   syncSidePane();
-  resetDraft();
   resetBudgetDraft();
   clearUsage();
   clearTodos();
@@ -1000,8 +1103,11 @@ export function newSession(): void {
 // initSessions wires the session search and the delete confirm dialog.
 export function initSessions(): void {
   void api.startCodexDiscovery().catch((error: unknown) => console.debug("Codex discovery unavailable", error));
+  void api.startClaudeDiscovery().catch((error: unknown) => console.debug("Claude discovery unavailable", error));
   window.setInterval(() => void syncLinkedSession(), 3000);
   window.addEventListener("focus", () => void syncLinkedSession());
+  // A folder's + shows a spinner while an engine starts there.
+  window.addEventListener(STARTING_CHANGED, renderSessions);
   document.addEventListener("visibilitychange", () => void syncLinkedSession());
   // Scrolling to the top of the transcript loads the next older turn by
   // itself: the old "Load earlier messages" button is gone, so deep

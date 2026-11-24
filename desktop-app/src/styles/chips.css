@@ -1,0 +1,115 @@
+/* ============ Composer chips and their popover menus ============
+   Shared by the tools, budget, MCP and worktree chips (the perm-* names are historical). */
+.perm-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.perm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--color-slate-500);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.perm-chip:hover,
+.perm-chip[aria-expanded="true"] {
+  border-color: var(--color-slate-200);
+  background: var(--color-slate-100);
+  color: var(--color-slate-700);
+}
+.dark .perm-chip {
+  color: var(--color-slate-400);
+}
+.dark .perm-chip:hover,
+.dark .perm-chip[aria-expanded="true"] {
+  border-color: var(--color-slate-700);
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+}
+.dark .perm-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 300px;
+  max-width: 92vw;
+  border-radius: 12px;
+  border: 1px solid var(--color-slate-200);
+  background: #fff;
+  padding: 4px;
+  box-shadow:
+    0 12px 32px -8px rgb(15 23 42 / 0.25),
+    0 2px 6px rgb(15 23 42 / 0.06);
+  animation: chip-in 140ms ease-out;
+}
+.dark .perm-menu {
+  border-color: rgb(51 65 85 / 0.7);
+  background: var(--color-slate-900);
+  box-shadow: 0 16px 40px -8px rgb(0 0 0 / 0.6);
+}
+.perm-menu.hidden {
+  display: none;
+}
+.perm-menu-head {
+  padding: 6px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-400);
+}
+.perm-item {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 7px 8px;
+  text-align: left;
+  outline: none;
+}
+.perm-item:hover,
+.perm-item:focus-visible {
+  background: var(--color-slate-100);
+}
+.dark .perm-item:hover,
+.dark .perm-item:focus-visible {
+  background: var(--color-slate-800);
+}
+.perm-item-ico {
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--color-slate-500);
+}
+.perm-item-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.perm-item-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-slate-800);
+}
+.dark .perm-item-label {
+  color: var(--color-slate-100);
+}
+.perm-item-blurb {
+  font-size: 11.5px;
+  color: var(--color-slate-500);
+}
+.perm-item-check {
+  display: inline-flex;
+  width: 14px;
+  margin-top: 2px;
+  color: var(--color-accent-600);
+}

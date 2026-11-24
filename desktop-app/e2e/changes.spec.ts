@@ -321,6 +321,27 @@ test("a running turn shows a floating summary and a collapsed card after finishi
     });
   });
   await expect(indicator).toContainText("2 files");
+  // A refresh that cannot place the running turn (the host answers with no
+  // turns for a moment) must not make the marker blink out mid-work.
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__keptTurns = w.__e2eChanges.turns;
+    w.__e2eChanges.turns = [];
+    w.__changeHandlers.onTool({
+      id: "write-3",
+      name: "shell",
+      arguments: '{"command":"touch x"}',
+      result: "",
+      status: "ok",
+    });
+  });
+  await page.waitForTimeout(900);
+  await expect(indicator).toBeVisible();
+  await expect(indicator).toContainText("2 files");
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__e2eChanges.turns = w.__keptTurns;
+  });
   await page.locator("#ideModeBtn").click();
   await expect(indicator).toBeHidden();
   await page.locator("#ideModeBtn").click();
@@ -658,7 +679,8 @@ test("a stale diff failure cannot overwrite the cleared selection", async ({ pag
 });
 
 test("the edits card and composer stack tightly", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 520 });
+  // Short enough that the (now folded) transcript still has to scroll.
+  await page.setViewportSize({ width: 1280, height: 400 });
   await page.addInitScript({ path: "e2e/paladin-stub.js" });
   await page.addInitScript(() => {
     (window as any).__e2eChanges = {
@@ -686,10 +708,10 @@ test("the edits card and composer stack tightly", async ({ page }) => {
     return Math.min(...tops);
   });
   expect(composerTop - (cardBox.y + cardBox.height)).toBeLessThanOrEqual(12);
-  // The thinking toggle sits right above the prompt text, not a line apart.
+  // The thinking level sits in the toolbar under the prompt text.
   const toggle = (await page.locator(".think-inline").boundingBox())!;
   const prompt = (await page.locator("#promptInput").boundingBox())!;
-  expect(prompt.y - (toggle.y + toggle.height)).toBeLessThanOrEqual(2);
+  expect(toggle.y).toBeGreaterThanOrEqual(prompt.y + prompt.height - 2);
 });
 
 // A compaction after a finished turn is a boundary between turns. Reloaded

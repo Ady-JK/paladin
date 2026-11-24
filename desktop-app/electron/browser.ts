@@ -245,6 +245,10 @@ export class BrowserManager {
       /* already gone */
     }
     void entry.egress.close();
+    // The in-memory partition outlives its views; drop what it cached.
+    const jar = session.fromPartition(`paladin-browser-${sessionId}`);
+    void jar.clearStorageData().catch(() => undefined);
+    void jar.clearCache().catch(() => undefined);
     this.entries.delete(sessionId);
     this.annotations.delete(sessionId);
     this.state({ event: "browser/closed", sessionId });

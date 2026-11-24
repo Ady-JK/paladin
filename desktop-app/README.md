@@ -47,7 +47,7 @@ The Sessions, Files and Tabs controls share the left rail across agent and IDE m
 | Sessions and context | `sessions.ts` and `sessions/history.ts` attach and page history; `contextBox.ts`, `models.ts`, `thinking.ts` and `usage.ts` render current controls and accounting. |
 | IDE and changes | `ide.ts` and `features/ide/` own editor, explorer and diagnostics; side-pane change modules display session diffs. |
 | Side surfaces | `sidePane.ts` coordinates session tabs; `sidePane/` implements browser, web, terminal, side-chat, agent and changes tabs. |
-| Configuration | `settings.ts` and feature-specific modules call the core for providers, permissions, memory, tools, MCP and related settings. |
+| Configuration | `settings.ts` and feature-specific modules call the core for providers, memory, tools, MCP and related settings. |
 | Input | `mentions.ts`, `tags.ts` and `attachments.ts` prepare file references and copied uploads before `chat.ts` submits a turn. |
 
 The preload bridge exposes named desktop capabilities as well as the generic host RPC entry point. Electron validates privileged IPC against the main frame. Renderer state is presentation state: a sidecar restart or session reattachment must obtain authoritative turn and history state from the core.
@@ -71,7 +71,7 @@ Conversation links route to the appropriate browser surface according to their U
 
 ## Terminals
 
-Interactive terminal tabs use a Go-hosted PTY in the chosen workspace. The renderer uses xterm and loads the terminal implementation when needed. These shells run with the user's OS permissions and are distinct from the agent's permission-gated shell tool. In the composer, `!` runs a command and shares its result with a subsequent agent turn; `!!` runs it without adding an agent turn.
+Interactive terminal tabs use a Go-hosted PTY in the chosen workspace. The renderer uses xterm and loads the terminal implementation when needed. These shells run with the user's OS permissions and are distinct from the agent's permission-gated shell tool.
 
 ## On-device voice
 
@@ -83,7 +83,7 @@ The renderer captures microphone audio and sends mono float32 chunks through pre
 
 The Vite build emits the renderer with relative asset paths so it can load from the packaged `file:` URL. TypeScript compiles the Electron main and preload files into `dist-electron/`; the packaging helper adds the Playwright client used for browser automation. `electron-builder.json` packages those outputs with the sidecar binary and prepared voice resources. The core protocol remains the same in a packaged build.
 
-The main renderer uses a content security policy and a context-isolated preload. Remote websites do not gain the host's renderer privileges. Browser site isolation and tool-level permission checks address different boundaries. Native tools and approved shell commands run without an OS sandbox.
+The main renderer uses a content security policy and a context-isolated preload. Remote websites do not gain the host's renderer privileges. Browser site isolation and tool-level permission checks address different boundaries. Native tools run without an OS sandbox; a guard asks before catastrophic actions.
 
 ## Build and test flow
 

@@ -1,8 +1,9 @@
 import { renderMarkdown } from "../../core/format";
 import { state } from "../../core/state";
-import type { MessageInfo, ToolInfo } from "../../core/types";
+import type { MessageInfo, ToolInfo, TurnStats } from "../../core/types";
 import { compactionText, createCompactionDivider, createTurn, mountLinkCards } from "../chatView";
 import { createTurnStats } from "../turnStats";
+import { foldWork } from "../workedFold";
 import { createThinkingBlock } from "../turnView";
 import { createFindingsCard } from "../findings";
 import { createVisualCard } from "../visuals";
@@ -25,11 +26,34 @@ export function buildHistory(
   // pendingStats closes the previous user turn: its summary row goes
   // just before the next user row (or at the end of the last turn).
   let pendingStats: HTMLElement | null = null;
+  let agentStats: TurnStats | undefined;
+  // A steer is stored as a user row inside the same turn. Its outcome is
+  // known only at the final stats row: mark the entire persisted span before
+  // drawing so pre-steer segments of a stopped turn never fold prematurely.
+  const incompleteRows = new Set<number>();
+  let spanStart = 0;
+  for (const [index, message] of history.entries()) {
+    if (!message.stats) continue;
+    if (message.stats.incomplete) {
+      for (let i = spanStart; i <= index; i++) incompleteRows.add(i);
+    }
+    spanStart = index + 1;
+  }
+  let rowIncomplete = false;
+  let agentIncomplete = false;
+  const finishAgent = (): void => {
+    if (agentBody && !agentIncomplete) foldWork(agentBody, agentStats);
+    agentBody = null;
+    agentStats = undefined;
+    agentIncomplete = false;
+    run = null;
+  };
 
   const openAgent = (text: string): void => {
     const { wrapper, textEl } = createTurn("agent", text);
     container.append(wrapper);
     agentBody = textEl.parentElement!;
+    agentIncomplete = rowIncomplete;
   };
 
   const pushAgentText = (text: string): void => {
@@ -61,13 +85,6 @@ export function buildHistory(
       run = null;
       return;
     }
-    // Cap the live DOM copy: the full result stays in the transcript.
-    if (tool.result && tool.result.length > 8000) {
-      tool = {
-        ...tool,
-        result: `${tool.result.slice(0, 8000)}\n…(truncated, kept in history)`,
-      };
-    }
     if (!run) {
       run = new ToolRun();
       agentBody!.append(run.el);
@@ -76,21 +93,20 @@ export function buildHistory(
   };
 
   for (const [index, message] of history.entries()) {
-    // A turn's summary closes it, so a pending one is flushed as soon as
-    // the next turn begins: a user row starts one, a compaction that
-    // follows a finished turn starts the next span, and a row that
-    // carries its own stats is the last row of one (see the core's
-    // HistoryViewStats, which anchors the summary on the turn's end).
+    rowIncomplete = message.incomplete === true || incompleteRows.has(index);
+    // Stats are anchored on a turn's last row. Close its agent body before
+    // the next row, even when a continuation has no new user message.
+    // Legacy rows without stats are still separated by their user messages.
     const compaction = message.role === "system" && message.kind === "compaction";
     const boundary = message.role === "user" || compaction;
     const endedTurn = pendingStats !== null && boundary;
-    if (pendingStats && (boundary || message.stats)) {
+    if (pendingStats) {
+      finishAgent();
       container.append(pendingStats);
       pendingStats = null;
     }
     if (message.role === "user") {
-      agentBody = null;
-      run = null;
+      finishAgent();
       const turn = createTurn("user", message.content, {
         index: message.index,
         revertable: revertable && message.index !== undefined,
@@ -137,7 +153,11 @@ export function buildHistory(
       });
       if (message.image && agentBody) mountImage(agentBody, sessionId, message.image.path, "Browser screenshot");
     }
-    if (message.stats) pendingStats = createTurnStats(message.stats);
+    if (message.stats) {
+      pendingStats = createTurnStats(message.stats);
+      agentStats = message.stats;
+    }
   }
+  finishAgent();
   if (pendingStats) container.append(pendingStats);
 }

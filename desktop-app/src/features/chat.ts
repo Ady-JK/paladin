@@ -14,7 +14,7 @@ import {
 import { state } from "../core/state";
 import { toast } from "../ui/toast";
 import { setStatus } from "../ui/status";
-import { addTurn, dismissGreeting, initMessageLinks } from "./chatView";
+import { addTurn, dismissGreeting, initChatFollow, initMessageLinks, scrollToBottom } from "./chatView";
 import { handleCodexSkillKey } from "../adapters/codex/skills";
 import { handleMentionKey, expandMentions } from "./mentions";
 import { openFilePicker } from "./filePicker";
@@ -22,7 +22,6 @@ import { renderSessions } from "./sessions";
 import { handleSlashKey, setSlashRunner } from "./slash";
 import { routeSlash, type AgentRoute } from "./slashRoute";
 import { initMode, setMode, toggleMode } from "./mode";
-import { currentPreset, initPermissions, keepDraftFor } from "./permissions";
 import { dropFinishedPanel } from "./todos";
 import { handleSkillKey, parseSkillLine, refreshSkillsCache, takeAttached } from "./skills";
 import { isBusy, noteSubmitted, showSentAttachments, syncComposer } from "./live";
@@ -33,7 +32,7 @@ import { syncMcp } from "./mcp";
 import { applyToolDraft, syncTools } from "./toolSwitches";
 import { applyBudgetDraft, syncBudget } from "./budget";
 import { reloadContextSources } from "./contextBox";
-import { showTerminalResult, STANDALONE_PANE_SESSION, syncSidePane } from "./sidePane";
+import { syncSidePane } from "./sidePane";
 import { hasAttachments, initAttachments, uploadAttachments } from "./attachments";
 import { clearTags, hasTags, initTags, tagPaths, tagsLabel, uploadTaggedItems, withTagLabels } from "./tags";
 
@@ -93,90 +92,16 @@ async function ensureSession(title: string): Promise<void> {
   }
   await applyToolDraft(state.sessionId);
   syncTools();
-  keepDraftFor(state.sessionId);
   await applyBudgetDraft(state.sessionId);
   void syncBudget();
   sessionLabelEl.textContent = state.sessionId.slice(0, 8);
   renderSessions();
 }
 
-let bangBusy = false;
-
-async function runBang(line: string): Promise<void> {
-  if (bangBusy) return;
-  const localOnly = line.startsWith("!!");
-  const command = line.slice(localOnly ? 2 : 1).replace(/^ /, "");
-  if (!command.trim()) {
-    toast("Enter a command after ! or !!", "error");
-    return;
-  }
-  bangBusy = true;
-  inputEl.value = "";
-  autosizeComposer();
-  let targetSession = state.sessionId;
-  try {
-    if (!localOnly) await ensureSession(command);
-    targetSession = state.sessionId;
-    const sessionId = state.sessionId || STANDALONE_PANE_SESSION;
-    const cwd = state.cwd;
-    const provider = state.selectedProvider || null;
-    const model = state.selectedModel || null;
-    const mode = state.mode;
-    const permissions = currentPreset();
-    const result = await api.terminalRun(cwd, command);
-    showTerminalResult(sessionId, cwd, command, result);
-    if (localOnly) return;
-    if (state.sessionId === sessionId) {
-      dropFinishedPanel();
-      dismissGreeting();
-    }
-    const output =
-      result.output.length > 64 * 1024
-        ? `${result.output.slice(0, 64 * 1024)}\n[output shortened for agent]`
-        : result.output;
-    const message = `I ran this command in ${cwd}: ${command}\nExit code: ${result.exitCode}\nOutput${result.truncated ? " (truncated)" : ""}:\n${output}`;
-    const info = await api.submitChat({
-      sessionId,
-      message,
-      cwd,
-      provider,
-      model,
-      skill: null,
-      display: `! ${command}`,
-      command: null,
-      compact: false,
-      mode,
-      permissions,
-    });
-    hideRecovery();
-    noteSubmitted(info);
-  } catch (error) {
-    if (!inputEl.value && state.sessionId === targetSession) inputEl.value = line;
-    addTurn("error", String(error));
-    setStatus(String(error), "error");
-    syncComposer();
-  } finally {
-    bangBusy = false;
-    autosizeComposer();
-    if (!document.activeElement?.closest(".approval-card")) inputEl.focus();
-  }
-}
-
 async function send(): Promise<void> {
   const message = inputEl.value.trim();
   if (!message && !hasAttachments() && !hasTags()) {
     return;
-  }
-  if (message.startsWith("!")) {
-    if (hasAttachments()) {
-      toast("Send attachments in a chat message, separate from ! commands", "error");
-      return;
-    }
-    if (hasTags()) {
-      toast("Send tagged files in a chat message, separate from ! commands", "error");
-      return;
-    }
-    return runBang(inputEl.value.trimStart());
   }
 
   // Slash lines either run locally (never reaching the agent) or become
@@ -220,6 +145,8 @@ async function send(): Promise<void> {
     const attachmentBatch = await uploadAttachments(sessionId, cwd);
     const taggedImages = await uploadTaggedItems(sessionId, cwd);
     dismissGreeting();
+    // Sending is the reader asking for the newest row: follow the new turn.
+    scrollToBottom();
     // Fire and forget: the turn runs (or queues) in the sidecar and its
     // progress arrives as events for this session, even if the user
     // switches away or reloads.
@@ -234,7 +161,6 @@ async function send(): Promise<void> {
       command: route?.command ?? null,
       compact: !!route?.compact,
       mode: turnMode(route),
-      permissions: currentPreset(),
       attachmentIds: [...attachmentBatch.ids, ...taggedImages.images.map((image) => image.id)],
       taggedPaths: taggedImages.paths,
     });
@@ -289,7 +215,7 @@ async function steer(): Promise<void> {
     toast("Messages with files will run after the current turn.");
     return send();
   }
-  if (message.startsWith("/") || message.startsWith("!") || !state.sessionId || !isBusy(state.sessionId)) {
+  if (message.startsWith("/") || !state.sessionId || !isBusy(state.sessionId)) {
     return send();
   }
   inputEl.value = "";
@@ -301,6 +227,8 @@ async function steer(): Promise<void> {
     outgoing = withTags(message, tagPaths());
   }
   try {
+    // Steering joins the running turn: follow it like a new turn.
+    scrollToBottom();
     await api.steerChat(state.sessionId, outgoing, message);
     clearTags();
   } catch {
@@ -326,10 +254,10 @@ function requestStop(): void {
 // initChat wires the composer and the stop affordances.
 export function initChat(): void {
   initMessageLinks();
+  initChatFollow();
   initAttachments();
   initTags();
   setSlashRunner(() => void send());
-  initPermissions();
   initMode(() => {
     // Implement keeps whatever draft the user has in the composer.
     const draft = inputEl.value;

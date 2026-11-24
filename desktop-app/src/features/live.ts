@@ -25,6 +25,7 @@ import { syncBudget, scheduleBudgetRefresh } from "./budget";
 import { showContextBox } from "./contextBox";
 import { hideLiveChanges, noteToolChange, refreshChanges } from "./sidePane";
 import { createTurnStats } from "./turnStats";
+import { foldBody, foldWork } from "./workedFold";
 import { paintProtection } from "./snapshotProtection";
 import { PHASE_TEXT, formatElapsed, workingLabel, workingStatus, type WorkingPhase } from "./workingBar";
 
@@ -136,13 +137,21 @@ function titleOf(sessionId: string): string {
   return state.sessions.find((s) => s.sessionId === sessionId)?.title || sessionId.slice(0, 8);
 }
 
+// The session list is rebuilt at most once per SIDEBAR_MS: every tool event of
+// every running session asks for it, and each rebuild walks all sessions.
+const SIDEBAR_MS = 100;
+let sidebarAt = 0;
 function sidebar(): void {
   if (sidebarQueued) return;
   sidebarQueued = true;
-  queueMicrotask(() => {
+  const run = (): void => {
     sidebarQueued = false;
+    sidebarAt = performance.now();
     renderSessions();
-  });
+  };
+  const wait = SIDEBAR_MS - (performance.now() - sidebarAt);
+  if (wait <= 0) queueMicrotask(run);
+  else window.setTimeout(run, wait);
 }
 
 // mount puts the visible session's live rows on screen (after history).
@@ -194,6 +203,12 @@ export function liveActivity(sessionId: string): string {
 // one (a subagent's side-pane tab) to show after its history.
 export function liveRoot(sessionId: string): HTMLElement {
   return entry(sessionId).root;
+}
+
+// detachLiveRoot takes a session's live rows out of whatever view shows them,
+// without creating the entry just to remove it.
+export function detachLiveRoot(sessionId: string): void {
+  entries.get(sessionId)?.root.remove();
 }
 
 // settleJobs reconciles a session's visible command cards against the jobs
@@ -573,6 +588,9 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
   e.views.delete(turn.turnId);
   e.users.delete(turn.turnId);
   const failure = view ? view.finish(turn) : turn.error || null;
+  // The turn's working folds into "Worked for …" once it ends cleanly; a
+  // stopped or failed turn keeps everything it drew.
+  if (view && !failure && !turn.cancelled && !turn.stopped && foldWork(view.wrapper, turn.stats) && shown) followTail();
   if (view && turn.reply) mountLinkCards(view.wrapper, turn.reply);
   if (view && turn.persisted)
     void api
@@ -590,7 +608,7 @@ function finishTurn(e: Entry, turn: TurnInfo): void {
         for (const image of seen.images) {
           if (image.index <= seen.latestUser || image.role === "user") continue;
           if (hasImage(view.wrapper, image.path)) continue;
-          mountImage(view.wrapper, e.sessionId, image.path, "Browser screenshot");
+          mountImage(foldBody(view.wrapper) ?? view.wrapper, e.sessionId, image.path, "Browser screenshot");
         }
       })
       .catch(() => {});
@@ -687,6 +705,7 @@ export function showSentAttachments(info: TurnInfo, attachments: api.SessionAtta
 function onEvent(ev: TurnEvent): void {
   if (ev?.event === "host/restarted") {
     void api.startCodexDiscovery().catch((error: unknown) => console.debug("Codex discovery unavailable", error));
+    void api.startClaudeDiscovery().catch((error: unknown) => console.debug("Claude discovery unavailable", error));
     void recoverFromRestart();
     return;
   }
@@ -704,7 +723,7 @@ function onEvent(ev: TurnEvent): void {
     // updated command result comes from. Cards are also reconciled against
     // the live job list, because a call's own stored result is the
     // snapshot taken when its command detached and can still say "running".
-    if (ev.sessionId && ev.sessionId === state.sessionId) reopen?.(ev.sessionId);
+    if (ev.sessionId && ev.sessionId === state.sessionId) reattach?.(ev.sessionId);
     if (ev.sessionId) void settleJobs(ev.sessionId);
     return;
   }
@@ -755,6 +774,8 @@ export function onResync(hook: () => void): void {
 }
 
 let reopen: ((sessionId: string) => void) | null = null;
+// reattach re-reads the visible session's history without reopening it.
+let reattach: ((sessionId: string) => void) | null = null;
 
 // resync runs after the host dropped streaming events for a client
 // that fell behind: its turns are still alive, so they are re-read
@@ -916,10 +937,11 @@ export async function bootLive(): Promise<void> {
 }
 
 // initLive subscribes to the event bus once.
-export function initLive(open: (sessionId: string) => void): void {
+export function initLive(open: (sessionId: string) => void, refresh: (sessionId: string) => void): void {
   if (wired) return;
   wired = true;
   reopen = open;
+  reattach = refresh;
   // An answer to an agent's question may have started a turn the view should show.
   window.addEventListener("paladin:turn-submitted", (event) => noteSubmitted((event as CustomEvent<TurnInfo>).detail));
   try {
