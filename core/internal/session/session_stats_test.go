@@ -7,8 +7,8 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
-// A turn's cost lands on the user row that starts it, so the renderer
-// can draw one summary per turn.
+// The supplied anchor is retained, including for legacy callers that
+// provide a user-row index.
 func TestHistoryViewStatsAttachToTheTurnStart(t *testing.T) {
 	msgs := []transcript.Message{
 		{Role: transcript.RoleUser, Content: "q1", CreatedAt: time.Now().UTC()},
@@ -27,5 +27,21 @@ func TestHistoryViewStatsAttachToTheTurnStart(t *testing.T) {
 	}
 	if view[2].Stats != nil {
 		t.Fatalf("second turn stats = %+v", view[2].Stats)
+	}
+}
+
+func TestHistoryStatsCloseAfterReasoningAndAnswer(t *testing.T) {
+	stats := &transcript.TurnStats{DurationMs: 2000, Incomplete: true}
+	rows := HistoryViewStats([]transcript.Message{{
+		Role: transcript.RoleAssistant, Content: "partial answer", Reasoning: "thinking",
+	}}, map[int]*transcript.TurnStats{0: stats})
+	if len(rows) != 2 || rows[0].Stats != nil || rows[1].Stats != stats || !rows[1].Stats.Incomplete {
+		t.Fatalf("stats must close the answer after reasoning: %+v", rows)
+	}
+	rows = HistoryViewStats([]transcript.Message{{
+		Role: transcript.RoleAssistant, Reasoning: "thinking only",
+	}}, map[int]*transcript.TurnStats{0: stats})
+	if len(rows) != 1 || rows[0].Stats != stats {
+		t.Fatalf("thinking-only turn lost its boundary: %+v", rows)
 	}
 }

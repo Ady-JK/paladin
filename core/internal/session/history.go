@@ -4,6 +4,7 @@ package session
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/media"
@@ -31,6 +32,7 @@ type HistoryMessage struct {
 	// Stats is a user row's turn cost, so a reopened session can show
 	// the same summary the live turn did.
 	Stats      *transcript.TurnStats `json:"stats,omitempty"`
+	Incomplete bool                  `json:"incomplete,omitempty"`
 	Protection *SnapshotProtection   `json:"protection,omitempty"`
 }
 
@@ -87,15 +89,30 @@ func historyRowCount(msg transcript.Message) int {
 func historyViewRange(msgs []transcript.Message, statsAt map[int]*transcript.TurnStats, start, end int) []HistoryMessage {
 	calls := map[string]transcript.ToolCall{}
 	indexHistoryToolCalls(msgs, start, end, calls)
+	// Outcomes belong to persisted turn spans, not just their last row.
+	// Carry them onto each row so a page cut at a mid-turn steer still knows
+	// that the pre-steer work was interrupted.
+	ends := make([]int, 0, len(statsAt))
+	for index := range statsAt {
+		ends = append(ends, index)
+	}
+	sort.Ints(ends)
+	endIndex := 0
+	turnIncomplete := false
 	var out []HistoryMessage
 	ordinal := 0
 	add := func(row HistoryMessage) {
+		row.Incomplete = turnIncomplete
 		if ordinal >= start && (end < 0 || ordinal < end) {
 			out = append(out, row)
 		}
 		ordinal++
 	}
 	for index, msg := range msgs {
+		for endIndex < len(ends) && ends[endIndex] < index {
+			endIndex++
+		}
+		turnIncomplete = endIndex < len(ends) && statsAt[ends[endIndex]] != nil && statsAt[ends[endIndex]].Incomplete
 		count := historyRowCount(msg)
 		if count == 0 {
 			continue
@@ -168,8 +185,13 @@ func appendHistoryRows(msg transcript.Message, index int, stats *transcript.Turn
 	}
 	if msg.Role == transcript.RoleAssistant && strings.TrimSpace(msg.Reasoning) != "" {
 		kind := "thinking"
-		add(HistoryMessage{Role: "assistant", Content: msg.Reasoning, CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: stats})
-		stats = nil
+		// Stats delimit a finished turn. A stored message with reasoning and
+		// answer text emits two rows, so anchor the boundary on the text.
+		var thinkingStats *transcript.TurnStats
+		if !msg.Visible() {
+			thinkingStats = stats
+		}
+		add(HistoryMessage{Role: "assistant", Content: msg.Reasoning, CreatedAt: msg.CreatedAt.Unix(), Kind: &kind, Stats: thinkingStats})
 	}
 	if msg.Visible() {
 		add(historyTextRow(msg, index, stats))
