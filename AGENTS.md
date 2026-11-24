@@ -196,10 +196,11 @@ serial. Playwright specs drive the real renderer with the fake bridge from
 - **Provider dialects:** standalone `ApiTypeAnthropic` and `ApiTypeGoogle` templates return
   an unimplemented error. Provider-specific routing can use Responses, Anthropic Messages
   and Google wire implementations; see `core/internal/inference/`.
-- **Tool permissions**: native execution has no OS sandbox. Session presets are Read-Only
-  (blocks modifying tools/commands) and Full Access (ordinary user privileges, explicit deny
-  rules still apply). Legacy Auto selections migrate to Read-Only. External agents retain
-  their own managed execution policy. Browser isolation remains separate.
+- **Tool permissions**: native execution has no OS sandbox and there are no modes or rules.
+  Agents run with full access; `core/internal/permission/` is a guard that asks once (once/deny)
+  before wipe-style deletes, exposing ports and credential theft or persistence. Old
+  `read-only`/`auto` values are accepted and ignored. External agents (Codex, Claude Code) run
+  wide open under their own managed policy. Browser isolation remains separate.
 - **Never commit** `core/bin/`, `core/agent-host`, `desktop-app/{node_modules,dist,dist-electron,release}/`,
   `test-results/`, `playwright-report/`, `.vite/`, or `tmp/`. Root `.gitignore` covers `core/bin/`,
   `tmp/`, `.idea/`; `desktop-app/.gitignore` covers the rest.

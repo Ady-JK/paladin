@@ -65,9 +65,9 @@ Prompt material comes from the configured system prompt, built-in guidance, work
 
 ## Tools and policy
 
-`internal/tools/` registers built-in file, search, shell, planning, browser, web, memory and other tools. The runtime combines them with enabled MCP tools, filters the set for the session and mode, and gives schemas to the provider. A tool request is normalized, checked against permission rules and routed to its implementation. The permission broker publishes approval events and waits for a response without blocking other sessions.
+`internal/tools/` registers built-in file, search, shell, planning, browser, web, memory and other tools. The runtime combines them with enabled MCP tools, filters the set for the session and mode, and gives schemas to the provider. A tool request is normalized, checked by the guard and routed to its implementation. The permission broker publishes approval events and waits for a response without blocking other sessions.
 
-The two session presets, Read-Only and Full Access, and saved rules live in `internal/permission/`. Native execution uses tool-level checks without Seatbelt, Landlock or an OS sandbox helper. Read-Only refuses changing tools; Full Access runs tools with ordinary user privileges, subject to explicit deny rules. External agents retain their own enforcement.
+Agents always run with full access; `internal/permission/` holds the guard (`guard.go`, `shellparse.go`) and the gate that wires it into the tool loop. The guard asks the user once before wipe-style deletes, exposing ports and credential theft or persistence; everything else runs with ordinary user privileges and no OS sandbox. There are no modes or saved rules. External agents run wide open under their own enforcement.
 
 The agent shell tool manages jobs. Output is written to session job logs, and a long foreground operation can return a job ID for later wait, status or cancellation. A user-opened terminal is instead an interactive PTY managed through the desktop/host terminal path and runs with the user's OS permissions.
 
@@ -87,7 +87,6 @@ The data root is `PALADIN_DATA_DIR` when set, otherwise the OS configuration dir
 ```text
 <data>/
   config/                 provider metadata, settings, prompts and MCP config
-  permissions/            global and folder permission rules
   sessions/<workspace>/<session>/
     meta.json             session identity and settings
     messages.jsonl        persisted conversation and compaction records
@@ -107,7 +106,7 @@ The data root is `PALADIN_DATA_DIR` when set, otherwise the OS configuration dir
 
 ### Maintenance and shared state
 
-The core maintains several related but separate stores. Provider metadata and settings are global configuration; model and context choices can also be saved on a session. Permission rules can be scoped beyond one call. Memory has user, global and workspace scopes, while a turn sees the session's frozen memory snapshot until it is refreshed. The search index is derived from transcripts rather than replacing them. A subagent is a separate session associated with its parent; a worktree is a separate workspace checkout, not a session transcript.
+The core maintains several related but separate stores. Provider metadata and settings are global configuration; model and context choices can also be saved on a session. Memory has user, global and workspace scopes, while a turn sees the session's frozen memory snapshot until it is refreshed. The search index is derived from transcripts rather than replacing them. A subagent is a separate session associated with its parent; a worktree is a separate workspace checkout, not a session transcript.
 
 Undo uses snapshots managed under the data directory. Every user turn takes a start snapshot, and a completed mutating turn takes an end snapshot, so each turn's edits are computed from its own start/end pair; every turn is revertible, however many there are. Snapshot availability and coverage are reported to the UI, and reverting is coordinated with session state. Workspace files and the session's own transcript are different kinds of state: deleting or reverting one should not be described as automatically deleting every other store.
 

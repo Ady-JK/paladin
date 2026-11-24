@@ -1,7 +1,7 @@
 # Agent adapters
 
 Paladin can run a session on an external coding agent instead of its own loop. Today
-that is the OpenAI Codex CLI; the layout is meant to take others. An **adapter**
+those are the OpenAI Codex and Claude Code CLIs. An **adapter**
 translates what the agent does into the things Paladin's UI already draws (tool cards,
 questions, notices), so every agent shares the app, its colours and its cards.
 
@@ -48,6 +48,48 @@ read, so it holds across session switches, restarts and imported threads.
 
 `session/refresh` (event, no turn) tells a client that something settled while no turn was
 running, so a session on screen reads its history again.
+
+## Claude Code
+
+`core/internal/claude` starts the installed `claude` CLI directly from Go with
+`-p --verbose --input-format stream-json --output-format stream-json`, partial
+messages, and a stdio permission host. No Node or TypeScript Agent SDK is required.
+Each active session keeps one process; stdin stays open between turns. Control
+requests are dispatched independently of output so a permission wait cannot block
+interrupts. Writes, framing, shutdown and descendant cleanup are bounded.
+
+`harness/claudeadapter` reconciles partial events with complete assistant blocks
+using frame UUIDs and API block indices. Text, thinking, shell/file/MCP tools,
+questions, compaction and tasks use the existing cards. Claude's native
+TaskCreate/TaskUpdate also feed Paladin's activity list. A result ends a response,
+not necessarily the process: background continuations are adopted by the turn hub
+and background task cards settle even between user turns.
+
+The CLI owns authentication, models, skills/plugins/MCP configuration and native
+approval policy. Outside plan mode, Paladin automatically approves tools that pass
+Paladin's guard (which asks once before catastrophic actions). A fail-closed PreToolUse host hook
+applies the guard, and plan mode's restrictions, to model tool calls. Claude's
+own configured hooks and startup customizations retain native CLI behavior, so choose
+trusted folders; this integration does not add an OS sandbox. Hooks that cannot register safely
+cause startup to fail instead of silently dropping the host gate.
+
+Saved sessions are discovered from Claude's project transcript directories without
+inference and linked into the normal sidebar. Native IDs survive app restarts;
+forks and rewinds branch from the retained assistant checkpoint without modifying
+the original conversation. Invisible attachment/progress entries must remain in
+the parentUuid chain even though they are not rendered. Claude's on-disk format is
+internal, so changes to it need fixture and live-protocol verification.
+
+Token usage is counted once per API message rather than once per streamed block;
+the context gauge uses the last request, and spend is the CLI's estimated API value,
+not a charge. CLI budget flags are startup-only: changed budgets apply on the next
+user turn, with bounded turns restarted using the remaining session allowance.
+
+Hermetic tests use `PALADIN_CLAUDE_BIN`. Billed protocol/runtime tests require
+`PALADIN_CLAUDE_LIVE=1` and always select `claude-haiku-5-5`. The real renderer test
+uses `PALADIN_CLAUDE_REAL_HOST` pointing at a freshly built agent-host, with isolated
+Paladin data and a small spend cap. The transport was validated against Claude Code
+2.1.326 and Haiku 5.5.
 
 ## Linked Codex history
 

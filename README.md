@@ -26,10 +26,10 @@ Electron owns native window and browser surfaces, whereas the Go core owns agent
 
 ## What happens to a message
 
-1. The composer resolves file tags, copies attached images into the session when applicable, selects the provider, model and permissions, and calls `submitChat`.
+1. The composer resolves file tags, copies attached images into the session when applicable, selects the provider and model, and calls `submitChat`.
 2. The host dispatcher validates and schedules the request. The turn hub returns a turn ID and a running or queued state without waiting for the answer. It serializes turns within a session and can run different sessions concurrently.
-3. The runtime builds an agent from the selected provider, transcript, prompt, project instructions, memory snapshot, available tools and permission policy.
-4. The agent sends model rounds, emits text and reasoning, executes requested tools through the permission gate, appends results, and continues until it finishes, is stopped or encounters an unrecoverable error. A turn has no fixed productive-round limit.
+3. The runtime builds an agent from the selected provider, transcript, prompt, project instructions, memory snapshot, available tools and the safety guard.
+4. The agent sends model rounds, emits text and reasoning, executes requested tools through the safety guard, appends results, and continues until it finishes, is stopped or encounters an unrecoverable error. A turn has no fixed productive-round limit.
 5. The hub emits sequenced events. The renderer routes them to the appropriate session, updates the chat and related panels, and can reattach to a running turn after a session switch.
 6. The core checkpoints work and records the transcript, usage and other session data. A finished turn is not dependent on the chat remaining visible.
 
