@@ -27,19 +27,14 @@ type Approval struct {
 	Command string `json:"command,omitempty"`
 	Path    string `json:"path,omitempty"`
 	// Server, MCPTool and Args describe an MCP call.
-	Server  string `json:"server,omitempty"`
-	MCPTool string `json:"mcpTool,omitempty"`
-	Args    string `json:"args,omitempty"`
-	// Host and URL describe a web request.
-	Host        string   `json:"host,omitempty"`
-	URL         string   `json:"url,omitempty"`
+	Server      string   `json:"server,omitempty"`
+	MCPTool     string   `json:"mcpTool,omitempty"`
+	Args        string   `json:"args,omitempty"`
 	Reasons     []string `json:"reasons"`
 	Destructive bool     `json:"destructive,omitempty"`
 	Choices     []string `json:"choices"`
-	// Remember is what "this session"/"this folder" would save.
-	Remember []Rule `json:"remember,omitempty"`
-	State    string `json:"state"`
-	Decision string `json:"decision,omitempty"`
+	State       string   `json:"state"`
+	Decision    string   `json:"decision,omitempty"`
 }
 
 // Broker parks approval waits until the UI answers.
@@ -109,22 +104,18 @@ func (b *Broker) Pending(sessionID, id string) bool {
 	return ok
 }
 
-// Gate is one turn's permission checkpoint.
+// Gate is one turn's checkpoint: every call runs unless the guard flags it.
 type Gate struct {
-	Preset    Preset
 	Workspace string
 	SessionID string
-	Store     *Store
 	Broker    *Broker
-	// Readable are folders the session owns (its own data folder with
-	// spilled tool output, job logs and screenshots): reads there run
-	// without a card. Deny rules still apply.
-	Readable []string
 	// MCP identifies tools proxied from MCP servers; nil means none.
 	MCP func(name string) (tools.MCPInfo, bool)
-	// Plan asks once/deny for every MCP call (a server cannot prove a
-	// tool is read-only); only deny rules skip the question.
+	// Plan is plan mode: nothing may change anything, and every MCP call
+	// asks (a server cannot prove a tool is read-only).
 	Plan bool
+	// Home is the home folder the guard protects; empty uses the user's.
+	Home string
 }
 
 // Auth is the gate's answer for one call.
@@ -139,139 +130,132 @@ func refusal(msg string) string {
 	return string(b)
 }
 
-// Authorize decides one call, asking the user (and blocking) if needed.
-func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.RawMessage, notify func(Approval)) Auth {
-	// Browser actions and visual generation may change state without a file
-	// path or shell command, so read-only mode blocks their whole tool surface.
-	if g.Preset == ReadOnly && (name == "browser" || name == "visual") {
-		return Auth{Content: refusal("read-only mode: switch to Full Access to use " + name)}
+func (g *Gate) home() string {
+	if g.Home != "" {
+		return g.Home
 	}
-	req, gated := Classify(name, args, g.Workspace)
-	if !gated && g.MCP != nil {
+	h, _ := os.UserHomeDir()
+	return h
+}
+
+// review is what a call is and why, if at all, it needs the user's say.
+type review struct {
+	kind, command, path, server, mcpTool, args string
+	reasons                                    []string
+	destructive                                bool
+}
+
+func (g *Gate) review(name string, raw json.RawMessage) (review, bool) {
+	switch name {
+	case "shell":
+		var a tools.ShellArgs
+		if json.Unmarshal(raw, &a) != nil || (a.Action != "" && a.Action != "run") {
+			return review{}, false
+		}
+		cmd := a.CommandLine()
+		if strings.TrimSpace(cmd) == "" {
+			return review{}, false
+		}
+		return review{kind: KindShell, command: cmd, reasons: CheckShell(cmd, g.Workspace, g.home())}, true
+	case "write", "edit", "read", "grep", "glob", "list":
+		var a struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(raw, &a) != nil || strings.TrimSpace(a.Path) == "" {
+			return review{}, false
+		}
+		path, _, err := tools.ResolveScopedPath(name, "path", a.Path, g.Workspace)
+		if err != nil {
+			return review{}, false // the tool rejects it itself
+		}
+		write := name == "write" || name == "edit"
+		kind := KindRead
+		if write {
+			kind = KindWrite
+		}
+		reasons := CheckPath(path, write, g.home())
+		if real := tools.RealPath(path); real != path {
+			for _, r := range CheckPath(real, write, g.home()) {
+				reasons = appendUnique(reasons, r)
+			}
+		}
+		return review{kind: kind, path: path, reasons: reasons}, true
+	}
+	if g.MCP != nil {
 		if info, ok := g.MCP(name); ok {
-			req, gated = ClassifyMCP(name, info, args), true
+			args := strings.TrimSpace(string(raw))
+			if len(args) > 4000 {
+				args = args[:4000] + "…"
+			}
+			return review{kind: KindMCP, server: info.Server, mcpTool: info.Tool, args: args, destructive: info.Destructive}, true
 		}
 	}
+	return review{}, false
+}
+
+func appendUnique(list []string, s string) []string {
+	for _, e := range list {
+		if e == s {
+			return list
+		}
+	}
+	return append(list, s)
+}
+
+// Authorize decides one call, asking the user (and blocking) only when the
+// guard flags it, a hook asks, or plan mode needs an MCP call confirmed.
+func (g *Gate) Authorize(ctx context.Context, callID, name string, args json.RawMessage, notify func(Approval)) Auth {
+	if g.Plan {
+		if refused, why := g.planRefusal(name, args); refused {
+			return Auth{Content: refusal(why)}
+		}
+	}
+	rv, gated := g.review(name, args)
 	if !gated {
 		return Auth{Run: true}
 	}
-	var rules []Rule
-	if g.Store != nil {
-		rules = g.Store.Effective(g.Workspace, g.SessionID)
+	hook, _ := ctx.Value(hookVerdictKey{}).(string)
+	switch {
+	case g.Plan && rv.kind == KindMCP:
+		rv.reasons = []string{"plan mode: the server's read-only claim cannot be verified"}
+	case hook == HookAsk && len(rv.reasons) == 0:
+		rv.reasons = []string{"a hook asked for confirmation"}
+	case hook == HookAllow && !(g.Plan && rv.kind == KindMCP):
+		rv.reasons = nil
 	}
-	d := Decide(g.Preset, req, rules)
-	if d.Verdict == Ask && req.Kind == KindRead && g.owns(req) {
-		d = Decision{Verdict: Allow}
-	}
-	d = applyHookVerdict(ctx, d)
-	if g.Plan && req.Kind == KindMCP && d.Verdict != Deny {
-		d = Decision{Verdict: Ask, Destructive: req.Destructive,
-			Reasons: []string{"plan mode: the server's read-only claim cannot be verified"},
-			Choices: []string{ReplyOnce, ReplyDeny}}
-	}
-	switch d.Verdict {
-	case Deny:
-		if d.Rule == nil && len(d.Reasons) > 0 {
-			return Auth{Content: refusal(strings.Join(d.Reasons, "; "))}
-		}
-		what := "this call"
-		if d.Rule != nil {
-			what = fmt.Sprintf("%s rule %q", d.Rule.Tool, d.Rule.Pattern)
-		}
-		if req.Kind == KindMCP {
-			what = describe(req) + ", " + what
-		}
-		return Auth{Content: refusal("blocked by a permission rule (" + what + "). Do not retry it; choose another approach or ask the user.")}
-	case Allow:
+	if len(rv.reasons) == 0 {
 		return Auth{Run: true}
 	}
-	card := Approval{ID: callID, Tool: name, Kind: req.Kind, Command: req.Command, Path: req.Path,
-		Server: req.Server, MCPTool: req.MCPTool, Args: req.Args, Host: req.Host, URL: req.URL,
-		Reasons: d.Reasons, Destructive: d.Destructive, Choices: d.Choices, Remember: d.Remember, State: StatePending}
+	card := Approval{ID: callID, Tool: name, Kind: rv.kind, Command: rv.command, Path: rv.path,
+		Server: rv.server, MCPTool: rv.mcpTool, Args: rv.args, Reasons: rv.reasons,
+		Destructive: rv.destructive || rv.kind != KindMCP, Choices: []string{ReplyOnce, ReplyDeny}, State: StatePending}
 	reply, err := g.ask(ctx, card, notify)
 	if err != nil {
 		return Auth{Content: refusal("interrupted while waiting for the user's approval; it did not run")}
 	}
 	if reply == ReplyDeny {
-		return Auth{Content: refusal("denied by the user: they declined this " + describe(req) + ". Do not retry it; continue another way or ask the user what they want.")}
+		return Auth{Content: refusal("denied by the user: they declined this " + describe(rv) + ". Do not retry it; continue another way or ask the user what they want.")}
 	}
-	g.remember(reply, d.Remember)
 	return Auth{Run: true}
 }
 
-// owns reports whether a read stays inside one of the session's own
-// folders, by its symlink-resolved path.
-func (g *Gate) owns(req Request) bool {
-	real := req.Real
-	if real == "" {
-		real = tools.RealPath(req.Path)
-	}
-	for _, dir := range g.Readable {
-		if dir != "" && pathMatches(tools.RealPath(dir), real) {
-			return true
+// planRefusal is plan mode's rule: look, don't touch.
+func (g *Gate) planRefusal(name string, raw json.RawMessage) (bool, string) {
+	switch name {
+	case "write", "edit", "browser", "visual":
+		return true, "plan mode: " + name + " is not available; describe the change in the plan instead"
+	case "shell":
+		var a tools.ShellArgs
+		if json.Unmarshal(raw, &a) == nil && (a.Action == "" || a.Action == "run") && tools.ReadOnlyCommand(a.CommandLine()) != nil {
+			return true, "plan mode: only inspection commands run; describe the change in the plan instead"
 		}
 	}
-	return false
+	return false, ""
 }
 
-// remember saves the rules a session/folder/global reply stands for.
-func (g *Gate) remember(reply string, rules []Rule) {
-	scope := map[string]string{ReplySession: ScopeSession, ReplyFolder: ScopeFolder, ReplyGlobal: ScopeGlobal}[reply]
-	if scope == "" || g.Store == nil || len(rules) == 0 {
-		return
-	}
-	_ = g.Store.Add(scope, g.Workspace, g.SessionID, rules...)
-}
-
-func defaultHomeDir() (string, error) { return os.UserHomeDir() }
-
-// homeDir is swapped in tests.
-var homeDir = defaultHomeDir
-
-// TrustProject decides whether tool, which the workspace itself ships (a
-// formatter or language server in node_modules/.bin or a virtualenv, or
-// a server that runs the project's build scripts), may run. It asks once
-// per folder: the answer is kept for the session or the folder, and a
-// refusal for the session, so it does not ask again. Full access trusts
-// everything a deny rule does not stop.
-func (g *Gate) TrustProject(ctx context.Context, callID, tool string, notify func(Approval)) bool {
-	if g.Preset == ReadOnly {
-		return false
-	}
-	var rules []Rule
-	if g.Store != nil {
-		rules = g.Store.Effective(g.Workspace, g.SessionID)
-	}
-	var allowed bool
-	for _, r := range rules {
-		if r.Tool != ToolProject || !pathMatches(r.Pattern, g.Workspace) {
-			continue
-		}
-		if r.Action == ActionDeny {
-			return false
-		}
-		allowed = true
-	}
-	if allowed || g.Preset == FullAccess {
-		return true
-	}
-	allow := Rule{Tool: ToolProject, Pattern: g.Workspace, Action: ActionAllow}
-	card := Approval{ID: callID, Tool: "project tools", Kind: KindProject, Command: tool, Path: g.Workspace,
-		Reasons: []string{"this project ships it, so it runs code from the project itself"},
-		Choices: []string{ReplySession, ReplyFolder, ReplyDeny}, Remember: []Rule{allow}, State: StatePending}
-	reply, err := g.ask(ctx, card, notify)
-	if err != nil {
-		return false
-	}
-	if reply == ReplyDeny {
-		if g.Store != nil {
-			_ = g.Store.Add(ScopeSession, g.Workspace, g.SessionID, Rule{Tool: ToolProject, Pattern: g.Workspace, Action: ActionDeny})
-		}
-		return false
-	}
-	g.remember(reply, card.Remember)
-	return true
-}
+// TrustProject: tools a workspace ships (formatters, language servers) run
+// without a question.
+func (g *Gate) TrustProject(context.Context, string, string, func(Approval)) bool { return true }
 
 func (g *Gate) ask(ctx context.Context, card Approval, notify func(Approval)) (string, error) {
 	if g.Broker == nil {
@@ -297,18 +281,16 @@ func (g *Gate) ask(ctx context.Context, card Approval, notify func(Approval)) (s
 	return reply, nil
 }
 
-func describe(req Request) string {
-	switch req.Kind {
+func describe(rv review) string {
+	switch rv.kind {
 	case KindWrite:
-		return "write to " + req.Path
-	case KindMCP:
-		return "MCP tool " + req.Server + "/" + req.MCPTool
+		return "write to " + rv.path
 	case KindRead:
-		return "read " + req.Path
-	case KindWeb:
-		return "visit to " + req.Host
+		return "read of " + rv.path
+	case KindMCP:
+		return "MCP tool " + rv.server + "/" + rv.mcpTool
 	}
-	return "command `" + strings.TrimSpace(req.Command) + "`"
+	return "command `" + strings.TrimSpace(rv.command) + "`"
 }
 
 // Hook verdicts a PreToolUse hook may hand the gate.
@@ -326,20 +308,4 @@ func WithHookVerdict(ctx context.Context, verdict string) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, hookVerdictKey{}, verdict)
-}
-
-// applyHookVerdict lets a hook skip a prompt ("allow") or force one
-// ("ask"). Deny rules still win.
-func applyHookVerdict(ctx context.Context, d Decision) Decision {
-	verdict, _ := ctx.Value(hookVerdictKey{}).(string)
-	switch {
-	case verdict == HookAllow && d.Verdict == Ask:
-		d.Verdict = Allow
-	case verdict == HookAsk && d.Verdict == Allow:
-		d.Verdict = Ask
-		d.Reasons = []string{"a hook asked for confirmation"}
-		d.Choices = []string{ReplyOnce, ReplyDeny}
-		d.Remember = nil
-	}
-	return d
 }
