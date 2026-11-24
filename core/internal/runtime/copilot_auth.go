@@ -149,17 +149,31 @@ func (r *AgentRuntime) StartCopilotSignIn() (CopilotSignInInfo, error) {
 }
 
 func (r *AgentRuntime) PollCopilotSignIn() (string, error) {
+	// The lock covers only the sign-in state: the two GitHub calls below take
+	// seconds, and Cancel must not wait for them.
 	r.copilotMu.Lock()
-	defer r.copilotMu.Unlock()
-	login := &r.copilotLogin
+	login := r.copilotLogin
 	if login.code == "" || time.Now().After(login.expires) {
-		*login = copilotSignIn{}
+		r.copilotLogin = copilotSignIn{}
+		r.copilotMu.Unlock()
 		return "", fmt.Errorf("GitHub sign-in expired; try again")
 	}
 	if time.Now().Before(login.nextPoll) {
+		r.copilotMu.Unlock()
 		return "pending", nil
 	}
-	login.nextPoll = time.Now().Add(login.interval)
+	r.copilotLogin.nextPoll = time.Now().Add(login.interval)
+	r.copilotMu.Unlock()
+	// update changes the sign-in state only if it is still the one polled.
+	update := func(change func(*copilotSignIn)) {
+		r.copilotMu.Lock()
+		defer r.copilotMu.Unlock()
+		if r.copilotLogin.code == login.code {
+			change(&r.copilotLogin)
+		}
+	}
+	clear := func() { update(func(l *copilotSignIn) { *l = copilotSignIn{} }) }
+
 	var result struct {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`
@@ -174,8 +188,10 @@ func (r *AgentRuntime) PollCopilotSignIn() (string, error) {
 	case "authorization_pending":
 		return "pending", nil
 	case "slow_down":
-		login.interval += 5 * time.Second
-		login.nextPoll = time.Now().Add(login.interval)
+		update(func(l *copilotSignIn) {
+			l.interval += 5 * time.Second
+			l.nextPoll = time.Now().Add(l.interval)
+		})
 		return "pending", nil
 	case "":
 		if result.AccessToken == "" {
@@ -183,16 +199,16 @@ func (r *AgentRuntime) PollCopilotSignIn() (string, error) {
 		}
 		endpoint, err := discoverCopilotEndpoint(ctx, result.AccessToken)
 		if err != nil {
-			*login = copilotSignIn{}
+			clear()
 			return "", err
 		}
 		if err := r.saveCopilotConnection(result.AccessToken, endpoint); err != nil {
 			return "", err
 		}
-		*login = copilotSignIn{}
+		clear()
 		return "connected", nil
 	default:
-		*login = copilotSignIn{}
+		clear()
 		return "", fmt.Errorf("GitHub sign-in failed: %s", result.Error)
 	}
 }

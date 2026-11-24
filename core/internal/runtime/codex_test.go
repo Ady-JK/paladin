@@ -198,13 +198,10 @@ func TestCodexFailedTurnReportsTheError(t *testing.T) {
 	}
 }
 
-func TestCodexPermissionPresetsPickTheSandbox(t *testing.T) {
-	for _, tc := range []struct{ perm, mode, sandbox, approval string }{
-		{"auto", "", "read-only", "on-request"},
-		{"read-only", "", "read-only", "on-request"},
-		{"auto", "plan", "read-only", "on-request"}, // plan mode is Codex's own, not a sandbox
-		{"full-access", "", "danger-full-access", "never"},
-	} {
+// Permissions are always full access now: whatever an older client sends,
+// Codex runs with its widest sandbox and never waits on an approval.
+func TestCodexAlwaysRunsWithFullAccess(t *testing.T) {
+	for _, tc := range []struct{ perm, mode string }{{"auto", ""}, {"read-only", ""}, {"auto", "plan"}, {"full-access", ""}} {
 		rt, _, fake := codexRuntime(t, "chat")
 		id, cwd := openCodex(t, rt)
 		provider, model := HarnessCodex, "fake-luna"
@@ -213,7 +210,7 @@ func TestCodexPermissionPresetsPickTheSandbox(t *testing.T) {
 			t.Fatal(err)
 		}
 		awaitTurn(t, done)
-		if want := "sandbox=" + tc.sandbox + " approval=" + tc.approval; !strings.Contains(fakeLog(t, fake), want) {
+		if want := "sandbox=danger-full-access approval=never"; !strings.Contains(fakeLog(t, fake), want) {
 			t.Fatalf("%s/%s: want %q in\n%s", tc.perm, tc.mode, want, fakeLog(t, fake))
 		}
 	}
@@ -1114,29 +1111,6 @@ func TestCodexSessionApprovalCoversLaterRequestsOfThatKind(t *testing.T) {
 	if !approved {
 		t.Fatal("the auto-accepted command should still show as approved")
 	}
-}
-
-func TestCodexSessionApprovalDoesNotSurviveAChangeOfPermissions(t *testing.T) {
-	rt, log, _ := codexRuntime(t, "approval")
-	id, cwd := openCodex(t, rt)
-	done := submitCodex(t, rt, id, cwd, "touch x")
-	log.waitFor(t, "approval card", func(evs []TurnEvent) bool { return countEvents(evs, "chat/approval") >= 1 })
-	if _, err := rt.AnswerApproval(id, "cmd-1", "session"); err != nil {
-		t.Fatal(err)
-	}
-	awaitTurn(t, done)
-	before := countEvents(log.all(), "chat/approval")
-
-	provider, model := HarnessCodex, "fake-luna"
-	_, done, err := rt.SubmitTurn(agent.Request{SessionID: id, Message: "touch z", Cwd: cwd, Provider: &provider, Model: &model, Permissions: "read-only"}, SubmitOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	log.waitFor(t, "a fresh approval card", func(evs []TurnEvent) bool { return countEvents(evs, "chat/approval") > before })
-	if _, err := rt.AnswerApproval(id, "cmd-1", "deny"); err != nil {
-		t.Fatal(err)
-	}
-	awaitTurn(t, done)
 }
 
 func TestMcpCommandListsCodexsServers(t *testing.T) {

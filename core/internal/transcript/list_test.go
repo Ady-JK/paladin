@@ -171,10 +171,11 @@ func TestDamagedSessionsAreListedWithTheReason(t *testing.T) {
 	for _, info := range infos {
 		damaged[info.Meta.SessionID] = info.Damaged
 	}
-	if damaged[sessions[0].Meta.SessionID] == "" || damaged[sessions[1].Meta.SessionID] == "" {
+	// Unreadable metadata is damage; one undecodable transcript line is not.
+	if damaged[sessions[0].Meta.SessionID] == "" {
 		t.Fatalf("damaged = %v", damaged)
 	}
-	if damaged[sessions[2].Meta.SessionID] != "" {
+	if damaged[sessions[1].Meta.SessionID] != "" || damaged[sessions[2].Meta.SessionID] != "" {
 		t.Fatalf("healthy session marked damaged: %v", damaged)
 	}
 }

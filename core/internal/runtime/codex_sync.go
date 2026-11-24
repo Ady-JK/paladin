@@ -58,6 +58,13 @@ func (r *AgentRuntime) SyncSession(sessionID, cwd string) (bool, error) {
 	if r.hub.Running(sessionID) {
 		return false, nil
 	}
+	sess, err := r.transcripts.Load(cwd, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessClaude {
+		return r.syncClaudeSession(sessionID, cwd)
+	}
 	return r.syncCodexSession(sessionID, cwd, false)
 }
 
@@ -113,8 +120,7 @@ func (r *AgentRuntime) syncCodexSession(sessionID, cwd string, ownTurn bool) (bo
 		return false, err
 	}
 	changed := false
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	err = r.hub.Gated(sessionID, func() error {
 		if !ownTurn && r.hub.Running(sessionID) {
 			return nil

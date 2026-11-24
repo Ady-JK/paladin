@@ -10,6 +10,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
@@ -180,10 +181,11 @@ func (r *AgentRuntime) RefreshProviders() bool {
 		defer r.refreshWG.Done()
 		defer r.refreshing.Store(false)
 		store := config.NewStore(r.dataDir, r.store.Keys)
-		results, err := refreshCatalogResults(store, nil, fetch)
+		results, err := refreshCatalogLocked(store, nil, fetch, &r.providersMu)
 		if err != nil {
 			log.Printf("refresh: providers: %v", err)
 		}
+		r.evictProviderCache()
 		for _, res := range results {
 			if res.Error != "" {
 				log.Printf("refresh: %s: %s", res.Name, res.Error)
@@ -215,11 +217,12 @@ func (r *AgentRuntime) RefreshProvider(name string) (RefreshResult, error) {
 	if !found {
 		return RefreshResult{}, fmt.Errorf("provider %q not found", name)
 	}
-	r.providersMu.Lock()
-	defer r.providersMu.Unlock()
-	results, err := refreshCatalogResults(r.store, []string{name}, r.fetcher())
+	results, err := refreshCatalogLocked(r.store, []string{name}, r.fetcher(), &r.providersMu)
 	if err != nil {
 		return RefreshResult{}, err
+	}
+	if len(results) == 0 {
+		return RefreshResult{}, fmt.Errorf("provider %q not found", name)
 	}
 	// A cached provider was built with the metadata known at the time, so
 	// its wire dialect and thinking levels would otherwise stay stale for
@@ -228,15 +231,24 @@ func (r *AgentRuntime) RefreshProvider(name string) (RefreshResult, error) {
 	return results[0], nil
 }
 
-// refreshCatalogResults fetches the named providers (all when names is
-// empty) and saves every successful listing. Failures keep the old
-// catalog entry and are reported per provider.
+// refreshCatalogResults is refreshCatalogLocked with nothing to lock.
 func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFetcher) ([]RefreshResult, error) {
+	return refreshCatalogLocked(store, names, fetch, noLock{})
+}
+
+type noLock struct{}
+
+func (noLock) Lock()   {}
+func (noLock) Unlock() {}
+
+// refreshCatalogLocked fetches the named providers (all when names is
+// empty), then, under lock, saves every successful listing into the
+// catalog as it stands by then. The fetches wait on the network without the
+// lock, so they never hold up changes to providers; merging into a fresh
+// read means a change made meanwhile is kept. Failures keep the old catalog
+// entry and are reported per provider.
+func refreshCatalogLocked(store *config.Store, names []string, fetch CatalogFetcher, lock sync.Locker) ([]RefreshResult, error) {
 	file, err := store.LoadProviders()
-	if err != nil {
-		return nil, err
-	}
-	catalog, err := store.LoadModels()
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +256,13 @@ func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFet
 	for _, n := range names {
 		want[n] = true
 	}
+	type listed struct {
+		p       config.Provider
+		fetched CatalogFetch
+		res     int // index into results
+	}
 	var results []RefreshResult
+	var ok []listed
 	for _, p := range file.Providers {
 		if len(want) > 0 && !want[p.Name] {
 			continue
@@ -264,8 +282,24 @@ func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFet
 			results = append(results, res)
 			continue
 		}
-		models := fetched.Models
-		sort.Strings(models)
+		sort.Strings(fetched.Models)
+		results = append(results, res)
+		ok = append(ok, listed{p: p, fetched: fetched, res: len(results) - 1})
+	}
+	if len(ok) == 0 {
+		return results, nil
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	catalog, err := store.LoadModels()
+	if err != nil {
+		return results, err
+	}
+	if catalog.Providers == nil {
+		catalog.Providers = map[string]config.ProviderModels{}
+	}
+	for _, l := range ok {
+		p, models := l.p, l.fetched.Models
 		entry := catalog.Providers[p.Name]
 		entry.AllModels = models
 		// LiteLLM's proxy catalog is the source of truth; keeping the
@@ -275,13 +309,9 @@ func refreshCatalogResults(store *config.Store, names []string, fetch CatalogFet
 		}
 		// A listing that carries no metadata says nothing about its
 		// models, so whatever was learned before still stands.
-		entry.Meta = mergeMeta(entry.Meta, fetched.Meta, models)
-		if catalog.Providers == nil {
-			catalog.Providers = map[string]config.ProviderModels{}
-		}
+		entry.Meta = mergeMeta(entry.Meta, l.fetched.Meta, models)
 		catalog.Providers[p.Name] = entry
-		res.Count, res.Models, res.Warning = len(models), models, fetched.Warning
-		results = append(results, res)
+		results[l.res].Count, results[l.res].Models, results[l.res].Warning = len(models), models, l.fetched.Warning
 	}
 	if err := store.SaveModels(catalog); err != nil {
 		return results, err

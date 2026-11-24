@@ -24,6 +24,9 @@ type codexDiscovery struct {
 	// Only metadata creation and the small exclusion file use this lock;
 	// Codex requests and history loading never block a manual import on it.
 	mu sync.Mutex
+	// synced remembers, per session, the thread update time its history was
+	// last synced at, so a scan skips threads Codex has not touched.
+	synced sync.Map // session id -> int64
 }
 
 const codexHiddenFile = "codex-hidden.json"
@@ -66,6 +69,9 @@ func discoveryWait(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
+// onDiscoverySync is set by tests to observe which sessions a scan syncs.
+var onDiscoverySync func(sessionID string)
+
 func (r *AgentRuntime) discoverCodexSessions(ctx context.Context) error {
 	// Codex is optional. Recheck on each background scan so installing it
 	// while Paladin is open enables discovery without a restart.
@@ -78,7 +84,15 @@ func (r *AgentRuntime) discoverCodexSessions(ctx context.Context) error {
 	}
 	cursor := ""
 	seen := map[string]bool{}
-	var load []transcript.Meta
+	type pending struct {
+		meta    transcript.Meta
+		updated int64
+	}
+	var load []pending
+	idx, err := r.newCodexIndex()
+	if err != nil {
+		return err
+	}
 	for {
 		pageCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		threads, next, err := client.ListThreads(pageCtx, codex.ThreadQuery{Cursor: cursor, Limit: 50})
@@ -94,7 +108,7 @@ func (r *AgentRuntime) discoverCodexSessions(ctx context.Context) error {
 			if !discoveryWait(ctx, 25*time.Millisecond) {
 				return ctx.Err()
 			}
-			sess, created, err := r.ensureCodexSession(thread, thread.Cwd, false)
+			sess, created, err := r.ensureCodexSessionIn(idx, thread, thread.Cwd, false)
 			if err != nil {
 				log.Printf("codex: discover thread %s: %v", thread.ID, err)
 				continue
@@ -102,7 +116,7 @@ func (r *AgentRuntime) discoverCodexSessions(ctx context.Context) error {
 			if sess.Meta.SessionID == "" {
 				continue
 			} // explicitly hidden
-			load = append(load, sess.Meta)
+			load = append(load, pending{sess.Meta, thread.UpdatedAt})
 			changed = changed || created
 		}
 		if changed {
@@ -118,7 +132,11 @@ func (r *AgentRuntime) discoverCodexSessions(ctx context.Context) error {
 	}
 	// Metadata is visible before histories are hydrated. One worker, with a
 	// pause between sessions, yields the expensive work to foreground turns.
-	for _, meta := range load {
+	for _, p := range load {
+		meta := p.meta
+		if last, ok := r.codexDiscovery.synced.Load(meta.SessionID); ok && p.updated != 0 && last.(int64) == p.updated {
+			continue
+		}
 		if !discoveryWait(ctx, 100*time.Millisecond) {
 			return ctx.Err()
 		}
@@ -127,47 +145,81 @@ func (r *AgentRuntime) discoverCodexSessions(ctx context.Context) error {
 				return ctx.Err()
 			}
 		}
+		if onDiscoverySync != nil {
+			onDiscoverySync(meta.SessionID)
+		}
 		if changed, err := r.SyncSession(meta.SessionID, meta.Cwd); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			log.Printf("codex: background history %s: %v", meta.SessionID, err)
-		} else if changed {
-			r.hub.PublishSession(meta.SessionID, "session/refresh")
-			r.hub.PublishSession("", "sessions/changed")
+		} else {
+			r.codexDiscovery.synced.Store(meta.SessionID, p.updated)
+			if changed {
+				r.hub.PublishSession(meta.SessionID, "session/refresh")
+				r.hub.PublishSession("", "sessions/changed")
+			}
 		}
 	}
 	return nil
+}
+
+// codexIndex is what one scan needs to know about the sessions already
+// linked to Codex threads, read once instead of for every thread.
+type codexIndex struct {
+	hidden map[string]bool
+	linked map[string]transcript.Meta // thread id -> its session
+}
+
+func (r *AgentRuntime) newCodexIndex() (*codexIndex, error) {
+	r.codexDiscovery.mu.Lock()
+	defer r.codexDiscovery.mu.Unlock()
+	hidden, err := r.hiddenCodexThreads()
+	if err != nil {
+		return nil, err
+	}
+	metas, err := r.transcripts.ListMeta("")
+	if err != nil {
+		return nil, err
+	}
+	idx := &codexIndex{hidden: hidden, linked: map[string]transcript.Meta{}}
+	for _, m := range metas {
+		if m.Harness != nil && m.Harness.Name == HarnessCodex {
+			idx.linked[m.Harness.ThreadID] = m
+		}
+	}
+	return idx, nil
 }
 
 // ensureCodexSession creates only the linked metadata, using the original
 // workspace even if it was deleted. Viewing old history must not create that
 // workspace again. A manual import can supply a replacement folder.
 func (r *AgentRuntime) ensureCodexSession(thread codex.ThreadSummary, cwd string, explicit bool) (transcript.Session, bool, error) {
-	r.codexDiscovery.mu.Lock()
-	defer r.codexDiscovery.mu.Unlock()
-	hidden, err := r.hiddenCodexThreads()
+	idx, err := r.newCodexIndex()
 	if err != nil {
 		return transcript.Session{}, false, err
 	}
-	if hidden[thread.ID] {
+	return r.ensureCodexSessionIn(idx, thread, cwd, explicit)
+}
+
+// ensureCodexSessionIn is ensureCodexSession against a scan's index, which it
+// keeps current as it links new threads.
+func (r *AgentRuntime) ensureCodexSessionIn(idx *codexIndex, thread codex.ThreadSummary, cwd string, explicit bool) (transcript.Session, bool, error) {
+	r.codexDiscovery.mu.Lock()
+	defer r.codexDiscovery.mu.Unlock()
+	var err error
+	if idx.hidden[thread.ID] {
 		if !explicit {
 			return transcript.Session{}, false, nil
 		}
-		delete(hidden, thread.ID)
-		if err := r.saveHiddenCodexThreads(hidden); err != nil {
+		delete(idx.hidden, thread.ID)
+		if err := r.saveHiddenCodexThreads(idx.hidden); err != nil {
 			return transcript.Session{}, false, err
 		}
 	}
-	metas, err := r.transcripts.ListMeta("")
-	if err != nil {
-		return transcript.Session{}, false, err
-	}
-	for _, held := range metas {
-		if held.Harness != nil && held.Harness.Name == HarnessCodex && held.Harness.ThreadID == thread.ID {
-			sess, err := r.transcripts.Load(held.Cwd, held.SessionID)
-			return sess, false, err
-		}
+	if held, ok := idx.linked[thread.ID]; ok {
+		sess, err := r.transcripts.Load(held.Cwd, held.SessionID)
+		return sess, false, err
 	}
 	if strings.TrimSpace(cwd) == "" {
 		cwd, err = os.UserHomeDir()
@@ -192,6 +244,7 @@ func (r *AgentRuntime) ensureCodexSession(thread codex.ThreadSummary, cwd string
 		_ = r.transcripts.Delete(cwd, sess.Meta.SessionID)
 		return sess, false, err
 	}
+	idx.linked[thread.ID] = sess.Meta
 	return sess, true, nil
 }
 

@@ -9,6 +9,14 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/transcript"
 )
 
+// historyCacheBudget bounds the transcript bytes the cache stands for (decoded,
+// they take several times that in memory); historyEntryMax keeps one huge
+// transcript from using it all. Variables so tests can shrink them.
+var (
+	historyCacheBudget int64 = 48 << 20
+	historyEntryMax    int64 = 16 << 20
+)
+
 // A small, bounded cache avoids decoding the same transcript on every page.
 // The file identity, size and modification time guard appends and rewrites.
 type historyCache struct {
@@ -48,7 +56,7 @@ func (c *historyCache) read(sess transcript.Session) ([]transcript.Turn, error) 
 		return nil, err
 	}
 	after, err := os.Stat(path)
-	if err != nil || !sameHistoryFile(before, after) || after.Size() > 32<<20 {
+	if err != nil || !sameHistoryFile(before, after) || after.Size() > historyEntryMax {
 		return turns, nil
 	}
 	c.mu.Lock()
@@ -56,7 +64,8 @@ func (c *historyCache) read(sess transcript.Session) ([]transcript.Turn, error) 
 	if c.entries == nil {
 		c.entries = make(map[string]cachedHistory)
 	}
-	if len(c.entries) >= 8 {
+	delete(c.entries, path)
+	for len(c.entries) >= 8 || (len(c.entries) > 0 && c.size()+after.Size() > historyCacheBudget) {
 		var oldest string
 		var at time.Time
 		for key, entry := range c.entries {
@@ -68,4 +77,13 @@ func (c *historyCache) read(sess transcript.Session) ([]transcript.Turn, error) 
 	}
 	c.entries[path] = cachedHistory{file: after, turns: turns, used: time.Now()}
 	return turns, nil
+}
+
+// size is the transcript bytes the cached entries stand for.
+func (c *historyCache) size() int64 {
+	var total int64
+	for _, e := range c.entries {
+		total += e.file.Size()
+	}
+	return total
 }

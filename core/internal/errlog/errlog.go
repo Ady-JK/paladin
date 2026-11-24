@@ -2,9 +2,9 @@
 //
 // Every session folder gets its own error.log, and so does every
 // subagent session (a child is a session with its own folder). Lines are
-// the unedited error text: no redaction, no truncation, no dedup — the
-// file exists so a bug can be understood later from what actually
-// happened. Timestamps are UTC so logs from several machines line up.
+// the error text as it happened: no truncation, no dedup — the file exists
+// so a bug can be understood later — except that the user's stored provider
+// keys are masked, since a request or a command can carry one. Timestamps are UTC so logs from several machines line up.
 //
 // Writing is best-effort: a full disk or a missing folder must never
 // change how a turn behaves. The one bound kept is size: a file that
@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 // FileName is the per-session log every error lands in.
@@ -53,7 +55,7 @@ func AppendText(dir, source, text string) {
 	if strings.TrimSpace(dir) == "" || strings.TrimSpace(text) == "" {
 		return
 	}
-	write(filepath.Join(dir, FileName), source, text)
+	write(filepath.Join(dir, FileName), source, redact.Registered(text))
 }
 
 // Global writes an entry for work that has no session yet (a bad
@@ -66,7 +68,7 @@ func Global(dataDir, source, text string) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	write(filepath.Join(dir, "errors.log"), source, text)
+	write(filepath.Join(dir, "errors.log"), source, redact.Registered(text))
 }
 
 // write appends one timestamped line, rotating first when the file has

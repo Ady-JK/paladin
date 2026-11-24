@@ -117,7 +117,7 @@ func (r *AgentRuntime) ImportCodexThread(threadID, cwd string) (Session, error) 
 		return Session{}, errors.New("a Codex thread id is required")
 	}
 	if held, ok := r.codexThreadSessions()[threadID]; ok {
-		return r.OpenSession(held.SessionID, held.Cwd)
+		return r.openSession(held.SessionID, held.Cwd, true)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), codexImportTimeout)
 	defer cancel()
@@ -141,7 +141,7 @@ func (r *AgentRuntime) ImportCodexThread(threadID, cwd string) (Session, error) 
 		return Session{}, err
 	}
 	if !created {
-		return r.OpenSession(sess.Meta.SessionID, sess.Meta.Cwd)
+		return r.openSession(sess.Meta.SessionID, sess.Meta.Cwd, true)
 	}
 	if _, err := r.SyncSession(sess.Meta.SessionID, sess.Meta.Cwd); err != nil {
 		return Session{}, err

@@ -198,6 +198,12 @@ func (t *AskTool) remove(key string) {
 // Resolve, drops them with Cancel, or the turn stops. The session and call
 // ids travel on the turn context (set by the agent and the registry).
 func (t *AskTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
+	return t.CallReady(raw, ctx, nil)
+}
+
+// CallReady lets an external harness publish its question card only after the
+// answer wait is registered, so an immediate UI answer cannot race ahead.
+func (t *AskTool) CallReady(raw json.RawMessage, ctx *ToolCtx, ready func()) (string, error) {
 	questions, err := parseAskQuestions(raw)
 	if err != nil {
 		return "", err
@@ -222,6 +228,9 @@ func (t *AskTool) Call(raw json.RawMessage, ctx *ToolCtx) (string, error) {
 	wait := &askPending{questions: questions, done: make(chan askOutcome, 1)}
 	t.pending[key] = wait
 	t.mu.Unlock()
+	if ready != nil {
+		ready()
+	}
 
 	select {
 	case out := <-wait.done:

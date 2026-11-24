@@ -134,6 +134,20 @@ func (b *jobBook) running(sessionID string) []string {
 	return ids
 }
 
+// runningCommands lists a session's running jobs with their command lines,
+// read under the lock because jobs start and finish on other goroutines.
+func (b *jobBook) runningCommands(sessionID string) []BlockingJob {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []BlockingJob
+	for id, rec := range b.live {
+		if rec.SessionID == sessionID {
+			out = append(out, BlockingJob{ID: id, Command: rec.Command})
+		}
+	}
+	return out
+}
+
 // runningJob reports whether jobID is one of the session's live jobs.
 func (b *jobBook) runningJob(sessionID, jobID string) bool {
 	b.mu.Lock()
@@ -547,10 +561,8 @@ func (b *jobBook) liveOrphans(sessionDir string) []JobRecord {
 // carries the command line so the user can tell what they are stopping.
 func (b *jobBook) blocking(sessionID, sessionDir string) []BlockingJob {
 	var out []BlockingJob
-	for _, id := range b.running(sessionID) {
-		if rec, ok := b.live[id]; ok {
-			out = append(out, BlockingJob{ID: id, Command: rec.Command, Live: true})
-		}
+	for _, job := range b.runningCommands(sessionID) {
+		out = append(out, BlockingJob{ID: job.ID, Command: job.Command, Live: true})
 	}
 	for _, rec := range b.liveOrphans(sessionDir) {
 		out = append(out, BlockingJob{ID: rec.ID, Command: rec.Command, PID: rec.PID})

@@ -378,3 +378,28 @@ func BenchmarkRefreshUnchangedSessions(b *testing.B) {
 		}
 	}
 }
+
+// An unchanged session is recognized from its stat data, not by hashing
+// every transcript on every search.
+func TestFingerprintUsesStatDataWhereAvailable(t *testing.T) {
+	data := t.TempDir()
+	store := transcript.NewStore(filepath.Join(data, "sessions"))
+	sess, err := store.Create("/work/a", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Append(transcript.RoleUser, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	a, err := fingerprintSession(context.Background(), sess.Dir, make([]byte, 1024))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := statFingerprint(sess.Dir); ok && !strings.HasPrefix(a, "s1|") {
+		t.Fatalf("fingerprint %q is not stat-based", a)
+	}
+	b, _ := fingerprintSession(context.Background(), sess.Dir, make([]byte, 1024))
+	if a != b {
+		t.Fatal("an unchanged session changed fingerprint")
+	}
+}

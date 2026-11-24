@@ -40,6 +40,7 @@ type codexThread struct {
 	mu       sync.Mutex
 	owned    bool // a turn is reading sub
 	adopting bool // an adopting turn is queued and has not started reading
+	adoptGen int  // counts adoptions, so a late finish cannot clear a newer one
 	kick     chan struct{}
 }
 
@@ -56,14 +57,15 @@ func (r *AgentRuntime) codexThreadFor(ctx context.Context, sess *transcript.Sess
 	if sess.Meta.Harness != nil {
 		threadID = sess.Meta.Harness.ThreadID
 	}
-	r.codexMu.Lock()
-	defer r.codexMu.Unlock()
-	if existing := r.codexThreads[id]; existing != nil && existing.client == client && existing.threadID == threadID && threadID != "" {
+	// Forking, starting and resuming a thread are app-server round trips of up
+	// to seconds: only this session waits, and the map is locked per lookup.
+	defer r.codexStart.lock(id)()
+	if existing := r.codexThread(id); existing != nil && existing.client == client && existing.threadID == threadID && threadID != "" {
 		return existing, false, nil
 	}
-	if old := r.codexThreads[id]; old != nil {
+	if old := r.codexThread(id); old != nil {
 		old.sub.Close()
-		delete(r.codexThreads, id)
+		r.forgetCodexThreadEntry(id, old)
 	}
 	if threadID == "" {
 		// A fork continues from its source's thread when Codex can fork it;
@@ -95,7 +97,9 @@ func (r *AgentRuntime) codexThreadFor(ctx context.Context, sess *transcript.Sess
 		return nil, false, err
 	}
 	th = &codexThread{r: r, sessionID: id, storeCwd: sess.Meta.Cwd, cwd: workspace, threadID: threadID, client: client, sub: sub, model: client.ThreadModel(threadID), kick: make(chan struct{}, 1)}
+	r.codexMu.Lock()
 	r.codexThreads[id] = th
+	r.codexMu.Unlock()
 	go th.watch()
 	return th, fresh, nil
 }
@@ -106,6 +110,21 @@ func forkSource(sess *transcript.Session) *transcript.HarnessFork {
 		return nil
 	}
 	return sess.Meta.Harness.ForkOf
+}
+
+func (r *AgentRuntime) codexThread(id string) *codexThread {
+	r.codexMu.Lock()
+	defer r.codexMu.Unlock()
+	return r.codexThreads[id]
+}
+
+// forgetCodexThreadEntry removes id's entry if it is still th.
+func (r *AgentRuntime) forgetCodexThreadEntry(id string, th *codexThread) {
+	r.codexMu.Lock()
+	if r.codexThreads[id] == th {
+		delete(r.codexThreads, id)
+	}
+	r.codexMu.Unlock()
 }
 
 // forgetCodexThread drops a session's thread (its session was deleted, or the
@@ -200,8 +219,34 @@ func (th *codexThread) adoptTurn() error {
 	provider := HarnessCodex
 	req := agent.Request{SessionID: th.sessionID, Cwd: settings.Cwd, Resume: true, Permissions: settings.Permissions,
 		Provider: &provider, Model: settings.Model}
-	_, _, err := th.r.hub.Submit(req, SubmitOpts{})
-	return err
+	_, done, err := th.r.hub.Submit(req, SubmitOpts{})
+	if err != nil {
+		return err
+	}
+	th.adoptGen++ // the caller holds th.mu
+	gen := th.adoptGen
+	go func() {
+		<-done
+		th.mu.Lock()
+		failed := th.adopting && !th.owned && th.adoptGen == gen
+		if failed {
+			// The turn was cancelled in the queue or failed before it took the
+			// thread. Drop the start it was meant to read and go back to
+			// draining, or Codex's messages would pile up unanswered.
+			th.adopting = false
+			if m, ok, _ := th.sub.Peek(); ok && m.Method == "turn/started" {
+				th.sub.Pop()
+			}
+		}
+		th.mu.Unlock()
+		if failed {
+			select {
+			case th.kick <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	return nil
 }
 
 // codexThreadsClose ends every thread's subscription (shutdown).

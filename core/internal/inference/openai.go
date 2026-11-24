@@ -287,6 +287,13 @@ func toSDKMessages(messages []LlmMessage, replay *thinkingPolicy) []openai.ChatC
 			}
 		default:
 			if m.Image == nil {
+				// A user message with no text and no image says nothing, and
+				// some endpoints reject it outright: Copilot's Gemini answers
+				// HTTP 400 "invalid request body". Attachment-only prompts and
+				// empty stray tool results leave such rows in the history.
+				if strings.TrimSpace(m.Content) == "" {
+					continue
+				}
 				out = append(out, openai.UserMessage(m.Content))
 			} else if url, err := m.Image.DataURL(); err == nil {
 				out = append(out, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
@@ -468,7 +475,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, system string, messages
 		idle.touch()
 		chunk := stream.Current()
 		if u := chatUsage(chunk.Usage, chunk.RawJSON()); u != nil {
-			usage.Add(*u)
+			usage.Latest(*u)
 		}
 		for _, choice := range chunk.Choices {
 			if r := thinking.add(choice.Delta.RawJSON()); r != "" {
@@ -629,9 +636,6 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 		return &ProviderError{Kind: "request", Timeout: true,
 			Message: fmt.Sprintf("%s: %s: model response timed out after %s — the model was still working; try again", p.name, op, defaultTimeout)}
 	}
-	if isTransientTransport(err) {
-		return RequestError(fmt.Sprintf("%s: %s: transient connection (%v) — try again", p.name, op, err))
-	}
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) && apiErr.StatusCode != 0 {
 		body := strings.TrimSpace(apiErr.RawJSON())
@@ -651,6 +655,9 @@ func (p *OpenAIProvider) mapError(op string, err error) *ProviderError {
 			retryAfter = parseRetryHint(body)
 		}
 		return &ProviderError{Kind: "request", Message: msg, Status: apiErr.StatusCode, RetryAfter: retryAfter}
+	}
+	if isTransientTransport(err) {
+		return RequestError(fmt.Sprintf("%s: %s: transient connection (%v) — try again", p.name, op, err))
 	}
 	return RequestError(fmt.Sprintf("%s: %s: %v", p.name, op, err))
 }

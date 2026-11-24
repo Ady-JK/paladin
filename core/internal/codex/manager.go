@@ -45,6 +45,14 @@ type Status struct {
 type Manager struct {
 	mu     sync.Mutex
 	client *Client
+	// startMu lets one caller at a time start the app-server without holding
+	// mu, so Live, Close and Models never wait on a slow start.
+	startMu sync.Mutex
+	// startedAt, coolUntil and lastErr back off after a start that failed or
+	// a process that died right away.
+	startedAt time.Time
+	coolUntil time.Time
+	lastErr   error
 
 	models   []Model
 	modelsAt time.Time
@@ -53,27 +61,61 @@ type Manager struct {
 // NewManager builds a manager; nothing starts until a Client is asked for.
 func NewManager() *Manager { return &Manager{} }
 
-// Client returns the live app-server, starting it when needed.
-func (m *Manager) Client(ctx context.Context) (*Client, error) {
+// startCooldown is how long a failed or short-lived app-server is left alone
+// before another start is tried.
+const (
+	startCooldown = 5 * time.Second
+	youngProcess  = 10 * time.Second
+)
+
+// live returns the running client, noting a process that died young.
+func (m *Manager) live() *Client {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.client != nil {
-		select {
-		case <-m.client.Done():
-			m.client = nil
-		default:
-			return m.client, nil
-		}
+	if m.client == nil {
+		return nil
 	}
+	select {
+	case <-m.client.Done():
+		if time.Since(m.startedAt) < youngProcess {
+			m.coolUntil, m.lastErr = time.Now().Add(startCooldown), m.client.Err()
+		}
+		m.client = nil
+		return nil
+	default:
+		return m.client
+	}
+}
+
+// Client returns the live app-server, starting it when needed.
+func (m *Manager) Client(ctx context.Context) (*Client, error) {
+	if c := m.live(); c != nil {
+		return c, nil
+	}
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	if c := m.live(); c != nil {
+		return c, nil // another caller started it while this one waited
+	}
+	m.mu.Lock()
+	if time.Now().Before(m.coolUntil) && m.lastErr != nil {
+		err := m.lastErr
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.mu.Unlock()
 	bin, err := FindBinary()
 	if err != nil {
 		return nil, err
 	}
 	c, err := Start(ctx, bin)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if err != nil {
+		m.coolUntil, m.lastErr = time.Now().Add(startCooldown), err
 		return nil, err
 	}
-	m.client = c
+	m.client, m.startedAt = c, time.Now()
 	return c, nil
 }
 

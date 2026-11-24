@@ -65,10 +65,14 @@ func (m *subagentManager) wait(ctx context.Context, parentID, target string, tim
 	defer restore()
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
+	// What a pass takes from the mailbox is gone for good, so a pass that
+	// does not end the wait carries it into the next one.
+	var carried []string
+	var carriedJobs []map[string]any
 	for {
 		changed := m.changedChan(parentID)
 		jobChanged := m.r.jobs.waitChan(parentID)
-		delivered := m.takePending(parentID, nil)
+		delivered := slices.Concat(carried, m.takePending(parentID, nil))
 
 		// Child half: the target (or every child with no target), plus any
 		// other child that finished meanwhile — its undelivered result
@@ -101,7 +105,7 @@ func (m *subagentManager) wait(ctx context.Context, parentID, target string, tim
 		// Job half: completions the shell still owes this session, taken
 		// from its notify accounting so a finished job is never reported
 		// twice. The wait consumes them exactly as a round would.
-		jobs := m.takeJobResults(parentID)
+		jobs := slices.Concat(carriedJobs, m.takeJobResults(parentID))
 		targetJobDone := targetJob == "" || !m.r.jobs.runningJob(parentID, targetJob)
 		if targetJob != "" && targetJobDone && !jobInList(jobs, targetJob) {
 			if row := m.jobRow(parent, targetJob); row != nil {
@@ -122,12 +126,22 @@ func (m *subagentManager) wait(ctx context.Context, parentID, target string, tim
 			m.handOver(parentID, parent.Meta.Cwd, m.r.hub.RunningTurnID(parentID), delivered)
 			return waitResult{Agents: infos, Jobs: jobs}, nil
 		}
+		carried, carriedJobs = delivered, jobs
 		select {
 		case <-changed:
 		case <-jobChanged:
 		case <-deadline.C:
+			// The answer carries what was taken, so it counts as delivered.
+			m.handOver(parentID, parent.Meta.Cwd, m.r.hub.RunningTurnID(parentID), delivered)
 			return waitResult{Agents: infos, Jobs: jobs, TimedOut: true}, nil
 		case <-ctx.Done():
+			// Nothing is consumed on cancellation: the children's results
+			// go back to the mailbox for the next wait or round.
+			m.mu.Lock()
+			for _, id := range delivered {
+				m.addPendingLocked(parentID, id)
+			}
+			m.mu.Unlock()
 			return waitResult{}, errors.New("wait cancelled: the turn was stopped")
 		}
 	}

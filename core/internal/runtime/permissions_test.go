@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,29 +75,69 @@ func TestBadPresetRejected(t *testing.T) {
 	}
 }
 
-func TestPermissionsGetSet(t *testing.T) {
+func TestPermissionsViewReportsFullAccessOnly(t *testing.T) {
 	rt, _ := testRuntime(t)
 	ws := t.TempDir()
-	if _, err := rt.PermissionsSet("global", "", []permission.Rule{{Tool: "shell", Pattern: "npm test", Action: "allow"}}); err != nil {
+	if _, err := rt.PermissionsSet("global", ""); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := rt.PermissionsSet("folder", ws, []permission.Rule{{Tool: "shell", Pattern: "git push", Action: "deny"}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := rt.PermissionsSet("folder", ws, []permission.Rule{{Tool: "write", Pattern: "relative", Action: "allow"}}); err == nil {
-		t.Fatal("relative write rule accepted")
-	}
-	if _, err := rt.PermissionsSet("session", ws, nil); err == nil {
-		t.Fatal("session scope must not be settable")
 	}
 	v, err := rt.PermissionsGet(ws)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Global) != 1 || len(v.Folder) != 1 || v.Folder[0].Pattern != "git push" || len(v.Folders) != 1 {
+	if len(v.Global)+len(v.Folder)+len(v.Session)+len(v.Folders) != 0 || len(v.Presets) != 1 || v.Presets[0] != "full-access" {
 		t.Fatalf("view %+v", v)
 	}
-	if len(v.Presets) != 2 {
-		t.Fatalf("presets %+v", v.Presets)
+}
+
+// An everyday command runs, and a flagged one waits for the user: once
+// approved it runs, denied it never does.
+func TestGuardAsksBeforeAFlaggedCommandOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply string
+		ran         bool
+	}{{"deny", "deny", false}, {"approve", "once", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := t.TempDir()
+			marker := filepath.Join(ws, "ran.txt")
+			// The flagged part (a tunnel binary that does not exist) fails harmlessly;
+			// the marker proves whether the command line ran at all.
+			cmd := "touch ran.txt; ngrok http 3000"
+			srv := shellRounds(t, cmd)
+			rt, _ := testRuntime(t)
+			_ = rt.store.Keys.Set("openrouter", "sk-test")
+			pointMockAt(rt, srv.URL)
+			sess, _ := rt.OpenSession("", ws)
+			done := make(chan []agent.ChatChunk, 1)
+			go func() {
+				_, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: ws})
+				done <- chunks
+			}()
+			waitApproval(t, rt, sess.SessionID, "c0")
+			if _, err := rt.AnswerApproval(sess.SessionID, "c0", tc.reply); err != nil {
+				t.Fatal(err)
+			}
+			var chunks []agent.ChatChunk
+			select {
+			case chunks = <-done:
+			case <-time.After(20 * time.Second):
+				t.Fatal("turn never finished")
+			}
+			asked := 0
+			for _, c := range chunks {
+				if c.Approval != nil && c.Approval.State == permission.StatePending {
+					asked++
+					if strings.Join(c.Approval.Choices, ",") != "once,deny" {
+						t.Fatalf("choices %v", c.Approval.Choices)
+					}
+				}
+			}
+			if asked != 1 {
+				t.Fatalf("asked %d times", asked)
+			}
+			if _, err := os.Stat(marker); (err == nil) != tc.ran {
+				t.Fatalf("ran = %v, want %v", err == nil, tc.ran)
+			}
+		})
 	}
 }

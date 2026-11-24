@@ -8,19 +8,20 @@ import (
 )
 
 // The stats use generated tokens (completion already counts reasoning)
-// and the wall time since the turn started; a resume turn has no user
-// row to attach a summary to.
+// and the wall time since the turn started. Stats anchor the turn's last
+// row, so continuations can carry them without a user row.
 func TestTurnStatsUseGeneratedTokens(t *testing.T) {
 	a := &Agent{startedAt: time.Now().Add(-2 * time.Second)}
 	a.turnUsage.CompletionTokens = 100
 	a.turnUsage.PromptTokens = 999_999
 
-	stats := a.turnStats(false)
-	if stats == nil || stats.Tokens != 100 || stats.DurationMs < 1900 {
+	stats := a.turnStats()
+	if stats == nil || stats.Tokens != 100 || stats.DurationMs < 1900 || !stats.Incomplete {
 		t.Fatalf("stats = %+v", stats)
 	}
-	if got := a.turnStats(true); got != nil {
-		t.Fatalf("resume turn got stats: %+v", got)
+	a.phase = phaseDone
+	if got := a.turnStats(); got == nil || got.Incomplete {
+		t.Fatalf("completed turn stats = %+v", got)
 	}
 }
 
@@ -46,5 +47,8 @@ func TestPersistRecordsTheTurnIndex(t *testing.T) {
 	}
 	if a.savedIndex != nil {
 		t.Fatalf("resume turn index = %v", a.savedIndex)
+	}
+	if a.savedStats == nil {
+		t.Fatal("resumed turn lost its end-of-turn stats")
 	}
 }

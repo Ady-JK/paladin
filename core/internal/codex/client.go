@@ -162,6 +162,9 @@ func Start(ctx context.Context, bin string) (*Client, error) {
 	}
 	stderr := &tail{max: 4096}
 	cmd.Stderr = stderr
+	// A grandchild that keeps stderr open must not keep Wait (and so the
+	// exit notice) from returning.
+	cmd.WaitDelay = 2 * time.Second
 	setProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start codex: %w", err)
@@ -235,9 +238,26 @@ func (c *Client) fail(err error) {
 	_ = c.stdin.Close()
 }
 
+// maxLineBytes bounds one JSON line from the app-server (a full thread
+// history can carry images); a variable so tests can shrink it.
+var maxLineBytes = 64 << 20
+
+// writeTimeout bounds one write to the app-server's stdin.
+var writeTimeout = 20 * time.Second
+
 func (c *Client) read(r io.Reader) {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
+	sc.Buffer(make([]byte, 0, min(1<<20, maxLineBytes)), maxLineBytes)
+	defer func() {
+		// A read error (a line over the limit) leaves the process blocked on
+		// a full pipe: retire it so calls and subscriptions end.
+		if err := sc.Err(); err != nil {
+			c.fail(fmt.Errorf("codex app-server output: %w", err))
+			if c.cmd.Process != nil {
+				killGroup(c.cmd)
+			}
+		}
+	}()
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
@@ -358,8 +378,27 @@ func (c *Client) write(v any) error {
 		return ErrClosed
 	default:
 	}
-	_, err = c.stdin.Write(append(data, '\n'))
-	return err
+	return c.writeLine(append(data, '\n'))
+}
+
+// writeLine writes to stdin, giving up when the app-server stops reading: a
+// full pipe would otherwise hold writeMu, and every caller, forever.
+func (c *Client) writeLine(line []byte) error {
+	errc := make(chan error, 1)
+	go func() { _, err := c.stdin.Write(line); errc <- err }()
+	timer := time.NewTimer(writeTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-errc:
+		return err
+	case <-timer.C:
+		err := errors.New("codex app-server is not reading its input")
+		c.fail(err)
+		if c.cmd.Process != nil {
+			killGroup(c.cmd)
+		}
+		return err
+	}
 }
 
 // Loaded reports whether this process already knows the thread (it was

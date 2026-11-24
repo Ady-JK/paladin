@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/config"
 )
@@ -147,5 +148,69 @@ func TestRefreshAllUsesInjectedFetcher(t *testing.T) {
 	rt.WaitRefresh()
 	if len(f.calls()) == 0 {
 		t.Fatal("manual refresh-all should go through the injected fetcher")
+	}
+}
+
+// A refresh waits on the network without holding the providers lock: adding
+// or changing a provider, or switching workspace, must not queue behind a
+// slow provider.
+func TestRefreshProviderDoesNotHoldTheLockWhileFetching(t *testing.T) {
+	rt, _ := testRuntime(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	rt.SetModelFetcher(func(ctx context.Context, p config.Provider, key string) ([]string, error) {
+		close(entered)
+		<-release
+		return []string{"m"}, nil
+	})
+	if _, err := rt.AddProvider(config.ProviderInput{Name: "local", ApiURL: "http://127.0.0.1:1/v1", ApiKey: "sk-x", ApiType: "openai"}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := rt.RefreshProvider("local"); done <- err }()
+	<-entered
+	if !rt.providersMu.TryLock() {
+		t.Fatal("the providers lock was held during the network fetch")
+	}
+	rt.providersMu.Unlock()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A provider removed while its catalog was being fetched is reported, not a
+// panic.
+func TestRefreshProviderRemovedMidFetchIsAnError(t *testing.T) {
+	rt, _ := testRuntime(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	rt.SetModelFetcher(func(ctx context.Context, p config.Provider, key string) ([]string, error) {
+		close(entered)
+		<-release
+		return []string{"m"}, nil
+	})
+	if _, err := rt.AddProvider(config.ProviderInput{Name: "local", ApiURL: "http://127.0.0.1:1/v1", ApiKey: "sk-x", ApiType: "openai"}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := rt.RefreshProvider("local"); done <- err }()
+	<-entered
+	rt.providersMu.Lock()
+	file, _ := rt.store.LoadProviders()
+	var keep []config.Provider
+	for _, p := range file.Providers {
+		if p.Name != "local" {
+			keep = append(keep, p)
+		}
+	}
+	file.Providers = keep
+	if err := rt.store.SaveProviders(file); err != nil {
+		t.Fatal(err)
+	}
+	rt.providersMu.Unlock()
+	close(release)
+	select {
+	case <-done: // an error or a result, as long as it returns
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh hung")
 	}
 }

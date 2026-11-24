@@ -76,6 +76,26 @@ func (u *Usage) Add(o Usage) {
 	}
 }
 
+// Latest folds usage reported within one streamed call: a provider may send
+// running totals on every chunk as well as one at the end, so each figure
+// keeps its largest value instead of adding them up.
+func (u *Usage) Latest(o Usage) {
+	u.PromptTokens = max(u.PromptTokens, o.PromptTokens)
+	u.CompletionTokens = max(u.CompletionTokens, o.CompletionTokens)
+	u.ReasoningTokens = max(u.ReasoningTokens, o.ReasoningTokens)
+	u.CacheReadTokens = max(u.CacheReadTokens, o.CacheReadTokens)
+	u.CacheWriteTokens = max(u.CacheWriteTokens, o.CacheWriteTokens)
+	u.CacheReadKnown = u.CacheReadKnown || o.CacheReadKnown
+	u.CacheWriteKnown = u.CacheWriteKnown || o.CacheWriteKnown
+	u.TotalTokens = max(u.TotalTokens, o.TotalTokens)
+	if o.HasCost {
+		u.Cost = max(u.Cost, o.Cost)
+		u.ListCost = max(u.ListCost, o.ListCost)
+		u.HasCost = true
+		u.CostEstimated = u.CostEstimated || o.CostEstimated
+	}
+}
+
 // opencodeExtras is the gateway cost envelope nested under usage.
 // OpenCode sends {"cost":…,"opencode":{"list_cost":…,"tokens":{…}}};
 // OpenRouter sends {"cost":…} with cache detail in

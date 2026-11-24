@@ -217,7 +217,7 @@ func externalCodexTurn(id, answer string) map[string]any {
 }
 
 func TestOpeningLinkedCodexSessionReadsExternalTurns(t *testing.T) {
-	rt, _, _ := codexRuntime(t, "chat")
+	rt, log, _ := codexRuntime(t, "chat")
 	cwd := t.TempDir()
 	t.Setenv("PALADIN_FAKE_CODEX_CWD", cwd)
 	path := filepath.Join(t.TempDir(), "codex-history.json")
@@ -233,6 +233,15 @@ func TestOpeningLinkedCodexSessionReadsExternalTurns(t *testing.T) {
 	if _, err := rt.OpenSession(opened.SessionID, cwd); err != nil {
 		t.Fatal(err)
 	}
+	// The continuation is read after the open returns and announced as a refresh.
+	log.waitFor(t, "the reopened session to refresh", func(events []TurnEvent) bool {
+		for _, e := range events {
+			if e.Event == "session/refresh" && e.SessionID == opened.SessionID {
+				return true
+			}
+		}
+		return false
+	})
 	att, err := rt.Attach(opened.SessionID, cwd, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -251,5 +260,77 @@ func TestOpeningLinkedCodexSessionReadsExternalTurns(t *testing.T) {
 	rows, err := rt.SessionHistory(opened.SessionID, cwd)
 	if err != nil || !strings.Contains(rows[len(rows)-1].Content, "another continuation") {
 		t.Fatalf("reimport did not refresh: %v", err)
+	}
+}
+
+// Opening a linked chat must not wait for the external client's history: the
+// transcript on disk opens at once, and a change found afterwards reaches the
+// UI as a session/refresh event.
+func TestOpeningALinkedSessionSyncsInTheBackground(t *testing.T) {
+	rt, _, _ := codexRuntime(t, "chat")
+	log := newEventLog()
+	rt.SetTurnSink(log.sink)
+	cwd := t.TempDir()
+	t.Setenv("PALADIN_FAKE_CODEX_CWD", cwd)
+	path := filepath.Join(t.TempDir(), "codex-history.json")
+	t.Setenv("PALADIN_FAKE_CODEX_HISTORY", path)
+	turns := []any{externalCodexTurn("tu-ext", "First answer")}
+	writeCodexHistory(t, path, turns)
+	imported, err := rt.ImportCodexThread("th-old", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.SyncSession(imported.SessionID, cwd); err != nil {
+		t.Fatal(err)
+	}
+	// The external client moves on while the chat is closed.
+	turns = append(turns, externalCodexTurn("tu-later", "Written while closed"))
+	writeCodexHistory(t, path, turns)
+
+	if _, err := rt.OpenSession(imported.SessionID, cwd); err != nil {
+		t.Fatal(err)
+	}
+	log.waitFor(t, "a session/refresh once the background sync lands", func(events []TurnEvent) bool {
+		for _, e := range events {
+			if e.Event == "session/refresh" && e.SessionID == imported.SessionID {
+				return true
+			}
+		}
+		return false
+	})
+	sess, _ := rt.transcripts.Load(cwd, imported.SessionID)
+	saved, _ := sess.HistoryTurns()
+	if len(saved) != 2 {
+		t.Fatalf("the background sync did not store the later turn: %d turns", len(saved))
+	}
+}
+
+// A chat opened and deleted straight away must not have its directory
+// recreated or blocked by the sync that open started in the background.
+func TestDeletingAJustOpenedSessionWaitsForItsBackgroundSync(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		rt, _, _ := codexRuntime(t, "chat")
+		cwd := t.TempDir()
+		t.Setenv("PALADIN_FAKE_CODEX_CWD", cwd)
+		path := filepath.Join(t.TempDir(), "codex-history.json")
+		t.Setenv("PALADIN_FAKE_CODEX_HISTORY", path)
+		turns := []any{externalCodexTurn("tu-ext", "First answer")}
+		writeCodexHistory(t, path, turns)
+		imported, err := rt.ImportCodexThread("th-old", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		turns = append(turns, externalCodexTurn("tu-later", "Written while closed"))
+		writeCodexHistory(t, path, turns)
+		if _, err := rt.OpenSession(imported.SessionID, cwd); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rt.DeleteSession(imported.SessionID, cwd); err != nil {
+			t.Fatalf("round %d: delete right after open: %v", i, err)
+		}
+		time.Sleep(150 * time.Millisecond)
+		if _, err := rt.transcripts.Load(cwd, imported.SessionID); err == nil {
+			t.Fatalf("round %d: the session came back after it was deleted", i)
+		}
 	}
 }

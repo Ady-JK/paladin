@@ -7,7 +7,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -159,7 +158,7 @@ func (t Template) Build(d Deps, req Request) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	gate := sessionGate(d.Gate, sess)
+	gate := d.Gate
 	if input.mode == ModePlan || t.ReadOnly {
 		registry, shell = planRegistry(registry, shell)
 		if !t.ReadOnly {
@@ -317,16 +316,6 @@ func (t Template) buildRegistry(d Deps, commandTools []string) (*tools.Registry,
 		registry = registry.With(tool)
 	}
 	return registry, shell, nil
-}
-
-func sessionGate(gate ToolGate, sess transcript.Session) ToolGate {
-	// The session may read its own folder without mutating the caller's gate.
-	if original, ok := gate.(*permission.Gate); ok && original != nil && sess.Dir != "" {
-		owned := *original
-		owned.Readable = append(slices.Clip(original.Readable), sess.Dir)
-		return &owned
-	}
-	return gate
 }
 
 func planGate(gate ToolGate) ToolGate {

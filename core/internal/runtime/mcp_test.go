@@ -85,10 +85,6 @@ func TestTurnUsesMCPTools(t *testing.T) {
 	}
 	ws := t.TempDir()
 	sess, _ := rt.OpenSession("", ws)
-	// readOnlyHint is not trusted; an allow rule is what lets it run.
-	if err := rt.perms.Add(permission.ScopeGlobal, ws, sess.SessionID, permission.Rule{Tool: permission.ToolMCP, Pattern: "dummy/echo", Action: permission.ActionAllow}); err != nil {
-		t.Fatal(err)
-	}
 	out, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: ws})
 	if out.Reply != "finished" {
 		t.Fatalf("outcome %+v", out)
@@ -116,27 +112,8 @@ func TestTurnUsesMCPTools(t *testing.T) {
 	}
 }
 
-func TestReadOnlyBlocksMCPWithoutApproval(t *testing.T) {
-	model := newToolModel(t, [2]string{"mcp__dummy__slow", `{"ms":1}`})
-	rt, _, _ := mcpRuntime(t, model.srv.URL)
-	if _, err := rt.MCPSetConfig(mcp.ScopeGlobal, "", dummyConfig(t)); err != nil {
-		t.Fatal(err)
-	}
-	ws := t.TempDir()
-	sess, _ := rt.OpenSession("", ws)
-	_, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "go", Cwd: ws, Permissions: "read-only"})
-	if !strings.Contains(model.body(1), "read-only") {
-		t.Fatal("read-only refusal missing from tool result")
-	}
-	for _, chunk := range chunks {
-		if chunk.Approval != nil {
-			t.Fatal("read-only must refuse MCP without prompting")
-		}
-	}
-}
-
 // Plan mode shows every MCP tool but asks once/deny for each call, even
-// for a tool the server calls read-only and an allow rule covers.
+// for a tool the server calls read-only.
 func TestPlanModeAsksForEveryMCPCall(t *testing.T) {
 	model := newToolModel(t, [2]string{"mcp__dummy__echo", `{"text":"planned"}`})
 	rt, _, _ := mcpRuntime(t, model.srv.URL)
@@ -145,9 +122,6 @@ func TestPlanModeAsksForEveryMCPCall(t *testing.T) {
 	}
 	ws := t.TempDir()
 	sess, _ := rt.OpenSession("", ws)
-	if err := rt.perms.Add(permission.ScopeGlobal, ws, sess.SessionID, permission.Rule{Tool: permission.ToolMCP, Pattern: "dummy", Action: permission.ActionAllow}); err != nil {
-		t.Fatal(err)
-	}
 	done := make(chan []agent.ChatChunk, 1)
 	go func() {
 		_, chunks := chatToEnd(t, rt, agent.Request{SessionID: sess.SessionID, Message: "plan", Cwd: ws, Mode: "plan"})

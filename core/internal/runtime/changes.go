@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/snapshot"
@@ -176,10 +177,47 @@ func turnStates(ctx context.Context, repo *snapshot.Repo, from, to string) (map[
 	return states, nil
 }
 
+// liveTreeTTL bounds how long a working-folder snapshot is reused while a turn
+// runs. Every change-list and per-file diff request needs the folder as it is
+// now, and a snapshot walks the whole tree and writes a commit. A busy turn
+// used to take one per request, so opening a diff queued behind the live
+// counters' dozens of them.
+const liveTreeTTL = 2 * time.Second
+
+type liveTree struct {
+	mu   sync.Mutex
+	tree string
+	mark int
+	at   time.Time
+}
+
+// currentTree snapshots the folder for a change view. While a turn runs it
+// reuses the last snapshot until a file-changing tool settles or liveTreeTTL
+// passes; callers share one in-flight snapshot instead of each taking their
+// own. With no turn running it always takes a fresh one.
+func (r *AgentRuntime) currentTree(ctx context.Context, repo *snapshot.Repo, sessionID string) (string, error) {
+	mark, running := r.hub.runningChangeMark(sessionID)
+	if !running {
+		return repo.Snapshot(ctx)
+	}
+	v, _ := r.liveTrees.LoadOrStore(repo.Dir(), &liveTree{})
+	lt := v.(*liveTree)
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	if lt.tree != "" && lt.mark == mark && time.Since(lt.at) < liveTreeTTL {
+		return lt.tree, nil
+	}
+	tree, err := repo.Snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	lt.tree, lt.mark, lt.at = tree, mark, time.Now()
+	return tree, nil
+}
+
 // SessionChanges groups files by turn using completed turn snapshots.
 func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	view := SessionChangesView{Turns: []ChangeTurn{}, Files: []ChangedFile{}}
 	repo, turns, msgs, err := r.visibleTurns(sessionID, cwd)
 	if err != nil || repo == nil {
@@ -206,7 +244,7 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 		}
 		if to == "" {
 			if current == "" {
-				current, err = repo.Snapshot(ctx)
+				current, err = r.currentTree(ctx, repo, sessionID)
 				if err != nil {
 					return view, err
 				}
@@ -239,8 +277,7 @@ func (r *AgentRuntime) SessionChanges(sessionID, cwd string) (SessionChangesView
 // SessionDiff shows the patch for one file in one turn, or across the
 // retained session snapshots when turn is negative.
 func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string) (SessionDiffView, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	if err := snapshot.CheckPath(path); err != nil {
 		return SessionDiffView{}, err
 	}
@@ -271,7 +308,7 @@ func (r *AgentRuntime) SessionDiff(sessionID, cwd string, turn int, path string)
 		}
 		if end == "" {
 			if current == "" {
-				current, err = repo.Snapshot(ctx)
+				current, err = r.currentTree(ctx, repo, sessionID)
 				if err != nil {
 					return SessionDiffView{}, err
 				}

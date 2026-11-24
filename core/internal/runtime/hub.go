@@ -111,16 +111,21 @@ type Attachment struct {
 }
 
 type hubTurn struct {
-	info     TurnInfo
-	req      agent.Request
-	cancel   context.CancelFunc
-	log      []TurnEvent
-	toolAt   map[string]int
-	waiting  map[string]bool
-	reply    strings.Builder
-	errMsg   string
-	result   chan TurnInfo
-	finished chan struct{}
+	info   TurnInfo
+	req    agent.Request
+	cancel context.CancelFunc
+	log    []TurnEvent
+	// tail holds the text of the last log row while deltas keep merging into
+	// it; snapshot folds it back into the row, so a chunk costs its own size.
+	tailOpen      bool
+	tailDelta     strings.Builder
+	tailReasoning strings.Builder
+	toolAt        map[string]int
+	waiting       map[string]bool
+	reply         strings.Builder
+	errMsg        string
+	result        chan TurnInfo
+	finished      chan struct{}
 	// steer holds messages sent mid-turn that the agent has not taken.
 	steer []agent.SteerMessage
 	// halted marks a user stop (or shutdown), as opposed to the turn
@@ -536,18 +541,44 @@ func (h *Hub) publishLocked(t *hubTurn, e TurnEvent) {
 	h.events.push(e)
 }
 
+// foldTail writes the merged text back into the last row and closes it.
+func (t *hubTurn) foldTail() {
+	if !t.tailOpen {
+		return
+	}
+	last := &t.log[len(t.log)-1]
+	last.Delta, last.Reasoning = t.tailDelta.String(), t.tailReasoning.String()
+	t.tailDelta, t.tailReasoning = strings.Builder{}, strings.Builder{}
+	t.tailOpen = false
+}
+
+// snapshot is the replay log with every row complete. Callers hold the hub lock.
+func (t *hubTurn) snapshot() []TurnEvent {
+	if t.tailOpen {
+		// Fold into the row but keep merging: later deltas reopen the tail.
+		t.foldTail()
+	}
+	return t.log
+}
+
 // record keeps the replay log compact: consecutive deltas (or thinking) merge and a
 // tool's later updates replace its first row in place.
 func (t *hubTurn) record(e TurnEvent) {
 	if (e.Event == "chat/delta" || e.Event == "chat/reasoning") && len(t.log) > 0 {
 		last := &t.log[len(t.log)-1]
 		if last.Event == e.Event {
-			last.Delta += e.Delta
-			last.Reasoning += e.Reasoning
+			if !t.tailOpen {
+				t.tailDelta.WriteString(last.Delta)
+				t.tailReasoning.WriteString(last.Reasoning)
+				t.tailOpen = true
+			}
+			t.tailDelta.WriteString(e.Delta)
+			t.tailReasoning.WriteString(e.Reasoning)
 			last.Seq = e.Seq
 			return
 		}
 	}
+	t.foldTail()
 	if key := replaceKey(e); key != "" {
 		if i, ok := t.toolAt[key]; ok {
 			t.log[i] = e
@@ -593,7 +624,7 @@ func (h *Hub) Attach(sessionID string, history func() (any, error)) (Attachment,
 	if t := h.active[sessionID]; t != nil {
 		att.Turn = infoPtr(t.info)
 		if !t.info.Persisted {
-			att.Events = append(att.Events, t.log...)
+			att.Events = append(att.Events, t.snapshot()...)
 		}
 	}
 	for _, t := range h.queue {
@@ -632,12 +663,30 @@ func (h *Hub) runningCanChangeFiles(sessionID string) bool {
 	if t == nil {
 		return false
 	}
-	for _, event := range t.log {
+	for _, event := range t.log { // tool rows only: the unfolded text tail is irrelevant
 		if event.Tool != nil && canChangeFiles(event.Tool.Name, event.Tool.Arguments) {
 			return true
 		}
 	}
 	return false
+}
+
+// runningChangeMark counts the file-changing tools that have settled in the
+// running turn. It moves whenever the folder may have changed under a cached
+// snapshot, so a snapshot taken at the same mark is still current.
+func (h *Hub) runningChangeMark(sessionID string) (mark int, running bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t := h.active[sessionID]
+	if t == nil {
+		return 0, false
+	}
+	for _, event := range t.log {
+		if event.Tool != nil && event.Tool.Status != "running" && canChangeFiles(event.Tool.Name, event.Tool.Arguments) {
+			mark++
+		}
+	}
+	return mark, true
 }
 
 // RunningTurnID is the id of the session's running turn, or "".

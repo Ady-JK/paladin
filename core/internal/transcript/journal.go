@@ -4,6 +4,7 @@ package transcript
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,18 +22,31 @@ const journalFile = "active-turn.json"
 const interruptedText = "Turn interrupted because Paladin stopped unexpectedly. Review the recorded work and send a message to continue. Tools with unknown results may have run; inspect their effects before retrying."
 const unknownToolResult = "The turn was interrupted before this tool's result was saved. It may have run or partially completed. Inspect its effects before deciding whether to retry; do not repeat it blindly."
 
+// A journal is three files: active-turn.json (the header, written once, whose
+// presence marks an interrupted turn), active-turn.msgs (one message per line,
+// rewritten only from the first line that changed) and active-turn.partial
+// (the reply being streamed). A checkpoint therefore costs what changed, not
+// the length of the turn. Older versions kept everything in the header's
+// "messages" and "partial"; recovery still reads that.
+const (
+	journalMsgs    = "active-turn.msgs"
+	journalPartial = "active-turn.partial"
+)
+
 type journalState struct {
 	ID        string    `json:"id"`
 	StartSize int64     `json:"startSize"`
-	Messages  []Message `json:"messages"`
-	Partial   string    `json:"partial,omitempty"`
+	Messages  []Message `json:"messages,omitempty"` // older single-file journals
+	Partial   string    `json:"partial,omitempty"`  // older single-file journals
 }
 
 type TurnJournal struct {
-	ID     string
-	dir    string
-	state  journalState
-	unlock func()
+	ID      string
+	dir     string
+	unlock  func()
+	msgs    *os.File
+	lines   [][]byte // the lines of active-turn.msgs, newline included
+	partial string
 }
 
 // BeginJournal must succeed before a turn may run side-effecting tools.
@@ -74,7 +88,11 @@ func (s *Session) BeginJournal(messages []Message) (*TurnJournal, error) {
 		return nil, err
 	}
 	id := uuid.NewString()
-	j := &TurnJournal{ID: id, dir: s.Dir, unlock: unlock, state: journalState{ID: id, StartSize: size}}
+	j := &TurnJournal{ID: id, dir: s.Dir, unlock: unlock}
+	if err := j.begin(journalState{ID: id, StartSize: size}); err != nil {
+		j.Release()
+		return nil, err
+	}
 	if err := j.Checkpoint(messages, ""); err != nil {
 		j.Release()
 		return nil, err
@@ -82,25 +100,112 @@ func (s *Session) BeginJournal(messages []Message) (*TurnJournal, error) {
 	return j, nil
 }
 
-func (j *TurnJournal) Checkpoint(messages []Message, partial string) error {
-	j.state.Messages = messages
-	j.state.Partial = partial
-	data, err := json.Marshal(j.state)
+// begin creates the message file (durably, with its directory entry) before
+// the header that marks the journal as live.
+func (j *TurnJournal) begin(state journalState) error {
+	if err := atomicWrite(j.dir, journalMsgs, nil); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(j.dir, journalMsgs), os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
-	return atomicWrite(j.dir, journalFile, data)
+	j.msgs = f
+	header, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return atomicWrite(j.dir, journalFile, header)
+}
+
+// Checkpoint records the turn so far. Messages that did not change since the
+// last checkpoint are not written again: the file is cut back to the first
+// line that differs and rewritten from there, so a message that changed or
+// moved is replaced, never duplicated.
+func (j *TurnJournal) Checkpoint(messages []Message, partial string) error {
+	lines := make([][]byte, len(messages))
+	for i := range messages {
+		line, err := json.Marshal(messages[i])
+		if err != nil {
+			return err
+		}
+		lines[i] = append(line, '\n')
+	}
+	same := 0
+	for same < len(lines) && same < len(j.lines) && bytes.Equal(lines[same], j.lines[same]) {
+		same++
+	}
+	if same < len(lines) || same < len(j.lines) {
+		if err := j.rewriteFrom(same, lines); err != nil {
+			return err
+		}
+	}
+	if partial == j.partial {
+		return nil
+	}
+	if partial == "" {
+		if err := os.Remove(filepath.Join(j.dir, journalPartial)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	} else if err := atomicWrite(j.dir, journalPartial, []byte(partial)); err != nil {
+		return err
+	}
+	j.partial = partial
+	return nil
+}
+
+// rewriteFrom cuts the message file back to its first n lines and writes
+// the rest of lines after them.
+func (j *TurnJournal) rewriteFrom(n int, lines [][]byte) error {
+	if j.msgs == nil {
+		return errors.New("journal is closed")
+	}
+	var offset int64
+	for _, l := range j.lines[:n] {
+		offset += int64(len(l))
+	}
+	if err := j.msgs.Truncate(offset); err != nil {
+		return err
+	}
+	if _, err := j.msgs.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := j.msgs.Write(bytes.Join(lines[n:], nil)); err != nil {
+		return err
+	}
+	if err := j.msgs.Sync(); err != nil {
+		return err
+	}
+	j.lines = lines
+	return nil
 }
 
 // Finish removes the journal only after the transcript was committed.
 func (j *TurnJournal) Finish() error {
-	if err := os.Remove(filepath.Join(j.dir, journalFile)); err != nil && !os.IsNotExist(err) {
-		return err
+	j.closeFiles()
+	return removeJournal(j.dir)
+}
+
+func (j *TurnJournal) closeFiles() {
+	if j.msgs != nil {
+		_ = j.msgs.Close()
+		j.msgs = nil
+	}
+}
+
+// removeJournal deletes the header last, so a crash in between still leaves
+// a journal that recovery finishes cleaning up.
+func removeJournal(dir string) error {
+	for _, name := range []string{journalMsgs, journalPartial, journalFile} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }
 
 func (j *TurnJournal) Release() {
+	j.closeFiles()
 	if j.unlock != nil {
 		j.unlock()
 		j.unlock = nil
@@ -134,6 +239,9 @@ func (s *Session) RecoverInterrupted() (bool, error) {
 	if state.ID == "" || state.StartSize < 0 {
 		return false, errors.New("invalid interrupted turn journal")
 	}
+	if err := s.readJournalBody(&state); err != nil {
+		return false, err
+	}
 	committed, err := s.journalCommitted(state)
 	if err != nil {
 		return false, err
@@ -148,10 +256,36 @@ func (s *Session) RecoverInterrupted() (bool, error) {
 			return false, err
 		}
 	}
-	if err := os.Remove(filepath.Join(s.Dir, journalFile)); err != nil && !os.IsNotExist(err) {
+	if err := removeJournal(s.Dir); err != nil {
 		return false, err
 	}
 	return !committed, nil
+}
+
+// readJournalBody adds the messages and the partial reply the newer journal
+// keeps beside its header to state. A torn last line (the process died
+// mid-append) is dropped.
+func (s *Session) readJournalBody(state *journalState) error {
+	data, err := os.ReadFile(filepath.Join(s.Dir, journalMsgs))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, raw := range bytes.SplitAfter(data, []byte("\n")) {
+		if len(raw) == 0 || raw[len(raw)-1] != '\n' {
+			continue
+		}
+		var m Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("read interrupted turn: %w", err)
+		}
+		state.Messages = append(state.Messages, m)
+	}
+	if partial, err := os.ReadFile(filepath.Join(s.Dir, journalPartial)); err == nil {
+		state.Partial = string(partial)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func settleInterrupted(messages []Message) []Message {

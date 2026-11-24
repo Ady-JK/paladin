@@ -119,3 +119,19 @@ func TestStreamSurvivesGatewayKeepalives(t *testing.T) {
 		t.Fatalf("reply truncated by a keepalive: %q", text.String())
 	}
 }
+
+// A connection that dies mid-frame must surface its error, not look like a
+// clean end of stream (which would save a cut-off reply as complete).
+func TestSSEFilterKeepsTheReadErrorAfterAPartialFrame(t *testing.T) {
+	boom := fmt.Errorf("connection reset")
+	body := io.MultiReader(strings.NewReader("data: {\"a\":1}\n\ndata: {\"b\""), errReader{boom})
+	f := &sseFilter{rc: io.NopCloser(body), br: bufio.NewReader(body)}
+	_, err := io.ReadAll(f)
+	if err == nil || err == io.EOF {
+		t.Fatalf("want the connection error, got %v", err)
+	}
+}
+
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }

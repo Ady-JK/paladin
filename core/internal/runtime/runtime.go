@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/atomicfile"
@@ -64,12 +65,10 @@ type Settings struct {
 	Web WebSettings `json:"web,omitzero"`
 }
 
-// WebSettings are the user's web access options. Which sites may be
-// reached is decided by permission rules ("web" tool), not here.
+// WebSettings are the user's web access options.
 type WebSettings struct {
 	// AllowPrivateNetwork lets web tools reach private and internal
-	// addresses (intranet sites). localhost is reachable without it, but
-	// each port asks once (web rule localhost:PORT).
+	// addresses (intranet sites).
 	AllowPrivateNetwork bool `json:"allowPrivateNetwork,omitempty"`
 	// TimeoutMs, MaxBytes and MaxChars bound one fetch; 0 means the
 	// defaults (30 s, 5 MB, 40 000 characters per chunk).
@@ -89,48 +88,57 @@ func (s Settings) formatOnWrite() bool { return s.FormatOnWrite == nil || *s.For
 func (s Settings) lspDiagnostics() bool { return s.LspDiagnostics == nil || *s.LspDiagnostics }
 
 type AgentRuntime struct {
-	dataDir       string
-	config        config.Config
-	settingsMu    sync.Mutex
-	ideCheckMu    sync.Mutex
-	ideCheckCache map[string]ideFileFingerprint
-	store         *config.Store
-	transcripts   *transcript.Store
-	historyCache  historyCache
+	dataDir         string
+	liveTrees       sync.Map // repo dir -> *liveTree, see currentTree
+	config          config.Config
+	settingsMu      sync.Mutex
+	settingsCacheMu sync.Mutex
+	settingsCache   settingsCacheEntry
+	ideCheckMu      sync.Mutex
+	ideCheckCache   map[string]ideFileFingerprint
+	store           *config.Store
+	transcripts     *transcript.Store
+	historyCache    historyCache
 	// codexRepaired holds the sessions already checked for commands whose outcome
 	// their transcript never got.
-	codexRepaired sync.Map
-	codexSync     sync.Map // session id -> *codexSyncState
-	sessionIndex  *sessionindex.Index
-	catalog       *tools.Catalog
-	tools         *tools.Registry
-	shell         *tools.ShellTool
-	ask           *tools.AskTool
-	browser       *tools.BrowserTool
-	memory        *memory.Bank
-	perms         *permission.Store
-	broker        *permission.Broker
-	agents        *agent.Registry
-	hub           *Hub
-	codex         *codex.Manager
-	codexMu       sync.Mutex
-	codexLimits   codexLimitCache
-	codexThreads  map[string]*codexThread
-	subagents     *subagentManager
-	lsp           *lsp.Manager
-	editorLsp     *lsp.Manager
-	snaps         *snapshot.Store
-	worktrees     *worktree.Manager
-	undoMu        sync.Mutex
-	jobs          *jobBook
-	providersMu   sync.Mutex
-	copilotMu     sync.Mutex
-	copilotLogin  copilotSignIn
-	refreshing    atomic.Bool
-	refreshWG     sync.WaitGroup
-	fetchMu       sync.RWMutex
-	fetchModels   CatalogFetcher
-	providerCache map[string]inference.Provider
+	codexRepaired   sync.Map
+	codexSync       sync.Map // session id -> *codexSyncState
+	openSyncs       sync.Map // session id -> chan struct{}, closed when its background sync after open ends
+	sessionIndex    *sessionindex.Index
+	catalog         *tools.Catalog
+	tools           *tools.Registry
+	shell           *tools.ShellTool
+	ask             *tools.AskTool
+	browser         *tools.BrowserTool
+	memory          *memory.Bank
+	broker          *permission.Broker
+	agents          *agent.Registry
+	hub             *Hub
+	codex           *codex.Manager
+	codexMu         sync.Mutex // guards codexThreads only
+	codexStart      keyedLock  // one session at a time starts, forks or resumes its thread
+	codexLimits     codexLimitCache
+	codexThreads    map[string]*codexThread
+	claudeMu        sync.Mutex // guards claudeThreads only
+	claudeStart     keyedLock  // one session at a time starts or reuses its CLI
+	claudeThreads   map[string]*claudeThread
+	claudeCatalog   claudeCatalog
+	claudeDiscovery claudeDiscovery
+	subagents       *subagentManager
+	lsp             *lsp.Manager
+	editorLsp       *lsp.Manager
+	snaps           *snapshot.Store
+	worktrees       *worktree.Manager
+	undo            keyedLock
+	jobs            *jobBook
+	providersMu     sync.Mutex
+	copilotMu       sync.Mutex
+	copilotLogin    copilotSignIn
+	refreshing      atomic.Bool
+	refreshWG       sync.WaitGroup
+	fetchMu         sync.RWMutex
+	fetchModels     CatalogFetcher
+	providerCache   map[string]inference.Provider
 	// thinkingCache holds providers with a thinking level applied, so a
 	// level the provider rejected stays dropped across turns.
 	thinkingCache map[string]inference.Provider
@@ -190,7 +198,6 @@ func WithKeyStore(dataDir string, cfg config.Config, keys config.KeyStore) *Agen
 		agents:        agents,
 		codex:         codex.NewManager(),
 		codexThreads:  map[string]*codexThread{},
-		perms:         permission.NewStore(dataDir),
 		broker:        permission.NewBroker(),
 		snaps:         snapshotStore(dataDir),
 		worktrees:     worktree.New(filepath.Join(dataDir, "worktrees")),
@@ -230,24 +237,42 @@ func (r *AgentRuntime) settingsPath() string {
 	return filepath.Join(r.dataDir, "config", "settings.json")
 }
 
+// loadSettings is the parsed settings.json. Most rounds of most turns ask
+// for it, so the parse is remembered until the file's size, modification
+// time or identity changes; callers only read what it returns.
 func (r *AgentRuntime) loadSettings() Settings {
-	data, err := os.ReadFile(r.settingsPath())
-	if err != nil {
+	info, statErr := os.Stat(r.settingsPath())
+	if statErr != nil {
 		return Settings{}
+	}
+	r.settingsCacheMu.Lock()
+	defer r.settingsCacheMu.Unlock()
+	if c := r.settingsCache; c.ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) && os.SameFile(c.info, info) {
+		return c.s
 	}
 	var s Settings
-	if err := json.Unmarshal(data, &s); err != nil {
-		return Settings{}
+	if data, err := os.ReadFile(r.settingsPath()); err == nil {
+		if json.Unmarshal(data, &s) != nil {
+			s = Settings{}
+		}
 	}
+	r.settingsCache = settingsCacheEntry{ok: true, size: info.Size(), mod: info.ModTime(), info: info, s: s}
 	return s
+}
+
+type settingsCacheEntry struct {
+	ok   bool
+	size int64
+	mod  time.Time
+	info os.FileInfo
+	s    Settings
 }
 
 // runTurn is the hub's RunFunc: it builds the default agent template
 // (provider, session, history, tools, prompt) and runs one turn under
 // parent. The hub has already validated req and owns tx.
 func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate func(func() error), tx chan<- agent.ChatChunk, done <-chan struct{}) (agent.ChatOutcome, error) {
-	preset, err := permission.ParsePreset(req.Permissions)
-	if err != nil {
+	if _, err := permission.ParsePreset(req.Permissions); err != nil {
 		return agent.ChatOutcome{}, err
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -276,14 +301,14 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			return agent.ChatOutcome{}, fmt.Errorf("recover interrupted turn: %w", err)
 		}
 		// A pending undo becomes permanent once the user moves on.
-		r.undoMu.Lock()
+		unlockUndo := r.undo.lock(req.SessionID)
 		cerr := r.commitRevert(&sess)
 		// The user's next message ends the chance to recover the state
 		// before the last undo; wake, resume and compaction turns do not.
 		if cerr == nil && !req.Resume && !req.Compact && sess.Meta.Subagent == nil {
 			cerr = clearRecovery(sess.Dir)
 		}
-		r.undoMu.Unlock()
+		unlockUndo()
 		if cerr != nil {
 			return agent.ChatOutcome{}, fmt.Errorf("commit revert: %w", cerr)
 		}
@@ -330,8 +355,10 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			return r.runHarnessTurn(ctx, sess, req, workspace, gate, tx)
 		}
 	}
-	if derefString(req.Provider) == HarnessCodex {
+	if p := derefString(req.Provider); p == HarnessCodex {
 		return agent.ChatOutcome{}, fmt.Errorf("this session runs on Paladin's own agent; start a Codex session from the sidebar to use Codex")
+	} else if p == HarnessClaude {
+		return agent.ChatOutcome{}, fmt.Errorf("this session runs on Paladin's own agent; start a Claude Code session from the sidebar")
 	}
 	var registry *tools.Registry
 	if child != nil {
@@ -422,13 +449,10 @@ func (r *AgentRuntime) runTurn(parent context.Context, req agent.Request, gate f
 			return view.Window, view.Percent
 		},
 		Gate: &permission.Gate{
-			Preset:    preset,
 			Workspace: workspace,
 			SessionID: req.SessionID,
-			Store:     r.perms,
 			Broker:    r.broker,
-
-			MCP: registry.MCPInfo,
+			MCP:       registry.MCPInfo,
 		},
 	}, req)
 	if err != nil {

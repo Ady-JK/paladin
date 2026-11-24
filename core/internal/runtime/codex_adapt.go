@@ -10,6 +10,7 @@ import (
 	"github.com/Ady-JK/paladin/core/internal/agent"
 	"github.com/Ady-JK/paladin/core/internal/codex"
 	"github.com/Ady-JK/paladin/core/internal/harness"
+	"github.com/Ady-JK/paladin/core/internal/harness/claudeadapter"
 	"github.com/Ady-JK/paladin/core/internal/harness/codexadapter"
 	"github.com/Ady-JK/paladin/core/internal/session"
 	"github.com/Ady-JK/paladin/core/internal/transcript"
@@ -20,7 +21,7 @@ import (
 // event and a transcript row, and following what outlives a turn.
 
 // adapters are the harness adapters by the name a session stores.
-var adapters = map[string]harness.Adapter{codexadapter.Name: codexadapter.New()}
+var adapters = map[string]harness.Adapter{codexadapter.Name: codexadapter.New(), claudeadapter.Name: claudeadapter.New()}
 
 // adapterFor returns the adapter of a session's harness, nil for a Paladin session.
 func adapterFor(name string) harness.Adapter { return adapters[name] }

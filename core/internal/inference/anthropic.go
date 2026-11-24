@@ -171,6 +171,7 @@ func buildAnthropicRequest(system string, messages []LlmMessage, tools []ToolDef
 		}
 	}
 	flushTools()
+	req.Messages = pairAnthropicTools(req.Messages)
 	for _, t := range tools {
 		req.Tools = append(req.Tools, anthropicTool{
 			Name: t.Name, Description: t.Description, InputSchema: schemaMap(t.Parameters),

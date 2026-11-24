@@ -146,8 +146,7 @@ func (r *AgentRuntime) planRevert(ctx context.Context, sess transcript.Session, 
 }
 
 func (r *AgentRuntime) RevertPreview(sessionID, cwd string, index int) (RevertPreview, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	sess, err := r.transcripts.Load(cwd, sessionID)
 	if err != nil {
 		return RevertPreview{}, err
@@ -231,16 +230,14 @@ func (r *AgentRuntime) RevertKillJobs(sessionID, cwd string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	stopped := r.jobs.killBlocking(sessionID, sess.Dir)
 	return nonNil(stopped), nil
 }
 
 // RevertSessionChecked rejects an out-of-date preview before changing files.
 func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, version string) (RevertResult, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	if r.hub.Busy(sessionID) {
 		return RevertResult{}, fmt.Errorf("a turn is running for this session; stop it first")
 	}
@@ -295,6 +292,9 @@ func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, ve
 	// passed, and this comes before files are touched, as in t3code; it never
 	// blocks the undo.
 	r.codexRewind(&sess, index)
+	if err := r.claudeRewind(&sess, index); err != nil {
+		return RevertResult{}, err
+	}
 	out := RevertResult{Index: index, Message: text, Restored: []string{}, Deleted: []string{}, Skipped: []string{}}
 	if plan != nil {
 		out.Snapshots = true
@@ -323,8 +323,7 @@ func (r *AgentRuntime) RevertSessionChecked(sessionID, cwd string, index int, ve
 	if err := pruneProtection(sess.Dir, index); err != nil {
 		log.Printf("undo: prune protection status: %v", err)
 	}
-	sess.Meta.Revert = nil
-	if err := sess.SaveMeta(); err != nil {
+	if err := r.clearRevert(&sess); err != nil {
 		return RevertResult{}, err
 	}
 	return out, nil
@@ -378,8 +377,21 @@ func (r *AgentRuntime) commitRevert(sess *transcript.Session) error {
 	}
 	syncRecalled(*sess)
 	pruneTurnSnapshots(sess.Dir, rv.Index)
-	sess.Meta.Revert = nil
-	return sess.SaveMeta()
+	return r.clearRevert(sess)
+}
+
+// clearRevert drops the session's pending-revert marker. It goes through
+// UpdateMeta so metadata changed since the caller loaded the session (a
+// rename, a new subagent) is not overwritten with the caller's stale copy.
+func (r *AgentRuntime) clearRevert(sess *transcript.Session) error {
+	err := r.transcripts.UpdateMeta(sess.Meta.Cwd, sess.Meta.SessionID, func(m *transcript.Meta) error {
+		m.Revert = nil
+		return nil
+	})
+	if err == nil {
+		sess.Meta.Revert = nil
+	}
+	return err
 }
 
 // visibleMessages hides a legacy pending revert's messages.
@@ -397,4 +409,12 @@ func snapshotStore(dataDir string) *snapshot.Store {
 		return nil
 	}
 	return snapshot.NewStore(filepath.Join(dataDir, "snapshots"))
+}
+
+// nonNil turns a nil slice into an empty one so it encodes as [].
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }

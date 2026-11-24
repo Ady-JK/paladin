@@ -138,15 +138,19 @@ func TestTruncateCountsMessagesInsideTurns(t *testing.T) {
 }
 
 // A complete envelope that does not decode is corruption, not a torn
-// tail.
-func TestCorruptTurnLineFails(t *testing.T) {
+// tail: skipped on read, refused by the strict loader.
+func TestCorruptTurnLineIsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	content := "{\"turn\":{\"messages\":[{\"role\":1}]}}\n{\"role\":\"user\",\"content\":\"hi\"}\n"
 	if err := os.WriteFile(filepath.Join(dir, "messages.jsonl"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadTranscript(dir); err == nil {
-		t.Fatal("a corrupt turn must not be skipped")
+	msgs, err := LoadTranscript(dir)
+	if err != nil || len(msgs) != 1 || msgs[0].Content != "hi" {
+		t.Fatalf("got %v, %v", msgs, err)
+	}
+	if _, err := loadTurnsStrict(dir); err == nil {
+		t.Fatal("the strict loader must not skip a corrupt turn")
 	}
 }
 
@@ -155,7 +159,7 @@ func TestCorruptTurnLineFails(t *testing.T) {
 func TestTurnStatsRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	s := &Session{Dir: dir}
-	stats := &TurnStats{DurationMs: 65_000, Tokens: 12_345}
+	stats := &TurnStats{DurationMs: 65_000, Tokens: 12_345, Incomplete: true}
 	if err := s.AppendTurnWithStats([]Message{UserMessage("ask"), AssistantMessage("answer")}, stats); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +173,7 @@ func TestTurnStatsRoundTrip(t *testing.T) {
 	if len(turns) != 2 {
 		t.Fatalf("turns = %d", len(turns))
 	}
-	if turns[0].Stats == nil || turns[0].Stats.DurationMs != 65_000 || turns[0].Stats.Tokens != 12_345 {
+	if turns[0].Stats == nil || turns[0].Stats.DurationMs != 65_000 || turns[0].Stats.Tokens != 12_345 || !turns[0].Stats.Incomplete {
 		t.Fatalf("stats = %+v", turns[0].Stats)
 	}
 	if turns[1].Stats != nil {

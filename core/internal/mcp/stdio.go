@@ -152,6 +152,11 @@ func (t *stdioTransport) send(ctx context.Context, msg []byte) error {
 		_ = t.stdin.SetWriteDeadline(time.Time{})
 	}
 	_, err := t.stdin.Write(append(msg, '\n'))
+	if err != nil {
+		// A write that failed or timed out may have left half a JSON line on
+		// the wire; the next message would be glued to it. Retire the server.
+		go func() { _ = t.close() }()
+	}
 	return err
 }
 

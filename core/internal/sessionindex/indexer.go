@@ -137,9 +137,15 @@ func findSessions(ctx context.Context, dataDir string) ([]sessionFile, error) {
 	return out, nil
 }
 
-// Fingerprinting the actual bytes catches rewrites with unchanged timestamps
-// and metadata-only changes. It streams instead of retaining transcripts.
+// fingerprintSession identifies a session's current state. Where the platform
+// reports a change time, that is size, mtime, ctime and inode of its two
+// files, which catches rewrites with unchanged timestamps without reading
+// every transcript on every search. Elsewhere it hashes the actual bytes,
+// streaming instead of retaining transcripts.
 func fingerprintSession(ctx context.Context, dir string, buffer []byte) (string, error) {
+	if stamp, ok, err := statFingerprint(dir); err != nil || ok {
+		return stamp, err
+	}
 	h := sha256.New()
 	for _, name := range []string{"messages.jsonl", "meta.json"} {
 		f, err := os.Open(filepath.Join(dir, name))
@@ -158,6 +164,24 @@ func fingerprintSession(ctx context.Context, dir string, buffer []byte) (string,
 		_, _ = h.Write(part.Sum(nil))
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// statFingerprint is the stat-based fingerprint, or false when the platform
+// cannot provide one.
+func statFingerprint(dir string) (string, bool, error) {
+	stamp := "s1"
+	for _, name := range []string{"messages.jsonl", "meta.json"} {
+		fi, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			return "", false, err
+		}
+		part, ok := statStamp(fi)
+		if !ok {
+			return "", false, nil
+		}
+		stamp += "|" + part
+	}
+	return stamp, true, nil
 }
 
 type contextReader struct {

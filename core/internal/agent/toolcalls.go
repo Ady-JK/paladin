@@ -58,6 +58,7 @@ func (a *Agent) refuseRereadCalls(calls []inference.ToolCall) error {
 			return err
 		}
 		if err := a.emit(ChatChunk{Tool: toolActivity(&calls[i], &result)}); err != nil {
+			a.settleAborted(calls[i+1:])
 			return turnStop{}
 		}
 	}
@@ -65,12 +66,13 @@ func (a *Agent) refuseRereadCalls(calls []inference.ToolCall) error {
 }
 
 func (a *Agent) announceToolCalls(calls []inference.ToolCall) error {
-	for i, call := range calls {
+	for _, call := range calls {
 		if err := a.emit(ChatChunk{Tool: &ToolActivity{
 			ID: call.ID, Name: call.Name, Arguments: call.Arguments,
 			Status: session.ToolRunning,
 		}}); err != nil {
-			a.settleAborted(calls[i:])
+			// No call has executed yet, including the ones already announced.
+			a.settleAborted(calls)
 			return turnStop{}
 		}
 	}

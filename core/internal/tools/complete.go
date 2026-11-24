@@ -13,6 +13,8 @@
 package tools
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"iter"
 	"os"
@@ -274,21 +276,46 @@ func markScopeOutside(abs, workspace string) bool {
 }
 
 // ignoreCache memoizes matchers per anchor: the .gitignore discovery
-// walk runs once per directory instead of once per keystroke.
+// walk runs once per directory instead of once per keystroke. Entries
+// expire, and the cache holds only a few anchors.
 var (
 	ignoreCacheMu sync.Mutex
-	ignoreCache   = map[string]*ignoreMatcher{}
+	ignoreCache   = map[string]ignoreCacheEntry{}
+)
+
+type ignoreCacheEntry struct {
+	at      time.Time
+	matcher *ignoreMatcher
+}
+
+const (
+	ignoreCacheTTL     = 30 * time.Second
+	ignoreCacheAnchors = 8
 )
 
 func cachedIgnoreMatcher(anchor string) *ignoreMatcher {
 	key := cleanPath(anchor)
 	ignoreCacheMu.Lock()
-	defer ignoreCacheMu.Unlock()
-	if m, ok := ignoreCache[key]; ok {
-		return m
+	if e, ok := ignoreCache[key]; ok && time.Since(e.at) < ignoreCacheTTL {
+		ignoreCacheMu.Unlock()
+		return e.matcher
 	}
+	ignoreCacheMu.Unlock()
+	// The walk runs unlocked: another anchor's completion must not wait for it.
 	m := newIgnoreMatcher(anchor)
-	ignoreCache[key] = m
+	ignoreCacheMu.Lock()
+	defer ignoreCacheMu.Unlock()
+	if len(ignoreCache) >= ignoreCacheAnchors {
+		for k, e := range ignoreCache {
+			if time.Since(e.at) >= ignoreCacheTTL {
+				delete(ignoreCache, k)
+			}
+		}
+		if len(ignoreCache) >= ignoreCacheAnchors {
+			ignoreCache = map[string]ignoreCacheEntry{}
+		}
+	}
+	ignoreCache[key] = ignoreCacheEntry{at: time.Now(), matcher: m}
 	return m
 }
 
@@ -346,18 +373,28 @@ func listCandidateFiles(root string) ([]string, error) {
 	return walkFiles(root)
 }
 
+// rgTimeout bounds one ripgrep listing; a variable so tests can shorten it.
+var rgTimeout = 5 * time.Second
+
 // rgFiles runs `rg --files --hidden` (gitignore still applies) and
-// joins the slash-separated rows onto root.
+// joins the slash-separated rows onto root. Its output is read as a stream
+// and the process is stopped at the file cap or the timeout.
 func rgFiles(rg, root string) ([]string, bool) {
-	cmd := exec.Command(rg, "--files", "--hidden", "--no-require-git", "--glob", "!.git/", "--", root)
+	ctx, cancel := context.WithTimeout(context.Background(), rgTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, rg, "--files", "--hidden", "--no-require-git", "--glob", "!.git/", "--glob", "!node_modules/", "--", root)
 	cmd.Env = shellEnv()
-	out, err := cmd.Output()
-	if err != nil {
+	cmd.WaitDelay = time.Second
+	pipe, err := cmd.StdoutPipe()
+	if err != nil || cmd.Start() != nil {
 		return nil, false
 	}
 	var files []string
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
+	sc := bufio.NewScanner(pipe)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	capped := false
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
@@ -368,8 +405,17 @@ func rgFiles(rg, root string) ([]string, bool) {
 		}
 		files = append(files, cleanPath(abs))
 		if len(files) >= completeScanCap {
+			capped = true
+			cancel()
 			break
 		}
+	}
+	waitErr := cmd.Wait()
+	if ctx.Err() != nil && !capped {
+		return nil, false // timed out
+	}
+	if waitErr != nil && !capped {
+		return nil, false
 	}
 	return files, true
 }
@@ -392,7 +438,7 @@ func walkFiles(root string) ([]string, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if name == ".git" {
+			if skipIgnoreWalkDir(name) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -413,6 +459,13 @@ func walkFiles(root string) ([]string, error) {
 	return files, nil
 }
 
+// ignoreWalkCap bounds the entries the .gitignore discovery walk visits.
+const ignoreWalkCap = 50000
+
+// skipIgnoreWalkDir names folders no walk here descends into: version
+// control data and dependency trees.
+func skipIgnoreWalkDir(name string) bool { return name == ".git" || name == "node_modules" }
+
 // ignoreRule is one .gitignore line bound to the directory holding
 // the .gitignore file. anchored rules match from that directory;
 // bare basenames match at any depth.
@@ -432,9 +485,22 @@ type ignoreMatcher struct {
 
 func newIgnoreMatcher(root string) *ignoreMatcher {
 	m := &ignoreMatcher{root: cleanPath(root)}
+	visited := 0
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() || d.Name() != ".gitignore" {
+		if walkErr != nil {
 			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
+		}
+		if visited++; visited > ignoreWalkCap {
+			return filepath.SkipAll // a huge tree (a home folder) is not worth walking whole
+		}
+		if d.IsDir() {
+			if skipIgnoreWalkDir(d.Name()) && path != root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != ".gitignore" {
+			return nil
 		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {

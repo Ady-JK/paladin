@@ -181,6 +181,7 @@ func (p *OpenAIProvider) copilotMessagesRequest(system string, messages []LlmMes
 		}
 	}
 	flushTools()
+	out = pairAnthropicTools(out)
 	out = mergeNeighbours(out)
 	if n := len(out); n > 0 && out[n-1].Role == "assistant" {
 		// A request may not end on an assistant message (that is a prefill,

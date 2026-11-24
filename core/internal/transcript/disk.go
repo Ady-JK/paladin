@@ -101,10 +101,17 @@ func LoadTranscript(dir string) ([]Message, error) {
 	return msgs, nil
 }
 
-// LoadTurns reads the transcript grouped into its stored turns.
-func LoadTurns(dir string) ([]Turn, error) {
+// LoadTurns reads the transcript grouped into its stored turns, skipping a
+// line that does not decode.
+func LoadTurns(dir string) ([]Turn, error) { return loadTurns(dir, false) }
+
+// loadTurnsStrict is LoadTurns that fails on an undecodable line, for
+// callers that rewrite the file from what they read.
+func loadTurnsStrict(dir string) ([]Turn, error) { return loadTurns(dir, true) }
+
+func loadTurns(dir string, strict bool) ([]Turn, error) {
 	var out []Turn
-	_, err := scanTranscriptFrom(dir, 0, true, func(msgs []Message, stats *TurnStats) {
+	_, err := scanTranscriptFrom(dir, 0, true, strict, func(msgs []Message, stats *TurnStats) {
 		out = append(out, Turn{Messages: msgs, Stats: stats})
 	})
 	return out, err

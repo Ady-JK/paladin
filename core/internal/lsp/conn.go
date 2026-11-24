@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // maxMessage bounds one inbound message so a broken server cannot
@@ -57,7 +58,14 @@ type conn struct {
 	closeOnce sync.Once
 	onNotify  func(method string, params json.RawMessage)
 	onRequest func(method string, params json.RawMessage) any
+	// onStall runs when a write gave up because the server stopped reading
+	// (the owner kills the process).
+	onStall func()
 }
+
+// writeTimeout bounds one write to the server; a variable so tests can
+// shorten it.
+var writeTimeout = 15 * time.Second
 
 func newConn(r io.Reader, w io.Writer, onNotify func(string, json.RawMessage), onRequest func(string, json.RawMessage) any) *conn {
 	c := &conn{w: w, pending: map[int]chan message{}, closed: make(chan struct{}), onNotify: onNotify, onRequest: onRequest}
@@ -85,11 +93,23 @@ func (c *conn) send(m message) error {
 		return errClosed
 	default:
 	}
-	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
+	frame := append([]byte(fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))), body...)
+	// A server that stops reading fills the pipe and would hold writeMu, and
+	// every edit behind it, forever: give up, and retire the connection.
+	errc := make(chan error, 1)
+	go func() { _, err := c.w.Write(frame); errc <- err }()
+	timer := time.NewTimer(writeTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-errc:
 		return err
+	case <-timer.C:
+		c.close()
+		if c.onStall != nil {
+			c.onStall()
+		}
+		return errors.New("language server is not reading its input")
 	}
-	_, err = c.w.Write(body)
-	return err
 }
 
 // call sends a request and waits for its response.

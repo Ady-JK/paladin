@@ -98,7 +98,9 @@ func startServer(spec Spec, root, bin string) (*server, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	cmd.WaitDelay = 2 * time.Second // a grandchild holding stderr must not hide the exit
 	s.c = newConn(stdout, stdin, s.onNotify, s.onRequest)
+	s.c.onStall = func() { killProcessGroup(cmd) }
 	go func() {
 		_ = cmd.Wait()
 		s.c.close()

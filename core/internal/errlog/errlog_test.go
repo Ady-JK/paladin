@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Ady-JK/paladin/core/internal/redact"
 )
 
 func TestAppendWritesRawError(t *testing.T) {
@@ -100,5 +102,25 @@ func TestGlobalWritesUnderLogs(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "rpc:openSession\tnot found") {
 		t.Fatalf("got %q", data)
+	}
+}
+
+// A stored provider key never reaches the log, even when it shows up in a
+// request line or a tool's arguments.
+func TestLogsMaskStoredKeys(t *testing.T) {
+	const secret = "sk-test-secret-value-1234567890"
+	redact.Register(secret)
+	t.Cleanup(func() { redact.Unregister(secret) })
+	dir := t.TempDir()
+	AppendText(dir, "tool:shell", `curl -H "Authorization: Bearer `+secret+`" https://example.com`)
+	Global(dir, "protocol:bad-request", `{"method":"addProvider","apiKey":"`+secret+`"`)
+	for _, path := range []string{filepath.Join(dir, FileName), filepath.Join(dir, "logs", "errors.log")} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("%s holds the key: %s", path, data)
+		}
 	}
 }

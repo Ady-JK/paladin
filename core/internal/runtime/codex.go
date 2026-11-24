@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -92,19 +93,16 @@ func containsString(list []string, s string) bool {
 // openHarnessSession creates a session that Codex will run. model may be
 // empty (Codex picks its default).
 func (r *AgentRuntime) openHarnessSession(cwd string, opts OpenOpts) (Session, error) {
-	if opts.Harness != HarnessCodex {
-		return Session{}, fmt.Errorf("unknown harness %q", opts.Harness)
-	}
-	if _, err := codex.FindBinary(); err != nil {
+	if err := findHarnessBinary(opts.Harness); err != nil {
 		return Session{}, err
 	}
 	model := strings.TrimSpace(opts.Model)
 	create := func(dir string) (transcript.Session, error) {
-		sess, err := r.transcripts.Create(dir, HarnessCodex, model)
+		sess, err := r.transcripts.Create(dir, opts.Harness, model)
 		if err != nil {
 			return sess, err
 		}
-		sess.Meta.Harness = &transcript.Harness{Name: HarnessCodex}
+		sess.Meta.Harness = &transcript.Harness{Name: opts.Harness}
 		return sess, nil
 	}
 	if !opts.Worktree {
@@ -136,21 +134,14 @@ func (r *AgentRuntime) openHarnessSession(cwd string, opts OpenOpts) (Session, e
 }
 
 func harnessSessionView(sess transcript.Session) Session {
-	return Session{SessionID: sess.Meta.SessionID, Cwd: sess.Meta.Cwd, Provider: HarnessCodex,
-		Model: derefString(sess.Meta.Model), Harness: HarnessCodex, Worktree: session.WorktreeView(sess.Meta.Worktree)}
+	name := sess.Meta.Harness.Name
+	return Session{SessionID: sess.Meta.SessionID, Cwd: sess.Meta.Cwd, Provider: name,
+		Model: derefString(sess.Meta.Model), Harness: name, Worktree: session.WorktreeView(sess.Meta.Worktree)}
 }
 
 // codexPreset is the permission preset a turn asks for. Plan mode is Codex's
 // own collaboration mode and does not change it.
-func codexPreset(preset permission.Preset) string {
-	switch preset {
-	case permission.ReadOnly:
-		return codex.PresetReadOnly
-	case permission.FullAccess:
-		return codex.PresetFullAccess
-	}
-	return codex.PresetReadOnly
-}
+func codexPreset(permission.Preset) string { return codex.PresetFullAccess }
 
 // codexTool is one Codex item shown as a tool card.
 type codexTool struct {
@@ -222,6 +213,8 @@ func (r *AgentRuntime) runHarnessTurn(ctx context.Context, sess transcript.Sessi
 	switch sess.Meta.Harness.Name {
 	case HarnessCodex:
 		return r.runCodexTurn(ctx, sess, req, workspace, gate, tx)
+	case HarnessClaude:
+		return r.runClaudeTurn(ctx, sess, req, workspace, gate, tx)
 	}
 	return agent.ChatOutcome{}, fmt.Errorf("unknown harness %q", sess.Meta.Harness.Name)
 }
@@ -291,10 +284,7 @@ func (r *AgentRuntime) runCodexTurn(ctx context.Context, sess transcript.Session
 	if run.turnID != "" && len(turn) > 0 {
 		turn[0].HarnessTurn = run.turnID
 	}
-	var stats *transcript.TurnStats
-	if !adopt {
-		stats = &transcript.TurnStats{DurationMs: time.Since(startedAt).Milliseconds(), Tokens: run.outTokens}
-	}
+	stats := &transcript.TurnStats{DurationMs: time.Since(startedAt).Milliseconds(), Tokens: run.outTokens, Incomplete: runErr != nil || run.status == "interrupted"}
 	var persistErr error
 	gate(func() error {
 		if err := sess.AppendJournalTurn(turn, stats, journal.ID); err != nil {
@@ -536,7 +526,12 @@ func (c *codexRun) steer(req agent.Request) {
 		err := c.client.SteerTurn(ctx, c.threadID, c.turnID, []map[string]any{{"type": "text", "text": msg.Message}})
 		cancel()
 		if err != nil {
-			c.send(agent.ChatChunk{Reasoning: ""})
+			// Codex refused it (the turn is ending, say): hand it back to the
+			// turn's queue so it is retried, or becomes the next turn if this
+			// one ends first, rather than vanishing.
+			if _, herr := c.r.hub.Steer(c.sessionID, msg.Message, msg.Display); herr != nil {
+				log.Printf("codex: steer %s: %v (requeue: %v)", c.sessionID, err, herr)
+			}
 			continue
 		}
 		c.flushText(nil)

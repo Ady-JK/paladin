@@ -258,3 +258,55 @@ func TestReadBodyIsBounded(t *testing.T) {
 		t.Fatalf("error body kept %d bytes, want %d", len(got), maxErrorBody)
 	}
 }
+
+// A gateway error keeps its status (and Retry-After) so the agent retries it:
+// the message of a 504 contains "timeout", which must not make it final.
+func TestGatewayErrorsAreRetryableWithTheirStatus(t *testing.T) {
+	for _, code := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "3")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			fmt.Fprint(w, `{"error":{"message":"upstream trouble"}}`)
+		}))
+		err := providerFor(srv.URL).StreamTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "s", make(chan Chunk, 8), make(chan struct{}))
+		srv.Close()
+		var pe *ProviderError
+		if !errors.As(err, &pe) || pe.Status != code {
+			t.Fatalf("%d: got %T %+v", code, err, pe)
+		}
+		if pe.RetryAfter != 3*time.Second {
+			t.Fatalf("%d: retry-after %v", code, pe.RetryAfter)
+		}
+		if d := Classify(err); !d.Retryable || d.Timeout {
+			t.Fatalf("%d: classify %+v", code, d)
+		}
+	}
+}
+
+// A gateway that repeats running usage totals on every chunk is counted
+// once, not once per chunk.
+func TestStreamUsageIsNotSummedAcrossChunks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for i := 0; i < 3; i++ {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":%d,\"total_tokens\":%d}}\n\n", 10*(i+1), 100+10*(i+1))
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	chunks := make(chan Chunk, 64)
+	if err := providerFor(srv.URL).StreamTools(context.Background(), "sys", []LlmMessage{{Role: "user", Content: "hi"}}, nil, "s", chunks, make(chan struct{})); err != nil {
+		t.Fatal(err)
+	}
+	close(chunks)
+	var final Usage
+	for c := range chunks {
+		if c.Usage != nil {
+			final = *c.Usage
+		}
+	}
+	if final.PromptTokens != 100 || final.CompletionTokens != 30 {
+		t.Fatalf("usage counted per chunk: %+v", final)
+	}
+}

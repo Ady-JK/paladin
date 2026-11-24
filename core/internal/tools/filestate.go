@@ -215,6 +215,11 @@ var errChanged = errors.New("file changed during the write")
 // non-atomic fallback. The rename is atomic on POSIX filesystems; an
 // external writer between check and rename can still be lost.
 func atomicReplace(path string, data []byte, perm os.FileMode, check func() error) error {
+	// Write through a symlink to the real file, so the link survives and
+	// its target is the one that changes. A dangling link is replaced.
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".paladin-*.tmp")
 	if err != nil {

@@ -50,20 +50,20 @@ type sseFilter struct {
 	br   *bufio.Reader
 	out  bytes.Buffer
 	done bool
+	// err is the failure that ended the stream, returned once the buffered
+	// bytes are drained so a dropped connection is not mistaken for a clean end.
+	err error
 }
 
 func (f *sseFilter) Read(p []byte) (int, error) {
 	for f.out.Len() == 0 && !f.done {
 		if err := f.fill(); err != nil {
-			f.done = true
-			if f.out.Len() == 0 {
-				return 0, err
-			}
+			f.done, f.err = true, err
 			break
 		}
 	}
 	if f.out.Len() == 0 && f.done {
-		return 0, io.EOF
+		return 0, f.err
 	}
 	return f.out.Read(p)
 }

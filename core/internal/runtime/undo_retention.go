@@ -41,8 +41,7 @@ type TurnSnapshot struct {
 // finishTurnSnapshot freezes a completed turn's changes before subsequent
 // work in the shared workspace can be mistaken for this session's work.
 func (r *AgentRuntime) finishTurnSnapshot(sess transcript.Session, workspace string, turn int) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sess.Meta.SessionID)()
 	repo := r.snapRepo(workspace)
 	if repo == nil {
 		return
@@ -90,8 +89,7 @@ func (r *AgentRuntime) finishTurnSnapshot(sess transcript.Session, workspace str
 // recordTurnSnapshot captures the folder before a user message starts
 // its work. One snapshot per turn is the whole undo model.
 func (r *AgentRuntime) recordTurnSnapshot(sess transcript.Session, workspace string) (status session.SnapshotProtection) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sess.Meta.SessionID)()
 	status = session.SnapshotProtection{Turn: -1, State: "unavailable", Reason: "Snapshot could not be created."}
 	history, err := readUndoHistory(sess)
 	if err != nil {
@@ -241,7 +239,7 @@ func readTurnSnapshots(dir string) ([]TurnSnapshot, error) {
 
 // collectSnapshots protects retained snapshots from every session before
 // collecting objects in the shared workspace repository. The caller holds
-// undoMu, so no local snapshot reader can lose its temporary tree.
+// every session lock, so no local snapshot reader can lose its temporary tree.
 func (r *AgentRuntime) collectSnapshots(ctx context.Context, repo *snapshot.Repo) error {
 	var roots []string
 	err := filepath.WalkDir(r.transcripts.Root, func(path string, entry fs.DirEntry, err error) error {

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -703,17 +704,26 @@ func (r *Repo) Restore(ctx context.Context, tree string, paths []string) error {
 		}
 	}
 	if len(present) > 0 {
+		var checkout []string
 		for _, p := range present {
 			// A folder now sitting where the file was would block checkout.
 			full := filepath.Join(r.work, filepath.FromSlash(p))
 			if st, err := os.Lstat(full); err == nil && st.IsDir() {
+				// Files no snapshot captured would be lost with it: keep the
+				// folder and leave this path as it is.
+				if r.holdsUncaptured(ctx, p, full) {
+					continue
+				}
 				if err := os.RemoveAll(full); err != nil {
 					return fmt.Errorf("snapshot: %w", err)
 				}
 			}
+			checkout = append(checkout, p)
 		}
-		if _, err := r.git(ctx, joinNul(present), "checkout", tree, "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
-			return err
+		if len(checkout) > 0 {
+			if _, err := r.git(ctx, joinNul(checkout), "checkout", tree, "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+				return err
+			}
 		}
 	}
 	for _, p := range absent {
@@ -726,6 +736,31 @@ func (r *Repo) Restore(ctx context.Context, tree string, paths []string) error {
 		r.pruneEmpty(filepath.Dir(full))
 	}
 	return nil
+}
+
+// holdsUncaptured reports whether the folder at rel holds a file no
+// snapshot captures (ignored, or too large or binary), or cannot be
+// listed: deleting it would lose data, so the answer errs towards yes.
+func (r *Repo) holdsUncaptured(ctx context.Context, rel, full string) bool {
+	out, err := r.git(ctx, nil, "-c", "core.fsmonitor=false", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", rel)
+	if err != nil || len(splitNul(out)) > 0 {
+		return true
+	}
+	found := false
+	walkErr := filepath.WalkDir(full, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			found = true
+			return err
+		}
+		if d.Type().IsRegular() {
+			if sub, rerr := filepath.Rel(r.work, path); rerr == nil && r.skippable(filepath.ToSlash(sub)) {
+				found = true
+				return fs.SkipAll
+			}
+		}
+		return nil
+	})
+	return found || walkErr != nil
 }
 
 func (r *Repo) pruneEmpty(dir string) {

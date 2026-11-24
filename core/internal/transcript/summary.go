@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/Ady-JK/paladin/core/internal/syserr"
 )
@@ -46,7 +48,7 @@ func sessionSummary(dir string) (summary, error) {
 		base = cached
 	}
 	next := base
-	end, err := scanTranscriptFrom(dir, base.Scanned, false, func(msgs []Message, _ *TurnStats) {
+	end, err := scanTranscriptFrom(dir, base.Scanned, false, false, func(msgs []Message, _ *TurnStats) {
 		for _, m := range msgs {
 			if !m.Visible() {
 				continue
@@ -112,11 +114,13 @@ func lineStartsAt(dir string, offset int64) bool {
 // scanTranscriptFrom streams messages.jsonl from offset (a line start),
 // calling fn per message, so a long transcript never sits in memory as
 // raw bytes. It returns the offset just past the last complete line. A
-// complete line that does not decode is an error. An unterminated last
+// complete line that does not decode is an error when strict (anything
+// that rewrites the file must not silently drop it); otherwise it is
+// skipped and logged once, so one bad line costs only itself. An unterminated last
 // line is skipped when it does not decode (a torn append: the process
 // died mid-write); one that does is passed to fn only with withTail,
 // since the next append cuts it off.
-func scanTranscriptFrom(dir string, offset int64, withTail bool, fn func([]Message, *TurnStats)) (int64, error) {
+func scanTranscriptFrom(dir string, offset int64, withTail, strict bool, fn func([]Message, *TurnStats)) (int64, error) {
 	if onScan != nil {
 		onScan(dir, offset)
 	}
@@ -148,11 +152,26 @@ func scanTranscriptFrom(dir string, offset int64, withTail bool, fn func([]Messa
 		}
 		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
 			msgs, stats, err := decodeLine(trimmed)
-			if err != nil {
+			switch {
+			case err == nil:
+				fn(msgs, stats)
+			case strict:
 				return 0, err
+			default:
+				warnBadLine(dir, end, err)
 			}
-			fn(msgs, stats)
 		}
 		end += int64(len(line))
+	}
+}
+
+// badLines remembers which undecodable lines were already reported, so a
+// session read many times logs each one once per process.
+var badLines sync.Map
+
+func warnBadLine(dir string, offset int64, err error) {
+	key := fmt.Sprintf("%s@%d", dir, offset)
+	if _, seen := badLines.LoadOrStore(key, struct{}{}); !seen {
+		log.Printf("transcript: skipping an undecodable line at byte %d of %s: %v", offset, filepath.Join(dir, "messages.jsonl"), err)
 	}
 }

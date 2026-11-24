@@ -394,3 +394,51 @@ func TestPathspecMagicIsTakenLiterally(t *testing.T) {
 		t.Fatal("restore must only touch the literal path")
 	}
 }
+
+// A folder that replaced a snapshotted file is cleared for the checkout,
+// but never when it holds files no snapshot captured (large, binary or
+// ignored): those would be gone for good.
+func TestRestoreKeepsAFolderHoldingUncapturedFiles(t *testing.T) {
+	r, work := setup(t)
+	r.limit = 64
+	ctx := context.Background()
+	write(t, work, "a", "was a file\n")
+	write(t, work, "b", "also a file\n")
+	before := snap(t, r)
+
+	for _, p := range []string{"a", "b"} {
+		if err := os.Remove(filepath.Join(work, p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, work, "a/big.txt", strings.Repeat("x", 200))
+	write(t, work, "b/note.txt", "plain text\n")
+
+	if err := r.Restore(ctx, before, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(work, "a/big.txt") {
+		t.Fatal("restore deleted a folder holding a file no snapshot captured")
+	}
+	if read(t, work, "b") != "also a file\n" {
+		t.Fatal("a folder holding only captured files should still make way for the file")
+	}
+}
+
+func TestRestoreKeepsAFolderHoldingIgnoredFiles(t *testing.T) {
+	r, work := setup(t)
+	ctx := context.Background()
+	write(t, work, ".gitignore", "secret.env\n")
+	write(t, work, "a", "was a file\n")
+	before := snap(t, r)
+	if err := os.Remove(filepath.Join(work, "a")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, work, "a/secret.env", "KEY=1\n")
+	if err := r.Restore(ctx, before, []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(work, "a/secret.env") {
+		t.Fatal("restore deleted an ignored file")
+	}
+}

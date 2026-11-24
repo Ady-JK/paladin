@@ -644,9 +644,9 @@ func (a *Agent) persist(message string, resume bool) error {
 			Reasoning: reasoning, Thinking: toTranscriptThinking(thinking),
 		})
 	}
-	// A resume turn has no user row to hang a summary on, and a failed
-	// write leaves nothing to describe.
-	stats := a.turnStats(resume)
+	// Stats anchor the end of the persisted turn, including a continuation
+	// without a user row, so history can keep its reply and work separate.
+	stats := a.turnStats()
 	journalID := ""
 	if a.journal != nil {
 		journalID = a.journal.ID
@@ -671,15 +671,16 @@ func (a *Agent) persist(message string, resume bool) error {
 
 // turnStats is what the transcript records for this turn: its wall
 // time and the tokens the model generated (completion already counts
-// reasoning). Nil for a resume turn.
-func (a *Agent) turnStats(resume bool) *transcript.TurnStats {
-	if resume || a.startedAt.IsZero() {
+// reasoning), including a resumed turn without a user row.
+func (a *Agent) turnStats() *transcript.TurnStats {
+	if a.startedAt.IsZero() {
 		return nil
 	}
 	stats := &transcript.TurnStats{
 		DurationMs: time.Since(a.startedAt).Milliseconds(),
 		Tokens:     a.turnUsage.CompletionTokens,
 		GenMs:      a.genMs,
+		Incomplete: a.phase != phaseDone,
 	}
 	if stats.DurationMs <= 0 && stats.Tokens <= 0 {
 		return nil

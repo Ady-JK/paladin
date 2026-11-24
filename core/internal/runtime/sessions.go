@@ -60,15 +60,35 @@ func (r *AgentRuntime) loadSessionWithRecovery(cwd, sessionID string) (transcrip
 	return sess, nil
 }
 
+// OpenSession opens a session for the UI. A linked chat opens from the history
+// on disk at once; see openSession for what is read afterwards.
 func (r *AgentRuntime) OpenSession(sessionID, cwd string) (Session, error) {
+	return r.openSession(sessionID, cwd, false)
+}
+
+// openSession opens an existing session, or creates one when sessionID is empty.
+// An external client may have written to a linked session since it was last
+// open. Callers that need that history before they go on (an import) pass
+// syncFirst; the UI does not, because a slow or disconnected CLI must not hold
+// up the history that is already on disk. A change found afterwards reaches an
+// open chat as a session/refresh event.
+func (r *AgentRuntime) openSession(sessionID, cwd string, syncFirst bool) (Session, error) {
 	if strings.TrimSpace(sessionID) != "" {
-		if _, err := r.SyncSession(sessionID, cwd); err != nil {
-			// A disconnected Codex must not make the local history unreadable.
-			log.Printf("codex: refresh session %s: %v", sessionID, err)
+		if syncFirst {
+			if _, err := r.SyncSession(sessionID, cwd); err != nil {
+				// A disconnected Codex must not make the local history unreadable.
+				log.Printf("codex: refresh session %s: %v", sessionID, err)
+			}
 		}
 		sess, err := r.loadSessionWithRecovery(cwd, sessionID)
 		if err != nil {
 			return Session{}, err
+		}
+		if !syncFirst {
+			r.syncInBackground(sessionID, cwd)
+		}
+		if sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessClaude {
+			r.WarmClaude(sess.Meta.Cwd)
 		}
 		provider := ""
 		if sess.Meta.Provider != nil {
@@ -244,7 +264,12 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("session id is required")
 	}
+	r.awaitOpenSync(sessionID, 20*time.Second)
 	sess, loadErr := r.transcripts.Load(cwd, sessionID)
+	if loadErr == nil && sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessClaude {
+		r.claudeDiscovery.importMu.Lock()
+		defer r.claudeDiscovery.importMu.Unlock()
+	}
 	if loadErr != nil {
 		if err := r.transcripts.CheckExists(cwd, sessionID); err != nil {
 			return false, err
@@ -284,6 +309,12 @@ func (r *AgentRuntime) DeleteSession(sessionID, cwd string) (bool, error) {
 			return false, fmt.Errorf("remember deleted Codex session: %w", err)
 		}
 	}
+	if loadErr == nil && sess.Meta.Harness != nil && sess.Meta.Harness.Name == HarnessClaude {
+		r.forgetClaudeThread(sessionID)
+		if err := r.hideClaudeSession(sess.Meta.Harness.ThreadID); err != nil {
+			return false, err
+		}
+	}
 	if err := r.transcripts.Delete(cwd, sessionID); err != nil {
 		return false, err
 	}
@@ -310,4 +341,44 @@ func (r *AgentRuntime) ForkSession(sessionID, cwd string) (session.SessionInfo, 
 // RenameSession sets (or clears) a session's title.
 func (r *AgentRuntime) RenameSession(sessionID, cwd, title string) error {
 	return r.transcripts.Rename(cwd, sessionID, title)
+}
+
+// syncInBackground reads a linked session's external history without holding
+// the caller up. A change reaches the open chat as a session/refresh event; a
+// failure only means the next open (or the periodic sync) tries again.
+func (r *AgentRuntime) syncInBackground(sessionID, cwd string) {
+	done := make(chan struct{})
+	if _, busy := r.openSyncs.LoadOrStore(sessionID, done); busy {
+		return
+	}
+	go func() {
+		defer func() {
+			r.openSyncs.Delete(sessionID)
+			close(done)
+		}()
+		changed, err := r.SyncSession(sessionID, cwd)
+		if err != nil {
+			// A disconnected Codex must not make the local history unreadable.
+			log.Printf("codex: refresh session %s: %v", sessionID, err)
+			return
+		}
+		if changed {
+			r.hub.PublishSession(sessionID, "session/refresh")
+		}
+	}()
+}
+
+// awaitOpenSync lets a background sync started by an open finish before the
+// caller removes the session's files, so it cannot write into a directory that
+// is being deleted. It gives up after limit: the sync is bounded by its own
+// timeouts anyway.
+func (r *AgentRuntime) awaitOpenSync(sessionID string, limit time.Duration) {
+	v, ok := r.openSyncs.Load(sessionID)
+	if !ok {
+		return
+	}
+	select {
+	case <-v.(chan struct{}):
+	case <-time.After(limit):
+	}
 }

@@ -342,3 +342,69 @@ func TestParentSegmentsEarlyStopDoesNotLeak(t *testing.T) {
 		t.Fatalf("parents = %v", got)
 	}
 }
+
+// The ignore-file discovery walk never descends into dependency or VCS
+// folders: a repository's node_modules holds thousands of folders and none
+// of its .gitignore files matter to the composer.
+func TestIgnoreMatcherSkipsDependencyFolders(t *testing.T) {
+	root := t.TempDir()
+	mustWrite := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(".gitignore", "build/\n")
+	mustWrite("pkg/.gitignore", "tmp/\n")
+	mustWrite("node_modules/dep/.gitignore", "should-not-load\n")
+	mustWrite(".git/info/.gitignore", "also-not\n")
+	m := newIgnoreMatcher(root)
+	for _, r := range m.rules {
+		if r.pattern == "should-not-load" || r.pattern == "also-not" {
+			t.Fatalf("walked into a skipped folder: %+v", r)
+		}
+	}
+	if len(m.rules) != 2 {
+		t.Fatalf("rules %+v", m.rules)
+	}
+}
+
+// A slow ripgrep is cut off instead of freezing the composer.
+func TestRipgrepListingHasATimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a shell script")
+	}
+	old := rgTimeout
+	rgTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { rgTimeout = old })
+	script := filepath.Join(t.TempDir(), "rg")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, ok := rgFiles(script, t.TempDir()); ok {
+		t.Fatal("a hung ripgrep was reported as a result")
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("ripgrep listing took %v", took)
+	}
+}
+
+// Ripgrep's output is read as a stream and stops at the cap.
+func TestRipgrepListingStopsAtTheCap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a shell script")
+	}
+	script := filepath.Join(t.TempDir(), "rg")
+	body := "#!/bin/sh\ni=0\nwhile [ $i -lt 30000 ]; do echo \"f$i.txt\"; i=$((i+1)); done\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files, ok := rgFiles(script, "/proj")
+	if !ok || len(files) != completeScanCap {
+		t.Fatalf("ok=%v files=%d", ok, len(files))
+	}
+}

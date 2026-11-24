@@ -193,8 +193,13 @@ func TestLoadTranscriptSkipsBlanksAndRejectsCorrupt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "messages.jsonl"), []byte("{bad\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadTranscript(dir); err == nil {
-		t.Fatal("expected decode error")
+	// A complete line that does not decode is skipped on read and refused
+	// by the strict loader that rewrites use.
+	if msgs, err := LoadTranscript(dir); err != nil || len(msgs) != 0 {
+		t.Fatalf("lenient load: %v %v", msgs, err)
+	}
+	if _, err := loadTurnsStrict(dir); err == nil {
+		t.Fatal("expected decode error from the strict loader")
 	}
 }
 
@@ -499,14 +504,20 @@ func TestTornTranscriptTailIsDroppedAndRepaired(t *testing.T) {
 	}
 }
 
-func TestCorruptMiddleLineStillFails(t *testing.T) {
+// The bad line is skipped; the readable one after it still loads, and the
+// strict loader still refuses the file.
+func TestCorruptMiddleLineIsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	content := "{bad}\n{\"role\":\"user\",\"content\":\"hi\"}\n"
 	if err := os.WriteFile(filepath.Join(dir, "messages.jsonl"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadTranscript(dir); err == nil {
-		t.Fatal("a corrupt complete line must not be skipped")
+	msgs, err := LoadTranscript(dir)
+	if err != nil || len(msgs) != 1 || msgs[0].Content != "hi" {
+		t.Fatalf("got %v, %v", msgs, err)
+	}
+	if _, err := loadTurnsStrict(dir); err == nil {
+		t.Fatal("the strict loader must not skip a corrupt complete line")
 	}
 }
 

@@ -7,6 +7,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Ady-JK/paladin/core/internal/custom"
 	"github.com/Ady-JK/paladin/core/internal/inference"
@@ -108,6 +109,8 @@ func (a *Agent) checkBudget() (end bool, err error) {
 	}
 	a.budgetWrapUp = true
 	a.toolDefs = nil
+	// With no tools to call, the exchange so far is plain text.
+	a.messages = flattenToolMessages(a.messages)
 	a.messages = append(a.messages, inference.LlmMessage{Role: "user", Content: custom.TextFill("reminder.budget",
 		map[string]string{"spent": fmt.Sprintf("%.2f", spent), "limit": fmt.Sprintf("%.2f", limit)})})
 	return false, nil
@@ -125,4 +128,44 @@ func (a *Agent) noteCallCost(u inference.Usage) {
 	}
 	a.costWarned = true
 	_ = a.emit(ChatChunk{Budget: &BudgetNotice{State: BudgetUnknownCost, Spent: a.sessionSpend().spent, Limit: limit}})
+}
+
+// flattenToolMessages rewrites tool calls and their results as ordinary text
+// messages, leaving the input untouched. Providers refuse a request that
+// carries tool blocks but defines no tools.
+func flattenToolMessages(in []inference.LlmMessage) []inference.LlmMessage {
+	const clip = 4000
+	out := make([]inference.LlmMessage, 0, len(in))
+	for _, m := range in {
+		switch {
+		case m.Role == "assistant" && len(m.ToolCalls) > 0:
+			var b strings.Builder
+			b.WriteString(m.Content)
+			for _, call := range m.ToolCalls {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				args := call.Arguments
+				if len(args) > 500 {
+					args = args[:500] + "…"
+				}
+				fmt.Fprintf(&b, "[called %s %s]", call.Name, args)
+			}
+			m.Content, m.ToolCalls = b.String(), nil
+			out = append(out, m)
+		case m.Role == "tool":
+			name := ""
+			if m.Name != nil {
+				name = *m.Name
+			}
+			content := m.Content
+			if len(content) > clip {
+				content = content[:clip] + "…"
+			}
+			out = append(out, inference.LlmMessage{Role: "user", Content: fmt.Sprintf("[result of %s]\n%s", name, content)})
+		default:
+			out = append(out, m)
+		}
+	}
+	return out
 }

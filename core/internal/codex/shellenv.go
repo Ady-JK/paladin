@@ -51,6 +51,11 @@ func loginShellPATH() string {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, shell, "-ilc", `printf '%s%s%s' '`+pathStart+`' "$PATH" '`+pathEnd+`'`)
 		cmd.Stdin = nil // /dev/null: an rc file must not wait for a terminal
+		// A background job an rc file starts keeps stdout open: kill the whole
+		// group at the timeout and stop waiting on the pipe soon after.
+		setProcAttr(cmd)
+		cmd.Cancel = func() error { killGroup(cmd); return nil }
+		cmd.WaitDelay = time.Second
 		out, err := cmd.Output()
 		if err != nil && len(out) == 0 {
 			return

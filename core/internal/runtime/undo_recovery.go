@@ -103,8 +103,7 @@ func clearRecovery(dir string) error {
 }
 
 func (r *AgentRuntime) RecoveryAvailable(sessionID, cwd string) (bool, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	sess, err := r.transcripts.Load(cwd, sessionID)
 	if err != nil {
 		return false, err
@@ -118,8 +117,7 @@ func (r *AgentRuntime) RecoveryAvailable(sessionID, cwd string) (bool, error) {
 
 // RecoveryPreview lists the workspace changes a recovery would make.
 func (r *AgentRuntime) RecoveryPreview(sessionID, cwd string) (RevertPreview, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	sess, err := r.transcripts.Load(cwd, sessionID)
 	if err != nil {
 		return RevertPreview{}, err
@@ -179,8 +177,7 @@ func (r *AgentRuntime) RecoverLatest(sessionID, cwd string) (RevertResult, error
 }
 
 func (r *AgentRuntime) RecoverLatestChecked(sessionID, cwd, version string) (RevertResult, error) {
-	r.undoMu.Lock()
-	defer r.undoMu.Unlock()
+	defer r.undo.lock(sessionID)()
 	if r.hub.Busy(sessionID) {
 		return RevertResult{}, fmt.Errorf("a turn is running for this session; stop it first")
 	}

@@ -321,6 +321,8 @@ type TurnStats struct {
 	DurationMs int64 `json:"durationMs"`
 	Tokens     int64 `json:"tokens"`
 	GenMs      int64 `json:"genMs"`
+	// Incomplete keeps stopped/failed work expanded when reopening history.
+	Incomplete bool `json:"incomplete,omitempty"`
 }
 
 // Turn is one transcript line: its messages and, for lines written by
@@ -532,7 +534,8 @@ func (s *Session) RewriteMessages(fn func(*Message) bool) (int, error) {
 
 // Truncate keeps the first n transcript messages, atomically.
 func (s *Session) Truncate(n int) error {
-	turns, err := s.HistoryTurns()
+	// Strict: rewriting from a view that skipped a bad line would lose it.
+	turns, err := loadTurnsStrict(s.Dir)
 	if err != nil {
 		return err
 	}

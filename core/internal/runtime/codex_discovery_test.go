@@ -177,3 +177,41 @@ func TestCodexDiscoveryStopsCleanlyAtShutdown(t *testing.T) {
 		t.Fatal("discovery continued after shutdown")
 	}
 }
+
+// A background scan syncs a thread's history only when Codex says it changed:
+// an idle thread costs nothing on later scans.
+func TestCodexDiscoverySyncsOnlyThreadsThatChanged(t *testing.T) {
+	rt, _, _ := codexRuntime(t, "chat")
+	cwd := t.TempDir()
+	t.Setenv("PALADIN_FAKE_CODEX_CWD", cwd)
+	threads := filepath.Join(t.TempDir(), "threads.json")
+	write := func(updated int) {
+		body := fmt.Sprintf(`[{"id":"th-old","preview":"Fix the bug","cwd":%q,"model":"fake-luna","updatedAt":%d,"createdAt":1,"source":"cli"}]`, cwd, updated)
+		if err := os.WriteFile(threads, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PALADIN_FAKE_CODEX_THREADS", threads)
+	write(100)
+	var synced []string
+	onDiscoverySync = func(id string) { synced = append(synced, id) }
+	t.Cleanup(func() { onDiscoverySync = nil })
+	scan := func() {
+		if err := rt.discoverCodexSessions(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan()
+	if len(synced) != 1 {
+		t.Fatalf("the first scan synced %d threads", len(synced))
+	}
+	scan()
+	if len(synced) != 1 {
+		t.Fatal("an unchanged thread was synced again")
+	}
+	write(200)
+	scan()
+	if len(synced) != 2 {
+		t.Fatal("a thread Codex updated was not synced")
+	}
+}

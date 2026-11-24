@@ -27,6 +27,9 @@ func (r *AgentRuntime) ThinkingGet(provider, model string) (ThinkingView, error)
 	if strings.TrimSpace(provider) == HarnessCodex {
 		return r.codexThinkingGet(model), nil
 	}
+	if strings.TrimSpace(provider) == HarnessClaude {
+		return r.claudeThinkingGet(model)
+	}
 	entry, _, err := r.store.Resolve(provider)
 	if err != nil {
 		return ThinkingView{}, err
@@ -57,9 +60,9 @@ func (r *AgentRuntime) ThinkingSet(provider, model, level string) (ThinkingView,
 	if err != nil {
 		return ThinkingView{}, err
 	}
-	if v.Provider == HarnessCodex {
+	if v.Provider == HarnessCodex || v.Provider == HarnessClaude {
 		if level != "" && !containsString(v.Levels, level) {
-			return ThinkingView{}, fmt.Errorf("codex model %q has no thinking level %q", v.Model, level)
+			return ThinkingView{}, fmt.Errorf("%s model %q has no thinking level %q", v.Provider, v.Model, level)
 		}
 	} else if err := inference.ValidEffort(v.Levels, level); err != nil {
 		return ThinkingView{}, err

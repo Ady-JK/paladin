@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Ady-JK/paladin/core/internal/agent"
 )
 
 func TestReadOnlyToolsDoNotClaimWorkspaceChanges(t *testing.T) {
@@ -59,5 +61,27 @@ func TestSessionChangesNameWhatTheyLeaveOut(t *testing.T) {
 	fail := func(string) (string, error) { return "", errors.New("gone") }
 	if _, err := renderSessionChanges(files, fail); err == nil || !strings.Contains(err.Error(), "broken.bin") {
 		t.Fatalf("all failed: %v", err)
+	}
+}
+
+// The live change views reuse one folder snapshot until a file-changing tool
+// settles, so the mark must move on exactly those tools.
+func TestRunningChangeMarkCountsSettledFileChangingTools(t *testing.T) {
+	h := &Hub{active: map[string]*hubTurn{}}
+	if _, running := h.runningChangeMark("s"); running {
+		t.Fatal("an idle session reported a running turn")
+	}
+	turn := &hubTurn{}
+	h.active["s"] = turn
+	tool := func(id, name, status string) TurnEvent {
+		return TurnEvent{Event: "chat/tool", Tool: &agent.ToolActivity{ID: id, Name: name, Arguments: "{}", Status: status}}
+	}
+	turn.log = []TurnEvent{tool("1", "write", "running"), tool("2", "read", "ok")}
+	if mark, running := h.runningChangeMark("s"); !running || mark != 0 {
+		t.Fatalf("running or read-only tools moved the mark: %d %v", mark, running)
+	}
+	turn.log = []TurnEvent{tool("1", "write", "ok"), tool("2", "read", "ok"), tool("3", "edit", "ok")}
+	if mark, _ := h.runningChangeMark("s"); mark != 2 {
+		t.Fatalf("mark = %d, want 2", mark)
 	}
 }

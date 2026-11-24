@@ -276,10 +276,13 @@ func loadPromptFile(path, seed string) string {
 	if err == nil && strings.TrimSpace(string(data)) != "" {
 		return string(data)
 	}
-	// Missing, unreadable, or blank: reseed so the file always shows
-	// the text the agent actually uses. A failed reseed still returns
-	// the default so turns keep working.
-	_ = AtomicWrite(path, []byte(seed))
+	// Missing or blank: reseed so the file always shows the text the agent
+	// actually uses. Any other read error (permissions, I/O) leaves the
+	// user's file alone and uses the default for now. A failed reseed
+	// still returns the default so turns keep working.
+	if err == nil || os.IsNotExist(err) {
+		_ = AtomicWrite(path, []byte(seed))
+	}
 	return seed
 }
 

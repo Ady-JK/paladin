@@ -84,3 +84,42 @@ func TestCopilotEndpointRejectsUntrustedHost(t *testing.T) {
 		t.Fatal("accepted an untrusted endpoint")
 	}
 }
+
+// Cancelling a sign-in never waits for a GitHub call that is in flight.
+func TestCancelCopilotSignInDoesNotWaitForAPoll(t *testing.T) {
+	old := copilotAuthHTTP
+	t.Cleanup(func() { copilotAuthHTTP = old })
+	inPoll, release := make(chan struct{}), make(chan struct{})
+	copilotAuthHTTP = &http.Client{Transport: copilotRoundTrip(func(r *http.Request) (*http.Response, error) {
+		result := `{"device_code":"d","user_code":"ABCD-1234","verification_uri":"https://github.com/login/device","interval":5,"expires_in":900}`
+		if strings.HasSuffix(r.URL.Path, "/access_token") {
+			close(inPoll)
+			<-release
+			result = `{"error":"authorization_pending"}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(result)), Header: make(http.Header), Request: r}, nil
+	})}
+	dir := t.TempDir()
+	rt := WithKeyStore(dir, config.NewConfig(dir), config.NewMemoryKeyStore())
+	if _, err := rt.StartCopilotSignIn(); err != nil {
+		t.Fatal(err)
+	}
+	rt.copilotMu.Lock()
+	rt.copilotLogin.nextPoll = time.Now().Add(-time.Second) // due now
+	rt.copilotMu.Unlock()
+	polled := make(chan struct{})
+	go func() { _, _ = rt.PollCopilotSignIn(); close(polled) }()
+	<-inPoll
+	cancelled := make(chan struct{})
+	go func() { rt.CancelCopilotSignIn(); close(cancelled) }()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("cancel waited for the in-flight poll")
+	}
+	close(release)
+	<-polled
+	if _, err := rt.PollCopilotSignIn(); err == nil {
+		t.Fatal("a cancelled sign-in kept polling")
+	}
+}
